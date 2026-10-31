@@ -323,6 +323,8 @@ func (a *Agent) handleEphemeralPrompt(
 	// Reasoning effort and agent loop: the job's (on ctx), then the thread's active mode, then
 	// the thread (ADR 0x026). This path does not select a mode, so the current one is read.
 	a.resolveTurnSettings(ctx, chatCtx, a.threadActiveMood(ctx, chatCtx))
+	// The job's skills are this message's skills; the index and loaded skills follow the chat.
+	a.prepareTurnSkills(ctx, userID, chatCtx, ephemeralUserMessage)
 	if opts.skipUsageRecording {
 		// An unmetered turn (the welcome message) never runs Advanced or a selected effort: it
 		// would be work nobody pays for.

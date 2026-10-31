@@ -26,14 +26,18 @@ import (
 type ModelContextSegmentKind string
 
 const (
-	SegmentKindSystemPrompt       ModelContextSegmentKind = "system_prompt"
-	SegmentKindScratchpad         ModelContextSegmentKind = "scratchpad"
-	SegmentKindCheckpointSummary  ModelContextSegmentKind = "checkpoint_summary"
-	SegmentKindHistoryTurn        ModelContextSegmentKind = "history_turn"
-	SegmentKindMemoryContext      ModelContextSegmentKind = "memory_context"
-	SegmentKindAttachmentContext  ModelContextSegmentKind = "attachment_context"
-	SegmentKindToolResult         ModelContextSegmentKind = "tool_result"
-	SegmentKindMood               ModelContextSegmentKind = "mood"
+	SegmentKindSystemPrompt      ModelContextSegmentKind = "system_prompt"
+	SegmentKindScratchpad        ModelContextSegmentKind = "scratchpad"
+	SegmentKindCheckpointSummary ModelContextSegmentKind = "checkpoint_summary"
+	SegmentKindHistoryTurn       ModelContextSegmentKind = "history_turn"
+	SegmentKindMemoryContext     ModelContextSegmentKind = "memory_context"
+	SegmentKindAttachmentContext ModelContextSegmentKind = "attachment_context"
+	SegmentKindToolResult        ModelContextSegmentKind = "tool_result"
+	SegmentKindMood              ModelContextSegmentKind = "mood"
+	// SegmentKindSkills holds the active skills' instructions; SegmentKindSkillsIndex the list
+	// of skills the model may load (ADR 0x035).
+	SegmentKindSkills             ModelContextSegmentKind = "skills"
+	SegmentKindSkillsIndex        ModelContextSegmentKind = "skills_index"
 	SegmentKindDeveloperContext   ModelContextSegmentKind = "developer_context"
 	SegmentKindExpressionPortrait ModelContextSegmentKind = "expression_portrait"
 	SegmentKindUserMessage        ModelContextSegmentKind = "user_message"

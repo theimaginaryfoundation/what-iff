@@ -95,3 +95,26 @@ func (d *Datastore) ChatToolNamesUsedSince(ctx context.Context, userID, chatID u
 	}
 	return out, nil
 }
+
+// ChatToolInputsSince returns the recorded inputs of every call to toolName by the chat's
+// messages sent at or after since (every message when since is nil), oldest first. The checkpoint
+// skill step reads load_skill calls this way to learn which skills the segment loaded.
+func (d *Datastore) ChatToolInputsSince(ctx context.Context, userID, chatID uuid.UUID, since *time.Time, toolName string) ([]string, error) {
+	msgPreds := []predicate.ChatMessage{chatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID)))}
+	if since != nil {
+		msgPreds = append(msgPreds, chatmessage.SentAtGTE(*since))
+	}
+	rows, err := d.dbClient.ToolCall.Query().
+		Where(toolcall.ToolName(toolName), toolcall.HasChatMessageWith(msgPreds...)).
+		Order(ent.Asc(toolcall.FieldCreatedAt)).
+		Select(toolcall.FieldToolInput).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.ToolInput)
+	}
+	return out, nil
+}

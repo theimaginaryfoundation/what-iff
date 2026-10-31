@@ -36,6 +36,8 @@ var sandboxedToolSurface = map[string]struct {
 	agenttools.GenerateImageToolSpec.Name:     {true, "default off; no account data read"},
 	agenttools.LoadToolsToolSpec.Name:         {true, "only connectors attached to this chat, and built-in tools the sandbox offers"},
 	agenttools.UnloadToolsToolSpec.Name:       {true, "only connectors attached to this chat"},
+	agenttools.LoadSkillToolSpec.Name:         {false, "skills are the owner's account data (their text and linked connectors); a sandbox sees none"},
+	agenttools.UnloadSkillToolSpec.Name:       {false, "nothing to unload where no skill can be loaded"},
 	agenttools.WebSearchFunctionToolSpec.Name: {true, "default off; no account data read (offered only when a backend is configured)"},
 	agenttools.FetchPageToolSpec.Name:         {true, "default off; no account data read (offered only when a backend is configured)"},
 	agenttools.RecallToolSpec.Name:            {true, "only this conversation's memories and summary"},
@@ -50,6 +52,8 @@ var sandboxedToolSurface = map[string]struct {
 var conditionalSandboxedTools = map[string]struct{}{
 	agenttools.WebSearchFunctionToolSpec.Name: {},
 	agenttools.FetchPageToolSpec.Name:         {},
+	agenttools.LoadSkillToolSpec.Name:         {}, // only when the chat has skills in scope
+	agenttools.UnloadSkillToolSpec.Name:       {},
 	discordPostToolName:                       {}, // only where the persona's bot has a connected channel
 	buzzPostToolName:                          {}, // only where the persona has a bound Buzz channel
 	slackPostToolName:                         {}, // only where the persona's Slack app has a bound channel

@@ -88,6 +88,8 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	chatRouter.HandleFunc("/{chatId}/chat-message", h.CreateChatMessage).Methods("POST")
 	chatRouter.HandleFunc("/{chatId}/welcome-message", h.CreateWelcomeMessage).Methods("POST")
 	chatRouter.HandleFunc("/{chatId}/available-rituals", h.GetAvailableRituals).Methods("GET")
+	chatRouter.HandleFunc("/{chatId}/loaded-skills", h.ListChatLoadedSkills).Methods("GET")
+	chatRouter.HandleFunc("/{chatId}/loaded-skills/{ritualId}", h.UnloadChatSkill).Methods("DELETE")
 	chatRouter.HandleFunc("/{chatId}/file-attachment", h.CreateFileAttachment).Methods("POST")
 	chatRouter.HandleFunc("/chat-message/{id}", h.GetChatMessage).Methods("GET")
 	chatRouter.HandleFunc("/{id}/context", h.GetChatContext).Methods("GET")

@@ -96,6 +96,13 @@ A skill the user invoked earlier is still in the index on the next turn, and the
 To make that likely, the index marks such skills `(used earlier in this thread)`, read from the thread's `chat_message_rituals` links.
 Mode and job skills are preloaded for as long as the mode is active or the job runs, as today, since the user chose them.
 
+**Implementation notes (step 2, 2026-10-31).**
+Three simplifications of the text above, each a small follow-up if it ever matters:
+
+- The index degrades uniformly, not by recency: over budget, every description is shortened (160, then 80 characters), then all are dropped; slugs always stay. A least-recently-used order needs per-skill usage data the product does not record yet.
+- A connector that was not in scope when the turn registered its tools has no tool definitions on that turn's adapter, so `load_skill` reports the connector's inventory but says its tools can be loaded from the next turn. Connectors already in scope (thread-attached, or a mode's or message's skill) are loadable at once.
+- The `(used earlier in this thread)` mark covers skills a message invoked and skills `load_skill` named before; the separate post-checkpoint note is not needed, since a skill unloaded at a checkpoint keeps its mark.
+
 ### 3. Bundle files live in the gallery VFS, under `skills/<slug>/`
 
 A skill's files are `file_attachments` rows, as #406 makes agent files, with two additions to that PR's model:
@@ -131,6 +138,8 @@ The checkpoint summary prompt is told which skills were active so the summary na
 Mode and job skills are not affected: they are preloaded each turn, not loaded state.
 
 A skill that falls out of scope (its personality binding changed, or it was deleted) stays in the table but is neither injected nor listed; the row is harmless and is dropped on the next unload sweep.
+
+**Implementation note (step 2).** "Used in the segment" is: named in a `load_skill` call of the segment, or one of the skill's `allowed_tools` was called. Calls to a skill's connector tools and reads under `skills/<slug>/` are added when those surfaces exist (connector names in `allowed_tools` is the §6 follow-up; files are step 3).
 
 ### 5. Scripts run in the conversation's container (private build)
 

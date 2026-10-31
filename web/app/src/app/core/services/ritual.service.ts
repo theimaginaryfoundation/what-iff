@@ -9,6 +9,7 @@ import {
   RitualFilters,
   PaginatedRitualResponse,
   RitualImportResult,
+  LoadedSkill,
 } from '../models/ritual.model';
 
 @Injectable({
@@ -83,6 +84,16 @@ export class RitualService {
       form.append('personality_id', personalityId);
     }
     return this.http.post<RitualImportResult>(`${this.apiUrl}/import`, form);
+  }
+
+  /** The skills the agent loaded in a thread with load_skill, oldest load first. */
+  listLoadedSkills(chatId: string): Observable<LoadedSkill[]> {
+    return this.http.get<LoadedSkill[]>(`${environment.apiUrl}/chat/${chatId}/loaded-skills`);
+  }
+
+  /** Forgets a skill the agent loaded in a thread; its instructions leave the context from the next turn. */
+  unloadSkill(chatId: string, ritualId: string): Observable<void> {
+    return this.http.delete<void>(`${environment.apiUrl}/chat/${chatId}/loaded-skills/${ritualId}`);
   }
 
   /** The skill as an Agent Skills zip; the Content-Disposition header carries `<slug>.zip`. */

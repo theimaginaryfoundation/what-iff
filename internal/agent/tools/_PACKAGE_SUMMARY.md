@@ -6,6 +6,9 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
 
 ## Responsibilities
 
+- **Skill lifecycle tools** (`skill_tools.go`, ADR 0x035): `load_skill` and `unload_skill` take skill slugs; the agent package implements them.
+  `list(kind="skills")` reports each skill's `slug` and whether it is `loaded` in the chat, and its `filter` matches slug, name, description and instructions (`ListScope.LoadedSkillIDs` carries the loaded set).
+
 - **Tool catalog/specs:** `FunctionToolSpec`, `FunctionToolDefinition`, and catalog helpers (`catalog.go`, `toolconstants.go`) define the static function-tool surface and user-toggleable metadata.
   `FunctionToolDefinition.HumanDescription` is presentation copy for human-facing surfaces and is intentionally separate from the agent-facing `FunctionToolSpec.Description` prompt.
 - **Provider projection:** `OpenAIToolUnionParam` / `OpenAIFunctionTools` build OpenAI Responses function tools; Claude projection is built by `internal/agent` via `provider.ClaudeFunctionTool`.

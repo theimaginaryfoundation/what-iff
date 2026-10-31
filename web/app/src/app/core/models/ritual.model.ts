@@ -70,6 +70,14 @@ export interface RitualImportResult {
   connectors_missing: string[];
 }
 
+/** A skill the agent loaded in a thread with load_skill (GET /chat/{id}/loaded-skills). */
+export interface LoadedSkill {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+}
+
 /** Bounds the editor shows; the server enforces the same (internal/skills). */
 export const RITUAL_SLUG_MAX = 64;
 export const RITUAL_DESCRIPTION_MAX = 1024;

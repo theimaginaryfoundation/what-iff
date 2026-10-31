@@ -46,6 +46,10 @@ var functionToolCatalog = []FunctionToolDefinition{
 	{Spec: EntityGetToolSpec, HumanDescription: "Look up entity pages about people, places and projects by name, following their [[links]].", UserGuide: "Reads the short wiki pages your personalities keep about people, places, projects and other things, by name. Pages link to each other, so it can follow a trail. See and edit them under Memories > Entities.", AgentDefault: true, UserToggleable: true, SandboxPolicy: SandboxNever, Loadable: true},
 	{Spec: EntityWriteToolSpec, HumanDescription: "Write, update or add to an entity page about a person, place, project or other thing.", UserGuide: "Keeps short wiki pages about the people, places and projects that come up, linked to each other. Pages follow your personality's memory pinning: pinned personalities keep their own. See and edit them under Memories > Entities.", AgentDefault: true, UserToggleable: true, SandboxPolicy: SandboxNever, Loadable: true},
 	{Spec: LoadToolsToolSpec, HumanDescription: "Load built-in or MCP tools into this chat. Loaded tools persist across turns until unloaded.", AgentDefault: true, UserToggleable: false, SandboxPolicy: SandboxAllowed},
+	// Skills (ADR 0x035): offered only when the chat has skills in scope (see buildTurnToolPolicy);
+	// never in a sandbox, which sees no account content.
+	{Spec: LoadSkillToolSpec, HumanDescription: "Load a skill's instructions into this thread when a task calls for it. Loaded skills persist across turns until unloaded.", AgentDefault: true, UserToggleable: false, SandboxPolicy: SandboxNever},
+	{Spec: UnloadSkillToolSpec, HumanDescription: "Unload skills loaded earlier in this thread.", AgentDefault: true, UserToggleable: false, SandboxPolicy: SandboxNever},
 	{Spec: UnloadToolsToolSpec, HumanDescription: "Unload previously loaded built-in or MCP tools from this chat.", AgentDefault: true, UserToggleable: false, SandboxPolicy: SandboxAllowed},
 	// First-party web search (ADR 0x021). Not user-toggleable here: GetAvailableTools already lists
 	// web_search for the toggle, and fetch_page follows it. The per-turn policy hides both when no
