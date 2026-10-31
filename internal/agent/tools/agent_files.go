@@ -98,7 +98,7 @@ var reservedAgentFolders = map[string]string{
 func checkAgentFolder(folder string) error {
 	top, _, _ := strings.Cut(folder, "/")
 	if owner, ok := reservedAgentFolders[strings.ToLower(top)]; ok {
-		return agentFileErrorf("the %q folder is managed by %s; write elsewhere", strings.ToLower(top)+"/", owner)
+		return fileRefusalf("the %q folder is managed by %s; write elsewhere", strings.ToLower(top)+"/", owner)
 	}
 	return nil
 }
@@ -144,7 +144,7 @@ func (t *AgentFileTool) resolveOwned(ctx context.Context, chat *models.Chat, fil
 		if att.AgentAuthored() {
 			what = "a file another agent created"
 		}
-		return nil, agentFileErrorf("%q is %s, which you can read but not change. To work from it, copy it to a new file of your own with action \"copy\".", FilePath(att), what)
+		return nil, fileRefusalf("%q is %s, which you can read but not change. To work from it, copy it to a new file of your own with action \"copy\".", FilePath(att), what)
 	}
 	return att, nil
 }
@@ -163,7 +163,7 @@ func agentFileName(name string) (string, string, error) {
 	}
 	norm, err := models.NormalizeFileName(name, name)
 	if err != nil {
-		return "", "", agentFileErrorf("invalid file name: %v", err)
+		return "", "", fileRefusalf("invalid file name: %v", err)
 	}
 	ext := strings.ToLower(path.Ext(norm))
 	mimeType, ok := agentFileTypes[ext]
@@ -173,14 +173,14 @@ func agentFileName(name string) (string, string, error) {
 			exts = append(exts, e)
 		}
 		sort.Strings(exts)
-		return "", "", agentFileErrorf("%q is not a text type agents can create; use one of %s", ext, strings.Join(exts, " "))
+		return "", "", fileRefusalf("%q is not a text type agents can create; use one of %s", ext, strings.Join(exts, " "))
 	}
 	return norm, mimeType, nil
 }
 
 func checkAgentFileSize(content string) error {
 	if len(content) > agentFileMaxBytes {
-		return agentFileErrorf("the file would be %d bytes; files are limited to %d bytes. Split it into several files.", len(content), agentFileMaxBytes)
+		return fileRefusalf("the file would be %d bytes; files are limited to %d bytes. Split it into several files.", len(content), agentFileMaxBytes)
 	}
 	return nil
 }

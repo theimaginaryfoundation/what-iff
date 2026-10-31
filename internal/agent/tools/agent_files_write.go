@@ -108,7 +108,7 @@ func (t *AgentFileTool) Write(ctx context.Context, chat *models.Chat, args []byt
 	case "append":
 		res, err = t.rewrite(ctx, chat, a.File, func(cur string) (string, error) {
 			if a.Content == "" {
-				return "", agentFileErrorf("content is required")
+				return "", fileRefusalf("content is required")
 			}
 			if cur == "" || strings.HasSuffix(cur, "\n") {
 				return cur + a.Content, nil
@@ -118,11 +118,11 @@ func (t *AgentFileTool) Write(ctx context.Context, chat *models.Chat, args []byt
 	case "patch":
 		res, err = t.rewrite(ctx, chat, a.File, func(cur string) (string, error) {
 			if strings.TrimSpace(a.Diff) == "" {
-				return "", agentFileErrorf("diff is required")
+				return "", fileRefusalf("diff is required")
 			}
 			next, err := applyUnifiedDiff(cur, a.Diff)
 			if err != nil {
-				return "", agentFileErrorf("patch not applied: %v", err)
+				return "", fileRefusalf("patch not applied: %v", err)
 			}
 			return next, nil
 		})
@@ -177,7 +177,7 @@ func (t *AgentFileTool) checkFreePath(ctx context.Context, userID uuid.UUID, fol
 		if folder != "" {
 			p = folder + "/" + name
 		}
-		return agentFileErrorf("a file is already at %q (id %s); pick another path, or change that file", p, existing[0].ID)
+		return fileRefusalf("a file is already at %q (id %s); pick another path, or change that file", p, existing[0].ID)
 	}
 	return nil
 }
@@ -185,7 +185,7 @@ func (t *AgentFileTool) checkFreePath(ctx context.Context, userID uuid.UUID, fol
 // newFile stores content as a new agent file of chat's agent at p.
 func (t *AgentFileTool) newFile(ctx context.Context, chat *models.Chat, p, content string) (*models.FileAttachment, error) {
 	if strings.TrimSpace(p) == "" {
-		return nil, agentFileErrorf("path is required, e.g. \"notes/journal.md\"")
+		return nil, fileRefusalf("path is required, e.g. \"notes/journal.md\"")
 	}
 	folder, rawName, err := SplitFilePath(p)
 	if err != nil {
@@ -206,7 +206,7 @@ func (t *AgentFileTool) newFile(ctx context.Context, chat *models.Chat, p, conte
 		return nil, err
 	}
 	if n >= agentFileMaxPerUser {
-		return nil, agentFileErrorf("this account already holds %d agent files, the limit; delete some you no longer need first", n)
+		return nil, fileRefusalf("this account already holds %d agent files, the limit; delete some you no longer need first", n)
 	}
 	key, err := t.putObject(ctx, chat.UserID, name, mimeType, content)
 	if err != nil {
@@ -285,7 +285,7 @@ func (t *AgentFileTool) rewrite(ctx context.Context, chat *models.Chat, file str
 		ref := t.ref(chat, att, next)
 		return agentFileWriteResult{File: &ref}, nil
 	}
-	return agentFileWriteResult{}, agentFileErrorf("the file kept changing while you wrote it; read it again and retry")
+	return agentFileWriteResult{}, fileRefusalf("the file kept changing while you wrote it; read it again and retry")
 }
 
 func (t *AgentFileTool) delete(ctx context.Context, chat *models.Chat, file string) (agentFileWriteResult, error) {
@@ -324,7 +324,7 @@ func (t *AgentFileTool) move(ctx context.Context, chat *models.Chat, file, p str
 		return agentFileWriteResult{}, err
 	}
 	if strings.TrimSpace(p) == "" {
-		return agentFileWriteResult{}, agentFileErrorf("path is required: where the file goes, e.g. \"notes/old/journal.md\"")
+		return agentFileWriteResult{}, fileRefusalf("path is required: where the file goes, e.g. \"notes/old/journal.md\"")
 	}
 	folder, rawName, err := SplitFilePath(p)
 	if err != nil {
@@ -335,7 +335,7 @@ func (t *AgentFileTool) move(ctx context.Context, chat *models.Chat, file, p str
 		return agentFileWriteResult{}, err
 	}
 	if !strings.EqualFold(name, att.Name) && !strings.EqualFold(pathExt(name), pathExt(att.Name)) {
-		return agentFileWriteResult{}, agentFileErrorf("a move keeps the file's type; name it with %s", pathExt(att.Name))
+		return agentFileWriteResult{}, fileRefusalf("a move keeps the file's type; name it with %s", pathExt(att.Name))
 	}
 	if folder != att.Folder || !strings.EqualFold(name, att.Name) {
 		if err := t.checkFreePath(ctx, chat.UserID, folder, name); err != nil {
@@ -346,7 +346,7 @@ func (t *AgentFileTool) move(ctx context.Context, chat *models.Chat, file, p str
 	if name != att.Name {
 		if att.Name, err = t.store.RenameGalleryFile(ctx, chat.UserID, att.ID, name); err != nil {
 			if errors.Is(err, models.ErrInvalidFileName) {
-				return agentFileWriteResult{}, agentFileErrorf("%v", err)
+				return agentFileWriteResult{}, fileRefusalf("%v", err)
 			}
 			return agentFileWriteResult{}, err
 		}

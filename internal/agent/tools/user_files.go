@@ -38,7 +38,7 @@ func AsFileRefusal(err error) (string, bool) {
 	return "", false
 }
 
-func agentFileErrorf(format string, args ...any) error {
+func fileRefusalf(format string, args ...any) error {
 	return FileRefusal{msg: fmt.Sprintf(format, args...)}
 }
 
@@ -61,11 +61,11 @@ func FilePath(att *models.FileAttachment) string {
 func SplitFilePath(p string) (folder, name string, err error) {
 	p = strings.Trim(strings.TrimSpace(p), "/")
 	if p == "" {
-		return "", "", agentFileErrorf("path is empty")
+		return "", "", fileRefusalf("path is empty")
 	}
 	dir, base := path.Split(p)
 	if folder, err = models.NormalizeFolder(dir); err != nil {
-		return "", "", agentFileErrorf("invalid folder in path: %v", err)
+		return "", "", fileRefusalf("invalid folder in path: %v", err)
 	}
 	return folder, strings.TrimSpace(base), nil
 }
@@ -77,12 +77,12 @@ func SplitFilePath(p string) (folder, name string, err error) {
 func ResolveUserFile(ctx context.Context, lookup UserFileLookup, userID uuid.UUID, ref string, prefer func(*models.FileAttachment) bool) (*models.FileAttachment, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return nil, agentFileErrorf("file is required: pass a file id or its path, e.g. \"notes/journal.md\"")
+		return nil, fileRefusalf("file is required: pass a file id or its path, e.g. \"notes/journal.md\"")
 	}
 	if id, err := uuid.Parse(ref); err == nil {
 		att, err := lookup.GetFileAttachment(ctx, userID, id)
 		if errors.Is(err, datastore.ErrFileAttachmentNotFound) {
-			return nil, agentFileErrorf("no file with id %s", ref)
+			return nil, fileRefusalf("no file with id %s", ref)
 		}
 		return att, err
 	}
@@ -96,7 +96,7 @@ func ResolveUserFile(ctx context.Context, lookup UserFileLookup, userID uuid.UUI
 	}
 	switch len(matches) {
 	case 0:
-		return nil, agentFileErrorf("no file at %q; list files with list (kind=\"files\")", ref)
+		return nil, fileRefusalf("no file at %q; list files with list (kind=\"files\")", ref)
 	case 1:
 		return matches[0], nil
 	}
@@ -111,7 +111,7 @@ func ResolveUserFile(ctx context.Context, lookup UserFileLookup, userID uuid.UUI
 	if len(preferred) == 1 {
 		return preferred[0], nil
 	}
-	return nil, agentFileErrorf("%d files are at %q; pass one of their ids instead: %s", len(matches), ref, strings.Join(ids, ", "))
+	return nil, fileRefusalf("%d files are at %q; pass one of their ids instead: %s", len(matches), ref, strings.Join(ids, ", "))
 }
 
 // ReadableAsText reports whether att's content can be read as text.
@@ -132,7 +132,7 @@ func ReadableAsText(att *models.FileAttachment) bool {
 // file that is not text, too large, not UTF-8, or whose stored content is missing is refused.
 func ReadFileText(ctx context.Context, logger *zap.Logger, files storage.FileStore, att *models.FileAttachment) (string, error) {
 	if !ReadableAsText(att) {
-		return "", agentFileErrorf("%q is not a text file (%s); use find_context to look at it", FilePath(att), att.FileType)
+		return "", fileRefusalf("%q is not a text file (%s); use find_context to look at it", FilePath(att), att.FileType)
 	}
 	var raw []byte
 	if att.AgentAuthored() {
@@ -144,15 +144,15 @@ func ReadFileText(ctx context.Context, logger *zap.Logger, files storage.FileSto
 	} else {
 		text, ok := storage.ResolveAttachmentTextContent(ctx, logger, files, att.UserID, att)
 		if !ok {
-			return "", agentFileErrorf("%q could not be read: its stored content is missing or empty", FilePath(att))
+			return "", fileRefusalf("%q could not be read: its stored content is missing or empty", FilePath(att))
 		}
 		raw = []byte(text)
 	}
 	if len(raw) > fileTextMaxBytes {
-		return "", agentFileErrorf("%q is too large to read here (%d bytes)", FilePath(att), len(raw))
+		return "", fileRefusalf("%q is too large to read here (%d bytes)", FilePath(att), len(raw))
 	}
 	if !utf8.Valid(raw) {
-		return "", agentFileErrorf("%q is not valid UTF-8 text", FilePath(att))
+		return "", fileRefusalf("%q is not valid UTF-8 text", FilePath(att))
 	}
 	return string(raw), nil
 }
