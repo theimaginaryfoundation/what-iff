@@ -3036,6 +3036,88 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /agent-job/{id}/rituals/{ritualId}:
+    post:
+      summary: Attach a skill to an agent job
+      description: Links a skill (ritual) the user owns to the job. A skill can be attached to any number of jobs and modes at once.
+      tags: [AgentJob Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: AgentJob ID
+          schema:
+            type: string
+            format: uuid
+        - name: ritualId
+          in: path
+          required: true
+          description: Skill (ritual) ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Skill attached (or already attached)
+        '400':
+          description: Invalid job or skill ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: AgentJob or skill not found for this user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Detach a skill from an agent job
+      description: Removes the link between the job and the skill. Other jobs and modes that use the skill are unaffected.
+      tags: [AgentJob Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: AgentJob ID
+          schema:
+            type: string
+            format: uuid
+        - name: ritualId
+          in: path
+          required: true
+          description: Skill (ritual) ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Skill detached (or was not attached)
+        '400':
+          description: Invalid job or skill ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: AgentJob or skill not found for this user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   # Personality Management Endpoints
   /personality:
     get:

@@ -117,6 +117,36 @@ func TestCreateMood_RejectsNonOwnedRitual(t *testing.T) {
 	require.ErrorIs(t, err, ErrRitualNotFound)
 }
 
+// A skill attached to a second mode stays on the first. Before ADR 0x035 §11 the edge was a
+// FK column on rituals, so the second attach silently detached the first.
+func TestCreateMood_SharesRitualAcrossMoods(t *testing.T) {
+	ds, cleanup := newMoodCatalogTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMoodTestUser(t, ds)
+	ritualID := createMoodTestRitual(t, ds, userID)
+
+	first, err := ds.CreateMood(ctx, userID, models.CreateMoodRequest{Name: "Cozy", RitualIDs: []uuid.UUID{ritualID}})
+	require.NoError(t, err)
+	second, err := ds.CreateMood(ctx, userID, models.CreateMoodRequest{Name: "Focused", RitualIDs: []uuid.UUID{ritualID}})
+	require.NoError(t, err)
+
+	gotFirst, err := ds.GetMood(ctx, userID, first.ID)
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{ritualID}, gotFirst.RitualIDs)
+	gotSecond, err := ds.GetMood(ctx, userID, second.ID)
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{ritualID}, gotSecond.RitualIDs)
+
+	// Detaching from one mode leaves the other alone.
+	_, err = ds.UpdateMood(ctx, userID, second.ID, models.UpdateMoodRequest{Name: "Focused", RitualIDs: &[]uuid.UUID{}})
+	require.NoError(t, err)
+	gotFirst, err = ds.GetMood(ctx, userID, first.ID)
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{ritualID}, gotFirst.RitualIDs)
+}
+
 func TestGetMood(t *testing.T) {
 	ds, cleanup := newMoodCatalogTestDatastore(t)
 	defer cleanup()
