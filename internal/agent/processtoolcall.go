@@ -65,9 +65,20 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			return out, nil, err
 		},
 		tools.ListToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
-			out, err := a.listTool.ListInMCPScope(ctx, chatCtx.chat, input, func(ctx context.Context) ([]*models.MCPServer, error) {
-				return a.mcpServersInScope(ctx, chatCtx)
+			out, err := a.listTool.ListWithScope(ctx, chatCtx.chat, input, tools.ListScope{
+				MCPServers: func(ctx context.Context) ([]*models.MCPServer, error) {
+					return a.mcpServersInScope(ctx, chatCtx)
+				},
+				LoadedSkillIDs: chatCtx.loadedSkillIDs(),
 			})
+			return out, nil, err
+		},
+		tools.LoadSkillToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.loadSkillTool(ctx, chatCtx, input)
+			return out, nil, err
+		},
+		tools.UnloadSkillToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.unloadSkillTool(ctx, chatCtx, input)
 			return out, nil, err
 		},
 		tools.MoveFilesToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {

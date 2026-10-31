@@ -86,6 +86,13 @@ func toolContextPolicyFor(toolName string) toolContextPolicy {
 		// File reads can be long (up to ~24k chars) and both go stale once the agent writes again;
 		// keep them for a while, then re-read.
 		return toolContextPolicy{persist: true, ttlTurns: agentStoreReadTTLTurns}
+	case tools.LoadSkillToolSpec.Name:
+		// A load_skill result carries the skill's instructions and its connector inventory; from
+		// the next turn the instructions are in the skills segment, so the result only needs to
+		// bridge the turns until then (ADR 0x035 §10).
+		return toolContextPolicy{persist: true, ttlTurns: agentStoreReadTTLTurns}
+	case tools.UnloadSkillToolSpec.Name:
+		return toolContextPolicy{persist: false}
 	case tools.ToolNameWebSearch, tools.ToolNameFetchPage:
 		// Web search snapshots and fetched pages go stale; keep for a handful of turns. Pages can
 		// be long (up to ~20k chars), so they must not fall through to the no-expiry default.
