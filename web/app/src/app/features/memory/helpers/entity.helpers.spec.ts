@@ -2,11 +2,11 @@ import { entitySegments, normalizeEntityName } from './entity.helpers';
 
 describe('entitySegments', () => {
   it('splits text around [[links]] and tidies link names', () => {
-    expect(entitySegments('Works with [[Dana  Lee]] on [[Project Y]].')).toEqual([
+    expect(entitySegments('Works with [[Dana  Lee]] on [[Project Orchard]].')).toEqual([
       { text: 'Works with ', link: false },
       { text: 'Dana Lee', link: true },
       { text: ' on ', link: false },
-      { text: 'Project Y', link: true },
+      { text: 'Project Orchard', link: true },
       { text: '.', link: false },
     ]);
   });
@@ -19,6 +19,6 @@ describe('entitySegments', () => {
 
 describe('normalizeEntityName', () => {
   it('matches the server key normalization', () => {
-    expect(normalizeEntityName('  Chris   SMITH ')).toBe('chris smith');
+    expect(normalizeEntityName('  Alex   RIVERA ')).toBe('alex rivera');
   });
 });

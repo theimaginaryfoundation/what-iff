@@ -20,6 +20,7 @@ export class AgentEntityService {
     } else if (filters.personality_id) {
       params = params.set('personality_id', filters.personality_id);
     }
+    if (filters.archived) params = params.set('archived', 'true');
     return this.http.get<PaginatedAgentEntityResponse>(this.apiUrl, { params }).pipe(catchError(handleError));
   }
 
@@ -27,6 +28,12 @@ export class AgentEntityService {
     return this.http.patch<AgentEntity>(`${this.apiUrl}/${id}`, { body }).pipe(catchError(handleError));
   }
 
+  /** Brings back an entity an agent archived. */
+  restore(id: string): Observable<AgentEntity> {
+    return this.http.post<AgentEntity>(`${this.apiUrl}/${id}/restore`, {}).pipe(catchError(handleError));
+  }
+
+  /** Removes a live or archived entity for good. */
   delete(id: string): Observable<void> {
     return this.http.delete<void>(`${this.apiUrl}/${id}`).pipe(catchError(handleError));
   }

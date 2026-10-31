@@ -16,12 +16,12 @@ import (
 )
 
 // Entity wiki routes for the Memories panel (ADR 0x034). Agents write entities with their tools;
-// here the user browses, edits and deletes them.
+// here the user browses, edits and deletes them, and restores the ones an agent archived.
 
 // maxEntityPatchBytes bounds an entity edit request body: the 5000-rune body is at most ~20KB.
 const maxEntityPatchBytes = 64 << 10
 
-// ListAgentEntities handles GET /memory/entities?page=&limit=&query=&personality_id=&global_only=.
+// ListAgentEntities handles GET /memory/entities?page=&limit=&query=&personality_id=&global_only=&archived=.
 func (h *Handler) ListAgentEntities(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserIDFromContext(r.Context())
 	if !ok {
@@ -34,7 +34,7 @@ func (h *Handler) ListAgentEntities(w http.ResponseWriter, r *http.Request) {
 	if limit < 1 || limit > 200 {
 		limit = 50
 	}
-	filters := models.AgentEntityFilters{Limit: limit, Offset: (page - 1) * limit}
+	filters := models.AgentEntityFilters{Limit: limit, Offset: (page - 1) * limit, Archived: q.Get("archived") == "true"}
 	if query := strings.TrimSpace(q.Get("query")); query != "" {
 		filters.Query = &query
 	}
@@ -96,7 +96,28 @@ func (h *Handler) PatchAgentEntity(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// DeleteAgentEntity handles DELETE /memory/entities/{id}.
+// RestoreAgentEntity handles POST /memory/entities/{id}/restore: the user brings back an entity an
+// agent archived.
+func (h *Handler) RestoreAgentEntity(w http.ResponseWriter, r *http.Request) {
+	userID, id, ok := h.entityRequest(w, r)
+	if !ok {
+		return
+	}
+	e, err := h.ds.RestoreAgentEntity(r.Context(), userID, id)
+	switch {
+	case errors.Is(err, datastore.ErrAgentEntityNotFound):
+		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Archived entity not found", err)
+	case errors.Is(err, datastore.ErrAgentEntityExists):
+		handlerutils.RespondWithError(w, h.logger, http.StatusConflict, handlerutils.CodeNotSet, "Another entity has this name now; edit or delete that one first", err)
+	case err != nil:
+		h.logger.Error("failed to restore entity", zap.String("user_id", userID.String()), zap.Error(err))
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to restore entity", err)
+	default:
+		handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, e)
+	}
+}
+
+// DeleteAgentEntity handles DELETE /memory/entities/{id}: removes a live or archived entity for good.
 func (h *Handler) DeleteAgentEntity(w http.ResponseWriter, r *http.Request) {
 	userID, id, ok := h.entityRequest(w, r)
 	if !ok {

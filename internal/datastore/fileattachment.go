@@ -46,7 +46,7 @@ func toFileAttachmentModel(e *ent.FileAttachment) *models.FileAttachment {
 		ContextOnly: e.ContextOnly,
 		CreatedAt:   e.CreatedAt,
 
-		AgentAuthored:          e.AgentAuthored,
+		Origin:                 models.FileOrigin(e.Origin),
 		CreatedByPersonalityID: e.CreatedByPersonalityID,
 		CreatedByChatID:        e.CreatedByChatID,
 		UpdatedAt:              e.UpdatedAt,
@@ -54,6 +54,9 @@ func toFileAttachmentModel(e *ent.FileAttachment) *models.FileAttachment {
 
 	if e.FileID != "" {
 		fileAttachmentModel.FileID = &e.FileID
+	}
+	if e.ChunkStatus != nil {
+		fileAttachmentModel.ChunkStatus = string(*e.ChunkStatus)
 	}
 
 	if e.Edges.ChatMessage != nil {
@@ -103,7 +106,7 @@ func classifyFileAttachmentSource(e *ent.FileAttachment) models.FileAttachmentSo
 		}
 		return models.FileAttachmentSourceImported
 	}
-	if e.AgentAuthored {
+	if e.Origin == entfileattachment.OriginAgent {
 		return models.FileAttachmentSourceGenerated
 	}
 	if strings.HasPrefix(strings.ToLower(e.FileType), models.ImageMIMEPrefix) &&
@@ -233,9 +236,11 @@ func (d *Datastore) CreateFileAttachment(ctx context.Context, userID uuid.UUID, 
 		create.SetContextOnly(true)
 	}
 
-	if fileAttachment.AgentAuthored {
-		create.SetAgentAuthored(true).
-			SetNillableCreatedByPersonalityID(fileAttachment.CreatedByPersonalityID).
+	if fileAttachment.Origin != "" {
+		create.SetOrigin(entfileattachment.Origin(fileAttachment.Origin))
+	}
+	if fileAttachment.AgentAuthored() {
+		create.SetNillableCreatedByPersonalityID(fileAttachment.CreatedByPersonalityID).
 			SetNillableCreatedByChatID(fileAttachment.CreatedByChatID)
 	}
 
@@ -499,11 +504,8 @@ func (d *Datastore) ListFileAttachments(ctx context.Context, userID uuid.UUID, p
 		))
 	}
 
-	switch filters.Origin {
-	case models.FileOriginAgent:
-		query = query.Where(entfileattachment.AgentAuthored(true))
-	case models.FileOriginUser:
-		query = query.Where(entfileattachment.AgentAuthored(false))
+	if filters.Origin != "" {
+		query = query.Where(entfileattachment.OriginEQ(entfileattachment.Origin(filters.Origin)))
 	}
 
 	if filters.ExcludeReferenceCopies {

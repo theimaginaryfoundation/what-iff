@@ -760,8 +760,8 @@ func TestListFilesRejectsAnInvalidFolderWithoutQuerying(t *testing.T) {
 func TestListFilesOriginAndTreeView(t *testing.T) {
 	chat := listTestChat()
 	store := &fakeListStore{files: []*models.FileAttachment{
-		{ID: uuid.New(), Name: "journal.md", FileType: "text/markdown", Folder: "notes", AgentAuthored: true},
-		{ID: uuid.New(), Name: "Ideas.md", FileType: "text/markdown", Folder: "notes/later", AgentAuthored: true},
+		{ID: uuid.New(), Name: "journal.md", FileType: "text/markdown", Folder: "notes", Origin: models.FileOriginAgent},
+		{ID: uuid.New(), Name: "Ideas.md", FileType: "text/markdown", Folder: "notes/later", Origin: models.FileOriginAgent},
 		{ID: uuid.New(), Name: "brief.pdf", FileType: "application/pdf"},
 		{ID: uuid.New(), Name: "a.md", FileType: "text/markdown", Folder: "notes"},
 	}}
@@ -779,6 +779,7 @@ func TestListFilesOriginAndTreeView(t *testing.T) {
 	res = decodeList(t, out)
 	require.Empty(t, res.Items)
 	require.Equal(t, 4, res.Count)
+	require.Equal(t, listMaxLimit, store.lastPageSize, "a tree defaults to the largest page")
 	require.Equal(t, strings.Join([]string{
 		".",
 		"├── notes/",

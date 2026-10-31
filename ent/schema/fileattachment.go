@@ -49,12 +49,14 @@ func (FileAttachment) Fields() []ent.Field {
 		field.Time("created_at").
 			Immutable().
 			Default(time.Now),
-		// Agent-authored files (ADR 0x034). An agent may change only the files its personality
+		// Who wrote the file (ADR 0x034). An agent may change only "agent" files its personality
 		// wrote, or, with no personality, the files written in its conversation; every other file,
-		// including all of the user's uploads, is read-only to agents.
-		field.Bool("agent_authored").
-			Default(false).
-			Comment("Written by an agent's file tools; only these files can be changed by an agent."),
+		// including all of the user's uploads, is read-only to agents. A string enum (varchar in
+		// Postgres), so a new origin is a new value, not a migration.
+		field.Enum("origin").
+			Values("user", "agent").
+			Default("user").
+			Comment("Who wrote the file: \"user\" (uploads, imports, reply outputs) or \"agent\" (an agent's file tools). Only agent files can be changed by an agent."),
 		field.UUID("created_by_personality_id", uuid.UUID{}).
 			Optional().
 			Nillable().

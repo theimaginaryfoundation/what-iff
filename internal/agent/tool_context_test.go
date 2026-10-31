@@ -27,6 +27,8 @@ func TestToolContextPolicyFor(t *testing.T) {
 		{"fetched page shares the web search TTL", tools.ToolNameFetchPage, true, webSearchTTLTurns, false},
 		{"create_memory dropped", tools.CreateMemoryToolSpec.Name, false, 0, false},
 		{"update_scratchpad dropped", tools.UpdateScratchpadToolSpec.Name, false, 0, false},
+		{"agent_file_write ack persists", tools.AgentFileWriteToolSpec.Name, true, noTTL, false},
+		{"entity_write dropped", tools.EntityWriteToolSpec.Name, false, 0, false},
 		{"auto memory enrichment dropped", memoryEnrichmentToolCallName, false, 0, false},
 		{"mcp tickets short TTL + stale", "mcp__jira__get_ticket", true, mcpMessagesTTLTurns, true},
 		{"mcp messages short TTL + stale", "mcp__slack__list_messages", true, mcpMessagesTTLTurns, true},
