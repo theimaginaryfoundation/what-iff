@@ -56,6 +56,9 @@ func toFileAttachmentModel(e *ent.FileAttachment) *models.FileAttachment {
 	if e.FileID != "" {
 		fileAttachmentModel.FileID = &e.FileID
 	}
+	if e.ChunkStatus != nil {
+		fileAttachmentModel.ChunkStatus = string(*e.ChunkStatus)
+	}
 
 	if e.Edges.ChatMessage != nil {
 		chatMessageID := e.Edges.ChatMessage.ID
@@ -234,14 +237,15 @@ func (d *Datastore) CreateFileAttachment(ctx context.Context, userID uuid.UUID, 
 		create.SetContextOnly(true)
 	}
 
-	switch fileAttachment.Origin {
-	case models.FileOriginAgent:
-		create.SetOrigin(entfileattachment.OriginAgent).
-			SetNillableCreatedByPersonalityID(fileAttachment.CreatedByPersonalityID).
+	if fileAttachment.Origin != "" {
+		create.SetOrigin(entfileattachment.Origin(fileAttachment.Origin))
+	}
+	if fileAttachment.IsSkillFile() {
+		create.SetNillableSkillID(fileAttachment.SkillID)
+	}
+	if fileAttachment.AgentAuthored() {
+		create.SetNillableCreatedByPersonalityID(fileAttachment.CreatedByPersonalityID).
 			SetNillableCreatedByChatID(fileAttachment.CreatedByChatID)
-	case models.FileOriginSkill:
-		create.SetOrigin(entfileattachment.OriginSkill).
-			SetNillableSkillID(fileAttachment.SkillID)
 	}
 
 	entFileAttachment, err := create.Save(ctx)
@@ -504,19 +508,12 @@ func (d *Datastore) ListFileAttachments(ctx context.Context, userID uuid.UUID, p
 		))
 	}
 
-	switch filters.Origin {
-	case models.FileOriginAgent:
-		query = query.Where(entfileattachment.OriginEQ(entfileattachment.OriginAgent))
-	case models.FileOriginUser:
-		query = query.Where(entfileattachment.OriginEQ(entfileattachment.OriginUser))
-	case models.FileOriginSkill:
-		query = query.Where(entfileattachment.OriginEQ(entfileattachment.OriginSkill))
-	default:
+	if filters.Origin != "" {
+		query = query.Where(entfileattachment.OriginEQ(entfileattachment.Origin(filters.Origin)))
+	} else if !listingUnderSkillsFolder(filters) {
 		// Skill bundle files live under the reserved skills folder and are managed by the skill
 		// editor; a gallery listing leaves them out unless it looks inside that folder.
-		if !listingUnderSkillsFolder(filters) {
-			query = query.Where(entfileattachment.OriginNEQ(entfileattachment.OriginSkill))
-		}
+		query = query.Where(entfileattachment.OriginNEQ(entfileattachment.OriginSkill))
 	}
 
 	if filters.ExcludeReferenceCopies {

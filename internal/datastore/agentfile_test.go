@@ -21,13 +21,13 @@ func TestAgentFiles_PathLookupSwapCountAndOrigin(t *testing.T) {
 		Origin: models.FileOriginAgent, CreatedByPersonalityID: &persona,
 	})
 	require.NoError(t, err)
-	require.Equal(t, models.FileOriginAgent, agentFile.Origin)
+	require.True(t, agentFile.AgentAuthored())
 	require.Equal(t, &persona, agentFile.CreatedByPersonalityID)
 	require.Equal(t, models.FileAttachmentSourceGenerated, agentFile.Source)
 
 	upload, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "brief.md", FileType: "text/markdown", S3Key: "users/u/brief.md", Folder: "notes"})
 	require.NoError(t, err)
-	require.Equal(t, models.FileOriginUser, upload.Origin)
+	require.False(t, upload.AgentAuthored())
 	_, err = ds.CreateFileAttachment(ctx, other, models.FileAttachment{Name: "journal.md", FileType: "text/markdown", Folder: "notes"})
 	require.NoError(t, err)
 

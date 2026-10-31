@@ -785,6 +785,7 @@ func TestListFilesOriginAndTreeView(t *testing.T) {
 	res = decodeList(t, out)
 	require.Empty(t, res.Items)
 	require.Equal(t, 4, res.Count)
+	require.Equal(t, listMaxLimit, store.lastPageSize, "a tree defaults to the largest page")
 	require.Equal(t, strings.Join([]string{
 		".",
 		"├── notes/",

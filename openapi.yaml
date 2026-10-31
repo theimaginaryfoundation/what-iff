@@ -4319,6 +4319,13 @@ paths:
           description: Only global entities.
           schema:
             type: boolean
+        - name: archived
+          in: query
+          description: >-
+            List the entities an agent deleted (archived) instead of the live ones. Archived
+            entities are hidden from agents and can be restored.
+          schema:
+            type: boolean
       responses:
         '200':
           description: Entities retrieved successfully
@@ -4396,6 +4403,7 @@ paths:
                 $ref: '#/components/schemas/Error'
     delete:
       summary: Delete an entity
+      description: Removes a live or archived entity for good.
       tags: [Memory Management]
       parameters:
         - name: id
@@ -4415,6 +4423,46 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: Entity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /memory/entities/{id}/restore:
+    post:
+      summary: Restore an archived entity
+      description: >-
+        Brings back an entity an agent deleted (archived). The restore is the user's, so the agent
+        provenance is cleared.
+      tags: [Memory Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Entity restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentEntity'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No archived entity with this id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: A live entity in the same scope has taken the name since it was archived
           content:
             application/json:
               schema:
@@ -5287,8 +5335,8 @@ paths:
         parts whose filenames are paths inside the skill directory. Frontmatter is parsed leniently: a
         missing or invalid `name` is derived with a warning, unknown keys are kept in `metadata`, and
         only a missing `description` or body is an error. A slug the account already uses gets a numeric
-        suffix. Bundle files (`scripts/`, `references/`, `assets/`, any content type) are stored under
-        `skills/<slug>/` as the skill's files, counted in `files_imported`.
+        suffix. Bundle files other than SKILL.md are not stored by this version and are counted in
+        `skipped_files`.
       tags: [Ritual Management]
       requestBody:
         required: true
@@ -5311,20 +5359,7 @@ paths:
                   type: string
                   format: uuid
                   description: Bind the imported skill to this personality
-                ritual_id:
-                  type: string
-                  format: uuid
-                  description: >-
-                    Import into this existing skill instead of creating one: its text fields are
-                    replaced (the slug, personality and connectors are kept) and its bundle files are
-                    replaced by the bundle's. Answers 200.
       responses:
-        '200':
-          description: Bundle imported into the existing skill named by `ritual_id`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RitualImportResult'
         '201':
           description: Skill imported
           content:
@@ -5360,8 +5395,7 @@ paths:
     get:
       summary: Export a skill as an Agent Skills bundle
       description: >-
-        A zip holding `<slug>/SKILL.md`, rendered from the skill's fields, plus the bundle's files at
-        their paths. SKILL.md carries `name` (the slug),
+        A zip holding `<slug>/SKILL.md`, rendered from the skill's fields: `name` (the slug),
         `description`, `license`, `compatibility`, `allowed-tools`, and `metadata` with
         `display_name`, `whatiff-hotkeys`, `whatiff-connectors` (connector names) and the invocation
         flags. Imports unchanged into any Agent Skills harness.
@@ -5395,139 +5429,6 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: Ritual not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /ritual/{id}/files:
-    get:
-      summary: List a skill's bundle files
-      description: The skill's reference documents, scripts and assets (ADR 0x035 §3), filed under `skills/<slug>/`, by folder then name.
-      tags: [Ritual Management]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: The bundle's files
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/RitualFile'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Ritual not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-    post:
-      summary: Add or replace a file in a skill's bundle
-      description: >-
-        Multipart form with `file` and `path`, the file's place in the bundle (e.g. `references/FORMS.md`;
-        defaults to `references/<filename>`). A file already at that path is replaced. Any content type;
-        10 MB per file, 200 files per skill. Skill files are read-only to agents (`agent_file_read`) and
-        to gallery moves.
-      tags: [Ritual Management]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [file]
-              properties:
-                file:
-                  type: string
-                  format: binary
-                path:
-                  type: string
-                  description: Path inside the bundle, e.g. scripts/fill.py
-      responses:
-        '201':
-          description: The stored file
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RitualFile'
-        '400':
-          description: Bad path or the bundle is full; `message` says which
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Ritual not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '413':
-          description: File larger than 10 MB
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '501':
-          description: This deployment has no file storage for skill files
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /ritual/{id}/files/{fileId}:
-    delete:
-      summary: Remove a file from a skill's bundle
-      tags: [Ritual Management]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: fileId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '204':
-          description: Removed
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Ritual or file not found
           content:
             application/json:
               schema:
@@ -11352,11 +11253,11 @@ components:
           type: string
           enum: [user, agent, skill]
           description: >-
-            Who wrote the file: `user` (uploads, imports and everything generated for a reply),
-            `agent` (an agent's file tools, ADR 0x034; only these can be changed by an agent, and only
-            by the personality or, with none, the thread that created them) or `skill` (a skill
-            bundle's file under `skills/<slug>/`, ADR 0x035; read-only, managed in the skill editor).
-            Omitted for `user`.
+            Who wrote the file (ADR 0x034, 0x035). `user` = uploads, imports and reply outputs;
+            `agent` = written by an agent's file tools; `skill` = a skill bundle's file under
+            `skills/<slug>/`, read-only and managed in the skill editor. Only `agent` files can be
+            changed by an agent, and only by the personality (or, with none, the thread) that created
+            them. More values may be added, so treat an unknown one like `user`.
         skill_id:
           type: string
           format: uuid
@@ -12008,28 +11909,6 @@ components:
           type: string
       required: [id, slug, name, description]
 
-    RitualFile:
-      type: object
-      description: A skill bundle file (ADR 0x035 §3).
-      properties:
-        id:
-          type: string
-          format: uuid
-        path:
-          type: string
-          description: Path inside the bundle, e.g. references/FORMS.md
-        file_type:
-          type: string
-        folder:
-          type: string
-          description: Gallery folder, skills/<slug>/<subdir>; with name, the path agent_file_read takes
-        name:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-      required: [id, path, file_type, folder, name, created_at]
-
     RitualImportResult:
       type: object
       properties:
@@ -12040,9 +11919,9 @@ components:
           items:
             type: string
           description: Lenient-parse repairs and import-time substitutions to show the user
-        files_imported:
+        skipped_files:
           type: integer
-          description: Bundle files stored under skills/<slug>/
+          description: Bundle members other than SKILL.md, not stored by this version
         connectors_linked:
           type: array
           items:
@@ -12053,7 +11932,7 @@ components:
           items:
             type: string
           description: Exporter connector names with no match here
-      required: [ritual, warnings, files_imported, connectors_linked, connectors_missing]
+      required: [ritual, warnings, skipped_files, connectors_linked, connectors_missing]
 
     AgentEntity:
       type: object
@@ -12095,6 +11974,10 @@ components:
         updated_at:
           type: string
           format: date-time
+        archived_at:
+          type: string
+          format: date-time
+          description: When an agent deleted (archived) the entity; absent for a live entity.
 
     Memory:
       type: object

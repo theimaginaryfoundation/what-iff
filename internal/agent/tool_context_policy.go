@@ -71,12 +71,17 @@ func toolContextPolicyFor(toolName string) toolContextPolicy {
 		tools.ChangeMoodToolSpec.Name,
 		tools.CreateAgentJobToolSpec.Name,
 		tools.UpdateAgentJobToolSpec.Name,
-		tools.EntityWriteToolSpec.Name,
-		tools.AgentFileWriteToolSpec.Name:
+		tools.EntityWriteToolSpec.Name:
 		// Write/side-effect confirmations: small acknowledgements. Persisting them adds
 		// little value and their effect is captured elsewhere (scratchpad, memories,
 		// mood, jobs). Drop from cross-turn context.
 		return toolContextPolicy{persist: false}
+	case tools.AgentFileWriteToolSpec.Name:
+		// Unlike the scratchpad or memories, an agent file's effect is visible to the model only
+		// through list, so keep the ack (action, id, path and size; never the content) for the
+		// rest of the conversation. Otherwise a recurring job "create"s the same file again next
+		// run and loses a turn to the refusal.
+		return toolContextPolicy{persist: true, ttlTurns: noTTL}
 	case tools.AgentFileReadToolSpec.Name, tools.EntityGetToolSpec.Name:
 		// File reads can be long (up to ~24k chars) and both go stale once the agent writes again;
 		// keep them for a while, then re-read.

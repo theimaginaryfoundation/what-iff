@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -100,11 +99,10 @@ func (t *AgentFileTool) Read(ctx context.Context, chat *models.Chat, args []byte
 		return fail(`action must be "read" or "search"`)
 	}
 	res, err := t.read(ctx, chat, a)
-	var refusal errAgentFile
-	switch {
-	case errors.As(err, &refusal):
-		return fail(refusal.msg)
-	case err != nil:
+	if msg, ok := AsFileRefusal(err); ok {
+		return fail(msg)
+	}
+	if err != nil {
 		t.logger.Error("agent_file_read failed", zap.String("user_id", chat.UserID.String()), zap.Error(err))
 		return fail("could not read the file; try again")
 	}
@@ -130,7 +128,7 @@ func (t *AgentFileTool) read(ctx context.Context, chat *models.Chat, a agentFile
 	if a.Action == "read" {
 		start := max(a.StartLine, 1)
 		if start > len(lines) {
-			return agentFileReadResult{}, agentFileErrorf("start_line %d is past the end of the file (%d lines)", start, len(lines))
+			return agentFileReadResult{}, fileRefusalf("start_line %d is past the end of the file (%d lines)", start, len(lines))
 		}
 		end := lineWindowEnd(lines, start-1, len(lines))
 		content := strings.Join(lines[start-1:end], "\n")

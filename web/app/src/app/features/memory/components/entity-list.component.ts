@@ -22,7 +22,8 @@ interface EntityVm {
 /**
  * Memories > Entities: the entity wiki pages agents keep about people, places and projects
  * (ADR 0x034). The user can search, follow [[links]], edit a page's text and delete pages. Agents
- * create pages; there is no create here yet.
+ * create pages; there is no create here yet. A page an agent deletes is archived: the Archived view
+ * lists those, to restore or delete for good.
  */
 @Component({
   selector: 'app-entity-list',
@@ -50,6 +51,8 @@ export class EntityListComponent implements OnInit {
   readonly searchDraft = signal('');
   readonly query = signal('');
   readonly personalityFilter = signal('');
+  /** Showing the pages agents archived instead of the live ones. */
+  readonly archived = signal(false);
   readonly editingId = signal<string | null>(null);
   readonly draft = signal('');
   readonly saving = signal(false);
@@ -57,7 +60,9 @@ export class EntityListComponent implements OnInit {
   readonly rowError = signal<{ id: string; message: string } | null>(null);
 
   readonly totalPages = computed(() => Math.max(1, Math.ceil(this.totalCount() / PAGE_SIZE)));
-  readonly countLabel = computed(() => `${this.totalCount()} entit${this.totalCount() === 1 ? 'y' : 'ies'}`);
+  readonly countLabel = computed(
+    () => `${this.totalCount()}${this.archived() ? ' archived' : ''} entit${this.totalCount() === 1 ? 'y' : 'ies'}`,
+  );
   readonly draftTooLong = computed(() => this.draft().length > this.maxChars);
   readonly items = computed<EntityVm[]>(() => {
     // A search for an entity's exact name (as when following a [[link]]) shows that entity first,
@@ -107,6 +112,31 @@ export class EntityListComponent implements OnInit {
     this.load(1);
   }
 
+  onArchivedChange(archived: boolean): void {
+    this.archived.set(archived);
+    this.editingId.set(null);
+    this.confirmDeleteId.set(null);
+    this.rowError.set(null);
+    this.load(1);
+  }
+
+  /** Brings back a page an agent archived; it leaves the Archived view. */
+  restore(entity: AgentEntity): void {
+    if (this.saving()) return;
+    this.saving.set(true);
+    this.rowError.set(null);
+    this.entityService.restore(entity.id).subscribe({
+      next: () => {
+        this.saving.set(false);
+        this.reloadAfterRemoval();
+      },
+      error: (err: Error) => {
+        this.rowError.set({ id: entity.id, message: err.message || 'Could not restore the entity' });
+        this.saving.set(false);
+      },
+    });
+  }
+
   /** Follows a [[link]]: searches for the linked entity by name. */
   followLink(name: string): void {
     this.searchDraft.set(name);
@@ -153,8 +183,7 @@ export class EntityListComponent implements OnInit {
       next: () => {
         this.saving.set(false);
         this.confirmDeleteId.set(null);
-        const lastOnPage = this.entities().length === 1 && this.page() > 1;
-        this.load(lastOnPage ? this.page() - 1 : this.page());
+        this.reloadAfterRemoval();
       },
       error: (err: Error) => {
         this.rowError.set({ id: entity.id, message: err.message || 'Could not delete the entity' });
@@ -163,8 +192,15 @@ export class EntityListComponent implements OnInit {
     });
   }
 
+  /** Reloads after a row left the current list, stepping back when it was the page's last. */
+  private reloadAfterRemoval(): void {
+    const lastOnPage = this.entities().length === 1 && this.page() > 1;
+    this.load(lastOnPage ? this.page() - 1 : this.page());
+  }
+
   private filters(): AgentEntityFilters {
     const filters: AgentEntityFilters = { query: this.query() };
+    if (this.archived()) filters.archived = true;
     const persona = this.personalityFilter();
     if (persona === GLOBAL_PERSONALITY_FILTER) {
       filters.global_only = true;

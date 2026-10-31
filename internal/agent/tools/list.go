@@ -57,7 +57,7 @@ const ListDescription = `List your available resources. Pick a kind:
 - models — chat models you can run (id, name, provider, tool support).
 - personalities — personalities you can switch to or run as a subagent.
 - skills — skills you can attach to a subagent or scheduled job (id, name, description).
-- files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf"), scope ("personality" docs, "conversation" attachments, or "all"), folder, and origin ("agent" for files agents wrote, "user" for the rest). view="tree" draws them as a folder tree. Images dominate most libraries, so pass file_type to cut through them. Files, images and documents alike, can be filed in gallery folders (e.g. "charts/oura"); folder lists that folder and everything beneath it, and each row shows its folder.
+- files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf"), scope ("personality" docs, "conversation" attachments, or "all"), folder, and origin ("agent" for files agents wrote, "user" for the rest). view="tree" draws one page of them (up to 200 by default) as a folder tree; with folder set, that is the folder's tree. Images dominate most libraries, so pass file_type to cut through them. Files, images and documents alike, can be filed in gallery folders (e.g. "charts/oura"); folder lists that folder and everything beneath it, and each row shows its folder.
 - conversations — your past conversations, including archived imports, that have messages, most-recent first (id, name). Pass an id to find_context (mode="conversation"/"origin") to read one.
 - jobs — your scheduled jobs (id, name, status, schedule, thread_id, next_runtime for still-active ones, and the start of each prompt as description). Active by default; set include_completed=true to also see paused jobs and finished/failed one-offs. Pass a job's id as filter to read that job in full: its whole prompt, model_id and skill_ids.
 - mcp_servers — MCP servers available to the current conversation (attached to it, or linked to a skill that is active now), with discoverable MCP tools and currently loaded tools for this chat.
@@ -100,7 +100,7 @@ var ListToolSpec = FunctionToolSpec{
 		"view": map[string]interface{}{
 			"type":        "string",
 			"enum":        []string{listFileViewList, listFileViewTree},
-			"description": "files only: 'list' (default) returns rows with ids; 'tree' draws the page's files as a folder tree of paths, like the tree command.",
+			"description": "files only: 'list' (default) returns rows with ids; 'tree' draws this page's files (default limit 200) as a folder tree of paths, like the tree command; pass folder to draw one folder, and page for the rest.",
 		},
 		"include_completed": map[string]interface{}{
 			"type":        "boolean",
@@ -190,7 +190,7 @@ type listItem struct {
 	ToolSupport  *bool    `json:"tool_support,omitempty"`  // models
 	FileType     string   `json:"file_type,omitempty"`     // files
 	Folder       string   `json:"folder,omitempty"`        // files (gallery files that are filed in a folder)
-	Origin       string   `json:"origin,omitempty"`        // files: "agent" for files an agent wrote (ADR 0x034)
+	Origin       string   `json:"origin,omitempty"`        // files: the origin when not "user", e.g. "agent" (ADR 0x034)
 	Status       string   `json:"status,omitempty"`        // jobs, mcp_servers
 	StatusDetail string   `json:"status_detail,omitempty"` // mcp_servers
 	MCPTools     []string `json:"tools,omitempty"`         // mcp_servers

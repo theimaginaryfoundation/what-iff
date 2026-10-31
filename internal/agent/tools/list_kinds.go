@@ -154,7 +154,17 @@ func (t *ListTool) listSandboxFiles(ctx context.Context, chat *models.Chat, a li
 }
 
 func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs) (string, error) {
-	limit := clampLimit(a.Limit, listDefaultLimit)
+	view := strings.ToLower(strings.TrimSpace(a.View))
+	if view != "" && view != listFileViewList && view != listFileViewTree {
+		return t.fail(listKindFiles, fmt.Sprintf("unknown view %q; use \"list\" or \"tree\"", a.View))
+	}
+	// A tree is drawn from one page, so it defaults to the largest page: one folder's whole tree
+	// in most libraries.
+	defLimit := listDefaultLimit
+	if view == listFileViewTree {
+		defLimit = listMaxLimit
+	}
+	limit := clampLimit(a.Limit, defLimit)
 	pageNum := clampPage(a.Page)
 	if chat.IsSandboxed() {
 		return t.listSandboxFiles(ctx, chat, a, limit, pageNum)
@@ -182,10 +192,6 @@ func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs)
 		filters.Origin = origin
 	default:
 		return t.fail(listKindFiles, fmt.Sprintf("unknown origin %q; use \"agent\", \"user\" or \"skill\"", a.Origin))
-	}
-	view := strings.ToLower(strings.TrimSpace(a.View))
-	if view != "" && view != listFileViewList && view != listFileViewTree {
-		return t.fail(listKindFiles, fmt.Sprintf("unknown view %q; use \"list\" or \"tree\"", a.View))
 	}
 
 	switch normalizeFileScope(a.Scope) {

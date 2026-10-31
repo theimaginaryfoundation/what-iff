@@ -84,6 +84,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	memoryRouter.HandleFunc("/entities", h.ListAgentEntities).Methods("GET")
 	memoryRouter.HandleFunc("/entities/{id}", h.PatchAgentEntity).Methods("PATCH")
 	memoryRouter.HandleFunc("/entities/{id}", h.DeleteAgentEntity).Methods("DELETE")
+	memoryRouter.HandleFunc("/entities/{id}/restore", h.RestoreAgentEntity).Methods("POST")
 	memoryRouter.HandleFunc("/{id}", h.GetMemory).Methods("GET")
 	memoryRouter.HandleFunc("/{id}", h.PatchMemory).Methods("PATCH")
 	memoryRouter.HandleFunc("/{id}", h.DeleteMemory).Methods("DELETE")
