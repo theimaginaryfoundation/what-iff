@@ -5,13 +5,14 @@ import { of, throwError } from 'rxjs';
 
 import { RitualService } from './ritual.service';
 import { RitualViewService } from './ritual-view.service';
-import { Ritual } from '../models/ritual.model';
+import { Ritual, RITUAL_SKILL_FIELD_DEFAULTS } from '../models/ritual.model';
 
 describe('RitualViewService', () => {
     let service: RitualViewService;
     let ritualService: Pick<MockedObject<RitualService>, 'listRituals' | 'deleteRitual'>;
 
     const ritual: Ritual = {
+        ...RITUAL_SKILL_FIELD_DEFAULTS,
         id: 'r-1',
         name: 'Morning brief',
         description: 'Start the day',

@@ -14,6 +14,9 @@ import { RitualService } from '../../core/services/ritual.service';
 import { ChatService } from '../../core/services/chat.service';
 import { DraftMessageService } from '../../core/services/draft-message.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
+import { ToolService } from '../../core/services/tool.service';
+import { apiErrorMessage } from '../../core/utils/api-error.helpers';
+import { filenameFromContentDisposition, saveBlobAsFile } from '../../core/utils/download.helpers';
 import {
   parseQueryParams,
   RitualViewFilters,
@@ -24,7 +27,16 @@ import { RitualSelectOption } from './components/ritual-filter-bar.component';
 import { RitualFormComponent, RitualFormSave } from './components/ritual-form.component';
 import { PersonaPickerDialogComponent } from '../personality/picker/persona-picker-dialog.component';
 import { PersonaCoverComponent } from '../personality/picker/persona-cover.component';
-import { BoltIconComponent, ChevDownIconComponent, EditIconComponent, SearchIconComponent, TrashIconComponent } from '../../shared/ui/icons/icons';
+import {
+  BoltIconComponent,
+  ChevDownIconComponent,
+  DownloadIconComponent,
+  EditIconComponent,
+  SearchIconComponent,
+  TrashIconComponent,
+  UploadIconComponent,
+  XIconComponent,
+} from '../../shared/ui/icons/icons';
 import { personalityAccent, personalityAccentSurface } from '../personality/helpers/personality-vm.helpers';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
@@ -46,11 +58,14 @@ import { MarketplaceBrowseLinkComponent } from '../../extensions/marketplace-bro
     PersonaCoverComponent,
     BoltIconComponent,
     ChevDownIconComponent,
+    DownloadIconComponent,
     SearchIconComponent,
     EditIconComponent,
     TrashIconComponent,
+    UploadIconComponent,
     HelpHintComponent,
     TooltipDirective,
+    XIconComponent,
   ],
   templateUrl: './rituals-page.component.html',
   styleUrl: './rituals-page.component.scss',
@@ -66,8 +81,14 @@ export class RitualsPageComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly confirmation = inject(ConfirmationService);
+  private readonly toolService = inject(ToolService);
 
   readonly personalities = signal<RitualSelectOption[]>([]);
+  /** This deployment's tools, offered in the editor for `allowed_tools`. */
+  readonly tools = signal<RitualSelectOption[]>([]);
+  readonly importing = signal(false);
+  /** What the last bundle import did, shown under the header until dismissed. */
+  readonly importNotice = signal<{ title: string; lines: string[]; kind: 'info' | 'danger' } | null>(null);
   readonly personalityRecords = signal<Personality[]>([]);
   readonly mcpServers = signal<RitualSelectOption[]>([]);
   readonly filters = this.view.filters;
@@ -113,6 +134,11 @@ export class RitualsPageComponent implements OnInit {
     this.mcpServerService.listMCPServers(1, 200).subscribe({
       next: result => this.mcpServers.set((result.results ?? []).map(server => ({ id: server.id, label: server.name }))),
       error: () => this.mcpServers.set([]),
+    });
+
+    this.toolService.listTools().subscribe({
+      next: list => this.tools.set((list ?? []).map(tool => ({ id: tool.name, label: tool.name }))),
+      error: () => this.tools.set([]),
     });
 
     this.route.queryParams.subscribe(params => {
@@ -229,6 +255,59 @@ export class RitualsPageComponent implements OnInit {
       error: error => {
         this.editorSaving.set(false);
         this.editorError.set(error instanceof Error ? error.message : 'Failed to save skill');
+      },
+    });
+  }
+
+  /** Imports an Agent Skills bundle (a zip, or a lone SKILL.md) and opens the editor on the result. */
+  onBundleFileChosen(event: Event): void {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement)) return;
+    const file = input.files?.[0];
+    input.value = ''; // let the same file be chosen again
+    if (!file) return;
+
+    this.importing.set(true);
+    this.importNotice.set(null);
+    this.ritualService.importBundle(file).subscribe({
+      next: result => {
+        this.importing.set(false);
+        this.view.refresh();
+        this.importNotice.set({
+          title: `Imported ${result.ritual.name}`,
+          lines: result.warnings,
+          kind: 'info',
+        });
+        this.creating.set(false);
+        this.editingRitual.set(result.ritual);
+        this.editorError.set(null);
+        this.editorOpen.set(true);
+      },
+      error: err => {
+        this.importing.set(false);
+        this.importNotice.set({
+          title: 'Import failed',
+          lines: [apiErrorMessage(err, 'Could not import that skill. It needs a SKILL.md with a description and instructions.')],
+          kind: 'danger',
+        });
+      },
+    });
+  }
+
+  dismissImportNotice(): void {
+    this.importNotice.set(null);
+  }
+
+  /** Downloads the skill as an Agent Skills zip (`<slug>/SKILL.md`). */
+  exportRitual(row: { id: string; name: string }): void {
+    this.ritualService.exportRitual(row.id).subscribe({
+      next: response => {
+        if (!response.body) return;
+        const fallback = `${row.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'skill'}.zip`;
+        saveBlobAsFile(response.body, filenameFromContentDisposition(response.headers.get('Content-Disposition'), fallback));
+      },
+      error: err => {
+        this.importNotice.set({ title: 'Export failed', lines: [apiErrorMessage(err, 'Could not export that skill.')], kind: 'danger' });
       },
     });
   }

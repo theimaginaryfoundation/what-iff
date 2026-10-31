@@ -9,11 +9,18 @@ describe('RitualFormComponent', () => {
 
     const ritual: Ritual = {
         id: 'ritual-1',
+        slug: 'source-analysis',
         name: 'Source analysis',
         description: 'Analyze a source',
         content: 'Review the source carefully',
         hotkeys: 'Ctrl+Shift+1',
         personality_id: 'personality-1',
+        license: '',
+        compatibility: '',
+        metadata: {},
+        allowed_tools: ['web_search'],
+        disable_model_invocation: false,
+        user_invocable: true,
         created_at: '2026-08-01T12:00:00Z',
         updated_at: '2026-08-01T12:00:00Z',
     };
@@ -90,6 +97,104 @@ describe('RitualFormComponent', () => {
         expect(saveButton.textContent).toContain('Save Changes');
     });
 
+    describe('Agent Skills fields', () => {
+        function section(name: string): HTMLElement {
+            return (fixture.nativeElement as HTMLElement).querySelector(`[data-section="${name}"]`) as HTMLElement;
+        }
+
+        it('derives the slug from the name while creating, until the slug is edited', () => {
+            fixture.componentRef.setInput('creating', true);
+            fixture.detectChanges();
+            const component = fixture.componentInstance;
+
+            component.name.set('PDF Forms!');
+            expect(component.slug()).toBe('pdf-forms');
+
+            component.onSlugChange('My-Forms');
+            expect(component.slug()).toBe('my-forms');
+            component.name.set('Renamed');
+            expect(component.slug()).toBe('my-forms');
+        });
+
+        it('keeps an existing skill\'s slug when its name changes', () => {
+            fixture.componentRef.setInput('ritual', ritual);
+            fixture.detectChanges();
+            const component = fixture.componentInstance;
+            expect(component.slug()).toBe('source-analysis');
+            component.name.set('Source review');
+            expect(component.slug()).toBe('source-analysis');
+        });
+
+        it('blocks saving on an invalid slug or an over-long description', () => {
+            fixture.componentRef.setInput('creating', true);
+            fixture.detectChanges();
+            const component = fixture.componentInstance;
+            component.name.set('Notes');
+            component.description.set('Keeps notes');
+            component.content.set('Write it down');
+            expect(component.canSave()).toBe(true);
+
+            component.onSlugChange('Bad Slug');
+            expect(component.slugValid()).toBe(false);
+            expect(component.canSave()).toBe(false);
+
+            component.onSlugChange('notes');
+            component.description.set('d'.repeat(1025));
+            expect(component.descriptionTooLong()).toBe(true);
+            expect(component.canSave()).toBe(false);
+        });
+
+        it('warns above the advisory body size without blocking', () => {
+            fixture.detectChanges();
+            const component = fixture.componentInstance;
+            component.content.set('x'.repeat(4 * 5001));
+            expect(component.bodyOverSoftLimit()).toBe(true);
+            expect(component.bodyTooLong()).toBe(false);
+            fixture.detectChanges();
+            expect((fixture.nativeElement as HTMLElement).textContent).toContain('Long skills cost context');
+        });
+
+        it('offers the deployment\'s tools, checks the allowed ones and lists foreign names', () => {
+            fixture.componentRef.setInput('ritual', { ...ritual, allowed_tools: ['web_search', 'Bash(git:*)'] });
+            fixture.componentRef.setInput('tools', [
+                { id: 'web_search', label: 'web_search' },
+                { id: 'fetch_page', label: 'fetch_page' },
+            ]);
+            fixture.detectChanges();
+
+            const boxes = Array.from(section('tools').querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
+            expect(boxes.map(box => box.checked)).toEqual([true, false]);
+            expect(section('tools').textContent).toContain('Bash(git:*)');
+
+            boxes[1].checked = true;
+            boxes[1].dispatchEvent(new Event('change'));
+            expect(fixture.componentInstance.allowedTools()).toEqual(['web_search', 'Bash(git:*)', 'fetch_page']);
+        });
+
+        it('sends every skill field on save', () => {
+            fixture.componentRef.setInput('ritual', { ...ritual, disable_model_invocation: true, license: 'MIT' });
+            fixture.detectChanges();
+            const component = fixture.componentInstance;
+            let saved: RitualFormSave | undefined;
+            component.save.subscribe(value => (saved = value));
+
+            const activation = Array.from(section('activation').querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
+            expect(activation.map(box => box.checked)).toEqual([false, true]);
+            component.userInvocable.set(false);
+            component.compatibility.set('Needs pypdf');
+            component.submit();
+
+            expect(saved).toBeDefined();
+            expect(saved!.slug).toBe('source-analysis');
+            expect(saved!.license).toBe('MIT');
+            expect(saved!.compatibility).toBe('Needs pypdf');
+            expect(saved!.allowed_tools).toEqual(['web_search']);
+            expect(saved!.disable_model_invocation).toBe(true);
+            expect(saved!.user_invocable).toBe(false);
+            expect(saved!.mcp_server_ids).toBeUndefined();
+        });
+    });
+
     describe('connectors (MCP servers)', () => {
         const servers = [
             { id: 'mcp-1', label: 'Grafana' },
@@ -97,7 +202,9 @@ describe('RitualFormComponent', () => {
         ];
 
         function checkboxes(): HTMLInputElement[] {
-            return Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
+            return Array.from(
+                (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLInputElement>('[data-section="connectors"] input[type="checkbox"]'),
+            );
         }
 
         function lastSave(): { value?: RitualFormSave } {

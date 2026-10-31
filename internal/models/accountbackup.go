@@ -133,8 +133,17 @@ type AccountBackupRitual struct {
 	Content       string     `json:"content"`
 	Hotkeys       string     `json:"hotkeys"`
 	PersonalityID *uuid.UUID `json:"personality_id,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	// Agent Skills fields (ADR 0x035). Absent in backups made before them: Slug is then derived
+	// from Name and UserInvocable defaults to true.
+	Slug                   string            `json:"slug,omitempty"`
+	License                string            `json:"license,omitempty"`
+	Compatibility          string            `json:"compatibility,omitempty"`
+	Metadata               map[string]string `json:"metadata,omitempty"`
+	AllowedTools           []string          `json:"allowed_tools,omitempty"`
+	DisableModelInvocation bool              `json:"disable_model_invocation,omitempty"`
+	UserInvocable          *bool             `json:"user_invocable,omitempty"`
+	CreatedAt              time.Time         `json:"created_at"`
+	UpdatedAt              time.Time         `json:"updated_at"`
 }
 
 type AccountBackupImportResult struct {
