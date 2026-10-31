@@ -166,6 +166,7 @@ export class AppShell {
       await this.clickThroughTo(section);
     }
     await this.prepareSidebar();
-    await this.page.getByRole('button', { name: action, exact: true }).first().click();
+    // Within the sidebar: a page can repeat an action, hidden where the sidebar offers it.
+    await this.page.locator('aside.app-sidebar').getByRole('button', { name: action, exact: true }).first().click();
   }
 }

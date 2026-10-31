@@ -320,8 +320,7 @@ export class ThreadListPanel {
     if (await headerButton.isVisible()) {
       await headerButton.click();
     } else {
-      await new AppShell(this.page).prepareSidebar();
-      await this.page.locator('aside.app-sidebar').getByRole('button', { name: 'Import threads' }).click();
+      await new AppShell(this.page).quickAction('Import threads');
     }
     await this.page.waitForURL(/\/data$/);
   }
