@@ -14,12 +14,16 @@ export interface AgentEntity {
   last_chat_id?: string;
   created_at: string;
   updated_at: string;
+  /** Set when an agent deleted the entity: archived, hidden from agents, restorable. */
+  archived_at?: string;
 }
 
 export interface AgentEntityFilters {
   query?: string;
   personality_id?: string;
   global_only?: boolean;
+  /** List archived entities instead of live ones. */
+  archived?: boolean;
 }
 
 export interface PaginatedAgentEntityResponse {

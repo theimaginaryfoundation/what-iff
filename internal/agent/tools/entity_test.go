@@ -69,7 +69,7 @@ func (f *fakeEntityStore) UpdateAgentEntity(_ context.Context, _ uuid.UUID, w mo
 	return e, nil
 }
 
-func (f *fakeEntityStore) TombstoneAgentEntity(_ context.Context, _ uuid.UUID, w models.AgentEntityWriter, key string) (*models.AgentEntity, error) {
+func (f *fakeEntityStore) ArchiveAgentEntity(_ context.Context, _ uuid.UUID, w models.AgentEntityWriter, key string) (*models.AgentEntity, error) {
 	norm, err := models.NormalizeEntityKey(key)
 	if err != nil {
 		return nil, err
@@ -81,7 +81,7 @@ func (f *fakeEntityStore) TombstoneAgentEntity(_ context.Context, _ uuid.UUID, w
 	delete(f.byKey, norm)
 	f.lastWrite = w
 	now := time.Now()
-	e.DeletedAt = &now
+	e.ArchivedAt = &now
 	return e, nil
 }
 func (f *fakeEntityStore) ListVisibleAgentEntities(_ context.Context, _, _ uuid.UUID, prefix string, limit int) ([]*models.AgentEntity, int, error) {
@@ -163,12 +163,13 @@ func TestEntityTools_PrefixLookupAndDelete(t *testing.T) {
 	requireOK(t, callJSON(t, tool.Get, chat, map[string]any{"names": []string{"Chris Smith"}, "prefix": ""}))
 
 	// Delete is exact-name only; a prefix is not a name.
-	requireRefused(t, callJSON(t, tool.Write, chat, map[string]any{"action": "delete", "name": "Project"}), "nothing was deleted")
+	requireRefused(t, callJSON(t, tool.Write, chat, map[string]any{"action": "delete", "name": "Project"}), "nothing was archived")
 	del := callJSON(t, tool.Write, chat, map[string]any{"action": "delete", "name": "project beta"})
 	requireOK(t, del)
 	page := del["entity"].(map[string]any)
 	require.Equal(t, "Project Beta", page["name"])
-	require.NotEmpty(t, page["deleted_at"])
+	require.NotEmpty(t, page["archived_at"])
+	require.Contains(t, page["note"], "restore")
 	require.Equal(t, false, page["found"])
 	require.EqualValues(t, 1, callJSON(t, tool.Get, chat, map[string]any{"prefix": "project"})["total"])
 }

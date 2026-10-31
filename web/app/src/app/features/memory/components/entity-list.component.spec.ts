@@ -31,6 +31,7 @@ function makeService() {
     list: vi.fn().mockReturnValue(of({ results: [CHRIS, PINNED], total_count: 2, page: 1 })),
     updateBody: vi.fn((id: string, body: string) => of({ ...CHRIS, id, body })),
     delete: vi.fn().mockReturnValue(of(undefined)),
+    restore: vi.fn((id: string) => of({ ...CHRIS, id })),
   };
 }
 
@@ -114,6 +115,40 @@ describe('EntityListComponent', () => {
     buttonIn(cards(fixture)[1], 'Delete').click();
     expect(service.delete).toHaveBeenCalledWith('e-2');
     expect(service.list).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows archived pages with Restore and Delete forever instead of Edit', async () => {
+    const { fixture, service } = await setup();
+    const archivedCar: AgentEntity = { ...CHRIS, id: 'e-9', key: 'old car', title: 'Old Car', archived_at: '2026-10-30T00:00:00Z' };
+    service.list.mockReturnValue(of({ results: [archivedCar], total_count: 1, page: 1 }));
+    const select = (fixture.nativeElement as HTMLElement).querySelector('[data-testid="entity-archived-filter"]') as HTMLSelectElement;
+    select.value = 'archived';
+    select.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+
+    expect(service.list).toHaveBeenLastCalledWith(1, 50, { query: '', archived: true });
+    const [card] = cards(fixture);
+    expect(card.querySelector('.entity-card__updated')?.textContent).toContain('Archived');
+    expect(Array.from(card.querySelectorAll('.entity-card__actions button')).map(b => b.textContent?.trim())).toEqual([
+      'Restore',
+      'Delete forever',
+    ]);
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('1 archived entity');
+
+    buttonIn(card, 'Restore').click();
+    expect(service.restore).toHaveBeenCalledWith('e-9');
+    expect(service.list).toHaveBeenCalledTimes(3);
+  });
+
+  it('shows why a restore failed on the row', async () => {
+    const service = makeService();
+    service.restore.mockReturnValue(throwError(() => new Error('Another entity has this name now')));
+    const { fixture } = await setup(service);
+    fixture.componentInstance.onArchivedChange(true);
+    fixture.detectChanges();
+    buttonIn(cards(fixture)[0], 'Restore').click();
+    fixture.detectChanges();
+    expect(cards(fixture)[0].querySelector('[role="alert"]')?.textContent).toContain('Another entity has this name now');
   });
 
   it('shows a load error', async () => {

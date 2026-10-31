@@ -6881,6 +6881,8 @@ export interface paths {
                     personality_id?: string;
                     /** @description Only global entities. */
                     global_only?: boolean;
+                    /** @description List the entities an agent deleted (archived) instead of the live ones. Archived entities are hidden from agents and can be restored. */
+                    archived?: boolean;
                 };
                 header?: never;
                 path?: never;
@@ -6937,7 +6939,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Delete an entity */
+        /**
+         * Delete an entity
+         * @description Removes a live or archived entity for good.
+         */
         delete: {
             parameters: {
                 query?: never;
@@ -7037,6 +7042,74 @@ export interface paths {
                 };
             };
         };
+        trace?: never;
+    };
+    "/memory/entities/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore an archived entity
+         * @description Brings back an entity an agent deleted (archived). The restore is the user's, so the agent provenance is cleared.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Entity restored */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentEntity"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No archived entity with this id */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A live entity in the same scope has taken the name since it was archived */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/memory/compaction-events": {
@@ -14662,6 +14735,11 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /**
+             * Format: date-time
+             * @description When an agent deleted (archived) the entity; absent for a live entity.
+             */
+            archived_at?: string;
         };
         /**
          * @example {

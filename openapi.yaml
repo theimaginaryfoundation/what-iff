@@ -4237,6 +4237,13 @@ paths:
           description: Only global entities.
           schema:
             type: boolean
+        - name: archived
+          in: query
+          description: >-
+            List the entities an agent deleted (archived) instead of the live ones. Archived
+            entities are hidden from agents and can be restored.
+          schema:
+            type: boolean
       responses:
         '200':
           description: Entities retrieved successfully
@@ -4314,6 +4321,7 @@ paths:
                 $ref: '#/components/schemas/Error'
     delete:
       summary: Delete an entity
+      description: Removes a live or archived entity for good.
       tags: [Memory Management]
       parameters:
         - name: id
@@ -4333,6 +4341,46 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: Entity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /memory/entities/{id}/restore:
+    post:
+      summary: Restore an archived entity
+      description: >-
+        Brings back an entity an agent deleted (archived). The restore is the user's, so the agent
+        provenance is cleared.
+      tags: [Memory Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Entity restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentEntity'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No archived entity with this id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: A live entity in the same scope has taken the name since it was archived
           content:
             application/json:
               schema:
@@ -11565,6 +11613,10 @@ components:
         updated_at:
           type: string
           format: date-time
+        archived_at:
+          type: string
+          format: date-time
+          description: When an agent deleted (archived) the entity; absent for a live entity.
 
     Memory:
       type: object

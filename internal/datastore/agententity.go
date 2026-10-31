@@ -41,7 +41,7 @@ func toAgentEntityModel(e *ent.AgentEntity) *models.AgentEntity {
 		LastChatID:          e.LastChatID,
 		CreatedAt:           e.CreatedAt,
 		UpdatedAt:           e.UpdatedAt,
-		DeletedAt:           e.DeletedAt,
+		ArchivedAt:          e.ArchivedAt,
 	}
 	if e.Edges.Owner != nil {
 		m.UserID = e.Edges.Owner.ID
@@ -52,9 +52,9 @@ func toAgentEntityModel(e *ent.AgentEntity) *models.AgentEntity {
 	return m
 }
 
-// liveAgentEntities matches the user's entities that are not tombstones.
+// liveAgentEntities matches the user's entities that are not archived.
 func liveAgentEntities(userID uuid.UUID) predicate.AgentEntity {
-	return agententity.And(agententity.HasOwnerWith(user.ID(userID)), agententity.DeletedAtIsNil())
+	return agententity.And(agententity.HasOwnerWith(user.ID(userID)), agententity.ArchivedAtIsNil())
 }
 
 // visibleAgentEntities matches the user's live entities a conversation with activePersonalityID
@@ -198,7 +198,7 @@ func (d *Datastore) UpdateAgentEntity(ctx context.Context, userID uuid.UUID, w m
 			return nil, err
 		}
 		upd := d.dbClient.AgentEntity.Update().
-			Where(agententity.ID(cur.ID), agententity.BodyEQ(cur.Body), agententity.DeletedAtIsNil()).
+			Where(agententity.ID(cur.ID), agententity.BodyEQ(cur.Body), agententity.ArchivedAtIsNil()).
 			SetBody(next)
 		if w.ActivePersonalityID != uuid.Nil {
 			upd.SetLastPersonalityID(w.ActivePersonalityID)
@@ -228,10 +228,13 @@ func (d *Datastore) UpdateAgentEntity(ctx context.Context, userID uuid.UUID, w m
 	return nil, ErrAgentEntityConflict
 }
 
-// ListAgentEntities lists the user's entities, newest change first, for the Memories panel. It
-// returns the page and the total matching count.
+// ListAgentEntities lists the user's live entities (or with f.Archived, the archived ones), newest
+// change first, for the Memories panel. It returns the page and the total matching count.
 func (d *Datastore) ListAgentEntities(ctx context.Context, userID uuid.UUID, f models.AgentEntityFilters) ([]*models.AgentEntity, int, error) {
 	q := d.dbClient.AgentEntity.Query().Where(liveAgentEntities(userID))
+	if f.Archived {
+		q = d.dbClient.AgentEntity.Query().Where(agententity.HasOwnerWith(user.ID(userID)), agententity.ArchivedAtNotNil())
+	}
 	if f.Query != nil && *f.Query != "" {
 		q = q.Where(agententity.Or(
 			agententity.KeyContainsFold(*f.Query),
@@ -303,8 +306,8 @@ func (d *Datastore) SetAgentEntityBody(ctx context.Context, userID, id uuid.UUID
 	return m, nil
 }
 
-// DeleteAgentEntity deletes the user's entity id from the UI. The user's delete removes the row
-// (a tombstone too). It returns ErrAgentEntityNotFound when id is not one of the user's entities.
+// DeleteAgentEntity deletes the user's entity id from the UI, live or archived. The user's delete
+// removes the row. It returns ErrAgentEntityNotFound when id is not one of the user's entities.
 func (d *Datastore) DeleteAgentEntity(ctx context.Context, userID, id uuid.UUID) error {
 	n, err := d.dbClient.AgentEntity.Delete().
 		Where(agententity.ID(id), agententity.HasOwnerWith(user.ID(userID))).
@@ -360,11 +363,11 @@ func (d *Datastore) ListVisibleAgentEntities(ctx context.Context, userID, active
 	return out, len(keep), nil
 }
 
-// TombstoneAgentEntity deletes the entity named key that the writer sees, as an agent: the row is
-// kept with deleted_at set and the writer recorded, hidden from every read, listing and the UI, so
-// the delete can be audited or undone. The key is free again at once. It returns the tombstone, or
-// ErrAgentEntityNotFound.
-func (d *Datastore) TombstoneAgentEntity(ctx context.Context, userID uuid.UUID, w models.AgentEntityWriter, key string) (*models.AgentEntity, error) {
+// ArchiveAgentEntity is an agent's delete of the entity named key that the writer sees: the row is
+// kept with archived_at set and the writer recorded, hidden from agents' reads and lists, and the
+// user can see and restore it in the Memories panel (RestoreAgentEntity). The key is free again at
+// once. It returns the archived entity, or ErrAgentEntityNotFound.
+func (d *Datastore) ArchiveAgentEntity(ctx context.Context, userID uuid.UUID, w models.AgentEntityWriter, key string) (*models.AgentEntity, error) {
 	norm, err := models.NormalizeEntityKey(key)
 	if err != nil {
 		return nil, err
@@ -372,13 +375,13 @@ func (d *Datastore) TombstoneAgentEntity(ctx context.Context, userID uuid.UUID, 
 	cur, err := d.resolveAgentEntity(ctx, userID, w.ActivePersonalityID, norm)
 	if err != nil {
 		if !errors.Is(err, ErrAgentEntityNotFound) {
-			d.logger.Error("failed to load entity for delete", zap.Error(err))
+			d.logger.Error("failed to load entity for archive", zap.Error(err))
 		}
 		return nil, err
 	}
 	upd := d.dbClient.AgentEntity.Update().
-		Where(agententity.ID(cur.ID), agententity.DeletedAtIsNil()).
-		SetDeletedAt(time.Now())
+		Where(agententity.ID(cur.ID), agententity.ArchivedAtIsNil()).
+		SetArchivedAt(time.Now())
 	if w.ActivePersonalityID != uuid.Nil {
 		upd.SetLastPersonalityID(w.ActivePersonalityID)
 	} else {
@@ -391,13 +394,43 @@ func (d *Datastore) TombstoneAgentEntity(ctx context.Context, userID uuid.UUID, 
 	}
 	n, err := upd.Save(ctx)
 	if err != nil {
-		d.logger.Error("failed to delete entity", zap.Error(err))
+		d.logger.Error("failed to archive entity", zap.Error(err))
 		return nil, err
 	}
 	if n == 0 {
-		return nil, ErrAgentEntityNotFound // deleted by a concurrent writer
+		return nil, ErrAgentEntityNotFound // archived by a concurrent writer
 	}
 	row, err := d.dbClient.AgentEntity.Get(ctx, cur.ID)
+	if err != nil {
+		return nil, fmt.Errorf("reload entity: %w", err)
+	}
+	m := toAgentEntityModel(row)
+	m.UserID = userID
+	return m, nil
+}
+
+// RestoreAgentEntity brings the user's archived entity id back. The restore is the user's, so the
+// agent provenance is cleared. It returns ErrAgentEntityNotFound when id is not an archived entity
+// of the user's, or ErrAgentEntityExists when a live entity in the same scope has taken its name
+// since.
+func (d *Datastore) RestoreAgentEntity(ctx context.Context, userID, id uuid.UUID) (*models.AgentEntity, error) {
+	n, err := d.dbClient.AgentEntity.Update().
+		Where(agententity.ID(id), agententity.HasOwnerWith(user.ID(userID)), agententity.ArchivedAtNotNil()).
+		ClearArchivedAt().
+		ClearLastPersonalityID().
+		ClearLastChatID().
+		Save(ctx)
+	if ent.IsConstraintError(err) {
+		return nil, ErrAgentEntityExists
+	}
+	if err != nil {
+		d.logger.Error("failed to restore entity", zap.Error(err))
+		return nil, err
+	}
+	if n == 0 {
+		return nil, ErrAgentEntityNotFound
+	}
+	row, err := d.dbClient.AgentEntity.Query().Where(agententity.ID(id)).WithPinnedPersonality().Only(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reload entity: %w", err)
 	}

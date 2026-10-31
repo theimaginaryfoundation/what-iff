@@ -30,7 +30,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   - Entity wiki: `agententity.go` (ADR 0x034) — `GetAgentEntity`, `CreateAgentEntity`, `UpdateAgentEntity` (compare-and-swap on the body, retried), `ListAgentEntities`, `SetAgentEntityBody`, `DeleteAgentEntity`.
     Visibility follows memories: global entities plus those pinned to the active personality, the pinned one winning; a new entity is pinned when the writing personality has `auto_pin_memories` on.
     `ListVisibleAgentEntities` lists what a conversation sees by key prefix (one row per key, the pinned one), without bodies.
-    `TombstoneAgentEntity` is the agent's delete: it sets `deleted_at` and the writer, and every other query skips tombstones (`liveAgentEntities`); the unique indexes ignore them, and the UI's `DeleteAgentEntity` removes the row.
+    `ArchiveAgentEntity` is the agent's delete: it sets `archived_at` and the writer, and every live query skips archived rows (`liveAgentEntities`); the unique indexes ignore them.
+    `ListAgentEntities` with `Archived` lists them for the Memories panel, `RestoreAgentEntity` brings one back (`ErrAgentEntityExists` when a live page has taken the name), and the UI's `DeleteAgentEntity` removes a row for good.
     **Gallery folders** are a normalized path string on `file_attachments.folder` (a label; the `s3_key` never changes), indexed with the owner.
     `FileAttachmentFilters.Folder` matches one folder exactly and `FolderPrefix` matches a folder and everything beneath it (the trailing `/` keeps `charts` from matching `charts-old`).
     `fileattachment_folders.go` holds `ListGalleryFolders` (files of one `models.GalleryKind` directly in each folder), `MoveFileAttachmentsToFolder` and `MoveGalleryFolder` (a rename that carries every folder beneath it).

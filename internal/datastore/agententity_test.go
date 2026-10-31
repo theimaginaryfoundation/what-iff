@@ -26,12 +26,12 @@ func createAgentEntityTestSchema(t *testing.T, db *sql.DB) {
 			body text NOT NULL DEFAULT '',
 			last_personality_id uuid,
 			last_chat_id uuid,
-			deleted_at datetime,
+			archived_at datetime,
 			pinned_personality_id uuid REFERENCES personalities(id) ON DELETE CASCADE,
 			user_agent_entities uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE
 		)`,
-		`CREATE UNIQUE INDEX agententity_key_user_agent_entities ON agent_entities(key, user_agent_entities) WHERE pinned_personality_id IS NULL AND deleted_at IS NULL`,
-		`CREATE UNIQUE INDEX agententity_key_pinned_personality_id_user_agent_entities ON agent_entities(key, pinned_personality_id, user_agent_entities) WHERE pinned_personality_id IS NOT NULL AND deleted_at IS NULL`,
+		`CREATE UNIQUE INDEX agententity_key_user_agent_entities ON agent_entities(key, user_agent_entities) WHERE pinned_personality_id IS NULL AND archived_at IS NULL`,
+		`CREATE UNIQUE INDEX agententity_key_pinned_personality_id_user_agent_entities ON agent_entities(key, pinned_personality_id, user_agent_entities) WHERE pinned_personality_id IS NOT NULL AND archived_at IS NULL`,
 	} {
 		_, err := db.Exec(stmt)
 		require.NoError(t, err)
@@ -278,7 +278,7 @@ func TestAgentEntity_PrefixListShowsWhatAReadSees(t *testing.T) {
 	require.Equal(t, shared.ID, list[0].ID)
 }
 
-func TestAgentEntity_TombstoneHidesAndFreesTheKey(t *testing.T) {
+func TestAgentEntity_ArchiveHidesFreesTheKeyAndRestores(t *testing.T) {
 	ds, db, cleanup := newAgentEntityTestDatastore(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -290,29 +290,44 @@ func TestAgentEntity_TombstoneHidesAndFreesTheKey(t *testing.T) {
 	created, err := ds.CreateAgentEntity(ctx, userID, w, "Old Car", "Sold in 2025.")
 	require.NoError(t, err)
 
-	tomb, err := ds.TombstoneAgentEntity(ctx, userID, w, "old car")
+	archived, err := ds.ArchiveAgentEntity(ctx, userID, w, "old car")
 	require.NoError(t, err)
-	require.Equal(t, created.ID, tomb.ID)
-	require.NotNil(t, tomb.DeletedAt)
-	require.Equal(t, "Sold in 2025.", tomb.Body, "the tombstone keeps the page for audit")
-	require.Equal(t, &chatID, tomb.LastChatID, "and who deleted it")
+	require.Equal(t, created.ID, archived.ID)
+	require.NotNil(t, archived.ArchivedAt)
+	require.Equal(t, "Sold in 2025.", archived.Body, "an archived page keeps its text")
+	require.Equal(t, &chatID, archived.LastChatID, "and who archived it")
 
 	_, err = ds.GetAgentEntity(ctx, userID, persona, "old car")
 	require.ErrorIs(t, err, ErrAgentEntityNotFound)
-	_, err = ds.TombstoneAgentEntity(ctx, userID, w, "old car")
+	_, err = ds.ArchiveAgentEntity(ctx, userID, w, "old car")
 	require.ErrorIs(t, err, ErrAgentEntityNotFound)
 	_, err = ds.UpdateAgentEntity(ctx, userID, w, "old car", appendTo("x"))
 	require.ErrorIs(t, err, ErrAgentEntityNotFound)
 	_, total, err := ds.ListAgentEntities(ctx, userID, models.AgentEntityFilters{})
 	require.NoError(t, err)
-	require.Zero(t, total, "the Memories panel hides tombstones")
+	require.Zero(t, total, "the live list leaves archived pages out")
+	list, total, err := ds.ListAgentEntities(ctx, userID, models.AgentEntityFilters{Archived: true})
+	require.NoError(t, err)
+	require.Equal(t, 1, total, "the archived list has them")
+	require.Equal(t, created.ID, list[0].ID)
 	_, err = ds.SetAgentEntityBody(ctx, userID, created.ID, "edit")
 	require.ErrorIs(t, err, ErrAgentEntityNotFound)
 
+	// While the name is taken again by a new page, the archived one cannot come back.
 	again, err := ds.CreateAgentEntity(ctx, userID, w, "Old Car", "A new page.")
-	require.NoError(t, err, "the key is free once the old page is a tombstone")
-	require.NotEqual(t, created.ID, again.ID)
-	var rows int
-	require.NoError(t, db.QueryRow(`SELECT count(*) FROM agent_entities WHERE key = 'old car'`).Scan(&rows))
-	require.Equal(t, 2, rows)
+	require.NoError(t, err, "the key is free once the old page is archived")
+	_, err = ds.RestoreAgentEntity(ctx, userID, created.ID)
+	require.ErrorIs(t, err, ErrAgentEntityExists)
+
+	require.NoError(t, ds.DeleteAgentEntity(ctx, userID, again.ID))
+	restored, err := ds.RestoreAgentEntity(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Nil(t, restored.ArchivedAt)
+	require.Nil(t, restored.LastChatID, "the restore is the user's")
+	got, err := ds.GetAgentEntity(ctx, userID, persona, "old car")
+	require.NoError(t, err)
+	require.Equal(t, "Sold in 2025.", got.Body)
+
+	_, err = ds.RestoreAgentEntity(ctx, userID, created.ID)
+	require.ErrorIs(t, err, ErrAgentEntityNotFound, "only archived entities restore")
 }

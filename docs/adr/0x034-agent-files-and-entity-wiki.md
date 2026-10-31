@@ -31,7 +31,7 @@ Four tools, grouped by intent so few schemas are loaded:
 |---|---|
 | `agent_file_write` | create, append, patch (unified diff), delete, copy, move |
 | `agent_file_read` | read (front to back, paged by line), search (the section under a Markdown heading) |
-| `entity_write` | write (create), update (replace), append, delete (exact name, leaves a tombstone) |
+| `entity_write` | write (create), update (replace), append, delete (exact name; archives the page) |
 | `entity_get` | get up to 5 entities by exact name, or list names by prefix |
 
 All four are catalog entries with `Loadable: true`, `AgentDefault: true`, `UserToggleable: true` and `SandboxPolicy: SandboxNever`.
@@ -104,9 +104,10 @@ Writes over the cap are refused with a message to condense the page or move deta
 Updates are a compare-and-swap on the body, retried, so concurrent appends both land.
 
 An agent deletes an entity with `entity_write` action `delete`, by exact name only (a name that matches nothing deletes nothing).
-The delete is a tombstone: the row keeps its body and gets `deleted_at`, with `last_personality_id` / `last_chat_id` recording who deleted it, and every read, listing, update and the Memories panel skip it.
-The partial unique indexes ignore tombstones, so the name is free again at once.
-This keeps an agent's delete auditable and restorable without making deletion hard to reach.
+An agent's delete **archives** the page, the way a memory merge retires the memories it absorbs rather than deleting them: the row keeps its body and gets `archived_at`, with `last_personality_id` / `last_chat_id` recording who archived it.
+Every agent read, prefix listing and update skips archived pages, and the partial unique indexes ignore them, so the name is free again at once.
+The user sees archived pages in the Memories panel and can restore one (or delete it for good), so a page an agent deleted by mistake is never lost.
+A restore fails while a live page in the same scope has taken the name; the user edits or deletes that one first.
 A user's delete in the Memories panel removes the row outright: it is the user's own correction.
 
 ### 8. Entity scope follows memory pinning
@@ -127,7 +128,8 @@ Deleting a personality deletes its pinned entities; global ones stay.
 
 Memories gets an **Entities** tab between Thread and Summaries.
 It lists entities (search, filter by personality or global), renders `[[links]]` as clickable searches, and lets the user edit an entity's text or delete it.
-The API is `GET /memory/entities`, `PATCH /memory/entities/{id}` and `DELETE /memory/entities/{id}`.
+A Show: Active / Archived switch lists the pages agents archived instead, each with Restore and Delete forever.
+The API is `GET /memory/entities` (`archived=true` for the archived ones), `PATCH /memory/entities/{id}`, `POST /memory/entities/{id}/restore` and `DELETE /memory/entities/{id}`.
 A user edit clears the "last written by" provenance.
 Creating entities from the UI is not in this change.
 
@@ -158,7 +160,6 @@ The public tools stay basic on purpose.
 ## Not done yet
 
 - Opt-in approval flow for agents proposing edits to user files.
-- Showing an agent's deleted entities to the user (review, restore, purge); the tombstones are kept for it.
 - The same exact-name, auditable delete for memories.
 - Wiring entities and files into pre/post-processing (summarizers saving entities, retrieval pulling in linked entities).
 - Fuzzy entity matching and entity aliases.

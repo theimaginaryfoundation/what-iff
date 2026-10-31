@@ -38,7 +38,7 @@ action:
 - "write" creates a new entity. It fails if the name is taken; read it with entity_get, then update or append.
 - "update" replaces the whole body of an existing entity. Read it first so nothing is lost.
 - "append" adds text to the end of an existing entity (a newline is added between). Use it for a new fact.
-- "delete" removes an entity from the wiki (text is not needed). Only by its exact name, never one you guessed or found by prefix without checking it is the right page. The page is kept as a deleted record the user can review, so deleting is not a way to hide anything.
+- "delete" archives an entity: it leaves the wiki (reads and lists no longer find it, and the name is free) but is kept, and the user can restore it. Text is not needed. Only by its exact name, never one you guessed or found by prefix without checking it is the right page. Use it for a page that is wrong, duplicated or no longer useful.
 
 Before writing, check with entity_get whether the entity already exists (by exact name, or by prefix when unsure of the name). Names are matched exactly, ignoring case and extra spaces ("Chris Smith" = "chris smith"). Pick the fullest common name and reuse it; never create a near-duplicate of an existing page. Do not create throwaway test entities unless you delete them afterwards.
 
@@ -58,7 +58,7 @@ var EntityWriteToolSpec = FunctionToolSpec{
 		"action": map[string]interface{}{
 			"type":        "string",
 			"enum":        []string{"write", "update", "append", "delete"},
-			"description": "write creates, update replaces the body, append adds to the end, delete removes the entity.",
+			"description": "write creates, update replaces the body, append adds to the end, delete archives the entity (the user can restore it).",
 		},
 		"name": map[string]interface{}{
 			"type":        "string",
@@ -108,7 +108,7 @@ type entityStore interface {
 	GetAgentEntity(ctx context.Context, userID, activePersonalityID uuid.UUID, key string) (*models.AgentEntity, error)
 	CreateAgentEntity(ctx context.Context, userID uuid.UUID, w models.AgentEntityWriter, key, body string) (*models.AgentEntity, error)
 	UpdateAgentEntity(ctx context.Context, userID uuid.UUID, w models.AgentEntityWriter, key string, change func(string) (string, error)) (*models.AgentEntity, error)
-	TombstoneAgentEntity(ctx context.Context, userID uuid.UUID, w models.AgentEntityWriter, key string) (*models.AgentEntity, error)
+	ArchiveAgentEntity(ctx context.Context, userID uuid.UUID, w models.AgentEntityWriter, key string) (*models.AgentEntity, error)
 	ListVisibleAgentEntities(ctx context.Context, userID, activePersonalityID uuid.UUID, prefix string, limit int) ([]*models.AgentEntity, int, error)
 }
 
@@ -130,15 +130,15 @@ type entityWriteArgs struct {
 }
 
 type entityPage struct {
-	Name      string   `json:"name"`
-	Found     bool     `json:"found"`
-	Scope     string   `json:"scope,omitempty"` // models.EntityScopeUser or models.EntityScopePersonality
-	Body      string   `json:"body,omitempty"`
-	Chars     int      `json:"chars,omitempty"`
-	Links     []string `json:"links,omitempty"`
-	UpdatedAt string   `json:"updated_at,omitempty"`
-	DeletedAt string   `json:"deleted_at,omitempty"`
-	Note      string   `json:"note,omitempty"`
+	Name       string   `json:"name"`
+	Found      bool     `json:"found"`
+	Scope      string   `json:"scope,omitempty"` // models.EntityScopeUser or models.EntityScopePersonality
+	Body       string   `json:"body,omitempty"`
+	Chars      int      `json:"chars,omitempty"`
+	Links      []string `json:"links,omitempty"`
+	UpdatedAt  string   `json:"updated_at,omitempty"`
+	ArchivedAt string   `json:"archived_at,omitempty"`
+	Note       string   `json:"note,omitempty"`
 }
 
 // entityMatch is one row of a prefix lookup: the name and metadata, not the page.
@@ -231,7 +231,7 @@ func (t *EntityTool) Write(ctx context.Context, chat *models.Chat, args []byte) 
 			return strings.TrimRight(body, "\n") + "\n" + text, nil
 		})
 	case "delete":
-		e, err = t.store.TombstoneAgentEntity(ctx, chat.UserID, w, a.Name)
+		e, err = t.store.ArchiveAgentEntity(ctx, chat.UserID, w, a.Name)
 	default:
 		return fail(`action must be "write", "update", "append" or "delete"`)
 	}
@@ -241,7 +241,7 @@ func (t *EntityTool) Write(ctx context.Context, chat *models.Chat, args []byte) 
 	case errors.Is(err, datastore.ErrAgentEntityExists):
 		return fail(fmt.Sprintf("an entity named %q already exists; read it with entity_get, then update or append", models.EntityTitle(a.Name)))
 	case errors.Is(err, datastore.ErrAgentEntityNotFound) && a.Action == "delete":
-		return fail(fmt.Sprintf("no entity named exactly %q; nothing was deleted. Look the name up with entity_get (prefix) first", models.EntityTitle(a.Name)))
+		return fail(fmt.Sprintf("no entity named exactly %q; nothing was archived. Look the name up with entity_get (prefix) first", models.EntityTitle(a.Name)))
 	case errors.Is(err, datastore.ErrAgentEntityNotFound):
 		return fail(fmt.Sprintf("no entity named %q; create it with action \"write\"", models.EntityTitle(a.Name)))
 	case errors.Is(err, models.ErrEntityBodyTooLong):
@@ -254,9 +254,10 @@ func (t *EntityTool) Write(ctx context.Context, chat *models.Chat, args []byte) 
 	}
 	page := toEntityPage(e)
 	page.Body = "" // the agent just wrote it; echoing the body only costs tokens
-	if e.DeletedAt != nil {
+	if e.ArchivedAt != nil {
 		page.Found, page.Chars, page.Links = false, 0, nil
-		page.DeletedAt = e.DeletedAt.UTC().Format(time.RFC3339)
+		page.ArchivedAt = e.ArchivedAt.UTC().Format(time.RFC3339)
+		page.Note = "Archived: gone from the wiki, and the name is free. The user can restore it from Memories > Entities."
 	}
 	return marshalToolResult(entityWriteResult{Success: true, Action: a.Action, Entity: page}, entityWriteToolName)
 }
