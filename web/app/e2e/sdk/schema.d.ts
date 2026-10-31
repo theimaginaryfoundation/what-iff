@@ -14781,10 +14781,15 @@ export interface components {
              */
             source?: "generated" | "imported";
             /**
-             * @description Who wrote the file (ADR 0x034). `user` = uploads, imports and reply outputs; `agent` = written by an agent's file tools. Only `agent` files can be changed by an agent, and only by the personality (or, with none, the thread) that created them. More values may be added, so treat an unknown one like `user`.
+             * @description Who wrote the file (ADR 0x034, 0x035). `user` = uploads, imports and reply outputs; `agent` = written by an agent's file tools; `skill` = a skill bundle's file under `skills/<slug>/`, read-only and managed in the skill editor. Only `agent` files can be changed by an agent, and only by the personality (or, with none, the thread) that created them. More values may be added, so treat an unknown one like `user`.
              * @enum {string}
              */
-            origin?: "user" | "agent";
+            origin?: "user" | "agent" | "skill";
+            /**
+             * Format: uuid
+             * @description For origin "skill", the skill whose bundle the file belongs to.
+             */
+            skill_id?: string;
             /**
              * Format: uuid
              * @description Personality whose agent created the file (agent-authored files only).

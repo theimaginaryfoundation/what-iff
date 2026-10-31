@@ -57,6 +57,16 @@ func NormalizeFolder(raw string) (string, error) {
 	return path, nil
 }
 
+// ReservedSkillsFolder is the top-level gallery folder that holds skill bundles
+// (`skills/<slug>/…`, ADR 0x035 §3). Only the skill editor and import write there; uploads, the
+// agent file tools and gallery moves refuse it.
+const ReservedSkillsFolder = "skills"
+
+// IsReservedFolder reports whether a normalized folder path is the skills folder or beneath it.
+func IsReservedFolder(folder string) bool {
+	return folder == ReservedSkillsFolder || strings.HasPrefix(folder, ReservedSkillsFolder+folderSeparator)
+}
+
 // FolderIsWithin reports whether path is folder itself or beneath it. Both must be normalized.
 // The top level ("") contains everything.
 func FolderIsWithin(path, folder string) bool {

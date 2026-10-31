@@ -13,6 +13,7 @@ import {
 } from '../../../core/models/ritual.model';
 import { HotkeyInputComponent } from '../../../core/components/hotkey-input/hotkey-input.component';
 import { RitualSelectOption } from './ritual-filter-bar.component';
+import { RitualFilesPanelComponent } from './ritual-files-panel.component';
 
 let nextFormId = 0;
 
@@ -38,7 +39,7 @@ export interface RitualFormSave {
 @Component({
   selector: 'app-ritual-form',
   standalone: true,
-  imports: [FormsModule, HotkeyInputComponent],
+  imports: [FormsModule, HotkeyInputComponent, RitualFilesPanelComponent],
   templateUrl: './ritual-form.component.html',
   styleUrl: './ritual-form.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -57,6 +58,8 @@ export class RitualFormComponent {
 
   readonly cancel = output<void>();
   readonly save = output<RitualFormSave>();
+  /** A bundle import replaced the skill's text; the host reloads it. */
+  readonly imported = output<Ritual>();
 
   private readonly formId = `ritual-form-${++nextFormId}`;
 

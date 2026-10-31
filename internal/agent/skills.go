@@ -334,6 +334,34 @@ func shortenDescription(desc string, limit int) string {
 	return strings.TrimRight(string(runes[:limit-1]), " ,;:") + "…"
 }
 
+// --- seams for builds that run skill scripts -------------------------------------------------
+
+// turnChatContextKey carries the turn's chatContext on the context tool handlers receive, so a
+// tool contributed through extraToolHandlersForChat (a build's shell_exec, say) can read the turn's
+// active skills and hydrate their bundles (ADR 0x035 §5).
+type turnChatContextKey struct{}
+
+func withTurnChatContext(ctx context.Context, chatCtx *chatContext) context.Context {
+	if chatCtx == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, turnChatContextKey{}, chatCtx)
+}
+
+// turnChatContextFrom returns the turn's chatContext, or nil outside a tool dispatch.
+func turnChatContextFrom(ctx context.Context) *chatContext {
+	c, _ := ctx.Value(turnChatContextKey{}).(*chatContext)
+	return c
+}
+
+// skillScriptsRunnableForChat, when set, says whether this build can run a skill's scripts for the
+// chat (a build with a per-conversation container sets it). Nil means no: load_skill then tells the
+// model that a skill's scripts cannot run here.
+var skillScriptsRunnableForChat func(a *Agent, chat *models.Chat) bool
+
+// skillScriptsNote is what load_skill says about scripts in a build that cannot run them.
+const skillScriptsNote = "Scripts in this skill cannot run in this deployment; follow the instructions by other means and tell the user what the skill expected."
+
 // --- load_skill / unload_skill ---------------------------------------------------------------
 
 type skillLifecycleArgs struct {
@@ -352,6 +380,11 @@ type loadedSkillResult struct {
 	ToolsAvailable    []string `json:"tools_available,omitempty"`
 	ToolsNotAvailable []string `json:"tools_not_available,omitempty"`
 	Compatibility     string   `json:"compatibility,omitempty"`
+	// Resources are the bundle's files (reference documents, scripts, assets) by path; read text
+	// ones with agent_file_read. Nothing here is in context until read.
+	Resources []string `json:"resources,omitempty"`
+	// Note is set when the deployment cannot run the skill's scripts.
+	Note string `json:"note,omitempty"`
 }
 
 // skillConnectorInventory is a skill connector's tool inventory, the list(kind="mcp_servers")
@@ -473,14 +506,60 @@ func (a *Agent) loadSkillTool(ctx context.Context, chatCtx *chatContext, input [
 			Compatibility: strings.TrimSpace(r.CompatibilityText()),
 		}
 		item.Connectors = a.skillConnectorInventories(ctx, chatCtx, r)
-		item.ToolsLoaded, item.ToolsAvailable, item.ToolsNotAvailable = a.loadSkillAllowedTools(ctx, chatCtx, r.AllowedToolList())
+		item.Resources = a.skillResourcePaths(ctx, chatCtx, r)
+		if hasScripts(item.Resources) && (skillScriptsRunnableForChat == nil || !skillScriptsRunnableForChat(a, chatCtx.chat)) {
+			item.Note = skillScriptsNote
+		}
+		allowed := r.AllowedToolList()
+		if len(item.Resources) > 0 {
+			// References can be read without a second load_tools round trip (ADR 0x035 §2).
+			allowed = append(allowed, agenttools.AgentFileReadToolSpec.Name)
+		}
+		item.ToolsLoaded, item.ToolsAvailable, item.ToolsNotAvailable = a.loadSkillAllowedTools(ctx, chatCtx, allowed)
 		res.Loaded = append(res.Loaded, item)
 	}
 	res.Note = "Follow the instructions above for the task. Loaded skills stay loaded in this chat until you unload them or a checkpoint finds them unused."
+	for _, item := range res.Loaded {
+		if len(item.Resources) > 0 {
+			res.Note += fmt.Sprintf(" Read a skill's reference files with %s at their paths (for example %q); only what you read enters the conversation.", agenttools.AgentFileReadToolSpec.Name, item.Resources[0])
+			break
+		}
+	}
 	if len(res.Unknown) > 0 {
 		res.Note += fmt.Sprintf(" Ignored slugs that are not loadable skills here: %s.", strings.Join(res.Unknown, ", "))
 	}
 	return marshalSkillLifecycleResult(res)
+}
+
+// hasScripts reports whether any bundle path sits under a scripts/ directory.
+func hasScripts(paths []string) bool {
+	for _, p := range paths {
+		if strings.Contains(p, "/scripts/") {
+			return true
+		}
+	}
+	return false
+}
+
+// skillResourcePaths lists the skill's bundle files by their gallery paths (skills/<slug>/…).
+func (a *Agent) skillResourcePaths(ctx context.Context, chatCtx *chatContext, r *models.Ritual) []string {
+	if a.ds == nil {
+		return nil
+	}
+	files, err := a.ds.ListSkillFiles(ctx, chatCtx.userID, r.ID)
+	if err != nil {
+		a.logger.Warn("skills: failed to list a skill's files", zap.String("ritual_id", r.ID.String()), zap.Error(err))
+		return nil
+	}
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		if f.Folder == "" {
+			paths = append(paths, f.Name)
+			continue
+		}
+		paths = append(paths, f.Folder+"/"+f.Name)
+	}
+	return paths
 }
 
 // messageAndMoodSkills are the turn's preloaded skills (this message's and the mode's), which stay
@@ -725,6 +804,15 @@ func (a *Agent) unloadSkillsUnusedInSegment(ctx context.Context, userID, chatID 
 	for _, slug := range slugsFromLoadSkillInputs(inputs) {
 		loadedInSegment[slug] = struct{}{}
 	}
+	// Reading a bundle file (skills/<slug>/…) counts as using the skill (ADR 0x035 §4).
+	readInputs, err := a.ds.ChatToolInputsSince(ctx, userID, chatID, segmentStart, agenttools.AgentFileReadToolSpec.Name)
+	if err != nil {
+		a.logger.Warn("checkpoint: failed to read the segment's agent_file_read calls", zap.String("chat_id", chatID.String()), zap.Error(err))
+		return
+	}
+	for _, slug := range skillSlugsFromFileReadInputs(readInputs) {
+		loadedInSegment[slug] = struct{}{}
+	}
 	keep := map[uuid.UUID]struct{}{}
 	for _, r := range loaded {
 		if _, ok := loadedInSegment[skillSlug(r)]; ok {
@@ -767,6 +855,30 @@ func slugsFromLoadSkillInputs(inputs []string) []string {
 		}
 		slugs, _ := normalizeSkillSlugs(args.Skills)
 		out = append(out, slugs...)
+	}
+	return out
+}
+
+// skillSlugsFromFileReadInputs extracts the skill slugs whose bundle files recorded agent_file_read
+// inputs name (a "file" argument of the form skills/<slug>/…).
+func skillSlugsFromFileReadInputs(inputs []string) []string {
+	var out []string
+	for _, raw := range inputs {
+		var args struct {
+			File string `json:"file"`
+		}
+		if err := json.Unmarshal([]byte(raw), &args); err != nil {
+			continue
+		}
+		p := strings.Trim(strings.ToLower(strings.TrimSpace(args.File)), "/")
+		prefix := models.ReservedSkillsFolder + "/"
+		if !strings.HasPrefix(p, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(p, prefix)
+		if i := strings.Index(rest, "/"); i > 0 {
+			out = append(out, rest[:i])
+		}
 	}
 	return out
 }

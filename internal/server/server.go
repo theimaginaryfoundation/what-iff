@@ -374,7 +374,7 @@ func (s *Server) setupRoutes() {
 		RequireBilling: s.config.RequireBilling,
 	})
 	agentJobHandler := agentjob.NewHandler(dataStore, agent, s.agentJobScheduler, s.logger)
-	ritualHandler := ritual.NewHandler(dataStore, s.logger)
+	ritualHandler := ritual.NewHandler(dataStore, agent.FileStore(), s.logger)
 	fileAttachmentHandler := fileattachment.NewHandler(dataStore, s.logger, agent)
 	imageGalleryHandler := imagegallery.NewHandler(dataStore, s.logger, agent.FileStore(), agent)
 	moodHandler := moodhandler.NewHandler(dataStore, s.logger, agent.FileStore())

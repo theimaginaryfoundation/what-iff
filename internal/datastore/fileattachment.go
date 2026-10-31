@@ -47,6 +47,7 @@ func toFileAttachmentModel(e *ent.FileAttachment) *models.FileAttachment {
 		CreatedAt:   e.CreatedAt,
 
 		Origin:                 models.FileOrigin(e.Origin),
+		SkillID:                e.SkillID,
 		CreatedByPersonalityID: e.CreatedByPersonalityID,
 		CreatedByChatID:        e.CreatedByChatID,
 		UpdatedAt:              e.UpdatedAt,
@@ -238,6 +239,9 @@ func (d *Datastore) CreateFileAttachment(ctx context.Context, userID uuid.UUID, 
 
 	if fileAttachment.Origin != "" {
 		create.SetOrigin(entfileattachment.Origin(fileAttachment.Origin))
+	}
+	if fileAttachment.IsSkillFile() {
+		create.SetNillableSkillID(fileAttachment.SkillID)
 	}
 	if fileAttachment.AgentAuthored() {
 		create.SetNillableCreatedByPersonalityID(fileAttachment.CreatedByPersonalityID).
@@ -506,6 +510,10 @@ func (d *Datastore) ListFileAttachments(ctx context.Context, userID uuid.UUID, p
 
 	if filters.Origin != "" {
 		query = query.Where(entfileattachment.OriginEQ(entfileattachment.Origin(filters.Origin)))
+	} else if !listingUnderSkillsFolder(filters) {
+		// Skill bundle files live under the reserved skills folder and are managed by the skill
+		// editor; a gallery listing leaves them out unless it looks inside that folder.
+		query = query.Where(entfileattachment.OriginNEQ(entfileattachment.OriginSkill))
 	}
 
 	if filters.ExcludeReferenceCopies {
@@ -904,4 +912,13 @@ func (d *Datastore) PersonalityHasSearchableFiles(ctx context.Context, personali
 		return false, err
 	}
 	return exists, nil
+}
+
+// listingUnderSkillsFolder reports whether a file listing is scoped to the reserved skills folder,
+// in which case the skill bundle files there are what the caller wants.
+func listingUnderSkillsFolder(filters models.FileAttachmentFilters) bool {
+	if filters.Folder != nil && models.IsReservedFolder(*filters.Folder) {
+		return true
+	}
+	return filters.FolderPrefix != nil && models.IsReservedFolder(*filters.FolderPrefix)
 }

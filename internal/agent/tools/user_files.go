@@ -119,7 +119,7 @@ func ReadableAsText(att *models.FileAttachment) bool {
 	if strings.HasPrefix(att.FileType, models.ImageMIMEPrefix) {
 		return false
 	}
-	if att.AgentAuthored() || strings.HasPrefix(att.FileType, "text/") ||
+	if att.AgentAuthored() || att.IsSkillFile() || strings.HasPrefix(att.FileType, "text/") ||
 		filechunker.IsTextType(att.FileType) || filechunker.IsTextFileByExtension(att.Name) {
 		return true
 	}
@@ -127,18 +127,24 @@ func ReadableAsText(att *models.FileAttachment) bool {
 	return ok
 }
 
-// ReadFileText loads att's full text. Agent files are read byte for byte from their current
-// object; other files go through the attachment text resolver, which also knows legacy keys. A
-// file that is not text, too large, not UTF-8, or whose stored content is missing is refused.
+// ReadFileText loads att's full text. Agent files and skill bundle files are read byte for byte
+// from their current object; other files go through the attachment text resolver, which also knows
+// legacy keys. A file that is not text, too large, not UTF-8, or whose stored content is missing is
+// refused.
 func ReadFileText(ctx context.Context, logger *zap.Logger, files storage.FileStore, att *models.FileAttachment) (string, error) {
 	if !ReadableAsText(att) {
 		return "", fileRefusalf("%q is not a text file (%s); use find_context to look at it", FilePath(att), att.FileType)
 	}
 	var raw []byte
-	if att.AgentAuthored() {
-		// Agent files only ever live under the owner's agent prefix (storage.FileKeyForAgentFile);
-		// refuse any other key rather than read an object the row should not point at.
-		if !strings.HasPrefix(att.S3Key, storage.AgentFileKeyPrefix(att.UserID)) {
+	if att.AgentAuthored() || att.IsSkillFile() {
+		// Agent files only ever live under the owner's agent prefix (storage.FileKeyForAgentFile)
+		// and skill files under the skills prefix (storage.FileKeyForSkillFile); refuse any other
+		// key rather than read an object the row should not point at.
+		prefix := storage.AgentFileKeyPrefix(att.UserID)
+		if att.IsSkillFile() {
+			prefix = storage.SkillFileKeyPrefix(att.UserID)
+		}
+		if !strings.HasPrefix(att.S3Key, prefix) {
 			return "", fileRefusalf("%q could not be read: its stored content is missing", FilePath(att))
 		}
 		data, err := files.DownloadFile(ctx, att.S3Key)

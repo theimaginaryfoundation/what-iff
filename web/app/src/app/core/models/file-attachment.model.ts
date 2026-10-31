@@ -20,6 +20,10 @@ export interface FileAttachment {
   /** Server-derived origin class (see openapi FileAttachment.source). Absent when the
    *  server could not determine it; the gallery then falls back to heuristics. */
   source?: 'generated' | 'imported';
+  /** Who wrote the file: an agent's file tools, a skill bundle, or (absent) the user. */
+  origin?: 'user' | 'agent' | 'skill';
+  /** For origin "skill", the skill whose bundle the file belongs to. */
+  skill_id?: string;
 }
 
 export interface FileAttachmentPersonalityRef {

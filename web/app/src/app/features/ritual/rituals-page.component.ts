@@ -294,6 +294,12 @@ export class RitualsPageComponent implements OnInit {
     });
   }
 
+  /** A bundle was imported into the skill open in the editor: show the new text and refresh the list. */
+  onImportedIntoEditor(ritual: Ritual): void {
+    this.editingRitual.set(ritual);
+    this.view.refresh();
+  }
+
   dismissImportNotice(): void {
     this.importNotice.set(null);
   }
