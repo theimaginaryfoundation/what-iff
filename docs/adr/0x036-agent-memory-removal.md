@@ -4,7 +4,7 @@
 - **Date:** 2026-10-31
 - **Deciders:** What Iff maintainers
 - **Issue:** none; raised by the Vix persona while testing the entity wiki in PR #406
-- **PR:** to be filled in when the PR is opened
+- **PR:** [#416](https://github.com/theimaginaryfoundation/what-iff/pull/416)
 - **Builds on:** the entity wiki's agent delete in [ADR 0x034](0x034-agent-files-and-entity-wiki.md) (PR #406), the memory merge audit log (`memory_merge_events`) and its undo, and memory provenance from the Discord relay ([ADR 0x025](0x025-discord-relay.md)).
 
 ## Context
