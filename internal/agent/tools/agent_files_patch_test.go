@@ -13,7 +13,7 @@ Walked the dog.
 Rained.
 
 ## Tuesday
-Worked on Project Y.
+Worked on Project Orchard.
 `
 
 func TestApplyUnifiedDiff(t *testing.T) {
@@ -34,17 +34,17 @@ func TestApplyUnifiedDiff(t *testing.T) {
 -Rained.
 +Sunny.
 `,
-			want: "# Journal\n\n## Monday\nWalked the dog.\nSunny.\n\n## Tuesday\nWorked on Project Y.\n",
+			want: "# Journal\n\n## Monday\nWalked the dog.\nSunny.\n\n## Tuesday\nWorked on Project Orchard.\n",
 		},
 		{
 			name:    "wrong line numbers still apply by context",
 			content: patchBase,
 			diff: `@@ -40,3 +40,4 @@
  ## Tuesday
- Worked on Project Y.
-+Called Chris.
+ Worked on Project Orchard.
++Called Alex.
 `,
-			want: patchBase + "Called Chris.\n",
+			want: patchBase + "Called Alex.\n",
 		},
 		{
 			name:    "header without numbers",
@@ -68,7 +68,7 @@ func TestApplyUnifiedDiff(t *testing.T) {
 			name:    "blank context line without its leading space",
 			content: patchBase,
 			diff:    "@@ -5,3 +5,3 @@\n Rained.\n\n-## Tuesday\n+## Wednesday\n",
-			want:    "# Journal\n\n## Monday\nWalked the dog.\nRained.\n\n## Wednesday\nWorked on Project Y.\n",
+			want:    "# Journal\n\n## Monday\nWalked the dog.\nRained.\n\n## Wednesday\nWorked on Project Orchard.\n",
 		},
 		{
 			name:    "trailing whitespace tolerated",

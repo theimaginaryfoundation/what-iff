@@ -26,7 +26,7 @@ const (
 	entityListLimit = 25
 )
 
-const entityWikiStyle = `Write entities like wiki pages: a few plain sentences or bullets of durable facts about the subject, not a conversation log. When a page mentions another person, place, project or thing that has (or deserves) its own entity, link it as [[Name]] using that entity's name, for example "Chris works with [[Dana Lee]] on [[Project Y]]." Keep one subject per entity; put details about Dana on Dana's page, not Chris's.`
+const entityWikiStyle = `Write entities like wiki pages: a few plain sentences or bullets of durable facts about the subject, not a conversation log. When a page mentions another person, place, project or thing that has (or deserves) its own entity, link it as [[Name]] using that entity's name, for example "Alex works with [[Dana Lee]] on [[Project Orchard]]." Keep one subject per entity; put details about Dana on Dana's page, not Alex's.`
 
 // entityScopeNote explains the scope field, which follows memory pinning.
 const entityScopeNote = `Each entity has a scope, which works like memories: "user" entities are shared by every personality of this account; "personality" entities belong to one personality and only it sees them. A new entity takes the scope of this personality's memories (kept to itself or shared), so you do not choose it.`
@@ -40,7 +40,7 @@ action:
 - "append" adds text to the end of an existing entity (a newline is added between). Use it for a new fact.
 - "delete" archives an entity: it leaves the wiki (reads and lists no longer find it, and the name is free) but is kept, and the user can restore it. Text is not needed. Only by its exact name, never one you guessed or found by prefix without checking it is the right page. Use it for a page that is wrong, duplicated or no longer useful.
 
-Before writing, check with entity_get whether the entity already exists (by exact name, or by prefix when unsure of the name). Names are matched exactly, ignoring case and extra spaces ("Chris Smith" = "chris smith"). Pick the fullest common name and reuse it; never create a near-duplicate of an existing page. Do not create throwaway test entities unless you delete them afterwards.
+Before writing, check with entity_get whether the entity already exists (by exact name, or by prefix when unsure of the name). Names are matched exactly, ignoring case and extra spaces ("Alex Rivera" = "alex rivera"). Pick the fullest common name and reuse it; never create a near-duplicate of an existing page. Do not create throwaway test entities unless you delete them afterwards.
 
 %s
 
@@ -62,7 +62,7 @@ var EntityWriteToolSpec = FunctionToolSpec{
 		},
 		"name": map[string]interface{}{
 			"type":        "string",
-			"description": fmt.Sprintf("The entity's exact name, e.g. 'Chris Smith' or 'Project Y'. At most %d characters.", models.MaxEntityKeyRunes),
+			"description": fmt.Sprintf("The entity's exact name, e.g. 'Alex Rivera' or 'Project Orchard'. At most %d characters.", models.MaxEntityKeyRunes),
 		},
 		"text": map[string]interface{}{
 			"type":        "string",
@@ -76,7 +76,7 @@ var EntityWriteToolSpec = FunctionToolSpec{
 var EntityGetDescription = fmt.Sprintf(`Read the entity wiki: what has been recorded about a person, place, project or other thing.
 
 - names: read up to %d entities by exact name (ignoring case and extra spaces). Returns each whole page.
-- prefix: when you do not know the exact name, list the entities whose names start with it (e.g. "Project" or "Chris"), up to %d, with their scope and last change but not their pages. An empty prefix lists every entity. Then read the right one by its exact name. If several could be the one you mean, ask rather than guess.
+- prefix: when you do not know the exact name, list the entities whose names start with it (e.g. "Project" or "Alex"), up to %d, with their scope and last change but not their pages. An empty prefix lists every entity. Then read the right one by its exact name. If several could be the one you mean, ask rather than guess.
 
 Pass names or prefix, not both.
 
@@ -91,7 +91,7 @@ var EntityGetToolSpec = FunctionToolSpec{
 	Properties: map[string]interface{}{
 		"names": map[string]interface{}{
 			"type":        "array",
-			"description": "Exact entity names to read, e.g. ['Chris Smith', 'Project Y'].",
+			"description": "Exact entity names to read, e.g. ['Alex Rivera', 'Project Orchard'].",
 			"items":       map[string]interface{}{"type": "string"},
 			"maxItems":    entityGetMaxKeys,
 		},

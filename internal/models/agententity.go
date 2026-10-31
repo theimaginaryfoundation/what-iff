@@ -80,8 +80,8 @@ type AgentEntityFilters struct {
 	Offset   int
 }
 
-// NormalizeEntityKey lowercases key, trims it and collapses inner whitespace, so "Chris  Smith" and
-// "chris smith" name the same entity. Matching is exact after this; fuzzier matching is later work.
+// NormalizeEntityKey lowercases key, trims it and collapses inner whitespace, so "Alex  Rivera" and
+// "alex rivera" name the same entity. Matching is exact after this; fuzzier matching is later work.
 func NormalizeEntityKey(key string) (string, error) {
 	norm := strings.ToLower(strings.Join(strings.Fields(key), " "))
 	if norm == "" || utf8.RuneCountInString(norm) > MaxEntityKeyRunes {

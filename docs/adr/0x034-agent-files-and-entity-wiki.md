@@ -14,7 +14,7 @@ Neither fits two things agents keep wanting to do:
 
 - **Keep working files**: a journal, a running checklist, a draft, a log of what a recurring job found.
   These are longer than a memory, are read front to back rather than by similarity, and change by appending or editing a few lines.
-- **Keep notes about the people, places and projects that come up**, so "Chris" means the same Chris next week.
+- **Keep notes about the people, places and projects that come up**, so "Alex" means the same Alex next week.
   That is a lookup by name, not by meaning, and the notes link to each other.
 
 PRs #257 and #262 explored the first one.
@@ -99,7 +99,7 @@ The description also states the ownership rule first: only files this personalit
 ### 7. Entities are a small Postgres table
 
 `agent_entities` holds one row per entity: a normalized key (lowercased, trimmed, inner whitespace collapsed), the display title, and a body of at most 5,000 characters.
-Lookups are exact on the normalized key; fuzzier matching ("Chris S" finding "Chris Smith") is later work.
+Lookups are exact on the normalized key; fuzzier matching ("Alex R" finding "Alex Rivera") is later work.
 For discovery, `entity_get` also takes a `prefix` instead of `names` and lists the visible entities whose key starts with it (names, scope and last change, not bodies; at most 25, with the total).
 The description tells the agent to read the right one by exact name and to ask when several could be meant, rather than guess or create a near-duplicate.
 A read returns the whole body, and lists the `[[Name]]` links in it so the agent can follow the graph.
@@ -159,7 +159,7 @@ The public tools stay basic on purpose.
 - User files cannot be changed by an agent at all, which is safe but means an agent "editing" a user document works on a copy.
 - Agent files whose personality is deleted stay in the gallery but can no longer be changed by any agent.
 - Every append rewrites the whole file (at most 1 MB), which is fine at this size and would need segments for large logs.
-- Entity lookup is exact; near-duplicate entities ("Chris" and "Chris Smith") are possible until fuzzy matching lands. Descriptions ask the agent to check first.
+- Entity lookup is exact; near-duplicate entities ("Alex" and "Alex Rivera") are possible until fuzzy matching lands. Descriptions ask the agent to check first.
 - `file_attachments` gains its columns, and the new `agent_entities` table is created, by auto-migration; existing rows take `origin = user` and need no backfill.
 
 ## Not done yet

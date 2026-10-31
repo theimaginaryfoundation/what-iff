@@ -78,26 +78,26 @@ func TestAgentEntity_GlobalCreateGetAndNormalizedKey(t *testing.T) {
 	other := insertEntityTestPersonality(t, db, userID, "Other", false)
 	chatID := uuid.New()
 
-	created, err := ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: shared, ChatID: chatID}, "  Chris   Smith ", "Works on [[Project Y]].")
+	created, err := ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: shared, ChatID: chatID}, "  Alex   Rivera ", "Works on [[Project Orchard]].")
 	require.NoError(t, err)
-	require.Equal(t, "chris smith", created.Key)
-	require.Equal(t, "Chris Smith", created.Title)
+	require.Equal(t, "alex rivera", created.Key)
+	require.Equal(t, "Alex Rivera", created.Title)
 	require.Nil(t, created.PinnedPersonalityID, "auto_pin_memories off: the entity is global")
 	require.Equal(t, &shared, created.LastPersonalityID)
 	require.Equal(t, &chatID, created.LastChatID)
 
-	got, err := ds.GetAgentEntity(ctx, userID, other, "CHRIS SMITH")
+	got, err := ds.GetAgentEntity(ctx, userID, other, "ALEX RIVERA")
 	require.NoError(t, err)
 	require.Equal(t, created.ID, got.ID, "a global entity is visible to every personality")
 
-	got, err = ds.GetAgentEntity(ctx, userID, uuid.Nil, "chris smith")
+	got, err = ds.GetAgentEntity(ctx, userID, uuid.Nil, "alex rivera")
 	require.NoError(t, err)
 	require.Equal(t, created.ID, got.ID, "and to conversations with no personality")
 
-	_, err = ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: other}, "chris smith", "dup")
+	_, err = ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: other}, "alex rivera", "dup")
 	require.ErrorIs(t, err, ErrAgentEntityExists)
 
-	_, err = ds.GetAgentEntity(ctx, insertEntityTestUser(t, db), uuid.Nil, "chris smith")
+	_, err = ds.GetAgentEntity(ctx, insertEntityTestUser(t, db), uuid.Nil, "alex rivera")
 	require.ErrorIs(t, err, ErrAgentEntityNotFound, "another user's entity is not visible")
 }
 
@@ -255,7 +255,7 @@ func TestAgentEntity_PrefixListShowsWhatAReadSees(t *testing.T) {
 	require.NoError(t, err)
 	_, err = ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: other}, "Project Beta", "x")
 	require.NoError(t, err)
-	_, err = ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: other}, "Chris", "x")
+	_, err = ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: other}, "Alex", "x")
 	require.NoError(t, err)
 
 	list, total, err := ds.ListVisibleAgentEntities(ctx, userID, pinner, "  PROJECT ", 10)
@@ -269,7 +269,7 @@ func TestAgentEntity_PrefixListShowsWhatAReadSees(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 3, total)
 	require.Len(t, list, 1)
-	require.Equal(t, "Chris", list[0].Title)
+	require.Equal(t, "Alex", list[0].Title)
 
 	// The other personality sees only the shared Project Alpha.
 	list, _, err = ds.ListVisibleAgentEntities(ctx, userID, other, "project a", 10)
