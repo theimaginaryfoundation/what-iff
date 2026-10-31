@@ -68,7 +68,7 @@ func (f *fakeAgentFileStore) SwapAgentFileObject(_ context.Context, _, id uuid.U
 		f.beforeSwap(id)
 	}
 	r, ok := f.rows[id]
-	if !ok || !r.AgentAuthored || r.S3Key != oldKey {
+	if !ok || !r.AgentAuthored() || r.S3Key != oldKey {
 		return false, nil
 	}
 	r.S3Key = newKey
@@ -87,7 +87,7 @@ func (f *fakeAgentFileStore) RenameGalleryFile(_ context.Context, _, id uuid.UUI
 func (f *fakeAgentFileStore) CountAgentFiles(context.Context, uuid.UUID) (int, error) {
 	n := 0
 	for _, r := range f.rows {
-		if r.AgentAuthored {
+		if r.AgentAuthored() {
 			n++
 		}
 	}
@@ -191,7 +191,7 @@ func TestAgentFiles_CreateReadAppendPatch(t *testing.T) {
 	require.Equal(t, true, file["editable"])
 	id := file["id"].(string)
 	row := fx.store.rows[uuid.MustParse(id)]
-	require.True(t, row.AgentAuthored)
+	require.True(t, row.AgentAuthored())
 	require.Equal(t, &persona, row.CreatedByPersonalityID)
 	require.Nil(t, row.CreatedByChatID)
 	require.True(t, strings.HasPrefix(row.S3Key, "users/"+fx.userID.String()+"/agent/"))
@@ -368,4 +368,54 @@ func TestAgentFiles_SandboxRefused(t *testing.T) {
 	chat.ContextScope = models.ContextScopeSandbox
 	requireRefused(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "create", "path": "a.md", "content": "x"}), "sandboxed")
 	requireRefused(t, callJSON(t, fx.tool.Read, chat, map[string]any{"action": "read", "file": "a.md"}), "sandboxed")
+}
+
+func TestAgentFiles_SkillsFolderIsReserved(t *testing.T) {
+	fx := newAgentFileFixture()
+	chat := fx.chat(uuid.New())
+	requireOK(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "create", "path": "notes/a.md", "content": "x"}))
+
+	for _, args := range []map[string]any{
+		{"action": "create", "path": "skills/b.md", "content": "x"},
+		{"action": "create", "path": "Skills/my-skill/references/b.md", "content": "x"},
+		{"action": "copy", "file": "notes/a.md", "path": "skills/my-skill/a.md"},
+		{"action": "move", "file": "notes/a.md", "path": "skills/a.md"},
+	} {
+		requireRefused(t, callJSON(t, fx.tool.Write, chat, args), `"skills/" folder is managed by your skills`)
+	}
+	requireOK(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "create", "path": "skillset/b.md", "content": "x"}))
+	requireOK(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "create", "path": "notes/skills/b.md", "content": "x"}))
+}
+
+func TestAgentFiles_UnreadableUserFileIsRefusedNotEmpty(t *testing.T) {
+	fx := newAgentFileFixture()
+	chat := fx.chat(uuid.New())
+	upload := fx.userUpload("docs", "gone.md", "text")
+	delete(fx.objects.objs, upload.S3Key)
+
+	requireRefused(t, callJSON(t, fx.tool.Read, chat, map[string]any{"action": "read", "file": "docs/gone.md"}), "could not be read")
+	requireRefused(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "copy", "file": "docs/gone.md", "path": "copy.md"}), "could not be read")
+}
+
+func TestResolveUserFile_PrefersAndRefuses(t *testing.T) {
+	fx := newAgentFileFixture()
+	ctx := context.Background()
+	one := fx.userUpload("", "dup.md", "1")
+	fx.userUpload("", "dup.md", "2")
+
+	_, err := ResolveUserFile(ctx, fx.store, fx.userID, "dup.md", nil)
+	msg, ok := AsFileRefusal(err)
+	require.True(t, ok)
+	require.Contains(t, msg, "pass one of their ids")
+
+	got, err := ResolveUserFile(ctx, fx.store, fx.userID, "/DUP.md", func(att *models.FileAttachment) bool { return att.ID == one.ID })
+	require.NoError(t, err)
+	require.Equal(t, one.ID, got.ID)
+
+	for ref, want := range map[string]string{"": "file is required", "nope.md": "no file at", uuid.NewString(): "no file with id"} {
+		_, err := ResolveUserFile(ctx, fx.store, fx.userID, ref, nil)
+		msg, ok := AsFileRefusal(err)
+		require.True(t, ok, ref)
+		require.Contains(t, msg, want)
+	}
 }

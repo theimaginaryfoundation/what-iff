@@ -14287,8 +14287,11 @@ export interface components {
              * @enum {string}
              */
             source?: "generated" | "imported";
-            /** @description Written by an agent's file tools (ADR 0x034). Only these files can be changed by an agent, and only by the personality (or, with none, the thread) that created them. Omitted when false. */
-            agent_authored?: boolean;
+            /**
+             * @description Who wrote the file (ADR 0x034). `user` = uploads, imports and reply outputs; `agent` = written by an agent's file tools. Only `agent` files can be changed by an agent, and only by the personality (or, with none, the thread) that created them. More values may be added, so treat an unknown one like `user`.
+             * @enum {string}
+             */
+            origin?: "user" | "agent";
             /**
              * Format: uuid
              * @description Personality whose agent created the file (agent-authored files only).

@@ -10922,12 +10922,14 @@ components:
             the user (gallery import, personality upload, user chat message).
             Agent-authored files are `generated`.
             Omitted when the server could not determine it.
-        agent_authored:
-          type: boolean
+        origin:
+          type: string
+          enum: [user, agent]
           description: >-
-            Written by an agent's file tools (ADR 0x034). Only these files can be changed by an
-            agent, and only by the personality (or, with none, the thread) that created them.
-            Omitted when false.
+            Who wrote the file (ADR 0x034). `user` = uploads, imports and reply outputs; `agent` =
+            written by an agent's file tools. Only `agent` files can be changed by an agent, and
+            only by the personality (or, with none, the thread) that created them. More values may
+            be added, so treat an unknown one like `user`.
         created_by_personality_id:
           type: string
           format: uuid

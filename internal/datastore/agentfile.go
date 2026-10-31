@@ -48,7 +48,7 @@ func (d *Datastore) SwapAgentFileObject(ctx context.Context, userID, id uuid.UUI
 		Where(
 			entfileattachment.ID(id),
 			entfileattachment.HasOwnerWith(user.ID(userID)),
-			entfileattachment.AgentAuthored(true),
+			entfileattachment.OriginEQ(entfileattachment.OriginAgent),
 			entfileattachment.S3Key(oldKey),
 		).
 		SetS3Key(newKey).
@@ -64,7 +64,7 @@ func (d *Datastore) SwapAgentFileObject(ctx context.Context, userID, id uuid.UUI
 // CountAgentFiles returns how many agent-authored files the user holds.
 func (d *Datastore) CountAgentFiles(ctx context.Context, userID uuid.UUID) (int, error) {
 	n, err := d.dbClient.FileAttachment.Query().
-		Where(entfileattachment.HasOwnerWith(user.ID(userID)), entfileattachment.AgentAuthored(true)).
+		Where(entfileattachment.HasOwnerWith(user.ID(userID)), entfileattachment.OriginEQ(entfileattachment.OriginAgent)).
 		Count(ctx)
 	if err != nil {
 		d.logger.Error("failed to count agent files", zap.Error(err))

@@ -2,15 +2,11 @@ package tools
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"path"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/filedelete"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -56,8 +52,7 @@ var agentFileTypes = map[string]string{
 // agentFileStore is the narrow datastore surface the file tools need. *datastore.Datastore
 // satisfies it.
 type agentFileStore interface {
-	GetFileAttachment(ctx context.Context, userID, id uuid.UUID) (*models.FileAttachment, error)
-	FindFileAttachmentsAtPath(ctx context.Context, userID uuid.UUID, folder, name string) ([]*models.FileAttachment, error)
+	UserFileLookup
 	CreateFileAttachment(ctx context.Context, userID uuid.UUID, att models.FileAttachment) (*models.FileAttachment, error)
 	SwapAgentFileObject(ctx context.Context, userID, id uuid.UUID, oldKey, newKey string) (bool, error)
 	MoveFileAttachmentsToFolder(ctx context.Context, userID uuid.UUID, ids []uuid.UUID, folder string) (int, error)
@@ -84,15 +79,6 @@ func NewAgentFileTool(ds *datastore.Datastore, files storage.FileStore, logger *
 	return &AgentFileTool{store: ds, files: files, deleter: filedelete.New(ds, files, logger), logger: logger}
 }
 
-// errAgentFile is a refusal meant for the model; its text is the tool result's error.
-type errAgentFile struct{ msg string }
-
-func (e errAgentFile) Error() string { return e.msg }
-
-func agentFileErrorf(format string, args ...any) error {
-	return errAgentFile{msg: fmt.Sprintf(format, args...)}
-}
-
 // agentFileRef is how results name a file.
 type agentFileRef struct {
 	ID       string `json:"id"`
@@ -102,31 +88,25 @@ type agentFileRef struct {
 	Editable bool   `json:"editable"`
 }
 
-// filePath is the folder/name path the tools address att by.
-func filePath(att *models.FileAttachment) string {
-	if att.Folder == "" {
-		return att.Name
-	}
-	return att.Folder + "/" + att.Name
+// reservedAgentFolders are top-level folders the app manages, which agent files may not go in.
+// skills/ holds skill bundles, written only by the skill editor and import.
+var reservedAgentFolders = map[string]string{
+	"skills": "your skills",
 }
 
-// splitAgentFilePath splits a "folder/name" path into a normalized folder and a name.
-func splitAgentFilePath(p string) (folder, name string, err error) {
-	p = strings.Trim(strings.TrimSpace(p), "/")
-	if p == "" {
-		return "", "", agentFileErrorf("path is empty")
+// checkAgentFolder refuses a folder under a reserved top-level folder.
+func checkAgentFolder(folder string) error {
+	top, _, _ := strings.Cut(folder, "/")
+	if owner, ok := reservedAgentFolders[strings.ToLower(top)]; ok {
+		return agentFileErrorf("the %q folder is managed by %s; write elsewhere", strings.ToLower(top)+"/", owner)
 	}
-	dir, base := path.Split(p)
-	if folder, err = models.NormalizeFolder(dir); err != nil {
-		return "", "", agentFileErrorf("invalid folder in path: %v", err)
-	}
-	return folder, strings.TrimSpace(base), nil
+	return nil
 }
 
 // ownsAgentFile reports whether the agent in chat may change att: an agent-authored file created
 // by this chat's personality, or with no personality, by this conversation.
 func ownsAgentFile(chat *models.Chat, att *models.FileAttachment) bool {
-	if att == nil || !att.AgentAuthored {
+	if att == nil || !att.AgentAuthored() {
 		return false
 	}
 	if chat.PersonalityID != uuid.Nil {
@@ -136,7 +116,7 @@ func ownsAgentFile(chat *models.Chat, att *models.FileAttachment) bool {
 }
 
 func (t *AgentFileTool) ref(chat *models.Chat, att *models.FileAttachment, content string) agentFileRef {
-	r := agentFileRef{ID: att.ID.String(), Path: filePath(att), Editable: ownsAgentFile(chat, att)}
+	r := agentFileRef{ID: att.ID.String(), Path: FilePath(att), Editable: ownsAgentFile(chat, att)}
 	if content != "" {
 		r.Bytes = len(content)
 		r.Lines = strings.Count(content, "\n")
@@ -147,46 +127,10 @@ func (t *AgentFileTool) ref(chat *models.Chat, att *models.FileAttachment, conte
 	return r
 }
 
-// resolve finds the file a "file" argument names: an id, or a folder/name path. A path that names
-// several files prefers the one this agent may edit; otherwise it is ambiguous.
+// resolve finds the file a "file" argument names. A path that names several files prefers the one
+// this agent may edit; otherwise it is ambiguous.
 func (t *AgentFileTool) resolve(ctx context.Context, chat *models.Chat, file string) (*models.FileAttachment, error) {
-	file = strings.TrimSpace(file)
-	if file == "" {
-		return nil, agentFileErrorf("file is required: pass a file id or its path, e.g. \"notes/journal.md\"")
-	}
-	if id, err := uuid.Parse(file); err == nil {
-		att, err := t.store.GetFileAttachment(ctx, chat.UserID, id)
-		if errors.Is(err, datastore.ErrFileAttachmentNotFound) {
-			return nil, agentFileErrorf("no file with id %s", file)
-		}
-		return att, err
-	}
-	folder, name, err := splitAgentFilePath(file)
-	if err != nil {
-		return nil, err
-	}
-	matches, err := t.store.FindFileAttachmentsAtPath(ctx, chat.UserID, folder, name)
-	if err != nil {
-		return nil, err
-	}
-	switch len(matches) {
-	case 0:
-		return nil, agentFileErrorf("no file at %q; list files with list (kind=\"files\")", file)
-	case 1:
-		return matches[0], nil
-	}
-	var mine []*models.FileAttachment
-	ids := make([]string, 0, len(matches))
-	for _, m := range matches {
-		ids = append(ids, m.ID.String())
-		if ownsAgentFile(chat, m) {
-			mine = append(mine, m)
-		}
-	}
-	if len(mine) == 1 {
-		return mine[0], nil
-	}
-	return nil, agentFileErrorf("%d files are at %q; pass one of their ids instead: %s", len(matches), file, strings.Join(ids, ", "))
+	return ResolveUserFile(ctx, t.store, chat.UserID, file, func(att *models.FileAttachment) bool { return ownsAgentFile(chat, att) })
 }
 
 // resolveOwned is resolve plus the edit check.
@@ -197,54 +141,17 @@ func (t *AgentFileTool) resolveOwned(ctx context.Context, chat *models.Chat, fil
 	}
 	if !ownsAgentFile(chat, att) {
 		what := "the user's file"
-		if att.AgentAuthored {
+		if att.AgentAuthored() {
 			what = "a file another agent created"
 		}
-		return nil, agentFileErrorf("%q is %s, which you can read but not change. To work from it, copy it to a new file of your own with action \"copy\".", filePath(att), what)
+		return nil, agentFileErrorf("%q is %s, which you can read but not change. To work from it, copy it to a new file of your own with action \"copy\".", FilePath(att), what)
 	}
 	return att, nil
 }
 
-// readableAsText reports whether att's content can be read as text.
-func readableAsText(att *models.FileAttachment) bool {
-	if strings.HasPrefix(att.FileType, models.ImageMIMEPrefix) {
-		return false
-	}
-	if att.AgentAuthored || strings.HasPrefix(att.FileType, "text/") ||
-		filechunker.IsTextType(att.FileType) || filechunker.IsTextFileByExtension(att.Name) {
-		return true
-	}
-	_, ok := agentFileTypes[strings.ToLower(path.Ext(att.Name))]
-	return ok
-}
-
-// readText loads att's full text. Agent files are read from their current object; other files go
-// through the attachment text resolver, which also knows legacy keys.
+// readText loads att's full text.
 func (t *AgentFileTool) readText(ctx context.Context, att *models.FileAttachment) (string, error) {
-	if !readableAsText(att) {
-		return "", agentFileErrorf("%q is not a text file (%s); use find_context to look at it", filePath(att), att.FileType)
-	}
-	var raw []byte
-	if att.AgentAuthored {
-		data, err := t.files.DownloadFile(ctx, att.S3Key)
-		if err != nil {
-			return "", err
-		}
-		raw = data
-	} else {
-		text, ok := storage.ResolveAttachmentTextContent(ctx, t.logger, t.files, att.UserID, att)
-		if !ok {
-			return "", nil
-		}
-		raw = []byte(text)
-	}
-	if len(raw) > 4*agentFileMaxBytes {
-		return "", agentFileErrorf("%q is too large to read here (%d bytes)", filePath(att), len(raw))
-	}
-	if !utf8.Valid(raw) {
-		return "", agentFileErrorf("%q is not valid UTF-8 text", filePath(att))
-	}
-	return string(raw), nil
+	return ReadFileText(ctx, t.logger, t.files, att)
 }
 
 // agentFileName checks a new file's name and returns it with its MIME type. A name without an

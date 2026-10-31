@@ -42,13 +42,19 @@ Automatic saving (summarizers writing entities, extraction writing files) is del
 ### 2. Agent files are ordinary file attachments
 
 An agent file is a `file_attachments` row like any upload, so it shows in the gallery, in `list` (`kind="files"`), and can be moved or deleted by the user as usual.
-Three columns are added: `agent_authored`, `created_by_personality_id`, `created_by_chat_id`, plus `updated_at` for the last content change.
+Four columns are added: `origin`, `created_by_personality_id`, `created_by_chat_id`, plus `updated_at` for the last content change.
+`origin` is a string enum (`user` for uploads, imports and reply outputs; `agent` for these files), not a boolean, so a further origin (skill bundle files are expected next) is a new value rather than a migration.
 Objects live under `users/{uid}/agent/`, so account deletion already purges them.
-They are **never chunked or embedded**: they are read front to back, and `find_context`'s fetch mode reads them straight from the object store instead of from chunks.
+They are **never chunked or embedded**: they are read front to back.
+`find_context`'s fetch mode reads any text file that has no chunks straight from the object store, which covers agent files and uploads whose chunking has not finished, instead of keying on the origin.
 
 Files are addressed by id or by a `folder/name` path (the gallery folder plus the display name).
 Creating a file at a path where the user already has a file is refused, so a path names one file in practice.
 Text types only (`.md .txt .json .jsonl .yaml .yml .csv .tsv .toml .xml .html .log`), 1 MB per file, 256 KB per call, 1000 agent files per account.
+The top-level `skills/` folder is reserved for skill bundles: agents cannot create, copy or move files into it.
+
+Resolving a file argument (an id or a `folder/name` path, with the same refusals for none or several) and reading a file's text are exported from the tools package (`ResolveUserFile`, `ReadFileText`, `FilePath`, `SplitFilePath`), so other tools that take a user's file (the private build's `load_file_to_container`, skill bundles later) share them instead of copying them.
+A file whose stored content cannot be read is refused as unreadable, never reported as empty.
 
 ### 3. Agents change only what they created
 
@@ -76,6 +82,7 @@ All hunks apply or none do, and a hunk that does not match is refused with a mes
 ### 6. Listing: extend `list`, no new tool
 
 `list` (`kind="files"`) gains `origin` (`agent` / `user`) and `view="tree"`, which draws the page's files as a folder tree like the `tree` command.
+The tree is one page, so it defaults to the largest page (200) and the descriptions say it is a page; with `folder` set it is that folder's tree.
 Rows of agent files carry `origin: "agent"`.
 There is no separate `list_agent_files` tool.
 
@@ -131,7 +138,7 @@ The public tools stay basic on purpose.
 - Agent files whose personality is deleted stay in the gallery but can no longer be changed by any agent.
 - Every append rewrites the whole file (at most 1 MB), which is fine at this size and would need segments for large logs.
 - Entity lookup is exact; near-duplicate entities ("Chris" and "Chris Smith") are possible until fuzzy matching lands. Descriptions ask the agent to check first.
-- `file_attachments` and the new `agent_entities` table are created by auto-migration; there is no data backfill.
+- `file_attachments` gains its columns, and the new `agent_entities` table is created, by auto-migration; existing rows take `origin = user` and need no backfill.
 
 ## Not done yet
 

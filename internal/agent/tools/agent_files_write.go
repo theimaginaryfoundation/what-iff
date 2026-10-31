@@ -135,11 +135,10 @@ func (t *AgentFileTool) Write(ctx context.Context, chat *models.Chat, args []byt
 	default:
 		return fail(`action must be one of "create", "append", "patch", "delete", "copy", "move"`)
 	}
-	var refusal errAgentFile
-	switch {
-	case errors.As(err, &refusal):
-		return fail(refusal.msg)
-	case err != nil:
+	if msg, ok := AsFileRefusal(err); ok {
+		return fail(msg)
+	}
+	if err != nil {
 		t.logger.Error("agent_file_write failed", zap.String("user_id", chat.UserID.String()), zap.String("action", a.Action), zap.Error(err))
 		return fail("could not write the file; try again")
 	}
@@ -166,6 +165,9 @@ func (t *AgentFileTool) dropObject(ctx context.Context, key string) {
 
 // checkFreePath refuses a path where the user already has a file, so paths stay unambiguous.
 func (t *AgentFileTool) checkFreePath(ctx context.Context, userID uuid.UUID, folder, name string) error {
+	if err := checkAgentFolder(folder); err != nil {
+		return err
+	}
 	existing, err := t.store.FindFileAttachmentsAtPath(ctx, userID, folder, name)
 	if err != nil {
 		return err
@@ -185,7 +187,7 @@ func (t *AgentFileTool) newFile(ctx context.Context, chat *models.Chat, p, conte
 	if strings.TrimSpace(p) == "" {
 		return nil, agentFileErrorf("path is required, e.g. \"notes/journal.md\"")
 	}
-	folder, rawName, err := splitAgentFilePath(p)
+	folder, rawName, err := SplitFilePath(p)
 	if err != nil {
 		return nil, err
 	}
@@ -211,11 +213,11 @@ func (t *AgentFileTool) newFile(ctx context.Context, chat *models.Chat, p, conte
 		return nil, err
 	}
 	att := models.FileAttachment{
-		Name:          name,
-		FileType:      mimeType,
-		S3Key:         key,
-		Folder:        folder,
-		AgentAuthored: true,
+		Name:     name,
+		FileType: mimeType,
+		S3Key:    key,
+		Folder:   folder,
+		Origin:   models.FileOriginAgent,
 	}
 	if chat.PersonalityID != uuid.Nil {
 		pid := chat.PersonalityID
@@ -324,7 +326,7 @@ func (t *AgentFileTool) move(ctx context.Context, chat *models.Chat, file, p str
 	if strings.TrimSpace(p) == "" {
 		return agentFileWriteResult{}, agentFileErrorf("path is required: where the file goes, e.g. \"notes/old/journal.md\"")
 	}
-	folder, rawName, err := splitAgentFilePath(p)
+	folder, rawName, err := SplitFilePath(p)
 	if err != nil {
 		return agentFileWriteResult{}, err
 	}

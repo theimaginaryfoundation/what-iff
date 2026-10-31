@@ -617,7 +617,7 @@ func TestRecallFetchMemoryByID(t *testing.T) {
 }
 
 func TestRecallFetchByFilenameExactVsFuzzy(t *testing.T) {
-	exact := &models.FileAttachment{ID: uuid.New(), Name: "vix_steering_buckets.md"}
+	exact := &models.FileAttachment{ID: uuid.New(), Name: "vix_steering_buckets.md", ChunkStatus: "chunked"}
 	other := &models.FileAttachment{ID: uuid.New(), Name: "notes_about_vix.md"}
 
 	// Fuzzy-only match: the filter surfaces `other`, but its name isn't exact -> suggestion note.
@@ -719,7 +719,7 @@ func TestRecallFetchImageAttachesToContext(t *testing.T) {
 // Non-image files must still return chunks (not attachments), unaffected by the image path.
 func TestRecallFetchNonImageReturnsChunksNotAttachments(t *testing.T) {
 	faID := uuid.New()
-	fa := &models.FileAttachment{ID: faID, Name: "notes.md", FileType: "text/markdown"}
+	fa := &models.FileAttachment{ID: faID, Name: "notes.md", FileType: "text/markdown", ChunkStatus: "chunked"}
 	store := &fakeRecallStore{
 		fileByID:     map[uuid.UUID]*models.FileAttachment{faID: fa},
 		chunksForAtt: []datastore.FileChunkResult{{FileName: fa.Name, Sequence: 0, Content: "body"}},
@@ -1433,4 +1433,27 @@ func TestConversationWindow_UsesCursorBounds(t *testing.T) {
 	require.NotNil(t, window.Max)
 	require.Equal(t, min, window.Min.UTC().Format(time.RFC3339Nano))
 	require.Equal(t, max, window.Max.UTC().Format(time.RFC3339Nano))
+}
+
+// A text file with no chunks (an agent file, or an upload not chunked yet) is read straight from the
+// object store; a chunked one still pages through chunks.
+func TestRecallFetchUnchunkedTextReadsTheObject(t *testing.T) {
+	agentFile := &models.FileAttachment{ID: uuid.New(), Name: "journal.md", FileType: "text/markdown", S3Key: "k/journal", Origin: models.FileOriginAgent}
+	pending := &models.FileAttachment{ID: uuid.New(), Name: "brief.txt", FileType: "text/plain", S3Key: "k/brief", ChunkStatus: "pending"}
+	rt := newTestRecallTool(&fakeRecallStore{
+		fileByID:     map[uuid.UUID]*models.FileAttachment{agentFile.ID: agentFile, pending.ID: pending},
+		chunksForAtt: []datastore.FileChunkResult{{FileName: "unexpected", Content: "chunk"}},
+	})
+	rt.fileStore = &memObjects{objs: map[string][]byte{"k/journal": []byte("# Journal\n"), "k/brief": []byte("Ship it.")}}
+
+	for _, tc := range []struct {
+		fa   *models.FileAttachment
+		want string
+	}{{agentFile, "# Journal\n"}, {pending, "Ship it."}} {
+		out, _, _, err := rt.Recall(context.Background(), recallTestChat(), []byte(`{"mode":"fetch","target":"`+tc.fa.ID.String()+`"}`))
+		require.NoError(t, err)
+		res := decodeRecall(t, out)
+		require.Len(t, res.Chunks, 1, tc.fa.Name)
+		require.Equal(t, tc.want, res.Chunks[0].Text)
+	}
 }
