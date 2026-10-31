@@ -12,6 +12,8 @@
 - **`RegisterPoolMetrics`** (`poolmetrics.go`): samples `sql.DBStats` at each metrics export as `db.client.connection.count` (`db.client.connection.state` = `idle`/`used`) plus cumulative pool waits and wait time.
   Called once from `internal/server`; a rising wait count means `MaxOpenConns` (100) is too low.
 - Driver imports: PostgreSQL (and MySQL driver may be present for tooling compatibility — verify `db.go`).
+- **`BackfillRitualLinks`** (`ritual_links.go`): after the schema migration, copies mode and job skill links from the one-to-many columns ent used to keep on `rituals` (`mood_rituals`, `agent_job_rituals`) into the join tables of the same name (ADR 0x035 §11).
+  Idempotent (`ON CONFLICT DO NOTHING`) and a no-op once `DESTRUCTIVE_MIGRATION` has dropped the columns; `cmd/api-server` calls it on every start that migrates.
 
 ## Key types and entry points
 
@@ -41,6 +43,7 @@
 - *(Typically integration-tested via app startup; add focused tests if connection logic grows.)*
 - `poolmetrics_test.go` — pool gauges against an in-memory sqlite `*sql.DB`.
 - `seed_test.go` — `EnsureSeedData` over sqlmock: with catalog seeding off it issues no catalog query, and with it on the catalog step runs.
+- `ritual_links_test.go` — the link backfill against in-memory sqlite: copies once, skips existing rows, and is a no-op without the legacy columns.
 
 ## Related documentation
 

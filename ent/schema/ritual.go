@@ -44,6 +44,14 @@ func (Ritual) Edges() []ent.Edge {
 		edge.From("chat_messages", ChatMessage.Type).
 			Ref("rituals"),
 		edge.To("mcp_servers", MCPServer.Type),
+		// Inverse of Mood.rituals and AgentJob.rituals. Declaring the back-reference makes both
+		// edges many-to-many (join tables mood_rituals and agent_job_rituals) instead of the
+		// one-to-many FK columns ent produced without it, which let a skill sit on only one mode
+		// or job at a time (ADR 0x035 §11).
+		edge.From("moods", Mood.Type).
+			Ref("rituals"),
+		edge.From("agent_jobs", AgentJob.Type).
+			Ref("rituals"),
 	}
 }
 

@@ -197,6 +197,12 @@ func init() {
 			logger.Fatal("Failed to run database migrations", zap.Error(err))
 		}
 		logger.Debug("Database migrations applied", zap.Bool("destructive_migration", destructiveMigration))
+
+		// Mode and job skill links moved from FK columns on rituals to join tables (ADR 0x035
+		// §11). Copy what the old columns still hold; a destructive migration drops them after.
+		if _, err := database.BackfillRitualLinks(context.Background(), sqlDB, logger); err != nil {
+			logger.Fatal("Failed to copy skill links into their join tables", zap.Error(err))
+		}
 	}
 
 	// Ensure seed data exists before serving requests
