@@ -256,6 +256,50 @@ func TestLoadAndUnloadSkillTools(t *testing.T) {
 	require.Empty(t, stored)
 }
 
+func TestLoadSkillTool_ListsBundleFilesAndLoadsFileRead(t *testing.T) {
+	a, ds, _, userID, chat := newSkillsAgentFixture(t)
+	ctx := context.Background()
+	pdf := createTestSkill(t, ds, userID, models.Ritual{Name: "PDF Forms"})
+	folder, name, err := datastore.SkillFileFolder(pdf.Slug, "references/FORMS.md")
+	require.NoError(t, err)
+	_, err = ds.CreateSkillFile(ctx, userID, pdf.ID, folder, name, "text/markdown", "users/u/skills/s/forms.md")
+	require.NoError(t, err)
+	plain := createTestSkill(t, ds, userID, models.Ritual{Name: "Plain"})
+
+	chatCtx := &chatContext{userID: userID, chat: chat}
+	a.prepareTurnSkills(ctx, userID, chatCtx, &models.ChatMessage{ChatID: chat.ID})
+	offered := gatedOffered(agenttools.AgentFileReadToolSpec.Name, agenttools.LoadSkillToolSpec.Name)
+	chatCtx.setOfferedTools(offered)
+	a.prepareTurnLoadableTools(ctx, chatCtx, offered)
+
+	out, err := a.loadSkillTool(ctx, chatCtx, []byte(`{"skills":["pdf-forms","plain"]}`))
+	require.NoError(t, err)
+	var res skillLifecycleResult
+	require.NoError(t, json.Unmarshal([]byte(out), &res))
+	require.Len(t, res.Loaded, 2)
+	byslug := map[string]loadedSkillResult{}
+	for _, item := range res.Loaded {
+		byslug[item.Slug] = item
+	}
+	require.Equal(t, []string{"skills/pdf-forms/references/FORMS.md"}, byslug["pdf-forms"].Resources)
+	require.Equal(t, []string{agenttools.AgentFileReadToolSpec.Name}, byslug["pdf-forms"].ToolsLoaded, "a bundle with files loads agent_file_read")
+	require.Empty(t, byslug["plain"].Resources)
+	require.Empty(t, byslug["plain"].ToolsLoaded)
+	require.Contains(t, res.Note, "skills/pdf-forms/references/FORMS.md")
+	require.False(t, chatCtx.builtinToolNeedsLoad(agenttools.AgentFileReadToolSpec.Name))
+	_ = plain
+}
+
+func TestSkillSlugsFromFileReadInputs(t *testing.T) {
+	require.Equal(t, []string{"pdf-forms", "notes"}, skillSlugsFromFileReadInputs([]string{
+		`{"file":"skills/pdf-forms/references/FORMS.md"}`,
+		`{"file":"/Skills/notes/x.md"}`,
+		`{"file":"skills/"}`,
+		`{"file":"notes/journal.md"}`,
+		`not json`,
+	}))
+}
+
 func TestUnloadSkillsUnusedInSegment(t *testing.T) {
 	a, ds, client, userID, chat := newSkillsAgentFixture(t)
 	ctx := context.Background()
@@ -266,17 +310,23 @@ func TestUnloadSkillsUnusedInSegment(t *testing.T) {
 	_, err := ds.AddChatLoadedSkills(ctx, userID, chat.ID, []uuid.UUID{kept.ID, reloaded.ID, stale.ID})
 	require.NoError(t, err)
 
-	// The segment holds one load_skill call naming "reloaded" and used web_search.
+	read := createTestSkill(t, ds, userID, models.Ritual{Name: "Read From"})
+	_, err = ds.AddChatLoadedSkills(ctx, userID, chat.ID, []uuid.UUID{read.ID})
+	require.NoError(t, err)
+
+	// The segment holds one load_skill call naming "reloaded", used web_search, and read a file of
+	// "read-from"'s bundle.
 	msg, err := client.ChatMessage.Create().SetMessage("hi").SetOrigin(chatmessage.OriginAssistant).SetChatID(chat.ID).Save(ctx)
 	require.NoError(t, err)
 	require.NoError(t, client.ToolCall.Create().SetToolName(agenttools.LoadSkillToolSpec.Name).SetToolInput(`{"skills":["reloaded"]}`).SetChatMessageID(msg.ID).Exec(ctx))
 	require.NoError(t, client.ToolCall.Create().SetToolName("web_search").SetToolInput(`{}`).SetChatMessageID(msg.ID).Exec(ctx))
+	require.NoError(t, client.ToolCall.Create().SetToolName(agenttools.AgentFileReadToolSpec.Name).SetToolInput(`{"file":"skills/read-from/references/a.md"}`).SetChatMessageID(msg.ID).Exec(ctx))
 
 	a.unloadToolsUnusedInSegment(ctx, userID, chat.ID, nil)
 
 	loaded, err := ds.ListChatLoadedSkillIDs(ctx, userID, chat.ID)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []uuid.UUID{kept.ID, reloaded.ID}, loaded, "stale was neither loaded in the segment nor had a tool it brought in called")
+	require.ElementsMatch(t, []uuid.UUID{kept.ID, reloaded.ID, read.ID}, loaded, "stale was neither loaded in the segment, read from, nor had a tool it brought in called")
 }
 
 func TestSlugsFromLoadSkillInputs(t *testing.T) {

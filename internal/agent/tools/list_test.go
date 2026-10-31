@@ -62,6 +62,9 @@ func (f *fakeListStore) ListRituals(_ context.Context, _ uuid.UUID, pageNum, pag
 	f.lastPageNum, f.lastPageSize = pageNum, pageSize
 	return paginatePage(toAny(f.rituals), pageNum, pageSize), nil
 }
+func (f *fakeListStore) CountSkillFiles(context.Context, uuid.UUID, []uuid.UUID) (map[uuid.UUID]int, error) {
+	return map[uuid.UUID]int{}, nil
+}
 func (f *fakeListStore) ListFileAttachments(_ context.Context, _ uuid.UUID, pageNum, pageSize int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error) {
 	f.lastFileFilters = filters
 	f.lastPageNum, f.lastPageSize = pageNum, pageSize
@@ -675,6 +678,9 @@ func (e *erroringListStore) ListPersonalities(_ context.Context, _ uuid.UUID, _,
 func (e *erroringListStore) ListRituals(_ context.Context, _ uuid.UUID, _, _ int, _ models.RitualFilters) (*models.PaginatedResponse, error) {
 	return nil, errListStoreBoom
 }
+func (e *erroringListStore) CountSkillFiles(context.Context, uuid.UUID, []uuid.UUID) (map[uuid.UUID]int, error) {
+	return nil, errListStoreBoom
+}
 func (e *erroringListStore) ListFileAttachments(_ context.Context, _ uuid.UUID, _, _ int, _ models.FileAttachmentFilters) (*models.PaginatedResponse, error) {
 	return nil, errListStoreBoom
 }
@@ -760,8 +766,8 @@ func TestListFilesRejectsAnInvalidFolderWithoutQuerying(t *testing.T) {
 func TestListFilesOriginAndTreeView(t *testing.T) {
 	chat := listTestChat()
 	store := &fakeListStore{files: []*models.FileAttachment{
-		{ID: uuid.New(), Name: "journal.md", FileType: "text/markdown", Folder: "notes", AgentAuthored: true},
-		{ID: uuid.New(), Name: "Ideas.md", FileType: "text/markdown", Folder: "notes/later", AgentAuthored: true},
+		{ID: uuid.New(), Name: "journal.md", FileType: "text/markdown", Folder: "notes", Origin: models.FileOriginAgent},
+		{ID: uuid.New(), Name: "Ideas.md", FileType: "text/markdown", Folder: "notes/later", Origin: models.FileOriginAgent},
 		{ID: uuid.New(), Name: "brief.pdf", FileType: "application/pdf"},
 		{ID: uuid.New(), Name: "a.md", FileType: "text/markdown", Folder: "notes"},
 	}}

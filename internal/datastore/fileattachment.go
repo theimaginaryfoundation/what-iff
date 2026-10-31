@@ -46,7 +46,8 @@ func toFileAttachmentModel(e *ent.FileAttachment) *models.FileAttachment {
 		ContextOnly: e.ContextOnly,
 		CreatedAt:   e.CreatedAt,
 
-		AgentAuthored:          e.AgentAuthored,
+		Origin:                 models.FileOrigin(e.Origin),
+		SkillID:                e.SkillID,
 		CreatedByPersonalityID: e.CreatedByPersonalityID,
 		CreatedByChatID:        e.CreatedByChatID,
 		UpdatedAt:              e.UpdatedAt,
@@ -103,7 +104,7 @@ func classifyFileAttachmentSource(e *ent.FileAttachment) models.FileAttachmentSo
 		}
 		return models.FileAttachmentSourceImported
 	}
-	if e.AgentAuthored {
+	if e.Origin == entfileattachment.OriginAgent {
 		return models.FileAttachmentSourceGenerated
 	}
 	if strings.HasPrefix(strings.ToLower(e.FileType), models.ImageMIMEPrefix) &&
@@ -233,10 +234,14 @@ func (d *Datastore) CreateFileAttachment(ctx context.Context, userID uuid.UUID, 
 		create.SetContextOnly(true)
 	}
 
-	if fileAttachment.AgentAuthored {
-		create.SetAgentAuthored(true).
+	switch fileAttachment.Origin {
+	case models.FileOriginAgent:
+		create.SetOrigin(entfileattachment.OriginAgent).
 			SetNillableCreatedByPersonalityID(fileAttachment.CreatedByPersonalityID).
 			SetNillableCreatedByChatID(fileAttachment.CreatedByChatID)
+	case models.FileOriginSkill:
+		create.SetOrigin(entfileattachment.OriginSkill).
+			SetNillableSkillID(fileAttachment.SkillID)
 	}
 
 	entFileAttachment, err := create.Save(ctx)
@@ -501,9 +506,17 @@ func (d *Datastore) ListFileAttachments(ctx context.Context, userID uuid.UUID, p
 
 	switch filters.Origin {
 	case models.FileOriginAgent:
-		query = query.Where(entfileattachment.AgentAuthored(true))
+		query = query.Where(entfileattachment.OriginEQ(entfileattachment.OriginAgent))
 	case models.FileOriginUser:
-		query = query.Where(entfileattachment.AgentAuthored(false))
+		query = query.Where(entfileattachment.OriginEQ(entfileattachment.OriginUser))
+	case models.FileOriginSkill:
+		query = query.Where(entfileattachment.OriginEQ(entfileattachment.OriginSkill))
+	default:
+		// Skill bundle files live under the reserved skills folder and are managed by the skill
+		// editor; a gallery listing leaves them out unless it looks inside that folder.
+		if !listingUnderSkillsFolder(filters) {
+			query = query.Where(entfileattachment.OriginNEQ(entfileattachment.OriginSkill))
+		}
 	}
 
 	if filters.ExcludeReferenceCopies {
@@ -902,4 +915,13 @@ func (d *Datastore) PersonalityHasSearchableFiles(ctx context.Context, personali
 		return false, err
 	}
 	return exists, nil
+}
+
+// listingUnderSkillsFolder reports whether a file listing is scoped to the reserved skills folder,
+// in which case the skill bundle files there are what the caller wants.
+func listingUnderSkillsFolder(filters models.FileAttachmentFilters) bool {
+	if filters.Folder != nil && models.IsReservedFolder(*filters.Folder) {
+		return true
+	}
+	return filters.FolderPrefix != nil && models.IsReservedFolder(*filters.FolderPrefix)
 }

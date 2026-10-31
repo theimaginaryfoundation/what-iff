@@ -64,11 +64,26 @@ export interface UpdateRitualRequest extends Partial<RitualSkillFields> {
 export interface RitualImportResult {
   ritual: Ritual;
   warnings: string[];
-  /** Bundle files other than SKILL.md, which this version does not store. */
-  skipped_files: number;
+  /** Bundle files stored under skills/<slug>/. */
+  files_imported: number;
   connectors_linked: string[];
   connectors_missing: string[];
 }
+
+/** A skill bundle file (GET /ritual/{id}/files): reference documents, scripts and assets. */
+export interface RitualFile {
+  id: string;
+  /** Path inside the bundle, e.g. "references/FORMS.md". */
+  path: string;
+  file_type: string;
+  /** Gallery location: skills/<slug>/<subdir> and the file name; the agent reads it at folder/name. */
+  folder: string;
+  name: string;
+  created_at: string;
+}
+
+export const RITUAL_FILE_MAX_BYTES = 10 * 1024 * 1024;
+export const RITUAL_BUNDLE_MAX_FILES = 200;
 
 /** A skill the agent loaded in a thread with load_skill (GET /chat/{id}/loaded-skills). */
 export interface LoadedSkill {

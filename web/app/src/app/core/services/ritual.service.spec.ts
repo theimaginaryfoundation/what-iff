@@ -42,14 +42,37 @@ describe('RitualService', () => {
             const body = req.request.body as FormData;
             expect(body.get('file')).toBeInstanceOf(File);
             expect(body.get('personality_id')).toBe('personality-1');
-            req.flush({ ritual: {}, warnings: [], skipped_files: 0, connectors_linked: [], connectors_missing: [] });
+            req.flush({ ritual: {}, warnings: [], files_imported: 0, connectors_linked: [], connectors_missing: [] });
         });
 
         it('omits personality_id when none is given', () => {
             service.importBundle(new File(['x'], 'SKILL.md')).subscribe();
             const req = httpMock.expectOne(`${environment.apiUrl}/ritual/import`);
             expect((req.request.body as FormData).has('personality_id')).toBe(false);
-            req.flush({ ritual: {}, warnings: [], skipped_files: 0, connectors_linked: [], connectors_missing: [] });
+            req.flush({ ritual: {}, warnings: [], files_imported: 0, connectors_linked: [], connectors_missing: [] });
+        });
+
+        it('imports into an existing skill when asked', () => {
+            service.importBundle(new File(['x'], 'SKILL.md'), null, 'ritual-9').subscribe();
+            const req = httpMock.expectOne(`${environment.apiUrl}/ritual/import`);
+            expect((req.request.body as FormData).get('ritual_id')).toBe('ritual-9');
+            req.flush({ ritual: {}, warnings: [], files_imported: 2, connectors_linked: [], connectors_missing: [] });
+        });
+
+        it('lists, uploads and deletes bundle files', () => {
+            service.listSkillFiles('ritual-1').subscribe();
+            httpMock.expectOne(`${environment.apiUrl}/ritual/ritual-1/files`).flush([]);
+
+            service.uploadSkillFile('ritual-1', new File(['ref'], 'FORMS.md'), 'references/FORMS.md').subscribe();
+            const upload = httpMock.expectOne(`${environment.apiUrl}/ritual/ritual-1/files`);
+            expect(upload.request.method).toBe('POST');
+            expect((upload.request.body as FormData).get('path')).toBe('references/FORMS.md');
+            upload.flush({ id: 'f1', path: 'references/FORMS.md', file_type: 'text/markdown', folder: 'skills/x/references', name: 'FORMS.md', created_at: '' });
+
+            service.deleteSkillFile('ritual-1', 'f1').subscribe();
+            const del = httpMock.expectOne(`${environment.apiUrl}/ritual/ritual-1/files/f1`);
+            expect(del.request.method).toBe('DELETE');
+            del.flush(null);
         });
 
         it('fetches the export as a blob response', () => {

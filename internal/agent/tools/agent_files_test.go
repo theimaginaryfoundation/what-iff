@@ -68,7 +68,7 @@ func (f *fakeAgentFileStore) SwapAgentFileObject(_ context.Context, _, id uuid.U
 		f.beforeSwap(id)
 	}
 	r, ok := f.rows[id]
-	if !ok || !r.AgentAuthored || r.S3Key != oldKey {
+	if !ok || !r.IsAgentAuthored() || r.S3Key != oldKey {
 		return false, nil
 	}
 	r.S3Key = newKey
@@ -87,7 +87,7 @@ func (f *fakeAgentFileStore) RenameGalleryFile(_ context.Context, _, id uuid.UUI
 func (f *fakeAgentFileStore) CountAgentFiles(context.Context, uuid.UUID) (int, error) {
 	n := 0
 	for _, r := range f.rows {
-		if r.AgentAuthored {
+		if r.IsAgentAuthored() {
 			n++
 		}
 	}
@@ -191,7 +191,7 @@ func TestAgentFiles_CreateReadAppendPatch(t *testing.T) {
 	require.Equal(t, true, file["editable"])
 	id := file["id"].(string)
 	row := fx.store.rows[uuid.MustParse(id)]
-	require.True(t, row.AgentAuthored)
+	require.Equal(t, models.FileOriginAgent, row.Origin)
 	require.Equal(t, &persona, row.CreatedByPersonalityID)
 	require.Nil(t, row.CreatedByChatID)
 	require.True(t, strings.HasPrefix(row.S3Key, "users/"+fx.userID.String()+"/agent/"))

@@ -207,6 +207,10 @@ func init() {
 		if _, err := database.BackfillRitualSlugs(context.Background(), client, logger); err != nil {
 			logger.Fatal("Failed to derive slugs for existing skills", zap.Error(err))
 		}
+		// file_attachments.agent_authored became the origin column; carry the flag over.
+		if _, err := database.BackfillFileOrigins(context.Background(), sqlDB, logger); err != nil {
+			logger.Fatal("Failed to carry agent_authored into file origins", zap.Error(err))
+		}
 	}
 
 	// Ensure seed data exists before serving requests

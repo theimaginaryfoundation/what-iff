@@ -193,6 +193,9 @@ func (t *AgentFileTool) newFile(ctx context.Context, chat *models.Chat, p, conte
 	if err != nil {
 		return nil, err
 	}
+	if err := refuseReservedFolder(folder); err != nil {
+		return nil, err
+	}
 	if err := checkAgentFileSize(content); err != nil {
 		return nil, err
 	}
@@ -211,11 +214,11 @@ func (t *AgentFileTool) newFile(ctx context.Context, chat *models.Chat, p, conte
 		return nil, err
 	}
 	att := models.FileAttachment{
-		Name:          name,
-		FileType:      mimeType,
-		S3Key:         key,
-		Folder:        folder,
-		AgentAuthored: true,
+		Name:     name,
+		FileType: mimeType,
+		S3Key:    key,
+		Folder:   folder,
+		Origin:   models.FileOriginAgent,
 	}
 	if chat.PersonalityID != uuid.Nil {
 		pid := chat.PersonalityID
@@ -332,6 +335,9 @@ func (t *AgentFileTool) move(ctx context.Context, chat *models.Chat, file, p str
 	if err != nil {
 		return agentFileWriteResult{}, err
 	}
+	if err := refuseReservedFolder(folder); err != nil {
+		return agentFileWriteResult{}, err
+	}
 	if !strings.EqualFold(name, att.Name) && !strings.EqualFold(pathExt(name), pathExt(att.Name)) {
 		return agentFileWriteResult{}, agentFileErrorf("a move keeps the file's type; name it with %s", pathExt(att.Name))
 	}
@@ -364,4 +370,13 @@ func pathExt(name string) string {
 		return strings.ToLower(name[i:])
 	}
 	return ""
+}
+
+// refuseReservedFolder keeps agent files out of the skills folder, which holds skill bundles
+// managed by the skill editor (ADR 0x035 §3).
+func refuseReservedFolder(folder string) error {
+	if models.IsReservedFolder(folder) {
+		return agentFileErrorf("the %q folder holds skill bundles and is managed in the skill editor; put the file elsewhere", models.ReservedSkillsFolder)
+	}
+	return nil
 }

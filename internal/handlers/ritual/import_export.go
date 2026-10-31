@@ -2,6 +2,7 @@ package ritual
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -32,9 +33,8 @@ type ImportResult struct {
 	Ritual *models.Ritual `json:"ritual"`
 	// Warnings are the lenient-parse repairs and import-time substitutions the user should see.
 	Warnings []string `json:"warnings"`
-	// SkippedFiles counts bundle members other than SKILL.md. This build stores the skill's text
-	// only; bundle files arrive with ADR 0x035 step 3.
-	SkippedFiles int `json:"skipped_files"`
+	// FilesImported counts the bundle files stored under skills/<slug>/ (ADR 0x035 §3).
+	FilesImported int `json:"files_imported"`
 	// ConnectorsLinked and ConnectorsMissing report the exporter's connector names matched to this
 	// account's connectors by name, and the ones with no match.
 	ConnectorsLinked  []string `json:"connectors_linked"`
@@ -44,7 +44,9 @@ type ImportResult struct {
 // ImportRitual handles POST /ritual/import: a multipart form with either `file` (a skill zip, or a
 // lone SKILL.md) or several `files` parts whose filenames are paths inside the skill directory.
 // An optional `personality_id` field binds the new skill to a personality. A slug the account
-// already uses gets a numeric suffix rather than failing, with a warning.
+// already uses gets a numeric suffix rather than failing, with a warning. With `ritual_id`, the
+// bundle is imported into that existing skill instead: its text fields are replaced (the slug is
+// kept) and its files are replaced by the bundle's.
 func (h *Handler) ImportRitual(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserIDFromContext(r.Context())
 	if !ok {
@@ -92,30 +94,47 @@ func (h *Handler) ImportRitual(w http.ResponseWriter, r *http.Request) {
 
 	result := ImportResult{
 		Warnings:          append([]string{}, parsed.Warnings...),
-		SkippedFiles:      len(bundle.Files),
 		ConnectorsLinked:  []string{},
 		ConnectorsMissing: []string{},
-	}
-	if result.SkippedFiles > 0 {
-		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("%d bundle file(s) were not imported: this version stores a skill's text only", result.SkippedFiles))
 	}
 
 	ritual := parsed.Ritual
 	ritual.PersonalityID = personalityID
-	requested := ritual.Slug
-	ritual.Slug, err = skills.UniqueSlug(requested, func(candidate string) (bool, error) {
-		return h.ds.RitualSlugTaken(r.Context(), userID, candidate, uuid.Nil)
-	})
-	if err != nil {
-		h.respondSkillError(w, err, "Failed to choose a slug")
-		return
-	}
-	if ritual.Slug != requested {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("slug %q is already in use; imported as %q", requested, ritual.Slug))
+	var existing *models.Ritual
+	if raw := strings.TrimSpace(r.FormValue("ritual_id")); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid ritual_id", err)
+			return
+		}
+		existing, err = h.ds.GetRitual(r.Context(), userID, id)
+		if err == datastore.ErrRitualNotFound {
+			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Ritual not found", nil)
+			return
+		} else if err != nil {
+			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to load skill", err)
+			return
+		}
+		// The existing skill keeps its slug, personality and connectors; the bundle replaces the rest.
+		if ritual.Slug != existing.Slug {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("the bundle names the skill %q; it stays %q here", ritual.Slug, existing.Slug))
+		}
+		ritual.ID, ritual.Slug, ritual.PersonalityID = existing.ID, existing.Slug, existing.PersonalityID
+	} else {
+		requested := ritual.Slug
+		ritual.Slug, err = skills.UniqueSlug(requested, func(candidate string) (bool, error) {
+			return h.ds.RitualSlugTaken(r.Context(), userID, candidate, uuid.Nil)
+		})
+		if err != nil {
+			h.respondSkillError(w, err, "Failed to choose a slug")
+			return
+		}
+		if ritual.Slug != requested {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("slug %q is already in use; imported as %q", requested, ritual.Slug))
+		}
 	}
 
-	if len(parsed.Connectors) > 0 {
+	if len(parsed.Connectors) > 0 && existing == nil {
 		ids, linked, missing, err := h.matchConnectorsByName(r, userID, parsed.Connectors)
 		if err != nil {
 			h.logger.Error("failed to match skill connectors", zap.String("user_id", userID.String()), zap.Error(err))
@@ -129,14 +148,26 @@ func (h *Handler) ImportRitual(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	created, err := h.ds.CreateRitual(r.Context(), userID, ritual)
+	var saved *models.Ritual
+	if existing != nil {
+		saved, err = h.ds.UpdateRitual(r.Context(), userID, ritual)
+	} else {
+		saved, err = h.ds.CreateRitual(r.Context(), userID, ritual)
+	}
 	if err != nil {
 		h.logger.Error("failed to import ritual", zap.String("user_id", userID.String()), zap.Error(err))
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to import skill", err)
 		return
 	}
-	result.Ritual = created
-	handlerutils.RespondWithJSON(w, h.logger, http.StatusCreated, result)
+	result.Ritual = saved
+	stored, fileWarnings := h.storeBundleFiles(r.Context(), userID, saved, bundle.Files)
+	result.FilesImported = stored
+	result.Warnings = append(result.Warnings, fileWarnings...)
+	status := http.StatusCreated
+	if existing != nil {
+		status = http.StatusOK
+	}
+	handlerutils.RespondWithJSON(w, h.logger, status, result)
 }
 
 // readImportBundle builds the bundle from the form: a `file` part that is a zip or a lone
@@ -215,7 +246,7 @@ func (h *Handler) matchConnectorsByName(r *http.Request, userID uuid.UUID, names
 }
 
 // ExportRitual handles GET /ritual/{id}/export: the skill as an Agent Skills zip holding
-// `<slug>/SKILL.md`, rendered from the stored fields.
+// `<slug>/SKILL.md`, rendered from the stored fields, plus the bundle's files at their paths.
 func (h *Handler) ExportRitual(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserIDFromContext(r.Context())
 	if !ok {
@@ -258,8 +289,13 @@ func (h *Handler) ExportRitual(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to render SKILL.md", err)
 		return
 	}
+	bundleFiles, err := h.exportSkillFiles(r.Context(), userID, ritual)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the skill's files", err)
+		return
+	}
 	var buf bytes.Buffer
-	if err := skills.WriteBundle(&buf, slug, skillMD, nil); err != nil {
+	if err := skills.WriteBundle(&buf, slug, skillMD, bundleFiles); err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to build skill bundle", err)
 		return
 	}
@@ -286,4 +322,29 @@ func quoteAll(items []string) []string {
 		out[i] = fmt.Sprintf("%q", s)
 	}
 	return out
+}
+
+// exportSkillFiles reads the skill's bundle files from the object store for an export. A file whose
+// object is missing is skipped with a log line rather than failing the export.
+func (h *Handler) exportSkillFiles(ctx context.Context, userID uuid.UUID, ritual *models.Ritual) ([]skills.File, error) {
+	rows, err := h.ds.ListSkillFiles(ctx, userID, ritual.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 || h.files == nil {
+		return nil, nil
+	}
+	out := make([]skills.File, 0, len(rows))
+	for _, row := range rows {
+		data, err := h.files.DownloadFile(ctx, row.S3Key)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", row.Name, err)
+		}
+		if data == nil {
+			h.logger.Warn("export: skill file object missing", zap.String("file_attachment_id", row.ID.String()), zap.String("key", row.S3Key))
+			continue
+		}
+		out = append(out, skills.File{Path: datastore.SkillFileRelPath(row, ritualSlug(ritual)), Data: data})
+	}
+	return out, nil
 }

@@ -77,6 +77,13 @@ func FileKeyForAgentFile(userID, objectID uuid.UUID, filename string) string {
 	return path.Join("users", userID.String(), "agent", filenameWithFallback(sanitizeFilename(filename), objectID.String()))
 }
 
+// FileKeyForSkillFile constructs the S3 object key for one version of a skill bundle file
+// (ADR 0x035 §3). Replacing a file stores a new object and swaps the row's key.
+// Format: users/{userID}/skills/{skillID}/{objectID_filename}
+func FileKeyForSkillFile(userID, skillID, objectID uuid.UUID, filename string) string {
+	return path.Join("users", userID.String(), "skills", skillID.String(), filenameWithFallback(sanitizeFilename(filename), objectID.String()))
+}
+
 // FileKeyForImageThumbnail constructs the S3 object key for a JPEG thumbnail.
 // Thumbnails are always stored as JPEG regardless of the original format.
 // Format: users/{userID}/images/thumbs/{attachmentID}.jpg

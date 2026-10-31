@@ -125,6 +125,8 @@ Rules for skill files:
 
 The `skills/` top-level folder is **reserved**: `agent_file_write` and the gallery refuse to create, move or upload there except through the skill editor and import.
 
+**Implementation notes (step 3, 2026-10-31).** The six #406 asks were applied in this stack as an isolated commit to be dropped when #406 lands them: `origin` enum (with `skill`) in place of `agent_authored`, the reserved folder, and `find_context` keyed on `StoredUnchunked`. The exported path resolver was not needed here (`FindFileAttachmentsAtPath` already resolves `skills/<slug>/…`). File size is not stored on `file_attachments`, so `<skill_resources>` lists paths and types, not sizes. `SKILL.md` is not served as a virtual file by `agent_file_read` yet; the skill's instructions reach the model through `load_skill`.
+
 ### 4. Loaded skills persist per chat and unload at checkpoints, like tools
 
 A new table `chat_skill_states` (`chat_id`, `ritual_id`, `loaded_at`, unique on the pair) holds the skills the agent loaded in a chat.

@@ -79,6 +79,10 @@ func (Ritual) Edges() []ent.Edge {
 			Ref("rituals"),
 		edge.From("agent_jobs", AgentJob.Type).
 			Ref("rituals"),
+		// The skill bundle's files, as file_attachments rows with origin = skill (ADR 0x035 §3).
+		// Deleting the skill deletes its files' rows; the handler releases their objects first.
+		edge.To("files", FileAttachment.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }
 

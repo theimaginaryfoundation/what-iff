@@ -49,12 +49,19 @@ func (FileAttachment) Fields() []ent.Field {
 		field.Time("created_at").
 			Immutable().
 			Default(time.Now),
-		// Agent-authored files (ADR 0x034). An agent may change only the files its personality
-		// wrote, or, with no personality, the files written in its conversation; every other file,
-		// including all of the user's uploads, is read-only to agents.
-		field.Bool("agent_authored").
-			Default(false).
-			Comment("Written by an agent's file tools; only these files can be changed by an agent."),
+		// Who wrote the file (ADR 0x034, 0x035): the user (uploads, imports and everything
+		// generated for a reply), an agent's file tools, or a skill bundle. An agent may change only
+		// agent files its personality wrote, or, with no personality, the files written in its
+		// conversation; every other file, including all of the user's uploads and every skill file,
+		// is read-only to agents. Agent and skill files are never chunked for search.
+		field.Enum("origin").
+			Values("user", "agent", "skill").
+			Default("user").
+			Comment("user: uploaded or generated for a reply; agent: written by an agent's file tools; skill: a skill bundle's file."),
+		field.UUID("skill_id", uuid.UUID{}).
+			Optional().
+			Nillable().
+			Comment("The skill (ritual) whose bundle this file belongs to, for origin = skill; the row goes with the skill."),
 		field.UUID("created_by_personality_id", uuid.UUID{}).
 			Optional().
 			Nillable().
@@ -83,6 +90,12 @@ func (FileAttachment) Edges() []ent.Edge {
 		edge.From("personality", Personality.Type).
 			Ref("file_attachments").
 			Unique(),
+		// A skill bundle's files (ADR 0x035 §3): deleting the skill deletes its files' rows; the
+		// handler releases their objects first.
+		edge.From("skill", Ritual.Type).
+			Ref("files").
+			Unique().
+			Field("skill_id"),
 	}
 }
 
@@ -100,5 +113,7 @@ func (FileAttachment) Indexes() []ent.Index {
 		index.Fields("s3_key").Edges("owner"),
 		// Backs gallery folder navigation and the agent's folder-prefix listing.
 		index.Fields("folder").Edges("owner"),
+		// Backs a skill's file listing and its cascade.
+		index.Fields("skill_id"),
 	}
 }

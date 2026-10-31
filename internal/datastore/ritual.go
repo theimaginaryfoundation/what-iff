@@ -460,17 +460,18 @@ func (d *Datastore) UpdateRitual(ctx context.Context, userID uuid.UUID, ritual m
 		}
 	}()
 
-	// Check if ritual exists and belongs to the user
-	exists, err := tx.Ritual.Query().
+	// Check if ritual exists and belongs to the user; the current row's slug tells whether the
+	// bundle files need refiling.
+	current, err := tx.Ritual.Query().
 		Where(
 			entritual.ID(ritual.ID),
 			entritual.HasOwnerWith(
 				user.ID(userID),
 			),
 		).
-		Exist(ctx)
+		Only(ctx)
 
-	if err != nil {
+	if err != nil && !ent.IsNotFound(err) {
 		d.logger.Error(i18n.T1("query.failed", "Entity", "ritual"), zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
@@ -478,7 +479,7 @@ func (d *Datastore) UpdateRitual(ctx context.Context, userID uuid.UUID, ritual m
 		return nil, err
 	}
 
-	if !exists {
+	if current == nil {
 		d.logger.Error(i18n.T2("ritual.not_found_or_unauthorized", "RitualID", ritual.ID.String(), "UserID", userID.String()))
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
@@ -569,6 +570,16 @@ func (d *Datastore) UpdateRitual(ctx context.Context, userID uuid.UUID, ritual m
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}
 		return nil, err
+	}
+	// The bundle's files are filed under skills/<slug>/…; a new slug moves them along (ADR 0x035 §3).
+	if newSlug := strings.TrimSpace(ritual.Slug); newSlug != "" && newSlug != current.Slug {
+		if err := moveSkillFilesToSlug(ctx, tx, ritual.ID, current.Slug, newSlug); err != nil {
+			d.logger.Error("failed to refile a skill's files after its slug changed", zap.Error(err))
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, err
+		}
 	}
 
 	// Load the relationships

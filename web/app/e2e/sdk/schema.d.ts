@@ -8442,7 +8442,7 @@ export interface paths {
         put?: never;
         /**
          * Import a skill from an Agent Skills bundle
-         * @description Creates a skill from a SKILL.md (ADR 0x035 §7). Send a multipart form with either `file` (a zip with SKILL.md at its root or inside one top-level folder, or a lone SKILL.md) or several `files` parts whose filenames are paths inside the skill directory. Frontmatter is parsed leniently: a missing or invalid `name` is derived with a warning, unknown keys are kept in `metadata`, and only a missing `description` or body is an error. A slug the account already uses gets a numeric suffix. Bundle files other than SKILL.md are not stored by this version and are counted in `skipped_files`.
+         * @description Creates a skill from a SKILL.md (ADR 0x035 §7). Send a multipart form with either `file` (a zip with SKILL.md at its root or inside one top-level folder, or a lone SKILL.md) or several `files` parts whose filenames are paths inside the skill directory. Frontmatter is parsed leniently: a missing or invalid `name` is derived with a warning, unknown keys are kept in `metadata`, and only a missing `description` or body is an error. A slug the account already uses gets a numeric suffix. Bundle files (`scripts/`, `references/`, `assets/`, any content type) are stored under `skills/<slug>/` as the skill's files, counted in `files_imported`.
          */
         post: {
             parameters: {
@@ -8466,10 +8466,24 @@ export interface paths {
                          * @description Bind the imported skill to this personality
                          */
                         personality_id?: string;
+                        /**
+                         * Format: uuid
+                         * @description Import into this existing skill instead of creating one: its text fields are replaced (the slug, personality and connectors are kept) and its bundle files are replaced by the bundle's. Answers 200.
+                         */
+                        ritual_id?: string;
                     };
                 };
             };
             responses: {
+                /** @description Bundle imported into the existing skill named by `ritual_id` */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RitualImportResult"];
+                    };
+                };
                 /** @description Skill imported */
                 201: {
                     headers: {
@@ -8532,7 +8546,7 @@ export interface paths {
         };
         /**
          * Export a skill as an Agent Skills bundle
-         * @description A zip holding `<slug>/SKILL.md`, rendered from the skill's fields: `name` (the slug), `description`, `license`, `compatibility`, `allowed-tools`, and `metadata` with `display_name`, `whatiff-hotkeys`, `whatiff-connectors` (connector names) and the invocation flags. Imports unchanged into any Agent Skills harness.
+         * @description A zip holding `<slug>/SKILL.md`, rendered from the skill's fields, plus the bundle's files at their paths. SKILL.md carries `name` (the slug), `description`, `license`, `compatibility`, `allowed-tools`, and `metadata` with `display_name`, `whatiff-hotkeys`, `whatiff-connectors` (connector names) and the invocation flags. Imports unchanged into any Agent Skills harness.
          */
         get: {
             parameters: {
@@ -8580,6 +8594,199 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a skill's bundle files
+         * @description The skill's reference documents, scripts and assets (ADR 0x035 §3), filed under `skills/<slug>/`, by folder then name.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The bundle's files */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RitualFile"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Add or replace a file in a skill's bundle
+         * @description Multipart form with `file` and `path`, the file's place in the bundle (e.g. `references/FORMS.md`; defaults to `references/<filename>`). A file already at that path is replaced. Any content type; 10 MB per file, 200 files per skill. Skill files are read-only to agents (`agent_file_read`) and to gallery moves.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /** Format: binary */
+                        file: string;
+                        /** @description Path inside the bundle, e.g. scripts/fill.py */
+                        path?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The stored file */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RitualFile"];
+                    };
+                };
+                /** @description Bad path or the bundle is full; `message` says which */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description File larger than 10 MB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description This deployment has no file storage for skill files */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/{id}/files/{fileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a file from a skill's bundle */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    fileId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Removed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual or file not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -14707,8 +14914,16 @@ export interface components {
              * @enum {string}
              */
             source?: "generated" | "imported";
-            /** @description Written by an agent's file tools (ADR 0x034). Only these files can be changed by an agent, and only by the personality (or, with none, the thread) that created them. Omitted when false. */
-            agent_authored?: boolean;
+            /**
+             * @description Who wrote the file: `user` (uploads, imports and everything generated for a reply), `agent` (an agent's file tools, ADR 0x034; only these can be changed by an agent, and only by the personality or, with none, the thread that created them) or `skill` (a skill bundle's file under `skills/<slug>/`, ADR 0x035; read-only, managed in the skill editor). Omitted for `user`.
+             * @enum {string}
+             */
+            origin?: "user" | "agent" | "skill";
+            /**
+             * Format: uuid
+             * @description For origin "skill", the skill whose bundle the file belongs to.
+             */
+            skill_id?: string;
             /**
              * Format: uuid
              * @description Personality whose agent created the file (agent-authored files only).
@@ -15078,12 +15293,25 @@ export interface components {
             name: string;
             description: string;
         };
+        /** @description A skill bundle file (ADR 0x035 §3). */
+        RitualFile: {
+            /** Format: uuid */
+            id: string;
+            /** @description Path inside the bundle, e.g. references/FORMS.md */
+            path: string;
+            file_type: string;
+            /** @description Gallery folder, skills/<slug>/<subdir>; with name, the path agent_file_read takes */
+            folder: string;
+            name: string;
+            /** Format: date-time */
+            created_at: string;
+        };
         RitualImportResult: {
             ritual: components["schemas"]["Ritual"];
             /** @description Lenient-parse repairs and import-time substitutions to show the user */
             warnings: string[];
-            /** @description Bundle members other than SKILL.md, not stored by this version */
-            skipped_files: number;
+            /** @description Bundle files stored under skills/<slug>/ */
+            files_imported: number;
             /** @description Exporter connector names matched to this account's connectors */
             connectors_linked: string[];
             /** @description Exporter connector names with no match here */

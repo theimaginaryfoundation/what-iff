@@ -61,10 +61,33 @@ func newTestHandler(t *testing.T) (*Handler, *mux.Router, uuid.UUID) {
 
 	ds, err := datastore.NewDatastore(client, db, zap.NewNop(), "12345678901234567890123456789012", nil)
 	require.NoError(t, err)
-	h := NewHandler(ds, zap.NewNop())
+	h := NewHandler(ds, &memFileStore{objects: map[string][]byte{}}, zap.NewNop())
 	router := mux.NewRouter()
 	h.RegisterRoutes(router)
 	return h, router, userID
+}
+
+// memFileStore is an in-memory storage.FileStore for the bundle file tests.
+type memFileStore struct {
+	objects map[string][]byte
+}
+
+func (m *memFileStore) UploadFile(_ context.Context, key string, content []byte, _ string) error {
+	m.objects[key] = append([]byte{}, content...)
+	return nil
+}
+
+func (m *memFileStore) DownloadFile(_ context.Context, key string) ([]byte, error) {
+	data, ok := m.objects[key]
+	if !ok {
+		return nil, nil
+	}
+	return data, nil
+}
+
+func (m *memFileStore) DeleteFile(_ context.Context, key string) error {
+	delete(m.objects, key)
+	return nil
 }
 
 func asUser(req *http.Request, userID uuid.UUID) *http.Request {
@@ -146,9 +169,9 @@ func TestImportRitual_ZipThenExportRoundTrip(t *testing.T) {
 	require.Equal(t, "Ctrl+Shift+1", res.Ritual.Hotkeys)
 	require.Equal(t, "MIT", res.Ritual.LicenseText())
 	require.Equal(t, []string{"web_search"}, res.Ritual.AllowedToolList())
-	require.Equal(t, 2, res.SkippedFiles)
+	require.Equal(t, 2, res.FilesImported)
 	require.Equal(t, []string{"Missing Connector"}, res.ConnectorsMissing)
-	require.Len(t, res.Warnings, 2, "skipped files and the missing connector: %v", res.Warnings)
+	require.Len(t, res.Warnings, 1, "only the missing connector: %v", res.Warnings)
 
 	// A second import of the same bundle gets a suffixed slug and says so.
 	body, ctype = multipartFile(t, "file", "SKILL.md", []byte(testSkillMD), nil)
@@ -172,12 +195,18 @@ func TestImportRitual_ZipThenExportRoundTrip(t *testing.T) {
 
 	zr, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
 	require.NoError(t, err)
-	require.Len(t, zr.File, 1)
-	require.Equal(t, "pdf-forms/SKILL.md", zr.File[0].Name)
-	f, err := zr.File[0].Open()
-	require.NoError(t, err)
-	exported, err := io.ReadAll(f)
-	require.NoError(t, err)
+	names := map[string]string{}
+	for _, zf := range zr.File {
+		f, err := zf.Open()
+		require.NoError(t, err)
+		data, err := io.ReadAll(f)
+		require.NoError(t, err)
+		names[zf.Name] = string(data)
+	}
+	require.Len(t, names, 3, "SKILL.md plus the two bundle files: %v", names)
+	require.Equal(t, "print('hi')", names["pdf-forms/scripts/fill.py"])
+	require.Equal(t, "ref", names["pdf-forms/references/FORMS.md"])
+	exported := []byte(names["pdf-forms/SKILL.md"])
 	parsed, err := skills.ParseSkillMD(exported)
 	require.NoError(t, err)
 	require.Equal(t, "pdf-forms", parsed.Ritual.Slug)

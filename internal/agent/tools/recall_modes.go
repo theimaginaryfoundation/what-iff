@@ -416,7 +416,7 @@ func (t *RecallTool) fetchFile(ctx context.Context, userID uuid.UUID, fa *models
 	if strings.HasPrefix(fa.FileType, models.ImageMIMEPrefix) {
 		return t.fetchImage(ctx, userID, fa)
 	}
-	if fa.AgentAuthored {
+	if fa.StoredUnchunked() {
 		return t.fetchAgentFile(ctx, fa)
 	}
 	return t.fetchFileChunks(ctx, fa.ID, fa.Name, token, maxChunks)

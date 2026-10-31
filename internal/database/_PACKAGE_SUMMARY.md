@@ -14,6 +14,7 @@
 - Driver imports: PostgreSQL (and MySQL driver may be present for tooling compatibility — verify `db.go`).
 - **`BackfillRitualLinks`** (`ritual_links.go`): after the schema migration, copies mode and job skill links from the one-to-many columns ent used to keep on `rituals` (`mood_rituals`, `agent_job_rituals`) into the join tables of the same name (ADR 0x035 §11).
   Idempotent (`ON CONFLICT DO NOTHING`) and a no-op once `DESTRUCTIVE_MIGRATION` has dropped the columns; `cmd/api-server` calls it on every start that migrates.
+- **`BackfillFileOrigins`** (`file_origins.go`): marks rows the legacy `file_attachments.agent_authored` flag set with `origin = 'agent'` (the enum that replaced the flag, ADR 0x035); idempotent and a no-op once the column is dropped.
 - **`BackfillRitualSlugs`** (`ritual_slugs.go`): gives rituals created before the `slug` column a slug derived from their name, unique per owner (`skills.Slugify` + `skills.UniqueSlug`), so the partial unique index can hold; also called on every migrating start and finds work once.
 
 ## Key types and entry points
@@ -45,6 +46,7 @@
 - `poolmetrics_test.go` — pool gauges against an in-memory sqlite `*sql.DB`.
 - `seed_test.go` — `EnsureSeedData` over sqlmock: with catalog seeding off it issues no catalog query, and with it on the catalog step runs.
 - `ritual_links_test.go` — the link backfill against in-memory sqlite: copies once, skips existing rows, and is a no-op without the legacy columns.
+- `file_origins_test.go` — the origin backfill: flagged rows marked once, nothing without the legacy column.
 - `ritual_slugs_test.go` — the slug backfill over the generated schema on sqlite: derived slugs, suffixes within an owner, editor-set slugs untouched.
 
 ## Related documentation

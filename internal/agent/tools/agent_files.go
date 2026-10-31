@@ -126,7 +126,7 @@ func splitAgentFilePath(p string) (folder, name string, err error) {
 // ownsAgentFile reports whether the agent in chat may change att: an agent-authored file created
 // by this chat's personality, or with no personality, by this conversation.
 func ownsAgentFile(chat *models.Chat, att *models.FileAttachment) bool {
-	if att == nil || !att.AgentAuthored {
+	if att == nil || !att.IsAgentAuthored() {
 		return false
 	}
 	if chat.PersonalityID != uuid.Nil {
@@ -197,7 +197,10 @@ func (t *AgentFileTool) resolveOwned(ctx context.Context, chat *models.Chat, fil
 	}
 	if !ownsAgentFile(chat, att) {
 		what := "the user's file"
-		if att.AgentAuthored {
+		switch {
+		case att.IsSkillFile():
+			what = "a skill's file, managed in the skill editor"
+		case att.IsAgentAuthored():
 			what = "a file another agent created"
 		}
 		return nil, agentFileErrorf("%q is %s, which you can read but not change. To work from it, copy it to a new file of your own with action \"copy\".", filePath(att), what)
@@ -210,7 +213,7 @@ func readableAsText(att *models.FileAttachment) bool {
 	if strings.HasPrefix(att.FileType, models.ImageMIMEPrefix) {
 		return false
 	}
-	if att.AgentAuthored || strings.HasPrefix(att.FileType, "text/") ||
+	if att.IsAgentAuthored() || strings.HasPrefix(att.FileType, "text/") ||
 		filechunker.IsTextType(att.FileType) || filechunker.IsTextFileByExtension(att.Name) {
 		return true
 	}
@@ -218,14 +221,14 @@ func readableAsText(att *models.FileAttachment) bool {
 	return ok
 }
 
-// readText loads att's full text. Agent files are read from their current object; other files go
-// through the attachment text resolver, which also knows legacy keys.
+// readText loads att's full text. Agent and skill files are read from their current object; other
+// files go through the attachment text resolver, which also knows legacy keys.
 func (t *AgentFileTool) readText(ctx context.Context, att *models.FileAttachment) (string, error) {
 	if !readableAsText(att) {
 		return "", agentFileErrorf("%q is not a text file (%s); use find_context to look at it", filePath(att), att.FileType)
 	}
 	var raw []byte
-	if att.AgentAuthored {
+	if att.StoredUnchunked() {
 		data, err := t.files.DownloadFile(ctx, att.S3Key)
 		if err != nil {
 			return "", err

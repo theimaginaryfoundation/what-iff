@@ -58,19 +58,7 @@ func BackfillRitualLinks(ctx context.Context, db *sql.DB, logger *zap.Logger) (i
 	return copied, nil
 }
 
-// ritualsColumnExists reports whether `rituals` has the named column, on PostgreSQL or SQLite
-// (tests). The column name comes from ritualLinkBackfills, never from input.
+// ritualsColumnExists reports whether `rituals` has the named column.
 func ritualsColumnExists(ctx context.Context, db *sql.DB, column string) (bool, error) {
-	var query string
-	switch databaseType() {
-	case "sqlite3", "sqlite":
-		query = fmt.Sprintf(`SELECT COUNT(*) FROM pragma_table_info('rituals') WHERE name = '%s'`, column)
-	default:
-		query = fmt.Sprintf(`SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'rituals' AND column_name = '%s'`, column)
-	}
-	var count int
-	if err := db.QueryRowContext(ctx, query).Scan(&count); err != nil {
-		return false, err
-	}
-	return count > 0, nil
+	return columnExists(ctx, db, "rituals", column)
 }

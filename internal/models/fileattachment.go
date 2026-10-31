@@ -62,12 +62,15 @@ type FileAttachment struct {
 	// direct file attachment ownership and expression-image associations.
 	Personalities []FileAttachmentPersonalityRef `json:"personalities,omitempty"`
 	CreatedAt     time.Time                      `json:"created_at"`
-	// AgentAuthored marks a file written by the agent file tools (ADR 0x034). Only these can be
-	// changed by an agent, and only by the one that created them: CreatedByPersonalityID, or with
-	// no personality, CreatedByChatID.
-	AgentAuthored          bool       `json:"agent_authored,omitempty"`
+	// Origin says who wrote the file (FileOrigin): the user, an agent's file tools (ADR 0x034) or
+	// a skill bundle (ADR 0x035). Only agent files can be changed by an agent, and only by the one
+	// that created them: CreatedByPersonalityID, or with no personality, CreatedByChatID. Empty
+	// means FileOriginUser (rows read without the column).
+	Origin                 FileOrigin `json:"origin,omitempty"`
 	CreatedByPersonalityID *uuid.UUID `json:"created_by_personality_id,omitempty"`
 	CreatedByChatID        *uuid.UUID `json:"created_by_chat_id,omitempty"`
+	// SkillID is the skill whose bundle the file belongs to, for Origin == FileOriginSkill.
+	SkillID *uuid.UUID `json:"skill_id,omitempty"`
 	// UpdatedAt is when an agent last changed the content; nil for a file never changed.
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 	// Source is empty when the chat message edge was not loaded, so callers can
@@ -82,14 +85,27 @@ type FileAttachmentPersonalityRef struct {
 	Name string    `json:"name"`
 }
 
-// FileOrigin says who wrote a file: an agent's file tools, or the user (uploads, imports and
-// everything generated for a reply).
+// FileOrigin says who wrote a file: an agent's file tools, a skill bundle, or the user (uploads,
+// imports and everything generated for a reply).
 type FileOrigin string
 
 const (
 	FileOriginAgent FileOrigin = "agent"
 	FileOriginUser  FileOrigin = "user"
+	FileOriginSkill FileOrigin = "skill"
 )
+
+// IsAgentAuthored reports whether an agent's file tools wrote the file.
+func (f *FileAttachment) IsAgentAuthored() bool { return f != nil && f.Origin == FileOriginAgent }
+
+// IsSkillFile reports whether the file belongs to a skill bundle.
+func (f *FileAttachment) IsSkillFile() bool { return f != nil && f.Origin == FileOriginSkill }
+
+// StoredUnchunked reports whether the file's text is read straight from its object rather than
+// from search chunks: agent and skill files are never chunked.
+func (f *FileAttachment) StoredUnchunked() bool {
+	return f != nil && (f.Origin == FileOriginAgent || f.Origin == FileOriginSkill)
+}
 
 // FileAttachmentFilters defines filters for listing file attachments
 type FileAttachmentFilters struct {
@@ -111,8 +127,9 @@ type FileAttachmentFilters struct {
 	// FolderPrefix matches that folder and everything beneath it ("charts" matches "charts" and
 	// "charts/oura", not "charts-old"). A normalized path; "" matches everything.
 	FolderPrefix *string `json:"folder_prefix,omitempty"`
-	// Origin narrows to agent-authored files (FileOriginAgent) or to every other file
-	// (FileOriginUser); empty applies no narrowing.
+	// Origin narrows to one origin: agent-authored files, skill bundle files, or the user's files.
+	// Empty applies no narrowing except that skill files are left out unless the listing is under
+	// the reserved skills folder (they belong to the skill editor, not the gallery).
 	Origin FileOrigin `json:"origin,omitempty"`
 	// Kind narrows to images or to every other file; empty (or GalleryKindAll) applies no narrowing.
 	Kind    GalleryKind `json:"kind,omitempty"`
