@@ -42,8 +42,12 @@ export type QuickAction = (typeof quickActions)[number];
 /** Chrome that wraps every authenticated page (the sidebar and its controls). */
 export class AppShell {
   constructor(private readonly page: Page) {
+    this.sidebar = this.page.locator('aside.app-sidebar');
     this.recentThreadsSection = this.page.locator('.app-sidebar__recent');
   }
+
+  /** The sidebar itself, on every layout (off-canvas on narrow viewports). */
+  readonly sidebar: Locator;
 
   /** Sidebar button that opens the Profile & Settings modal. */
   openProfileButton() {
@@ -95,7 +99,7 @@ export class AppShell {
   async prepareSidebar(): Promise<void> {
     // The probes below don't wait, so first wait for the shell itself: the sidebar, plus the
     // mobile menu button on narrow viewports, render together once the layout is up.
-    await this.page.locator('aside.app-sidebar').waitFor({ state: 'attached' });
+    await this.sidebar.waitFor({ state: 'attached' });
     await this.openMobileSidebarIfPresent();
     await this.expandSidebarIfCollapsed();
   }
@@ -167,6 +171,6 @@ export class AppShell {
     }
     await this.prepareSidebar();
     // Within the sidebar: a page can repeat an action, hidden where the sidebar offers it.
-    await this.page.locator('aside.app-sidebar').getByRole('button', { name: action, exact: true }).first().click();
+    await this.sidebar.getByRole('button', { name: action, exact: true }).first().click();
   }
 }
