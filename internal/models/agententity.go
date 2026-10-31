@@ -39,6 +39,23 @@ type AgentEntity struct {
 	LastChatID            *uuid.UUID `json:"last_chat_id,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
+	// DeletedAt is set on the tombstone an agent's delete leaves; live entities have nil.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+}
+
+// EntityScope names who sees an entity, in the tool results: EntityScopeUser for every
+// personality of the account, EntityScopePersonality for the one it is pinned to.
+const (
+	EntityScopeUser        = "user"
+	EntityScopePersonality = "personality"
+)
+
+// Scope is the entity's EntityScope.
+func (e *AgentEntity) Scope() string {
+	if e.PinnedPersonalityID != nil {
+		return EntityScopePersonality
+	}
+	return EntityScopeUser
 }
 
 // AgentEntityWriter says who is writing an entity. ActivePersonalityID is the personality of the

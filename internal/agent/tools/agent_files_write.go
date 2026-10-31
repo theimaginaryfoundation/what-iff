@@ -17,12 +17,21 @@ import (
 const agentFileWriteAttempts = 3
 
 // AgentFileWriteDescription is the agent-facing description of agent_file_write.
-var AgentFileWriteDescription = fmt.Sprintf(`Create and change your own text files: notes, journals, drafts, checklists, data you are collecting. They are kept in the user's files (the user sees them in their gallery) and last across conversations. Read them with agent_file_read; find them with list (kind="files", origin="agent").
+var AgentFileWriteDescription = fmt.Sprintf(`Create and change your own text files: notes, journals, drafts, checklists, data you are collecting. Only files you created can be changed; every other file is read-only to you. Files are kept in the user's files (the user sees them in their gallery) and last across conversations. Read them with agent_file_read; find them with list (kind="files", origin="agent").
 
-You can change only files you created. The user's own files, and files other agents made, are read-only: to work from one, copy it to a new file of yours.
+Ownership: "you" is this personality, in any conversation with it (with no personality, this conversation). The user's own files, and files other personalities made, can be read but never changed in place: to work from one, copy it to a new file of yours and change the copy. Readable does not mean editable; agent_file_read reports editable for each file.
 
-action:
-- "create": a new file at path with content. Fails if a file is already at that path.
+Pick the action first, then send only its fields:
+| action | needs | leave out |
+|---|---|---|
+| create | path, content | file, diff |
+| append | file, content | path, diff |
+| patch | file, diff | path, content |
+| delete | file | path, content, diff |
+| copy | file, path | content, diff |
+| move | file, path | content, diff |
+
+- "create": a new file at path with content. Fails if a file is already at that path; read it first if unsure.
 - "append": add content to the end of file (a newline is added between when needed). Best for logs and journals.
 - "patch": change file with diff, a unified diff of that one file. Each hunk starts with "@@ -<line>,<count> +<line>,<count> @@" and has lines starting with ' ' (unchanged), '-' (removed) or '+' (added). Include 2-3 unchanged lines around each change. Hunks are matched by their text, so read the file first and copy its lines exactly; a hunk that does not match is refused and nothing changes.
 - "delete": delete file.
@@ -81,6 +90,55 @@ type agentFileWriteResult struct {
 	Error   string        `json:"error,omitempty"`
 }
 
+// agentFileWriteFields lists, per action, the fields it needs; every other field must be left out.
+var agentFileWriteFields = map[string][]string{
+	"create": {"path", "content"},
+	"append": {"file", "content"},
+	"patch":  {"file", "diff"},
+	"delete": {"file"},
+	"copy":   {"file", "path"},
+	"move":   {"file", "path"},
+}
+
+// checkAgentFileWriteFields refuses a call that leaves out a field its action needs or sends one it
+// does not use, naming the action's fields. An empty string counts as left out, since models often
+// send every property.
+func checkAgentFileWriteFields(a agentFileWriteArgs) string {
+	needs, ok := agentFileWriteFields[a.Action]
+	if !ok {
+		return `action must be one of "create", "append", "patch", "delete", "copy", "move"`
+	}
+	sent := map[string]bool{
+		"file":    strings.TrimSpace(a.File) != "",
+		"path":    strings.TrimSpace(a.Path) != "",
+		"content": a.Content != "",
+		"diff":    strings.TrimSpace(a.Diff) != "",
+	}
+	var missing, extra []string
+	for _, f := range needs {
+		if !sent[f] {
+			missing = append(missing, f)
+		}
+		delete(sent, f)
+	}
+	for _, f := range []string{"file", "path", "content", "diff"} {
+		if sent[f] {
+			extra = append(extra, f)
+		}
+	}
+	if len(missing) == 0 && len(extra) == 0 {
+		return ""
+	}
+	msg := fmt.Sprintf("action %q takes %s", a.Action, strings.Join(needs, " and "))
+	if len(missing) > 0 {
+		msg += "; missing " + strings.Join(missing, ", ")
+	}
+	if len(extra) > 0 {
+		msg += "; leave out " + strings.Join(extra, ", ")
+	}
+	return msg
+}
+
 // Write executes an agent_file_write call.
 func (t *AgentFileTool) Write(ctx context.Context, chat *models.Chat, args []byte) (string, error) {
 	fail := func(msg string) (string, error) {
@@ -93,6 +151,9 @@ func (t *AgentFileTool) Write(ctx context.Context, chat *models.Chat, args []byt
 	var a agentFileWriteArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return fail(fmt.Sprintf("invalid arguments: %v", err))
+	}
+	if msg := checkAgentFileWriteFields(a); msg != "" {
+		return fail(msg)
 	}
 	if len(a.Content) > agentFileMaxCallBytes || len(a.Diff) > agentFileMaxCallBytes {
 		return fail(fmt.Sprintf("one call sends at most %d KB; split the write into several appends", agentFileMaxCallBytes>>10))

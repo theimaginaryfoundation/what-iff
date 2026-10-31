@@ -26,11 +26,12 @@ func createAgentEntityTestSchema(t *testing.T, db *sql.DB) {
 			body text NOT NULL DEFAULT '',
 			last_personality_id uuid,
 			last_chat_id uuid,
+			deleted_at datetime,
 			pinned_personality_id uuid REFERENCES personalities(id) ON DELETE CASCADE,
 			user_agent_entities uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE
 		)`,
-		`CREATE UNIQUE INDEX agententity_key_user_agent_entities ON agent_entities(key, user_agent_entities) WHERE pinned_personality_id IS NULL`,
-		`CREATE UNIQUE INDEX agententity_key_pinned_personality_id_user_agent_entities ON agent_entities(key, pinned_personality_id, user_agent_entities) WHERE pinned_personality_id IS NOT NULL`,
+		`CREATE UNIQUE INDEX agententity_key_user_agent_entities ON agent_entities(key, user_agent_entities) WHERE pinned_personality_id IS NULL AND deleted_at IS NULL`,
+		`CREATE UNIQUE INDEX agententity_key_pinned_personality_id_user_agent_entities ON agent_entities(key, pinned_personality_id, user_agent_entities) WHERE pinned_personality_id IS NOT NULL AND deleted_at IS NULL`,
 	} {
 		_, err := db.Exec(stmt)
 		require.NoError(t, err)
@@ -238,4 +239,80 @@ func TestAgentEntity_UserEditListAndDelete(t *testing.T) {
 	require.NoError(t, ds.DeleteAgentEntity(ctx, userID, pinned.ID))
 	_, err = ds.GetAgentEntity(ctx, userID, pinner, "rex")
 	require.ErrorIs(t, err, ErrAgentEntityNotFound)
+}
+
+func TestAgentEntity_PrefixListShowsWhatAReadSees(t *testing.T) {
+	ds, db, cleanup := newAgentEntityTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := insertEntityTestUser(t, db)
+	pinner := insertEntityTestPersonality(t, db, userID, "Pinner", true)
+	other := insertEntityTestPersonality(t, db, userID, "Other", false)
+
+	_, err := ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: pinner}, "Project Alpha", "pinned")
+	require.NoError(t, err)
+	shared, err := ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: other}, "Project Alpha", "shared")
+	require.NoError(t, err)
+	_, err = ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: other}, "Project Beta", "x")
+	require.NoError(t, err)
+	_, err = ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: other}, "Chris", "x")
+	require.NoError(t, err)
+
+	list, total, err := ds.ListVisibleAgentEntities(ctx, userID, pinner, "  PROJECT ", 10)
+	require.NoError(t, err)
+	require.Equal(t, 2, total, "the shadowed global page is listed once")
+	require.Equal(t, "Project Alpha", list[0].Title)
+	require.Equal(t, models.EntityScopePersonality, list[0].Scope(), "as the pinned page a read returns")
+	require.Equal(t, "Project Beta", list[1].Title)
+
+	list, total, err = ds.ListVisibleAgentEntities(ctx, userID, other, "", 1)
+	require.NoError(t, err)
+	require.Equal(t, 3, total)
+	require.Len(t, list, 1)
+	require.Equal(t, "Chris", list[0].Title)
+
+	// The other personality sees only the shared Project Alpha.
+	list, _, err = ds.ListVisibleAgentEntities(ctx, userID, other, "project a", 10)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.Equal(t, shared.ID, list[0].ID)
+}
+
+func TestAgentEntity_TombstoneHidesAndFreesTheKey(t *testing.T) {
+	ds, db, cleanup := newAgentEntityTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := insertEntityTestUser(t, db)
+	persona := insertEntityTestPersonality(t, db, userID, "Vix", false)
+	chatID := uuid.New()
+	w := models.AgentEntityWriter{ActivePersonalityID: persona, ChatID: chatID}
+
+	created, err := ds.CreateAgentEntity(ctx, userID, w, "Old Car", "Sold in 2025.")
+	require.NoError(t, err)
+
+	tomb, err := ds.TombstoneAgentEntity(ctx, userID, w, "old car")
+	require.NoError(t, err)
+	require.Equal(t, created.ID, tomb.ID)
+	require.NotNil(t, tomb.DeletedAt)
+	require.Equal(t, "Sold in 2025.", tomb.Body, "the tombstone keeps the page for audit")
+	require.Equal(t, &chatID, tomb.LastChatID, "and who deleted it")
+
+	_, err = ds.GetAgentEntity(ctx, userID, persona, "old car")
+	require.ErrorIs(t, err, ErrAgentEntityNotFound)
+	_, err = ds.TombstoneAgentEntity(ctx, userID, w, "old car")
+	require.ErrorIs(t, err, ErrAgentEntityNotFound)
+	_, err = ds.UpdateAgentEntity(ctx, userID, w, "old car", appendTo("x"))
+	require.ErrorIs(t, err, ErrAgentEntityNotFound)
+	_, total, err := ds.ListAgentEntities(ctx, userID, models.AgentEntityFilters{})
+	require.NoError(t, err)
+	require.Zero(t, total, "the Memories panel hides tombstones")
+	_, err = ds.SetAgentEntityBody(ctx, userID, created.ID, "edit")
+	require.ErrorIs(t, err, ErrAgentEntityNotFound)
+
+	again, err := ds.CreateAgentEntity(ctx, userID, w, "Old Car", "A new page.")
+	require.NoError(t, err, "the key is free once the old page is a tombstone")
+	require.NotEqual(t, created.ID, again.ID)
+	var rows int
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM agent_entities WHERE key = 'old car'`).Scan(&rows))
+	require.Equal(t, 2, rows)
 }

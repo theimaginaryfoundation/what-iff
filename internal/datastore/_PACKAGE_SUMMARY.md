@@ -29,6 +29,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     `file_attachments.origin` is a string enum (`user`, `agent`); `FileAttachmentFilters.Origin` narrows listings to one origin, and `toFileAttachmentModel` carries `chunk_status` as `FileAttachment.ChunkStatus`.
   - Entity wiki: `agententity.go` (ADR 0x034) — `GetAgentEntity`, `CreateAgentEntity`, `UpdateAgentEntity` (compare-and-swap on the body, retried), `ListAgentEntities`, `SetAgentEntityBody`, `DeleteAgentEntity`.
     Visibility follows memories: global entities plus those pinned to the active personality, the pinned one winning; a new entity is pinned when the writing personality has `auto_pin_memories` on.
+    `ListVisibleAgentEntities` lists what a conversation sees by key prefix (one row per key, the pinned one), without bodies.
+    `TombstoneAgentEntity` is the agent's delete: it sets `deleted_at` and the writer, and every other query skips tombstones (`liveAgentEntities`); the unique indexes ignore them, and the UI's `DeleteAgentEntity` removes the row.
     **Gallery folders** are a normalized path string on `file_attachments.folder` (a label; the `s3_key` never changes), indexed with the owner.
     `FileAttachmentFilters.Folder` matches one folder exactly and `FolderPrefix` matches a folder and everything beneath it (the trailing `/` keeps `charts` from matching `charts-old`).
     `fileattachment_folders.go` holds `ListGalleryFolders` (files of one `models.GalleryKind` directly in each folder), `MoveFileAttachmentsToFolder` and `MoveGalleryFolder` (a rename that carries every folder beneath it).

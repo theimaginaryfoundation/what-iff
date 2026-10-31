@@ -419,3 +419,14 @@ func TestResolveUserFile_PrefersAndRefuses(t *testing.T) {
 		require.Contains(t, msg, want)
 	}
 }
+
+func TestAgentFiles_WriteFieldsFollowTheAction(t *testing.T) {
+	fx := newAgentFileFixture()
+	chat := fx.chat(uuid.New())
+	requireRefused(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "create", "path": "a.md"}), `action "create" takes path and content; missing content`)
+	requireRefused(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "create", "path": "a.md", "content": "x", "file": "a.md"}), "leave out file")
+	requireRefused(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "delete", "file": "a.md", "diff": "@@ @@"}), `action "delete" takes file; leave out diff`)
+	requireRefused(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "rename", "file": "a.md"}), "action must be one of")
+	// Empty strings for unused fields are fine: models often send every property.
+	requireOK(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "create", "path": "a.md", "content": "x", "file": "", "diff": ""}))
+}

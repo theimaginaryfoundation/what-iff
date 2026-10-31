@@ -23,6 +23,9 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   - Shared file helpers (`user_files.go`): `ResolveUserFile` (an id or `folder/name` path, with one set of refusals), `ReadFileText`, `ReadableAsText`, `FilePath`, `SplitFilePath`, and `FileRefusal` / `AsFileRefusal` for refusals meant for the model.
     Exported so other tools that take a user's file (the private build's `load_file_to_container`) do not copy them.
   - `EntityTool` — `entity_write` and `entity_get` (ADR 0x034): the entity wiki, exact lookup by normalized name, wiki-style `[[links]]` (`entity.go`; tests in `entity_test.go`).
+    `entity_get` also lists names by `prefix` (metadata only); `entity_write` action `delete` is exact-name and leaves a tombstone.
+    Results name the scope `user` or `personality`.
+  - `agent_file_write` refuses a call whose fields do not match its action (`checkAgentFileWriteFields`; empty strings count as left out).
   - `RecallTool` — unified context retrieval (`recall.go`, `recall_modes.go`, `recall_memory_id.go`, `recall_time.go`; see ADR 0x017).
     Modes: `investigate`/`search`/`fetch`/`related`/`origin`/`conversation`/`lifecycle_events` (alias `merge_history`).
     `source_type=summaries` searches per-chat checkpoint Summary memories (via `datastore.GetRelatedSummaryMemories`); `lifecycle_events` lists the memory lifecycle audit trail (`datastore.ListMemoryMergeEvents`).

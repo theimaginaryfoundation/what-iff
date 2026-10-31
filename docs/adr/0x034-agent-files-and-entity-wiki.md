@@ -31,8 +31,8 @@ Four tools, grouped by intent so few schemas are loaded:
 |---|---|
 | `agent_file_write` | create, append, patch (unified diff), delete, copy, move |
 | `agent_file_read` | read (front to back, paged by line), search (the section under a Markdown heading) |
-| `entity_write` | write (create), update (replace), append |
-| `entity_get` | get up to 5 entities by name |
+| `entity_write` | write (create), update (replace), append, delete (exact name, leaves a tombstone) |
+| `entity_get` | get up to 5 entities by exact name, or list names by prefix |
 
 All four are catalog entries with `Loadable: true`, `AgentDefault: true`, `UserToggleable: true` and `SandboxPolicy: SandboxNever`.
 The model sees them by name in the developer context and loads them with `load_tools` when it needs them; they unload at a checkpoint that did not use them.
@@ -86,22 +86,37 @@ The tree is one page, so it defaults to the largest page (200) and the descripti
 Rows of agent files carry `origin: "agent"`.
 There is no separate `list_agent_files` tool.
 
+`agent_file_write` takes one schema for six actions, so its description carries an action matrix (which of `file`, `path`, `content`, `diff` each action needs and which it leaves out), and a call that leaves out a needed field or sends one its action does not use is refused with a message naming the action's fields.
+An empty string counts as left out, because models often send every property.
+A tagged-union schema (one per action) was considered; provider support for `oneOf` in tool schemas is uneven, so validation does the same job.
+The description also states the ownership rule first: only files this personality created can be changed, and readable does not mean editable.
+
 ### 7. Entities are a small Postgres table
 
 `agent_entities` holds one row per entity: a normalized key (lowercased, trimmed, inner whitespace collapsed), the display title, and a body of at most 5,000 characters.
 Lookups are exact on the normalized key; fuzzier matching ("Chris S" finding "Chris Smith") is later work.
+For discovery, `entity_get` also takes a `prefix` instead of `names` and lists the visible entities whose key starts with it (names, scope and last change, not bodies; at most 25, with the total).
+The description tells the agent to read the right one by exact name and to ask when several could be meant, rather than guess or create a near-duplicate.
 A read returns the whole body, and lists the `[[Name]]` links in it so the agent can follow the graph.
 Tool descriptions ask for wiki-style pages: durable facts, one subject per page, other nouns linked as `[[Name]]`.
 
 Writes over the cap are refused with a message to condense the page or move detail to a linked entity, never truncated.
 Updates are a compare-and-swap on the body, retried, so concurrent appends both land.
 
+An agent deletes an entity with `entity_write` action `delete`, by exact name only (a name that matches nothing deletes nothing).
+The delete is a tombstone: the row keeps its body and gets `deleted_at`, with `last_personality_id` / `last_chat_id` recording who deleted it, and every read, listing, update and the Memories panel skip it.
+The partial unique indexes ignore tombstones, so the name is free again at once.
+This keeps an agent's delete auditable and restorable without making deletion hard to reach.
+A user's delete in the Memories panel removes the row outright: it is the user's own correction.
+
 ### 8. Entity scope follows memory pinning
 
-Scope works exactly like user memories:
+Scope works exactly like user memories.
+Tool results name it `user` (every personality of the account sees it) or `personality` (only the personality it is pinned to), not "global", which read as global to the deployment.
+The agent does not choose it:
 
 - A new entity written by a personality with `auto_pin_memories` on is pinned to that personality, and only it sees it.
-- Otherwise the entity is global, and every personality (and conversations with none) sees it.
+- Otherwise the entity is user-scoped ("global" in the schema and UI filter), and every personality (and conversations with none) sees it.
 - A read sees global entities plus the active personality's pinned ones. When both exist for a key, the pinned one wins.
 - `write` is refused when the key is already visible (global or pinned), so a pinned personality never silently shadows a shared page with a new one; it updates the shared page instead.
 
@@ -143,6 +158,8 @@ The public tools stay basic on purpose.
 ## Not done yet
 
 - Opt-in approval flow for agents proposing edits to user files.
+- Showing an agent's deleted entities to the user (review, restore, purge); the tombstones are kept for it.
+- The same exact-name, auditable delete for memories.
 - Wiring entities and files into pre/post-processing (summarizers saving entities, retrieval pulling in linked entities).
 - Fuzzy entity matching and entity aliases.
 - Creating entities from the UI, and showing an entity's links back ("what links here").

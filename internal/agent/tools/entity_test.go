@@ -2,8 +2,10 @@ package tools
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -12,7 +14,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// fakeEntityStore keeps entities by normalized key, all global.
+// fakeEntityStore keeps entities by normalized key, all user-scoped.
 type fakeEntityStore struct {
 	byKey     map[string]*models.AgentEntity
 	lastWrite models.AgentEntityWriter
@@ -67,6 +69,37 @@ func (f *fakeEntityStore) UpdateAgentEntity(_ context.Context, _ uuid.UUID, w mo
 	return e, nil
 }
 
+func (f *fakeEntityStore) TombstoneAgentEntity(_ context.Context, _ uuid.UUID, w models.AgentEntityWriter, key string) (*models.AgentEntity, error) {
+	norm, err := models.NormalizeEntityKey(key)
+	if err != nil {
+		return nil, err
+	}
+	e, ok := f.byKey[norm]
+	if !ok {
+		return nil, datastore.ErrAgentEntityNotFound
+	}
+	delete(f.byKey, norm)
+	f.lastWrite = w
+	now := time.Now()
+	e.DeletedAt = &now
+	return e, nil
+}
+func (f *fakeEntityStore) ListVisibleAgentEntities(_ context.Context, _, _ uuid.UUID, prefix string, limit int) ([]*models.AgentEntity, int, error) {
+	norm := strings.ToLower(strings.Join(strings.Fields(prefix), " "))
+	var keys []string
+	for k := range f.byKey {
+		if strings.HasPrefix(k, norm) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	var out []*models.AgentEntity
+	for _, k := range keys[:min(len(keys), limit)] {
+		out = append(out, f.byKey[k])
+	}
+	return out, len(keys), nil
+}
+
 func TestEntityTools(t *testing.T) {
 	store := &fakeEntityStore{byKey: map[string]*models.AgentEntity{}}
 	tool := &EntityTool{store: store, logger: zap.NewNop()}
@@ -91,7 +124,7 @@ func TestEntityTools(t *testing.T) {
 	chris := entities[0].(map[string]any)
 	require.Equal(t, true, chris["found"])
 	require.Equal(t, "Works with [[Dana Lee]] on [[Project Y]] and [[dana lee]].\nLikes tea.", chris["body"])
-	require.Equal(t, "global", chris["scope"])
+	require.Equal(t, "user", chris["scope"])
 	dana := entities[1].(map[string]any)
 	require.Equal(t, false, dana["found"])
 	require.Equal(t, "No entity with this name.", dana["note"])
@@ -99,8 +132,43 @@ func TestEntityTools(t *testing.T) {
 	requireOK(t, callJSON(t, tool.Write, chat, map[string]any{"action": "update", "name": "chris smith", "text": "Moved to Oslo."}))
 	require.Equal(t, "Moved to Oslo.", store.byKey["chris smith"].Body)
 
-	requireRefused(t, callJSON(t, tool.Write, chat, map[string]any{"action": "delete", "name": "chris smith", "text": "x"}), "action must be")
+	requireRefused(t, callJSON(t, tool.Write, chat, map[string]any{"action": "remove", "name": "chris smith", "text": "x"}), "action must be")
 	sandboxed := *chat
 	sandboxed.ContextScope = models.ContextScopeSandbox
 	requireRefused(t, callJSON(t, tool.Get, &sandboxed, map[string]any{"names": []string{"x"}}), "sandboxed")
+}
+
+func TestEntityTools_PrefixLookupAndDelete(t *testing.T) {
+	store := &fakeEntityStore{byKey: map[string]*models.AgentEntity{}}
+	tool := &EntityTool{store: store, logger: zap.NewNop()}
+	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), PersonalityID: uuid.New()}
+	for _, name := range []string{"Project Alpha", "Project Beta", "Chris Smith"} {
+		requireOK(t, callJSON(t, tool.Write, chat, map[string]any{"action": "write", "name": name, "text": "x"}))
+	}
+
+	res := callJSON(t, tool.Get, chat, map[string]any{"prefix": "project"})
+	requireOK(t, res)
+	require.Equal(t, "prefix", res["match_type"])
+	require.EqualValues(t, 2, res["total"])
+	matches := res["matches"].([]any)
+	first := matches[0].(map[string]any)
+	require.Equal(t, "Project Alpha", first["name"])
+	require.Equal(t, "user", first["scope"])
+	require.Nil(t, first["body"], "a prefix lookup lists names, not pages")
+
+	require.Contains(t, callJSON(t, tool.Get, chat, map[string]any{"prefix": "zed"})["note"], "No entity name starts with")
+	requireRefused(t, callJSON(t, tool.Get, chat, map[string]any{"names": []string{"Chris Smith"}, "prefix": "pro"}), "not both")
+	requireRefused(t, callJSON(t, tool.Get, chat, map[string]any{}), "pass names")
+	// An empty prefix sent next to names is ignored, since models often send every property.
+	requireOK(t, callJSON(t, tool.Get, chat, map[string]any{"names": []string{"Chris Smith"}, "prefix": ""}))
+
+	// Delete is exact-name only; a prefix is not a name.
+	requireRefused(t, callJSON(t, tool.Write, chat, map[string]any{"action": "delete", "name": "Project"}), "nothing was deleted")
+	del := callJSON(t, tool.Write, chat, map[string]any{"action": "delete", "name": "project beta"})
+	requireOK(t, del)
+	page := del["entity"].(map[string]any)
+	require.Equal(t, "Project Beta", page["name"])
+	require.NotEmpty(t, page["deleted_at"])
+	require.Equal(t, false, page["found"])
+	require.EqualValues(t, 1, callJSON(t, tool.Get, chat, map[string]any{"prefix": "project"})["total"])
 }
