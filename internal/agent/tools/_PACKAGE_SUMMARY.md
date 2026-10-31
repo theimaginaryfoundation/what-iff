@@ -15,16 +15,17 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   - `list` — unified resource listing (`list.go`, `list_kinds.go`; tests in `list_test.go`).
   - `create_memory`, `generate_image`, `create_agent_job` — named files for those flows.
     `UpdateAgentJobToolSpec` (`update_agent_job`) sits beside the create spec in `toolconstants.go`; its handler is in `internal/agent`.
-  - `remove_memory` — an agent takes one wrong or stale memory out of active memory (`remove_memory.go`, ADR 0x036; tests in `remove_memory_test.go`).
+  - `archive_memory` — an agent archives one wrong or stale memory: out of search, `find_context` and recall, kept, and restorable by the user (`archive_memory.go`, ADR 0x036; tests in `archive_memory_test.go`).
+    Its description and result say that archiving is not deleting and where the user restores it.
     Loadable, and `SandboxNever`.
-    It takes one full memory id only (a prefix or description is refused), and only a memory this conversation recalls: its own thread memories and User-scoped ones unpinned or pinned to its personality (`memoryNotRemovableHere`).
+    It takes one full memory id only (a prefix or description is refused), and only a memory this conversation recalls: its own thread memories and User-scoped ones unpinned or pinned to its personality (`memoryNotArchivableHere`).
     On an external (relay) turn only an external memory qualifies.
-    `datastore.RemoveMemory` does the soft delete and refuses starred memories, summaries and memories already inactive.
+    `datastore.ArchiveMemory` archives it and refuses starred memories, summaries and memories already inactive.
   - `move_files` — files gallery files (images, documents, any upload) in a folder or back at the top level (`move_files.go`; tests in `move_files_test.go`).
     A personality's documents stay attached to it; only the folder label changes.
   - `RecallTool` — unified context retrieval (`recall.go`, `recall_modes.go`, `recall_memory_id.go`, `recall_time.go`; see ADR 0x017).
     Modes: `investigate`/`search`/`fetch`/`related`/`origin`/`conversation`/`lifecycle_events` (alias `merge_history`).
-    `source_type=summaries` searches per-chat checkpoint Summary memories (via `datastore.GetRelatedSummaryMemories`); `lifecycle_events` lists the memory lifecycle audit trail (`datastore.ListMemoryMergeEvents`), including `remove_memory` removals with their `reason`.
+    `source_type=summaries` searches per-chat checkpoint Summary memories (via `datastore.GetRelatedSummaryMemories`); `lifecycle_events` lists the memory lifecycle audit trail (`datastore.ListMemoryMergeEvents`), including `archive_memory` archives with their `reason`.
     Paginated modes emit `page`/`total_count`/`has_more`/`next_page_token`.
   - `list_models`, `list_personalities`, `run_subagent` — shared function specs consumed by `internal/agent` dispatch.
 - **Shared helpers:** `tool_helpers.go` — marshal/unmarshal tool results, validation, truncation for logs (`tool_helpers_test.go`).
@@ -91,4 +92,4 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
 ## Related documentation
 
 - [Architecture summary](../../../docs/ARCHITECTURE_SUMMARY.md) — agent layer and tools; **Model context** for how tools attach to chat turns.
-- [ADR 0x036](../../../docs/adr/0x036-agent-memory-removal.md) — `remove_memory`.
+- [ADR 0x036](../../../docs/adr/0x036-agent-memory-archive.md) — `archive_memory`.

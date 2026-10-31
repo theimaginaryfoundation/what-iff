@@ -45,12 +45,15 @@ func TestFormatMemoryForContext_BaseAndOptionalSignals(t *testing.T) {
 	require.Equal(t, "Post the daily digest to #status-updates as a root message", StripMemoryContextMetadata(rich))
 }
 
-// A memory an agent removed says so when it is fetched by id, and still strips cleanly.
-func TestFormatMemoryForContext_RemovedMemory(t *testing.T) {
+// An archived memory says so when it is fetched by id, and still strips cleanly.
+func TestFormatMemoryForContext_ArchivedMemory(t *testing.T) {
 	created := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
-	removed := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
-	line := FormatMemoryForContext(&models.Memory{Content: "Lives in Berlin", CreatedAt: created, Confidence: models.DefaultMemoryConfidence, RemovedAt: &removed})
-	require.Contains(t, line, "removed=2026-10-31T09:00:00Z(no longer in active memory)")
+	archived := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
+	line := FormatMemoryForContext(&models.Memory{Content: "Lives in Berlin", CreatedAt: created, Confidence: models.DefaultMemoryConfidence, Status: models.MemoryStatusInactive, ArchivedAt: &archived})
+	require.Contains(t, line, "archived=2026-10-31T09:00:00Z(by an agent; not in active memory until the user restores it)")
 	require.Equal(t, "Lives in Berlin", StripMemoryContextMetadata(line))
-	require.NotContains(t, FormatMemoryForContext(&models.Memory{Content: "x", CreatedAt: created}), "removed=")
+	require.NotContains(t, FormatMemoryForContext(&models.Memory{Content: "x", CreatedAt: created}), "archived")
+	merged := FormatMemoryForContext(&models.Memory{Content: "y", CreatedAt: created, Status: models.MemoryStatusInactive})
+	require.Contains(t, merged, "archived(not in active memory until the user restores it)")
+	require.Equal(t, "y", StripMemoryContextMetadata(merged))
 }

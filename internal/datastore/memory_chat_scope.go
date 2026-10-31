@@ -21,11 +21,11 @@ func memoryOfChat(chatID uuid.UUID) predicate.Memory {
 	)
 }
 
-// MemoryIDsCreatedInChat returns which of ids are owner-scoped, still exist and belong to chatID:
+// MemoryIDsCreatedInChat returns which of ids are owner-scoped, still active and belong to chatID:
 // its Chat-scoped memories and its own checkpoint summary. A User-scoped memory keeps the chat it
 // was created in as provenance, but it is the account's, so it does not count. It backs
 // re-filtering of memory context persisted on earlier turns of a sandboxed chat: only memories of
-// the chat itself may be replayed there.
+// the chat itself may be replayed there, and not once archived (ADR 0x036).
 func (d *Datastore) MemoryIDsCreatedInChat(ctx context.Context, userID, chatID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]struct{}, error) {
 	out := map[uuid.UUID]struct{}{}
 	if len(ids) == 0 {
@@ -35,7 +35,32 @@ func (d *Datastore) MemoryIDsCreatedInChat(ctx context.Context, userID, chatID u
 		Where(
 			memory.IDIn(ids...),
 			memory.HasOwnerWith(user.ID(userID)),
+			memory.StatusEQ(memory.StatusActive),
 			memoryOfChat(chatID),
+		).
+		IDs(ctx)
+	if err != nil {
+		return out, err
+	}
+	for _, id := range found {
+		out[id] = struct{}{}
+	}
+	return out, nil
+}
+
+// ActiveMemoryIDs returns which of ids are the user's memories and still active. It backs the
+// re-check of memory context replayed from earlier turns of an ordinary chat, so a memory archived
+// since (by an agent, a merge or the user) is not shown again (ADR 0x036).
+func (d *Datastore) ActiveMemoryIDs(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]struct{}, error) {
+	out := map[uuid.UUID]struct{}{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	found, err := d.dbClient.Memory.Query().
+		Where(
+			memory.IDIn(ids...),
+			memory.HasOwnerWith(user.ID(userID)),
+			memory.StatusEQ(memory.StatusActive),
 		).
 		IDs(ctx)
 	if err != nil {

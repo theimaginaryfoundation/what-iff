@@ -910,8 +910,8 @@ func toRecallLifecycleEvent(ev *models.MemoryMergeEvent) recallLifecycleEvent {
 	if ev.RevertedAt != nil {
 		out.RevertedAt = ev.RevertedAt.UTC().Format(time.RFC3339)
 	}
-	if ev.Removal != nil {
-		out.Reason = ev.Removal.Reason
+	if ev.Archival != nil {
+		out.Reason = ev.Archival.Reason
 	}
 	for _, m := range ev.SourceMembers {
 		out.SourceMembers = append(out.SourceMembers, TruncateRunes(m.Content, recallLifecyclePreviewLen))

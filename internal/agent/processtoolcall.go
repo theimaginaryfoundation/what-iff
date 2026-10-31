@@ -64,8 +64,8 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			out, err := a.memoryTool.CreateMemoryToolWithOrigin(ctx, chatCtx.chat, a.createMemoryOrigin(ctx, chatCtx), input)
 			return out, nil, err
 		},
-		tools.RemoveMemoryToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
-			out, err := a.removeMemoryTool.Remove(ctx, chatCtx.chat, chatCtx.externalMemoryChat(), input)
+		tools.ArchiveMemoryToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.archiveMemoryTool.Archive(ctx, chatCtx.chat, chatCtx.externalMemoryChat(), input)
 			return out, nil, err
 		},
 		tools.ListToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {

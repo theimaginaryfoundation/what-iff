@@ -39,6 +39,9 @@ type messageContextBuilder struct {
 	// memoryIDLookup re-checks persisted memory ids against the chat a sandboxed turn replays them
 	// into; nil uses ds.
 	memoryIDLookup memoryIDLookup
+	// activeMemoryLookup re-checks persisted memory ids an ordinary chat replays against the
+	// memories still active; nil uses ds.
+	activeMemoryLookup activeMemoryLookup
 }
 
 func newMessageContextBuilder(ds *datastore.Datastore, tel *telemetry.Telemetry, fileStore storage.FileStore, loadHistoryOverride func(ctx context.Context, userID, chatID, excludeMessageID uuid.UUID, pageSize int, minDate *time.Time, logContext string) []*models.ChatMessage, expressionThumbCache *expressionPortraitThumbCache) (*messageContextBuilder, error) {

@@ -14,17 +14,17 @@ const (
 	// MemoryMergeTypeLink cross-references related-but-distinct memories that share a
 	// link_group_id. No rows are folded or de-indexed; every surface is preserved.
 	MemoryMergeTypeLink MemoryMergeType = "link"
-	// MemoryMergeTypeRemove records an agent removing one memory from active memory with
-	// remove_memory (ADR 0x036). The memory row is kept, inactive; undo restores it.
-	MemoryMergeTypeRemove MemoryMergeType = "remove"
+	// MemoryMergeTypeArchive records an agent archiving one memory with
+	// archive_memory (ADR 0x036). The memory row is kept, inactive; undo restores it.
+	MemoryMergeTypeArchive MemoryMergeType = "archive"
 )
 
-// MaxMemoryRemovalReasonRunes bounds the reason an agent gives for removing a memory.
-const MaxMemoryRemovalReasonRunes = 500
+// MaxMemoryArchiveReasonRunes bounds the reason an agent gives for archiving a memory.
+const MaxMemoryArchiveReasonRunes = 500
 
-// MemoryRemoval is who removed a memory, from which conversation, and why. PersonalityID is nil
+// MemoryArchival is who archived a memory, from which conversation, and why. PersonalityID is nil
 // for a conversation without a personality.
-type MemoryRemoval struct {
+type MemoryArchival struct {
 	PersonalityID *uuid.UUID `json:"personality_id,omitempty"`
 	ChatID        *uuid.UUID `json:"chat_id,omitempty"`
 	Reason        string     `json:"reason,omitempty"`
@@ -70,9 +70,9 @@ type MemoryMergeEvent struct {
 	CompactionEventID *uuid.UUID                `json:"compaction_event_id,omitempty"`
 	SourceMembers     []MemoryMergeSourceMember `json:"source_members,omitempty"`
 	Snapshot          *MemoryMergeUndoSnapshot  `json:"snapshot,omitempty"`
-	// Removal is set on a remove event.
-	Removal    *MemoryRemoval `json:"removal,omitempty"`
-	RevertedAt *time.Time     `json:"reverted_at,omitempty"`
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
+	// Archival is set on an archive event.
+	Archival   *MemoryArchival `json:"archival,omitempty"`
+	RevertedAt *time.Time      `json:"reverted_at,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+	UpdatedAt  time.Time       `json:"updated_at"`
 }

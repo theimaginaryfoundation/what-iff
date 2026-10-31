@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,70 +15,71 @@ import (
 	"go.uber.org/zap"
 )
 
-// fakeRemoveMemoryStore serves one stored memory and records the removal it is asked for.
-type fakeRemoveMemoryStore struct {
-	mem       *models.Memory
-	removeErr error
-	removed   *models.MemoryRemoval
-	removedID uuid.UUID
+// fakeArchiveMemoryStore serves one stored memory and records the archive it is asked for.
+type fakeArchiveMemoryStore struct {
+	mem        *models.Memory
+	archiveErr error
+	archived   *models.MemoryArchival
+	archivedID uuid.UUID
 }
 
-func (f *fakeRemoveMemoryStore) GetMemory(_ context.Context, _ uuid.UUID, id uuid.UUID) (*models.Memory, error) {
+func (f *fakeArchiveMemoryStore) GetMemory(_ context.Context, _ uuid.UUID, id uuid.UUID) (*models.Memory, error) {
 	if f.mem == nil || f.mem.ID != id {
 		return nil, datastore.ErrMemoryNotFound
 	}
 	return f.mem, nil
 }
 
-func (f *fakeRemoveMemoryStore) RemoveMemory(_ context.Context, _ uuid.UUID, id uuid.UUID, removal models.MemoryRemoval) (*models.MemoryMergeEvent, error) {
-	if f.removeErr != nil {
-		return nil, f.removeErr
+func (f *fakeArchiveMemoryStore) ArchiveMemory(_ context.Context, _ uuid.UUID, id uuid.UUID, archival models.MemoryArchival) (*models.MemoryMergeEvent, error) {
+	if f.archiveErr != nil {
+		return nil, f.archiveErr
 	}
-	f.removedID, f.removed = id, &removal
-	return &models.MemoryMergeEvent{ID: uuid.New(), SurvivorMemoryID: id, MergeType: models.MemoryMergeTypeRemove, CreatedAt: time.Now()}, nil
+	f.archivedID, f.archived = id, &archival
+	return &models.MemoryMergeEvent{ID: uuid.New(), SurvivorMemoryID: id, MergeType: models.MemoryMergeTypeArchive, CreatedAt: time.Now()}, nil
 }
 
-func runRemoveMemory(t *testing.T, store *fakeRemoveMemoryStore, chat *models.Chat, external bool, args string) removeMemoryResult {
+func runArchiveMemory(t *testing.T, store *fakeArchiveMemoryStore, chat *models.Chat, external bool, args string) archiveMemoryResult {
 	t.Helper()
-	tool := &RemoveMemoryTool{store: store, logger: zap.NewNop()}
-	out, err := tool.Remove(context.Background(), chat, external, []byte(args))
+	tool := &ArchiveMemoryTool{store: store, logger: zap.NewNop()}
+	out, err := tool.Archive(context.Background(), chat, external, []byte(args))
 	require.NoError(t, err, "refusals are results, not Go errors")
-	var res removeMemoryResult
+	var res archiveMemoryResult
 	require.NoError(t, json.Unmarshal([]byte(out), &res))
 	return res
 }
 
-func TestRemoveMemory_RemovesAnExactIDWithProvenance(t *testing.T) {
+func TestArchiveMemory_ArchivesAnExactIDWithProvenance(t *testing.T) {
 	personalityID := uuid.New()
 	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), PersonalityID: personalityID}
 	mem := &models.Memory{ID: uuid.New(), Content: "Lives in Berlin", Scope: MemoryScopeUser, PinnedPersonalityID: &personalityID}
-	store := &fakeRemoveMemoryStore{mem: mem}
+	store := &fakeArchiveMemoryStore{mem: mem}
 
-	res := runRemoveMemory(t, store, chat, false, fmt.Sprintf(`{"memory_id":"Memory:%s","reason":"moved to Lisbon"}`, mem.ID))
+	res := runArchiveMemory(t, store, chat, false, fmt.Sprintf(`{"memory_id":"Memory:%s","reason":"moved to Lisbon"}`, mem.ID))
 	require.True(t, res.Success, res.Error)
 	require.Equal(t, "memory:"+mem.ID.String(), res.MemoryID)
 	require.Equal(t, "Lives in Berlin", res.Content)
 	require.NotEmpty(t, res.EventID)
-	require.Contains(t, res.Note, "Merge history")
+	require.Contains(t, res.Note, "not deleted")
+	require.Contains(t, res.Note, "Archived view")
 
-	require.Equal(t, mem.ID, store.removedID)
-	require.Equal(t, &chat.ID, store.removed.ChatID)
-	require.Equal(t, &personalityID, store.removed.PersonalityID)
-	require.Equal(t, "moved to Lisbon", store.removed.Reason)
+	require.Equal(t, mem.ID, store.archivedID)
+	require.Equal(t, &chat.ID, store.archived.ChatID)
+	require.Equal(t, &personalityID, store.archived.PersonalityID)
+	require.Equal(t, "moved to Lisbon", store.archived.Reason)
 }
 
-func TestRemoveMemory_NoPersonalityRecordsOnlyTheChat(t *testing.T) {
+func TestArchiveMemory_NoPersonalityRecordsOnlyTheChat(t *testing.T) {
 	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New()}
 	mem := &models.Memory{ID: uuid.New(), Content: "x", Scope: MemoryScopeChat, ChatID: chat.ID}
-	store := &fakeRemoveMemoryStore{mem: mem}
+	store := &fakeArchiveMemoryStore{mem: mem}
 
-	res := runRemoveMemory(t, store, chat, false, fmt.Sprintf(`{"memory_id":%q}`, mem.ID))
+	res := runArchiveMemory(t, store, chat, false, fmt.Sprintf(`{"memory_id":%q}`, mem.ID))
 	require.True(t, res.Success, res.Error)
-	require.Nil(t, store.removed.PersonalityID)
-	require.Equal(t, &chat.ID, store.removed.ChatID)
+	require.Nil(t, store.archived.PersonalityID)
+	require.Equal(t, &chat.ID, store.archived.ChatID)
 }
 
-func TestRemoveMemory_Refusals(t *testing.T) {
+func TestArchiveMemory_Refusals(t *testing.T) {
 	personalityID := uuid.New()
 	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), PersonalityID: personalityID}
 	otherPersonality := uuid.New()
@@ -115,8 +117,8 @@ func TestRemoveMemory_Refusals(t *testing.T) {
 		{
 			name: "the store refuses (starred)",
 			mem:  &models.Memory{ID: id, Scope: MemoryScopeUser},
-			args: fmt.Sprintf(`{"memory_id":%q}`, id), storeErr: fmt.Errorf("%w: the user starred it", datastore.ErrMemoryNotRemovable),
-			want: "cannot be removed: the user starred it",
+			args: fmt.Sprintf(`{"memory_id":%q}`, id), storeErr: fmt.Errorf("%w: the user starred it", datastore.ErrMemoryNotArchivable),
+			want: "cannot be archived: the user starred it",
 		},
 		{
 			name: "sandboxed chat",
@@ -127,35 +129,43 @@ func TestRemoveMemory_Refusals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			store := &fakeRemoveMemoryStore{mem: tc.mem, removeErr: tc.storeErr}
+			store := &fakeArchiveMemoryStore{mem: tc.mem, archiveErr: tc.storeErr}
 			c := chat
 			if tc.chat != nil {
 				c = tc.chat
 			}
-			res := runRemoveMemory(t, store, c, tc.external, tc.args)
+			res := runArchiveMemory(t, store, c, tc.external, tc.args)
 			require.False(t, res.Success)
 			require.Contains(t, res.Error, tc.want)
-			require.Nil(t, store.removed, "nothing was removed")
+			require.Nil(t, store.archived, "nothing was archived")
 		})
 	}
 }
 
 // On an external (Discord relay) turn, a memory learned from the people in the thread may go.
-func TestRemoveMemory_ExternalTurnRemovesExternalMemory(t *testing.T) {
+func TestArchiveMemory_ExternalTurnArchivesExternalMemory(t *testing.T) {
 	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New()}
 	mem := &models.Memory{ID: uuid.New(), Scope: MemoryScopeChat, ChatID: chat.ID, Provenance: models.MemoryProvenanceExternal}
-	store := &fakeRemoveMemoryStore{mem: mem}
+	store := &fakeArchiveMemoryStore{mem: mem}
 
-	res := runRemoveMemory(t, store, chat, true, fmt.Sprintf(`{"memory_id":%q}`, mem.ID))
+	res := runArchiveMemory(t, store, chat, true, fmt.Sprintf(`{"memory_id":%q}`, mem.ID))
 	require.True(t, res.Success, res.Error)
 }
 
-// find_context lifecycle_events shows a removal's reason, so the agent can see why a memory went.
-func TestToRecallLifecycleEvent_RemoveCarriesReason(t *testing.T) {
+// find_context lifecycle_events shows an archive's reason, so the agent can see why a memory went.
+func TestToRecallLifecycleEvent_ArchiveCarriesReason(t *testing.T) {
 	ev := toRecallLifecycleEvent(&models.MemoryMergeEvent{
-		ID: uuid.New(), SurvivorMemoryID: uuid.New(), MergeType: models.MemoryMergeTypeRemove,
-		Content: "Lives in Berlin", Removal: &models.MemoryRemoval{Reason: "moved to Lisbon"},
+		ID: uuid.New(), SurvivorMemoryID: uuid.New(), MergeType: models.MemoryMergeTypeArchive,
+		Content: "Lives in Berlin", Archival: &models.MemoryArchival{Reason: "moved to Lisbon"},
 	})
-	require.Equal(t, "remove", ev.MergeType)
+	require.Equal(t, "archive", ev.MergeType)
 	require.Equal(t, "moved to Lisbon", ev.Reason)
+}
+
+// The agent is told that archiving is not deleting and where the user restores a memory, so it
+// archives a wrong memory without hesitating and can tell the user how to get it back.
+func TestArchiveMemoryDescription_SaysTheUserCanRestore(t *testing.T) {
+	require.Contains(t, ArchiveMemoryDescription, "Archiving is not deleting")
+	require.Contains(t, ArchiveMemoryDescription, "Archived view")
+	require.NotContains(t, strings.ToLower(ArchiveMemoryDescription), "delete it", "the tool never offers deletion")
 }

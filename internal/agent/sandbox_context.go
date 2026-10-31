@@ -28,7 +28,7 @@ func userNameLineAllowed(sandboxed bool) bool {
 type memoryIDLookup func(ctx context.Context, userID, chatID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]struct{}, error)
 
 // persistedMemoryFilter returns a predicate that keeps a persisted additional-context item only if
-// it is still readable in chat, or nil when the chat is not sandboxed (keep everything).
+// it is still readable in chat. A chat that is not sandboxed gets activeMemoryFilter instead.
 // Memory items are matched by id; one without an id cannot be classified and is dropped (fail
 // closed), including a legacy MEMORY item that merely looks like the user-name line: only an item
 // explicitly typed USER_NAME (profile data, see models.AdditionalContextTypeUserName) is kept
@@ -36,21 +36,9 @@ type memoryIDLookup func(ctx context.Context, userID, chatID uuid.UUID, ids []uu
 // userNameLineAllowed). The sets are loaded in one query. A failed lookup drops every id-bearing
 // memory item.
 func (b *messageContextBuilder) persistedMemoryFilter(ctx context.Context, userID uuid.UUID, chat *models.Chat, persisted ...[]models.AdditionalContextItem) func(models.AdditionalContextItem) bool {
+	ids := persistedMemoryIDs(persisted...)
 	if !chat.IsSandboxed() {
-		return nil
-	}
-	var ids []uuid.UUID
-	seen := map[uuid.UUID]struct{}{}
-	for _, items := range persisted {
-		for _, it := range items {
-			if it.Type != models.AdditionalContextTypeMemory || it.MemoryID == nil || *it.MemoryID == uuid.Nil {
-				continue
-			}
-			if _, dup := seen[*it.MemoryID]; !dup {
-				seen[*it.MemoryID] = struct{}{}
-				ids = append(ids, *it.MemoryID)
-			}
-		}
+		return b.activeMemoryFilter(ctx, userID, chat, ids)
 	}
 	allowed := map[uuid.UUID]struct{}{}
 	if len(ids) > 0 {

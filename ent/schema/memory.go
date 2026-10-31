@@ -70,18 +70,18 @@ func (Memory) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("Optional personality ID to pin this User-scoped memory to. When set, only this personality can access the memory. When null, all personalities can access it."),
-		field.Time("removed_at").
+		field.Time("archived_at").
 			Optional().
 			Nillable().
-			Comment("When an agent removed this memory with remove_memory (ADR 0x036). A removed memory is also inactive, so it is out of recall and listings; this tells it apart from one a merge retired. Cleared when the memory is restored."),
-		field.UUID("removed_by_personality_id", uuid.UUID{}).
+			Comment("When an agent archived this memory with archive_memory (ADR 0x036). The memory is then inactive, like one the user archived or a merge retired, so it is out of recall and the default listing; this says an agent did it. Cleared when the memory is restored."),
+		field.UUID("archived_by_personality_id", uuid.UUID{}).
 			Optional().
 			Nillable().
-			Comment("The personality of the conversation that removed the memory, if it had one. A plain id (no edge), so the record survives the personality's deletion."),
-		field.UUID("removed_by_chat_id", uuid.UUID{}).
+			Comment("The personality of the conversation that archived the memory, if it had one. A plain id (no edge), so the record survives the personality's deletion."),
+		field.UUID("archived_by_chat_id", uuid.UUID{}).
 			Optional().
 			Nillable().
-			Comment("The conversation that removed the memory. A plain id (no edge), so the record survives the conversation's deletion."),
+			Comment("The conversation that archived the memory. A plain id (no edge), so the record survives the conversation's deletion."),
 		field.Time("created_at").
 			Immutable().
 			Default(time.Now),

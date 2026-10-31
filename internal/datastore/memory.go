@@ -111,11 +111,11 @@ func toMemoryModel(e *ent.Memory) *models.Memory {
 	if e.PinnedPersonalityID != nil {
 		memoryModel.PinnedPersonalityID = e.PinnedPersonalityID
 	}
-	if e.RemovedAt != nil {
-		removedAt := e.RemovedAt.UTC()
-		memoryModel.RemovedAt = &removedAt
-		memoryModel.RemovedByPersonalityID = e.RemovedByPersonalityID
-		memoryModel.RemovedByChatID = e.RemovedByChatID
+	if e.ArchivedAt != nil {
+		archivedAt := e.ArchivedAt.UTC()
+		memoryModel.ArchivedAt = &archivedAt
+		memoryModel.ArchivedByPersonalityID = e.ArchivedByPersonalityID
+		memoryModel.ArchivedByChatID = e.ArchivedByChatID
 	}
 
 	// Add source chat details if available.
@@ -648,11 +648,11 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 		}
 	}
 
-	// Setting a memory an agent removed active again is the user restoring it: the removal marks go,
-	// and its remove event is closed so it cannot be undone later (ADR 0x036).
-	restoresRemoval := existing.RemovedAt != nil && normalizeMemoryStatus(nextStatus) == memory.StatusActive
-	if restoresRemoval {
-		if err := closeRemovalEventsTx(ctx, tx, userID, memoryID, time.Now().UTC()); err != nil {
+	// Setting a memory an agent archived active again is the user restoring it: the archive marks go,
+	// and its archive event is closed so it cannot be undone later (ADR 0x036).
+	restoresArchival := existing.ArchivedAt != nil && normalizeMemoryStatus(nextStatus) == memory.StatusActive
+	if restoresArchival {
+		if err := closeArchiveEventsTx(ctx, tx, userID, memoryID, time.Now().UTC()); err != nil {
 			tx.Rollback()
 			return nil, err
 		}
@@ -671,8 +671,8 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 		// A memory confirmed as the owner's has no outside speaker.
 		update.ClearSourceSpeaker()
 	}
-	if restoresRemoval {
-		update.ClearRemovedAt().ClearRemovedByPersonalityID().ClearRemovedByChatID()
+	if restoresArchival {
+		update.ClearArchivedAt().ClearArchivedByPersonalityID().ClearArchivedByChatID()
 	}
 
 	if nextChatID != nil && *nextChatID != uuid.Nil {
