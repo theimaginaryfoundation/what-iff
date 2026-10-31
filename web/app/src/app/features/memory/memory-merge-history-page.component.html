@@ -47,11 +47,17 @@
               @if (isLink(event)) {
                 <span class="merge-history-item__count merge-history-item__count--link">Nothing removed</span>
               }
+              @if (isRemove(event)) {
+                <span class="merge-history-item__count" uiTooltip="The memory is kept, out of active memory, until you undo or delete it">Kept, not deleted</span>
+              }
               @if (isReverted(event)) {
                 <span class="merge-history-item__reverted" uiTooltip="This event was undone and no longer applies">Undone</span>
               }
             </div>
             <p class="merge-history-item__content">{{ event.content }}</p>
+            @if (isRemove(event) && event.removal?.reason) {
+              <p class="merge-history-item__reason">Reason: {{ event.removal?.reason }}</p>
+            }
             <div class="merge-history-item__meta">
               <span>{{ event.created_at | date:'MMM d, y' | uppercase }}</span>
               <span>{{ event.created_at | date:'h:mm a' }}</span>
@@ -59,7 +65,7 @@
             @if (isExpanded(event)) {
               <div class="merge-history-item__sources">
                 <h3 class="merge-history-item__sources-title">
-                  {{ isLink(event) ? 'Linked memories (all kept)' : (isCreate(event) ? 'Created from extraction' : 'Merged from') }}
+                  {{ isLink(event) ? 'Linked memories (all kept)' : (isCreate(event) ? 'Created from extraction' : (isRemove(event) ? 'Removed memory' : 'Merged from')) }}
                 </h3>
                 @if ((event.source_members?.length ?? 0) === 0) {
                   <p class="merge-history-item__sources-empty">No source snapshot for this event (logged before audit detail was added).</p>
@@ -90,7 +96,7 @@
                 @if (isLink(event)) {
                   <p class="merge-history-item__result-label">Relationship (nothing was removed)</p>
                   <p class="merge-history-item__result-content">{{ event.content }}</p>
-                } @else if (!isCreate(event)) {
+                } @else if (!isCreate(event) && !isRemove(event)) {
                   <p class="merge-history-item__result-label">Result after merge</p>
                   <p class="merge-history-item__result-content">{{ event.content }}</p>
                 }

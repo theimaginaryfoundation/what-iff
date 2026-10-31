@@ -117,8 +117,10 @@ type Agent struct {
 	recallTool     *tools.RecallTool
 	listTool       *tools.ListTool
 	moveFilesTool  *tools.MoveFilesTool
-	chunkPipeline  *filechunker.FileChunkPipeline
-	fileStore      storage.FileStore
+	// removeMemoryTool is remove_memory (ADR 0x036).
+	removeMemoryTool *tools.RemoveMemoryTool
+	chunkPipeline    *filechunker.FileChunkPipeline
+	fileStore        storage.FileStore
 	// expressionPortraitThumbCache caches thumbnails loaded for expression continuity in message context (bounded).
 	expressionPortraitThumbCache *expressionPortraitThumbCache
 	// tokenCounter is shared for segment token estimates and is safe for concurrent use (stateless tokenizer).
@@ -290,6 +292,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		scratchpadTool:               tools.NewScratchpadTool(ds, logger),
 		listTool:                     tools.NewListTool(ds, logger),
 		moveFilesTool:                tools.NewMoveFilesTool(ds, logger),
+		removeMemoryTool:             tools.NewRemoveMemoryTool(ds, logger),
 		mcpClient:                    mcpclient.New(nil, logger),
 		chunkPipeline:                newChunkPipelineForMode(cfg.LLMBackend != "vendor", &oaiClient, ds, logger),
 		fileStore:                    fileStore,

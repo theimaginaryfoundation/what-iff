@@ -6802,7 +6802,7 @@ export interface paths {
         put?: never;
         /**
          * Undo a memory merge event
-         * @description Reverts one merge log entry. Undoing a fold_live restores the survivor's prior confidence, chain metadata and, when the fold rewrote it, its content and embedding, and returns every absorbed memory to its prior status. Undoing a link withdraws the cross-reference; undoing a legacy create deletes the created survivor.
+         * @description Reverts one merge log entry. Undoing a fold_live restores the survivor's prior confidence, chain metadata and, when the fold rewrote it, its content and embedding, and returns every absorbed memory to its prior status. Undoing a link withdraws the cross-reference; undoing a legacy create deletes the created survivor. Undoing a remove puts the removed memory back in active memory (404 when the user has since deleted it).
          */
         post: {
             parameters: {
@@ -14475,10 +14475,25 @@ export interface components {
              */
             pinned_personality_id?: string | null;
             /**
-             * @description Lifecycle status (inactive rows are retired merge sources)
+             * @description Lifecycle status (inactive rows are retired merge sources, or memories an agent removed; see removed_at)
              * @enum {string}
              */
             status?: "active" | "inactive";
+            /**
+             * Format: date-time
+             * @description Set while an agent's remove_memory removal stands (ADR 0x036). The memory is then inactive. Setting the memory active again (PATCH status) restores it, clears these removal fields and closes its remove event.
+             */
+            removed_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The personality of the conversation that removed the memory, if it had one.
+             */
+            removed_by_personality_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The conversation that removed the memory.
+             */
+            removed_by_chat_id?: string | null;
             provenance: components["schemas"]["MemoryProvenance"];
             /** @description For an external memory, the Discord display name it came from, when known (unverified) */
             source_speaker?: string;
@@ -15147,10 +15162,10 @@ export interface components {
             /** Format: uuid */
             survivor_memory_id: string;
             /**
-             * @description create = new survivor row from a merge; fold_live = updated an existing live memory in place and retired absorbers; link = cross-referenced related-but-distinct memories under a shared link_group_id without deleting or de-indexing any rows.
+             * @description create = new survivor row from a merge; fold_live = updated an existing live memory in place and retired absorbers; link = cross-referenced related-but-distinct memories under a shared link_group_id without deleting or de-indexing any rows; remove = an agent removed survivor_memory_id from active memory with remove_memory (the row is kept, inactive; see removal).
              * @enum {string}
              */
-            merge_type: "create" | "fold_live" | "link";
+            merge_type: "create" | "fold_live" | "link" | "remove";
             content: string;
             duplicates_folded: number;
             /** Format: uuid */
@@ -15161,6 +15176,7 @@ export interface components {
              */
             compaction_event_id?: string | null;
             source_members?: components["schemas"]["MemoryMergeSourceMember"][];
+            removal?: components["schemas"]["MemoryRemoval"];
             /** Format: date-time */
             reverted_at?: string | null;
             /** Format: date-time */
@@ -15168,6 +15184,21 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /** @description Set on a remove event (ADR 0x036) — where an agent removed the memory from, and why. */
+        MemoryRemoval: {
+            /**
+             * Format: uuid
+             * @description The personality of the removing conversation; absent when it had none.
+             */
+            personality_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The conversation that removed the memory.
+             */
+            chat_id?: string | null;
+            /** @description The reason the agent gave, if any (at most 500 characters). */
+            reason?: string;
+        } | null;
         MemoryMergeSourceMember: {
             content: string;
             scope: string;

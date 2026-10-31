@@ -64,6 +64,17 @@ type MemoryMergeUndoSnapshot struct {
 	PriorProvenance    string  `json:"prior_provenance,omitempty"`
 	PriorSourceSpeaker *string `json:"prior_source_speaker,omitempty"`
 	FoldedProvenance   string  `json:"folded_provenance,omitempty"`
+
+	// Removal is set on a remove event: who removed the memory and why.
+	Removal *MemoryRemovalSnapshot `json:"removal,omitempty"`
+}
+
+// MemoryRemovalSnapshot records an agent's removal of one memory (ADR 0x036). The memory row keeps
+// who and when only until it is restored; the event keeps them for good.
+type MemoryRemovalSnapshot struct {
+	PersonalityID *uuid.UUID `json:"personality_id,omitempty"`
+	ChatID        *uuid.UUID `json:"chat_id,omitempty"`
+	Reason        string     `json:"reason,omitempty"`
 }
 
 // UnmarshalJSON accepts confidence buckets written before confidence became numeric.
@@ -131,10 +142,10 @@ func (MemoryMergeEvent) Fields() []ent.Field {
 		field.UUID("user_id", uuid.UUID{}).
 			Comment("Owner of the affected memories"),
 		field.UUID("survivor_memory_id", uuid.UUID{}).
-			Comment("Memory row that remains active after the merge. For link events this is the anchor (first) member; no rows are retired."),
+			Comment("Memory row that remains active after the merge. For link events this is the anchor (first) member; no rows are retired. For remove events it is the removed memory."),
 		field.Enum("merge_type").
-			Values("create", "fold_live", "link").
-			Comment("create = new row; fold_live = updated an existing live memory in place; link = cross-referenced related-but-distinct memories (no fold, all surfaces kept)"),
+			Values("create", "fold_live", "link", "remove").
+			Comment("create = new row; fold_live = updated an existing live memory in place; link = cross-referenced related-but-distinct memories (no fold, all surfaces kept); remove = an agent removed the survivor memory from active memory (ADR 0x036)"),
 		field.UUID("link_group_id", uuid.UUID{}).
 			Optional().
 			Nillable().
@@ -149,7 +160,7 @@ func (MemoryMergeEvent) Fields() []ent.Field {
 			Comment("Pre-merge candidate snapshot for audit/review"),
 		field.JSON("snapshot", &MemoryMergeUndoSnapshot{}).
 			Optional().
-			Comment("Prior survivor state (content, embedding, confidence, chain metadata) and absorbed members for fold_live undo"),
+			Comment("Prior survivor state (content, embedding, confidence, chain metadata) and absorbed members for fold_live undo; who removed the memory, and why, for a remove event"),
 		field.Time("reverted_at").
 			Optional().
 			Nillable().

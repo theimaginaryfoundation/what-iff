@@ -102,6 +102,30 @@ describe('MemoryDetailPageComponent', () => {
     ]);
   });
 
+  it('says when an agent removed an inactive memory', () => {
+    const fixture = TestBed.createComponent(MemoryDetailPageComponent);
+    const component = fixture.componentInstance;
+    fixture.detectChanges();
+    component.memory.set({
+      id: 'm-removed',
+      content: 'Lives in Berlin',
+      level: 'global',
+      type: 'Context',
+      status: 'inactive',
+      confidence: 0.6,
+      starred: false,
+      removed_at: '2026-10-31T09:00:00Z',
+      created_at: '2026-05-01T00:00:00Z',
+      updated_at: '2026-10-31T09:00:00Z',
+    });
+    component.loading.set(false);
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.textContent).toContain('An agent removed this memory on');
+    expect(host.textContent).not.toContain('This memory is archived or was merged away.');
+  });
+
   it('does not show the raw backend "Type" in the metadata panel', () => {
     const fixture = TestBed.createComponent(MemoryDetailPageComponent);
     fixture.componentInstance.ngOnInit();

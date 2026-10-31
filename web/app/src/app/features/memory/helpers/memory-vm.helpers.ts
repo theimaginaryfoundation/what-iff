@@ -111,6 +111,8 @@ export function mergeTypeLabel(type: MemoryMergeType): string {
       return 'Memories merged';
     case 'link':
       return 'Linked related memories';
+    case 'remove':
+      return 'Removed by an agent';
     default:
       return 'Created from batch';
   }
@@ -123,6 +125,8 @@ export function mergeTypeDescription(type: MemoryMergeType): string {
       return 'Duplicates folded into one memory; the others were archived';
     case 'link':
       return 'Related memories tagged as a group; nothing was removed';
+    case 'remove':
+      return 'An agent took this memory out of active memory; it is kept here, not deleted';
     default:
       return 'New memory saved from a checkpoint extraction';
   }
@@ -135,6 +139,8 @@ export function mergeUndoDescription(type: MemoryMergeType): string {
       return 'Restores confidence and verified count; merged duplicates stay archived';
     case 'link':
       return 'Removes the link tag from these memories';
+    case 'remove':
+      return 'Puts the memory back in active memory';
     default:
       return 'Permanently deletes the memory this event created';
   }

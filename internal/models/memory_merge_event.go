@@ -14,7 +14,21 @@ const (
 	// MemoryMergeTypeLink cross-references related-but-distinct memories that share a
 	// link_group_id. No rows are folded or de-indexed; every surface is preserved.
 	MemoryMergeTypeLink MemoryMergeType = "link"
+	// MemoryMergeTypeRemove records an agent removing one memory from active memory with
+	// remove_memory (ADR 0x036). The memory row is kept, inactive; undo restores it.
+	MemoryMergeTypeRemove MemoryMergeType = "remove"
 )
+
+// MaxMemoryRemovalReasonRunes bounds the reason an agent gives for removing a memory.
+const MaxMemoryRemovalReasonRunes = 500
+
+// MemoryRemoval is who removed a memory, from which conversation, and why. PersonalityID is nil
+// for a conversation without a personality.
+type MemoryRemoval struct {
+	PersonalityID *uuid.UUID `json:"personality_id,omitempty"`
+	ChatID        *uuid.UUID `json:"chat_id,omitempty"`
+	Reason        string     `json:"reason,omitempty"`
+}
 
 type MemoryMergeUndoSnapshot struct {
 	PriorConfidence          float64              `json:"prior_confidence,omitempty"`
@@ -56,7 +70,9 @@ type MemoryMergeEvent struct {
 	CompactionEventID *uuid.UUID                `json:"compaction_event_id,omitempty"`
 	SourceMembers     []MemoryMergeSourceMember `json:"source_members,omitempty"`
 	Snapshot          *MemoryMergeUndoSnapshot  `json:"snapshot,omitempty"`
-	RevertedAt        *time.Time                `json:"reverted_at,omitempty"`
-	CreatedAt         time.Time                 `json:"created_at"`
-	UpdatedAt         time.Time                 `json:"updated_at"`
+	// Removal is set on a remove event.
+	Removal    *MemoryRemoval `json:"removal,omitempty"`
+	RevertedAt *time.Time     `json:"reverted_at,omitempty"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
 }

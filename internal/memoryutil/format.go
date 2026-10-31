@@ -26,6 +26,8 @@ import (
 //   - source=external(…) — the memory was learned from someone outside the account in a public
 //     Discord relay thread (models.MemoryProvenanceExternal): unverified, and attributed to its
 //     speaker when known.
+//   - removed=… — an agent removed the memory with remove_memory (ADR 0x036). Only a fetch by id
+//     reaches a removed memory; it is no longer recalled.
 func FormatMemoryForContext(mem *models.Memory) string {
 	if mem == nil {
 		return ""
@@ -44,6 +46,9 @@ func FormatMemoryForContext(mem *models.Memory) string {
 	}
 	if mem.Provenance.IsExternal() {
 		meta += " " + ExternalProvenanceNote(mem.SourceSpeaker)
+	}
+	if mem.RemovedAt != nil {
+		meta += fmt.Sprintf(" removed=%s(no longer in active memory)", mem.RemovedAt.UTC().Format(time.RFC3339))
 	}
 	return fmt.Sprintf("%s [%s]", mem.Content, meta)
 }

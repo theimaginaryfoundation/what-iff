@@ -44,3 +44,13 @@ func TestFormatMemoryForContext_BaseAndOptionalSignals(t *testing.T) {
 	require.Contains(t, rich, "relevance=0.87")
 	require.Equal(t, "Post the daily digest to #status-updates as a root message", StripMemoryContextMetadata(rich))
 }
+
+// A memory an agent removed says so when it is fetched by id, and still strips cleanly.
+func TestFormatMemoryForContext_RemovedMemory(t *testing.T) {
+	created := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	removed := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
+	line := FormatMemoryForContext(&models.Memory{Content: "Lives in Berlin", CreatedAt: created, Confidence: models.DefaultMemoryConfidence, RemovedAt: &removed})
+	require.Contains(t, line, "removed=2026-10-31T09:00:00Z(no longer in active memory)")
+	require.Equal(t, "Lives in Berlin", StripMemoryContextMetadata(line))
+	require.NotContains(t, FormatMemoryForContext(&models.Memory{Content: "x", CreatedAt: created}), "removed=")
+}

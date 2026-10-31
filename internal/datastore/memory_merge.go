@@ -937,7 +937,11 @@ func toMemoryMergeEventModel(row *ent.MemoryMergeEvent) *models.MemoryMergeEvent
 	if len(row.SourceMembers) > 0 {
 		event.SourceMembers = sourceMembersToModel(row.SourceMembers)
 	}
-	if row.Snapshot != nil {
+	if row.Snapshot != nil && row.Snapshot.Removal != nil {
+		// A remove event's snapshot holds only the removal; there is no fold state to show.
+		r := row.Snapshot.Removal
+		event.Removal = &models.MemoryRemoval{PersonalityID: r.PersonalityID, ChatID: r.ChatID, Reason: r.Reason}
+	} else if row.Snapshot != nil {
 		event.Snapshot = &models.MemoryMergeUndoSnapshot{
 			PriorConfidence:          row.Snapshot.PriorConfidence,
 			PriorChainMetadataWasNil: row.Snapshot.PriorChainMetadataWasNil,
@@ -997,6 +1001,11 @@ func (d *Datastore) UndoMemoryMergeEvent(ctx context.Context, userID, eventID uu
 		}
 	case entmerge.MergeTypeLink:
 		if err := undoLinkGroup(ctx, tx, userID, event); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+	case entmerge.MergeTypeRemove:
+		if err := undoRemoveMemory(ctx, tx, userID, event); err != nil {
 			_ = tx.Rollback()
 			return nil, err
 		}

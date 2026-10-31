@@ -56,10 +56,11 @@ export class MemoryMergeHistoryPageComponent implements OnInit {
     });
   }
 
-  readonly introText = 'Automatic merges and links from memory extraction. Expand an event to see exactly what happened.';
+  readonly introText =
+    'Automatic merges and links from memory extraction, and memories an agent removed. Expand an event to see exactly what happened.';
   readonly undoText =
     "Undoing a merge restores the kept memory's confidence and verified count; merged duplicates stay archived. " +
-    'Undoing a created memory deletes it.';
+    'Undoing a created memory deletes it. Undoing a removal puts the memory back.';
   readonly mergeTypeLabel = mergeTypeLabel;
   readonly mergeTypeDescription = mergeTypeDescription;
   readonly undoDescription = mergeUndoDescription;
@@ -80,6 +81,10 @@ export class MemoryMergeHistoryPageComponent implements OnInit {
 
   isCreate(event: MemoryMergeEvent): boolean {
     return event.merge_type === 'create';
+  }
+
+  isRemove(event: MemoryMergeEvent): boolean {
+    return event.merge_type === 'remove';
   }
 
   isReverted(event: MemoryMergeEvent): boolean {

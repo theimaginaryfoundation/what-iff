@@ -114,8 +114,13 @@ type Memory struct {
 	Scope               string               `json:"-"`
 	ChainMetadata       *MemoryChainMetadata `json:"chain_metadata,omitempty"`
 	PinnedPersonalityID *uuid.UUID           `json:"pinned_personality_id,omitempty"`
-	CreatedAt           time.Time            `json:"created_at"`
-	UpdatedAt           time.Time            `json:"updated_at"`
+	// RemovedAt is set while an agent's remove_memory removal stands (ADR 0x036): the memory is then
+	// inactive, and RemovedByPersonalityID / RemovedByChatID say where it was removed from.
+	RemovedAt              *time.Time `json:"removed_at,omitempty"`
+	RemovedByPersonalityID *uuid.UUID `json:"removed_by_personality_id,omitempty"`
+	RemovedByChatID        *uuid.UUID `json:"removed_by_chat_id,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
 	// Relevance is a transient, retrieval-time cosine similarity in [0,1] set by the vector search
 	// (GetRelatedMemories). It is not persisted; it's nil for memories not loaded via a query.
 	Relevance *float64 `json:"relevance,omitempty"`

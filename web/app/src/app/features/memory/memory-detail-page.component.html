@@ -20,7 +20,12 @@
   } @else if (memory(); as currentMemory) {
     @if (currentMemory.status === "inactive") {
       <p class="rounded-2xl border border-warning/40 bg-warning/10 p-4 text-sm text-text-primary" role="status">
-        This memory is archived or was merged away. It is excluded from retrieval until restored.
+        @if (currentMemory.removed_at) {
+          An agent removed this memory on {{ currentMemory.removed_at | date: "medium" }}; Merge history has its reason.
+          It is excluded from retrieval until restored.
+        } @else {
+          This memory is archived or was merged away. It is excluded from retrieval until restored.
+        }
       </p>
       <article class="rounded-2xl border border-border-base bg-surface-card p-4">
         <h1 class="text-base font-semibold text-text-primary">Archived memory</h1>

@@ -111,6 +111,12 @@ func toMemoryModel(e *ent.Memory) *models.Memory {
 	if e.PinnedPersonalityID != nil {
 		memoryModel.PinnedPersonalityID = e.PinnedPersonalityID
 	}
+	if e.RemovedAt != nil {
+		removedAt := e.RemovedAt.UTC()
+		memoryModel.RemovedAt = &removedAt
+		memoryModel.RemovedByPersonalityID = e.RemovedByPersonalityID
+		memoryModel.RemovedByChatID = e.RemovedByChatID
+	}
 
 	// Add source chat details if available.
 	if e.Edges.Chat != nil {
@@ -642,6 +648,16 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 		}
 	}
 
+	// Setting a memory an agent removed active again is the user restoring it: the removal marks go,
+	// and its remove event is closed so it cannot be undone later (ADR 0x036).
+	restoresRemoval := existing.RemovedAt != nil && normalizeMemoryStatus(nextStatus) == memory.StatusActive
+	if restoresRemoval {
+		if err := closeRemovalEventsTx(ctx, tx, userID, memoryID, time.Now().UTC()); err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+	}
+
 	update := tx.Memory.UpdateOneID(memoryID).
 		SetContent(nextContent).
 		SetScope(scope).
@@ -654,6 +670,9 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 	if nextProvenance == models.MemoryProvenanceUser {
 		// A memory confirmed as the owner's has no outside speaker.
 		update.ClearSourceSpeaker()
+	}
+	if restoresRemoval {
+		update.ClearRemovedAt().ClearRemovedByPersonalityID().ClearRemovedByChatID()
 	}
 
 	if nextChatID != nil && *nextChatID != uuid.Nil {
