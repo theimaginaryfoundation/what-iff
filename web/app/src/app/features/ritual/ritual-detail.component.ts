@@ -12,6 +12,7 @@ import { Personality } from '../../core/models/personality.model';
 import { MCPServer } from '../../core/models/mcp-server.model';
 import { NULL_PERSONALITY_ID } from '../../core/constants/app.constants';
 import { parseHotkeyKeys, formatKeyForDisplay } from '../../core/utils/hotkey.utils';
+import { filenameFromContentDisposition, saveBlobAsFile } from '../../core/utils/download.helpers';
 
 @Component({
   selector: 'app-ritual-detail',
@@ -174,6 +175,22 @@ export class RitualDetailComponent implements OnInit {
         this.errorMessage.set(error.message || 'Failed to update skill. Please try again.');
         this.isSaving.set(false);
       }
+    });
+  }
+
+  /** Downloads the skill as an Agent Skills zip (`<slug>/SKILL.md`). */
+  exportSkill(): void {
+    const ritual = this.ritual();
+    if (!ritual) return;
+    this.ritualService.exportRitual(ritual.id).subscribe({
+      next: response => {
+        if (!response.body) return;
+        saveBlobAsFile(response.body, filenameFromContentDisposition(response.headers.get('Content-Disposition'), `${ritual.slug || 'skill'}.zip`));
+      },
+      error: error => {
+        console.error('Failed to export skill:', error);
+        this.errorMessage.set('Failed to export skill. Please try again.');
+      },
     });
   }
 

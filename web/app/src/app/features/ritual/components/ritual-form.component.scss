@@ -120,3 +120,61 @@
   border: 1px solid transparent;
   color: var(--color-accent-contrast);
 }
+
+.ritual-form__input--mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.ritual-form__textarea--short {
+  min-height: 56px;
+}
+
+.ritual-form__hint--row {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.ritual-form__hint--invalid {
+  color: var(--color-danger);
+}
+
+.ritual-form__counter {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.ritual-form__counter--warn {
+  color: var(--color-warning, #b45309);
+  font-weight: 600;
+}
+
+.ritual-form__checklist--static {
+  max-height: none;
+}
+
+.ritual-form__code {
+  background: var(--color-surface-base);
+  border: 1px solid var(--color-border-base);
+  border-radius: 4px;
+  font-size: 11px;
+  margin-left: 4px;
+  padding: 1px 5px;
+}
+
+.ritual-form__details {
+  border: 1px solid var(--color-border-base);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.ritual-form__summary {
+  cursor: pointer;
+}
+
+.ritual-form__details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}

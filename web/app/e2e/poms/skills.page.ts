@@ -14,8 +14,8 @@ export class SkillsPage {
     this.shell = new AppShell(page);
     this.confirmation = new ConfirmationModal(page);
     this.nameInput = this.page.getByPlaceholder('e.g., Source Analysis');
-    this.descriptionInput = this.page.getByPlaceholder('Brief description of what this skill does');
-    this.contentInput = this.page.getByPlaceholder('The prompt text that will be inserted into chat when this skill is called...');
+    this.descriptionInput = this.page.getByPlaceholder('What this skill does and when to use it');
+    this.contentInput = this.page.getByPlaceholder('The instructions the agent follows when this skill is active...');
     this.heading = this.page.getByRole('heading', { name: 'Skills', level: 1 });
     this.searchInput = this.page.getByPlaceholder('Search skills...');
     this.emptyMessage = this.page.getByText('No personal skills match your filters.');

@@ -203,6 +203,10 @@ func init() {
 		if _, err := database.BackfillRitualLinks(context.Background(), sqlDB, logger); err != nil {
 			logger.Fatal("Failed to copy skill links into their join tables", zap.Error(err))
 		}
+		// Skills created before the slug column get one derived from their name (ADR 0x035 §1).
+		if _, err := database.BackfillRitualSlugs(context.Background(), client, logger); err != nil {
+			logger.Fatal("Failed to derive slugs for existing skills", zap.Error(err))
+		}
 	}
 
 	// Ensure seed data exists before serving requests

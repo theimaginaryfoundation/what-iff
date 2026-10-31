@@ -1,8 +1,15 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpParams, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '@environments/environment';
-import { Ritual, CreateRitualRequest, UpdateRitualRequest, RitualFilters, PaginatedRitualResponse } from '../models/ritual.model';
+import {
+  Ritual,
+  CreateRitualRequest,
+  UpdateRitualRequest,
+  RitualFilters,
+  PaginatedRitualResponse,
+  RitualImportResult,
+} from '../models/ritual.model';
 
 @Injectable({
   providedIn: 'root'
@@ -63,6 +70,24 @@ export class RitualService {
 
   deleteRitual(id: string): Observable<void> {
     return this.http.delete<void>(`${this.apiUrl}/${id}`);
+  }
+
+  /**
+   * Imports a skill from an Agent Skills bundle: a zip with SKILL.md at its root or in one top-level
+   * folder, or a lone SKILL.md. A taken slug gets a numeric suffix; the result's warnings say so.
+   */
+  importBundle(file: File, personalityId?: string | null): Observable<RitualImportResult> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    if (personalityId) {
+      form.append('personality_id', personalityId);
+    }
+    return this.http.post<RitualImportResult>(`${this.apiUrl}/import`, form);
+  }
+
+  /** The skill as an Agent Skills zip; the Content-Disposition header carries `<slug>.zip`. */
+  exportRitual(id: string): Observable<HttpResponse<Blob>> {
+    return this.http.get(`${this.apiUrl}/${id}/export`, { responseType: 'blob', observe: 'response' });
   }
 
   getAvailableRituals(chatId: string, page: number = 1, limit: number = 10, filters: RitualFilters = {}): Observable<PaginatedRitualResponse> {

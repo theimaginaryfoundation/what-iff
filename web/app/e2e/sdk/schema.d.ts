@@ -8487,8 +8487,171 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Another of the account's skills already uses the requested slug */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a skill from an Agent Skills bundle
+         * @description Creates a skill from a SKILL.md (ADR 0x035 §7). Send a multipart form with either `file` (a zip with SKILL.md at its root or inside one top-level folder, or a lone SKILL.md) or several `files` parts whose filenames are paths inside the skill directory. Frontmatter is parsed leniently: a missing or invalid `name` is derived with a warning, unknown keys are kept in `metadata`, and only a missing `description` or body is an error. A slug the account already uses gets a numeric suffix. Bundle files other than SKILL.md are not stored by this version and are counted in `skipped_files`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description A skill zip or a SKILL.md
+                         */
+                        file?: string;
+                        /** @description The skill directory's files, named by their relative paths */
+                        files?: string[];
+                        /**
+                         * Format: uuid
+                         * @description Bind the imported skill to this personality
+                         */
+                        personality_id?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Skill imported */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RitualImportResult"];
+                    };
+                };
+                /** @description Not a bundle, no SKILL.md, or SKILL.md without a description or body; `message` says which */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Bundle larger than 30 MB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/{id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export a skill as an Agent Skills bundle
+         * @description A zip holding `<slug>/SKILL.md`, rendered from the skill's fields: `name` (the slug), `description`, `license`, `compatibility`, `allowed-tools`, and `metadata` with `display_name`, `whatiff-hotkeys`, `whatiff-connectors` (connector names) and the invocation flags. Imports unchanged into any Agent Skills harness.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ritual ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The bundle */
+                200: {
+                    headers: {
+                        /** @description attachment; filename="<slug>.zip" */
+                        "Content-Disposition"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/zip": string;
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -8610,6 +8773,15 @@ export interface paths {
                 };
                 /** @description Ritual not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Another of the account's skills already uses the requested slug */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -14821,10 +14993,43 @@ export interface components {
             personality_id?: string;
             /** @description MCP servers to enable when this ritual is triggered (omit on update to leave links unchanged). */
             mcp_server_ids?: string[];
+            /** @description The skill's name in the Agent Skills sense (ADR 0x035): 1-64 chars of [a-z0-9-], unique among the account's skills. Omit on create to derive it from `name`; omit on update to keep the stored slug. Taken slugs answer 409. */
+            slug?: string;
+            /** @description SKILL.md `license`. Omit on update to leave unchanged. */
+            license?: string;
+            /** @description SKILL.md `compatibility`, what the skill needs from its environment. Omit on update to leave unchanged. */
+            compatibility?: string;
+            /** @description SKILL.md `metadata`, string to string. Keys starting with `whatiff-` are reserved. Omit on update to leave unchanged. */
+            metadata?: {
+                [key: string]: string;
+            };
+            /** @description SKILL.md `allowed-tools`: tools loaded with the skill when it is activated. Never a permission grant; the thread's disabled tools still win. Omit on update to leave unchanged. */
+            allowed_tools?: string[];
+            /**
+             * @description When true the skill is left out of the model's skills index; only the user, a mode or a job can activate it.
+             * @default false
+             */
+            disable_model_invocation: boolean;
+            /**
+             * @description When false the skill is hidden from the /skill picker and hotkeys (and from `available-rituals`); the model may still load it.
+             * @default true
+             */
+            user_invocable: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        RitualImportResult: {
+            ritual: components["schemas"]["Ritual"];
+            /** @description Lenient-parse repairs and import-time substitutions to show the user */
+            warnings: string[];
+            /** @description Bundle members other than SKILL.md, not stored by this version */
+            skipped_files: number;
+            /** @description Exporter connector names matched to this account's connectors */
+            connectors_linked: string[];
+            /** @description Exporter connector names with no match here */
+            connectors_missing: string[];
         };
         /** @description One entity wiki page (ADR 0x034). */
         AgentEntity: {

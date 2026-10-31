@@ -10,8 +10,47 @@
       </h1>
       <p>Reusable prompt templates. Type / in chat to call a skill.</p>
     </div>
-    <app-marketplace-browse-link kind="skill" />
+    <div class="skills-page__header-actions">
+      <button
+        type="button"
+        class="skills-page__import-btn"
+        uiTooltip="Import a SKILL.md or an Agent Skills zip"
+        [disabled]="importing()"
+        (click)="bundleInput.click()">
+        <ui-upload-icon [size]="12" />
+        {{ importing() ? 'Importing…' : 'Import skill' }}
+      </button>
+      <input
+        #bundleInput
+        class="sr-only"
+        type="file"
+        accept=".zip,.md,application/zip,text/markdown"
+        aria-label="Agent Skills bundle (zip) or SKILL.md"
+        (change)="onBundleFileChosen($event)" />
+      <app-marketplace-browse-link kind="skill" />
+    </div>
   </header>
+
+  @if (importNotice(); as notice) {
+    <aside
+      class="skills-page__notice"
+      [class.skills-page__notice--danger]="notice.kind === 'danger'"
+      [attr.role]="notice.kind === 'danger' ? 'alert' : 'status'">
+      <div class="skills-page__notice-body">
+        <strong>{{ notice.title }}</strong>
+        @if (notice.lines.length > 0) {
+          <ul>
+            @for (line of notice.lines; track $index) {
+              <li>{{ line }}</li>
+            }
+          </ul>
+        }
+      </div>
+      <button type="button" class="skills-page__icon-btn" aria-label="Dismiss" (click)="dismissImportNotice()">
+        <ui-x-icon [size]="12" />
+      </button>
+    </aside>
+  }
 
   <section class="skills-page__controls">
     <div class="skills-page__search-wrap">
@@ -99,6 +138,14 @@
               </button>
               <button
                 type="button"
+                class="skills-page__icon-btn"
+                [attr.aria-label]="'Export ' + row.name"
+                uiTooltip="Export as SKILL.md bundle"
+                (click)="exportRitual(row)">
+                <ui-download-icon [size]="13" />
+              </button>
+              <button
+                type="button"
                 class="skills-page__icon-btn skills-page__icon-btn--delete"
                 [attr.aria-label]="'Delete ' + row.name"
                 uiTooltip="Delete skill"
@@ -149,6 +196,7 @@
           [ritual]="editingRitual()"
           [personalities]="personalities()"
           [mcpServers]="mcpServers()"
+          [tools]="tools()"
           [saving]="editorSaving()"
           [deleting]="false"
           [creating]="creating()"

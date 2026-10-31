@@ -284,3 +284,55 @@
     text-align: center;
   }
 }
+
+.skills-page__header-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.skills-page__import-btn {
+  align-items: center;
+  background: var(--color-surface-base);
+  border: 1px solid var(--color-border-base);
+  border-radius: 7px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+}
+
+.skills-page__import-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.skills-page__notice {
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+  border-radius: 10px;
+  color: var(--color-text-primary);
+  display: flex;
+  font-size: 13px;
+  gap: 12px;
+  justify-content: space-between;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
+.skills-page__notice--danger {
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);
+  color: var(--color-danger);
+}
+
+.skills-page__notice-body ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}

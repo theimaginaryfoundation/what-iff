@@ -5319,6 +5319,120 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '409':
+          description: Another of the account's skills already uses the requested slug
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /ritual/import:
+    post:
+      summary: Import a skill from an Agent Skills bundle
+      description: >-
+        Creates a skill from a SKILL.md (ADR 0x035 §7). Send a multipart form with either `file` (a zip
+        with SKILL.md at its root or inside one top-level folder, or a lone SKILL.md) or several `files`
+        parts whose filenames are paths inside the skill directory. Frontmatter is parsed leniently: a
+        missing or invalid `name` is derived with a warning, unknown keys are kept in `metadata`, and
+        only a missing `description` or body is an error. A slug the account already uses gets a numeric
+        suffix. Bundle files other than SKILL.md are not stored by this version and are counted in
+        `skipped_files`.
+      tags: [Ritual Management]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: A skill zip or a SKILL.md
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: The skill directory's files, named by their relative paths
+                personality_id:
+                  type: string
+                  format: uuid
+                  description: Bind the imported skill to this personality
+      responses:
+        '201':
+          description: Skill imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RitualImportResult'
+        '400':
+          description: Not a bundle, no SKILL.md, or SKILL.md without a description or body; `message` says which
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Bundle larger than 30 MB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /ritual/{id}/export:
+    get:
+      summary: Export a skill as an Agent Skills bundle
+      description: >-
+        A zip holding `<slug>/SKILL.md`, rendered from the skill's fields: `name` (the slug),
+        `description`, `license`, `compatibility`, `allowed-tools`, and `metadata` with
+        `display_name`, `whatiff-hotkeys`, `whatiff-connectors` (connector names) and the invocation
+        flags. Imports unchanged into any Agent Skills harness.
+      tags: [Ritual Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Ritual ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The bundle
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: attachment; filename="<slug>.zip"
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Ritual not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /ritual/{id}:
     get:
@@ -5414,6 +5528,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Another of the account's skills already uses the requested slug
           content:
             application/json:
               schema:
@@ -11630,6 +11750,43 @@ components:
             type: string
             format: uuid
           description: MCP servers to enable when this ritual is triggered (omit on update to leave links unchanged).
+        slug:
+          type: string
+          maxLength: 64
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: >-
+            The skill's name in the Agent Skills sense (ADR 0x035): 1-64 chars of [a-z0-9-], unique
+            among the account's skills. Omit on create to derive it from `name`; omit on update to keep
+            the stored slug. Taken slugs answer 409.
+        license:
+          type: string
+          maxLength: 500
+          description: SKILL.md `license`. Omit on update to leave unchanged.
+        compatibility:
+          type: string
+          maxLength: 500
+          description: >-
+            SKILL.md `compatibility`, what the skill needs from its environment. Omit on update to leave unchanged.
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: SKILL.md `metadata`, string to string. Keys starting with `whatiff-` are reserved. Omit on update to leave unchanged.
+        allowed_tools:
+          type: array
+          items:
+            type: string
+          description: >-
+            SKILL.md `allowed-tools`: tools loaded with the skill when it is activated. Never a permission
+            grant; the thread's disabled tools still win. Omit on update to leave unchanged.
+        disable_model_invocation:
+          type: boolean
+          default: false
+          description: When true the skill is left out of the model's skills index; only the user, a mode or a job can activate it.
+        user_invocable:
+          type: boolean
+          default: true
+          description: When false the skill is hidden from the /skill picker and hotkeys (and from `available-rituals`); the model may still load it.
         created_at:
           type: string
           format: date-time
@@ -11655,6 +11812,31 @@ components:
         updated_at: "2024-01-01T00:00:00Z"
 
     # Memory Management Schemas
+    RitualImportResult:
+      type: object
+      properties:
+        ritual:
+          $ref: '#/components/schemas/Ritual'
+        warnings:
+          type: array
+          items:
+            type: string
+          description: Lenient-parse repairs and import-time substitutions to show the user
+        skipped_files:
+          type: integer
+          description: Bundle members other than SKILL.md, not stored by this version
+        connectors_linked:
+          type: array
+          items:
+            type: string
+          description: Exporter connector names matched to this account's connectors
+        connectors_missing:
+          type: array
+          items:
+            type: string
+          description: Exporter connector names with no match here
+      required: [ritual, warnings, skipped_files, connectors_linked, connectors_missing]
+
     AgentEntity:
       type: object
       description: One entity wiki page (ADR 0x034).

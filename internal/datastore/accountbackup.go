@@ -24,6 +24,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/ent/userpreference"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/skills"
 )
 
 const accountBackupMaxJSONLine = 16 << 20 // 16 MiB
@@ -305,13 +306,40 @@ func (d *Datastore) importBackupRituals(ctx context.Context, targetUserID uuid.U
 			res.Conflict++
 			continue
 		}
+		// Backups made before the Agent Skills fields have no slug; derive one and keep it unique
+		// among the target account's skills, as the editor would.
+		slug := strings.TrimSpace(rec.Slug)
+		if slug == "" || skills.ValidateSlug(slug) != nil {
+			slug = skills.Slugify(name)
+		}
+		slug, err = skills.UniqueSlug(slug, func(candidate string) (bool, error) {
+			return ritualSlugTaken(ctx, d.dbClient, targetUserID, candidate, uuid.Nil)
+		})
+		if err != nil {
+			return err
+		}
+		meta := rec.Metadata
+		if meta == nil {
+			meta = map[string]string{}
+		}
+		allowed := rec.AllowedTools
+		if allowed == nil {
+			allowed = []string{}
+		}
 		create := d.dbClient.Ritual.Create().
 			SetID(rec.ID).
 			SetOwnerID(targetUserID).
 			SetName(name).
+			SetSlug(slug).
 			SetDescription(desc).
 			SetContent(content).
 			SetHotkeys(rec.Hotkeys).
+			SetLicense(rec.License).
+			SetCompatibility(rec.Compatibility).
+			SetMetadata(meta).
+			SetAllowedTools(allowed).
+			SetDisableModelInvocation(rec.DisableModelInvocation).
+			SetUserInvocable(rec.UserInvocable == nil || *rec.UserInvocable).
 			SetCreatedAt(rec.CreatedAt).
 			SetUpdatedAt(rec.UpdatedAt)
 		if rec.PersonalityID != nil {
