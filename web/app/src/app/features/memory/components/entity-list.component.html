@@ -1,7 +1,11 @@
 <div class="entity-list">
   <div class="entity-list__summary">
     <span>{{ countLabel() }}</span>
-    <span class="entity-list__hint">· pages your personalities keep about people, places and projects</span>
+    @if (archived()) {
+      <span class="entity-list__hint">· pages an agent deleted; restore one to put it back</span>
+    } @else {
+      <span class="entity-list__hint">· pages your personalities keep about people, places and projects</span>
+    }
   </div>
 
   <div class="entity-list__controls">
@@ -27,6 +31,18 @@
         }
       </select>
     </label>
+    <label class="entity-list__filter">
+      <span>Show</span>
+      <select
+        aria-label="Show active or archived entities"
+        data-testid="entity-archived-filter"
+        [value]="archived() ? 'archived' : 'active'"
+        (change)="onArchivedChange($any($event.target).value === 'archived')"
+      >
+        <option value="active">Active</option>
+        <option value="archived">Archived</option>
+      </select>
+    </label>
   </div>
 
   @if (error(); as message) {
@@ -36,7 +52,9 @@
   } @else if (items().length === 0) {
     <p class="entity-list__empty">
       @if (query()) {
-        No entities match "{{ query() }}".
+        No {{ archived() ? "archived " : "" }}entities match "{{ query() }}".
+      } @else if (archived()) {
+        No archived entities. When a personality deletes an entity, it lands here so you can restore it.
       } @else {
         No entities yet. Personalities write them with the entity tools as people, places and projects come up.
       }
@@ -54,7 +72,11 @@
             [uiTooltip]="item.entity.pinned_personality_id ? 'Only this personality sees it' : 'Every personality sees it'"
             >{{ item.scopeLabel }}</span
           >
-          <span class="entity-card__updated">Updated {{ item.entity.updated_at | date: "mediumDate" }}</span>
+          @if (item.entity.archived_at) {
+            <span class="entity-card__updated">Archived {{ item.entity.archived_at | date: "mediumDate" }}</span>
+          } @else {
+            <span class="entity-card__updated">Updated {{ item.entity.updated_at | date: "mediumDate" }}</span>
+          }
         </div>
 
         @if (editingId() === item.entity.id) {
@@ -86,9 +108,12 @@
           </p>
           <div class="entity-card__actions">
             @if (confirmDeleteId() === item.entity.id) {
-              <span class="entity-card__confirm">Delete this entity?</span>
+              <span class="entity-card__confirm">{{ archived() ? "Delete this entity for good?" : "Delete this entity?" }}</span>
               <button type="button" (click)="confirmDeleteId.set(null)" [disabled]="saving()">Keep</button>
               <button type="button" class="entity-card__danger" (click)="delete(item.entity)" [disabled]="saving()">Delete</button>
+            } @else if (archived()) {
+              <button type="button" class="entity-card__primary" (click)="restore(item.entity)" [disabled]="saving()">Restore</button>
+              <button type="button" class="entity-card__danger" (click)="confirmDelete(item.entity)">Delete forever</button>
             } @else {
               <button type="button" (click)="startEdit(item.entity)">Edit</button>
               <button type="button" class="entity-card__danger" (click)="confirmDelete(item.entity)">Delete</button>

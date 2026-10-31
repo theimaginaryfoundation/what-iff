@@ -17,12 +17,21 @@ import (
 const agentFileWriteAttempts = 3
 
 // AgentFileWriteDescription is the agent-facing description of agent_file_write.
-var AgentFileWriteDescription = fmt.Sprintf(`Create and change your own text files: notes, journals, drafts, checklists, data you are collecting. They are kept in the user's files (the user sees them in their gallery) and last across conversations. Read them with agent_file_read; find them with list (kind="files", origin="agent").
+var AgentFileWriteDescription = fmt.Sprintf(`Create and change your own text files: notes, journals, drafts, checklists, data you are collecting. Only files you created can be changed; every other file is read-only to you. Files are kept in the user's files (the user sees them in their gallery) and last across conversations. Read them with agent_file_read; find them with list (kind="files", origin="agent").
 
-You can change only files you created. The user's own files, and files other agents made, are read-only: to work from one, copy it to a new file of yours.
+Ownership: "you" is this personality, in any conversation with it (with no personality, this conversation). The user's own files, and files other personalities made, can be read but never changed in place: to work from one, copy it to a new file of yours and change the copy. Readable does not mean editable; agent_file_read reports editable for each file.
 
-action:
-- "create": a new file at path with content. Fails if a file is already at that path.
+Pick the action first, then send only its fields:
+| action | needs | leave out |
+|---|---|---|
+| create | path, content | file, diff |
+| append | file, content | path, diff |
+| patch | file, diff | path, content |
+| delete | file | path, content, diff |
+| copy | file, path | content, diff |
+| move | file, path | content, diff |
+
+- "create": a new file at path with content. Fails if a file is already at that path; read it first if unsure.
 - "append": add content to the end of file (a newline is added between when needed). Best for logs and journals.
 - "patch": change file with diff, a unified diff of that one file. Each hunk starts with "@@ -<line>,<count> +<line>,<count> @@" and has lines starting with ' ' (unchanged), '-' (removed) or '+' (added). Include 2-3 unchanged lines around each change. Hunks are matched by their text, so read the file first and copy its lines exactly; a hunk that does not match is refused and nothing changes.
 - "delete": delete file.
@@ -81,6 +90,55 @@ type agentFileWriteResult struct {
 	Error   string        `json:"error,omitempty"`
 }
 
+// agentFileWriteFields lists, per action, the fields it needs; every other field must be left out.
+var agentFileWriteFields = map[string][]string{
+	"create": {"path", "content"},
+	"append": {"file", "content"},
+	"patch":  {"file", "diff"},
+	"delete": {"file"},
+	"copy":   {"file", "path"},
+	"move":   {"file", "path"},
+}
+
+// checkAgentFileWriteFields refuses a call that leaves out a field its action needs or sends one it
+// does not use, naming the action's fields. An empty string counts as left out, since models often
+// send every property.
+func checkAgentFileWriteFields(a agentFileWriteArgs) string {
+	needs, ok := agentFileWriteFields[a.Action]
+	if !ok {
+		return `action must be one of "create", "append", "patch", "delete", "copy", "move"`
+	}
+	sent := map[string]bool{
+		"file":    strings.TrimSpace(a.File) != "",
+		"path":    strings.TrimSpace(a.Path) != "",
+		"content": a.Content != "",
+		"diff":    strings.TrimSpace(a.Diff) != "",
+	}
+	var missing, extra []string
+	for _, f := range needs {
+		if !sent[f] {
+			missing = append(missing, f)
+		}
+		delete(sent, f)
+	}
+	for _, f := range []string{"file", "path", "content", "diff"} {
+		if sent[f] {
+			extra = append(extra, f)
+		}
+	}
+	if len(missing) == 0 && len(extra) == 0 {
+		return ""
+	}
+	msg := fmt.Sprintf("action %q takes %s", a.Action, strings.Join(needs, " and "))
+	if len(missing) > 0 {
+		msg += "; missing " + strings.Join(missing, ", ")
+	}
+	if len(extra) > 0 {
+		msg += "; leave out " + strings.Join(extra, ", ")
+	}
+	return msg
+}
+
 // Write executes an agent_file_write call.
 func (t *AgentFileTool) Write(ctx context.Context, chat *models.Chat, args []byte) (string, error) {
 	fail := func(msg string) (string, error) {
@@ -93,6 +151,9 @@ func (t *AgentFileTool) Write(ctx context.Context, chat *models.Chat, args []byt
 	var a agentFileWriteArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return fail(fmt.Sprintf("invalid arguments: %v", err))
+	}
+	if msg := checkAgentFileWriteFields(a); msg != "" {
+		return fail(msg)
 	}
 	if len(a.Content) > agentFileMaxCallBytes || len(a.Diff) > agentFileMaxCallBytes {
 		return fail(fmt.Sprintf("one call sends at most %d KB; split the write into several appends", agentFileMaxCallBytes>>10))
@@ -108,7 +169,7 @@ func (t *AgentFileTool) Write(ctx context.Context, chat *models.Chat, args []byt
 	case "append":
 		res, err = t.rewrite(ctx, chat, a.File, func(cur string) (string, error) {
 			if a.Content == "" {
-				return "", agentFileErrorf("content is required")
+				return "", fileRefusalf("content is required")
 			}
 			if cur == "" || strings.HasSuffix(cur, "\n") {
 				return cur + a.Content, nil
@@ -118,11 +179,11 @@ func (t *AgentFileTool) Write(ctx context.Context, chat *models.Chat, args []byt
 	case "patch":
 		res, err = t.rewrite(ctx, chat, a.File, func(cur string) (string, error) {
 			if strings.TrimSpace(a.Diff) == "" {
-				return "", agentFileErrorf("diff is required")
+				return "", fileRefusalf("diff is required")
 			}
 			next, err := applyUnifiedDiff(cur, a.Diff)
 			if err != nil {
-				return "", agentFileErrorf("patch not applied: %v", err)
+				return "", fileRefusalf("patch not applied: %v", err)
 			}
 			return next, nil
 		})
@@ -135,11 +196,10 @@ func (t *AgentFileTool) Write(ctx context.Context, chat *models.Chat, args []byt
 	default:
 		return fail(`action must be one of "create", "append", "patch", "delete", "copy", "move"`)
 	}
-	var refusal errAgentFile
-	switch {
-	case errors.As(err, &refusal):
-		return fail(refusal.msg)
-	case err != nil:
+	if msg, ok := AsFileRefusal(err); ok {
+		return fail(msg)
+	}
+	if err != nil {
 		t.logger.Error("agent_file_write failed", zap.String("user_id", chat.UserID.String()), zap.String("action", a.Action), zap.Error(err))
 		return fail("could not write the file; try again")
 	}
@@ -166,6 +226,9 @@ func (t *AgentFileTool) dropObject(ctx context.Context, key string) {
 
 // checkFreePath refuses a path where the user already has a file, so paths stay unambiguous.
 func (t *AgentFileTool) checkFreePath(ctx context.Context, userID uuid.UUID, folder, name string) error {
+	if err := checkAgentFolder(folder); err != nil {
+		return err
+	}
 	existing, err := t.store.FindFileAttachmentsAtPath(ctx, userID, folder, name)
 	if err != nil {
 		return err
@@ -175,7 +238,7 @@ func (t *AgentFileTool) checkFreePath(ctx context.Context, userID uuid.UUID, fol
 		if folder != "" {
 			p = folder + "/" + name
 		}
-		return agentFileErrorf("a file is already at %q (id %s); pick another path, or change that file", p, existing[0].ID)
+		return fileRefusalf("a file is already at %q (id %s); pick another path, or change that file", p, existing[0].ID)
 	}
 	return nil
 }
@@ -183,9 +246,9 @@ func (t *AgentFileTool) checkFreePath(ctx context.Context, userID uuid.UUID, fol
 // newFile stores content as a new agent file of chat's agent at p.
 func (t *AgentFileTool) newFile(ctx context.Context, chat *models.Chat, p, content string) (*models.FileAttachment, error) {
 	if strings.TrimSpace(p) == "" {
-		return nil, agentFileErrorf("path is required, e.g. \"notes/journal.md\"")
+		return nil, fileRefusalf("path is required, e.g. \"notes/journal.md\"")
 	}
-	folder, rawName, err := splitAgentFilePath(p)
+	folder, rawName, err := SplitFilePath(p)
 	if err != nil {
 		return nil, err
 	}
@@ -204,18 +267,18 @@ func (t *AgentFileTool) newFile(ctx context.Context, chat *models.Chat, p, conte
 		return nil, err
 	}
 	if n >= agentFileMaxPerUser {
-		return nil, agentFileErrorf("this account already holds %d agent files, the limit; delete some you no longer need first", n)
+		return nil, fileRefusalf("this account already holds %d agent files, the limit; delete some you no longer need first", n)
 	}
 	key, err := t.putObject(ctx, chat.UserID, name, mimeType, content)
 	if err != nil {
 		return nil, err
 	}
 	att := models.FileAttachment{
-		Name:          name,
-		FileType:      mimeType,
-		S3Key:         key,
-		Folder:        folder,
-		AgentAuthored: true,
+		Name:     name,
+		FileType: mimeType,
+		S3Key:    key,
+		Folder:   folder,
+		Origin:   models.FileOriginAgent,
 	}
 	if chat.PersonalityID != uuid.Nil {
 		pid := chat.PersonalityID
@@ -271,11 +334,14 @@ func (t *AgentFileTool) rewrite(ctx context.Context, chat *models.Chat, file str
 			return agentFileWriteResult{}, err
 		}
 		swapped, err := t.store.SwapAgentFileObject(ctx, chat.UserID, att.ID, att.S3Key, key)
-		if err != nil || !swapped {
+		if err != nil {
+			// The swap may have committed before the error surfaced, leaving the row on key, so
+			// key is not dropped: an orphaned object beats a row pointing at a deleted one.
+			return agentFileWriteResult{}, err
+		}
+		if !swapped {
+			// Another writer won; key was never referenced.
 			t.dropObject(ctx, key)
-			if err != nil {
-				return agentFileWriteResult{}, err
-			}
 			continue
 		}
 		storage.ReleaseReplacedObject(context.WithoutCancel(ctx), t.logger, t.files, t.store, att.S3Key)
@@ -283,7 +349,7 @@ func (t *AgentFileTool) rewrite(ctx context.Context, chat *models.Chat, file str
 		ref := t.ref(chat, att, next)
 		return agentFileWriteResult{File: &ref}, nil
 	}
-	return agentFileWriteResult{}, agentFileErrorf("the file kept changing while you wrote it; read it again and retry")
+	return agentFileWriteResult{}, fileRefusalf("the file kept changing while you wrote it; read it again and retry")
 }
 
 func (t *AgentFileTool) delete(ctx context.Context, chat *models.Chat, file string) (agentFileWriteResult, error) {
@@ -322,9 +388,9 @@ func (t *AgentFileTool) move(ctx context.Context, chat *models.Chat, file, p str
 		return agentFileWriteResult{}, err
 	}
 	if strings.TrimSpace(p) == "" {
-		return agentFileWriteResult{}, agentFileErrorf("path is required: where the file goes, e.g. \"notes/old/journal.md\"")
+		return agentFileWriteResult{}, fileRefusalf("path is required: where the file goes, e.g. \"notes/old/journal.md\"")
 	}
-	folder, rawName, err := splitAgentFilePath(p)
+	folder, rawName, err := SplitFilePath(p)
 	if err != nil {
 		return agentFileWriteResult{}, err
 	}
@@ -333,7 +399,7 @@ func (t *AgentFileTool) move(ctx context.Context, chat *models.Chat, file, p str
 		return agentFileWriteResult{}, err
 	}
 	if !strings.EqualFold(name, att.Name) && !strings.EqualFold(pathExt(name), pathExt(att.Name)) {
-		return agentFileWriteResult{}, agentFileErrorf("a move keeps the file's type; name it with %s", pathExt(att.Name))
+		return agentFileWriteResult{}, fileRefusalf("a move keeps the file's type; name it with %s", pathExt(att.Name))
 	}
 	if folder != att.Folder || !strings.EqualFold(name, att.Name) {
 		if err := t.checkFreePath(ctx, chat.UserID, folder, name); err != nil {
@@ -344,7 +410,7 @@ func (t *AgentFileTool) move(ctx context.Context, chat *models.Chat, file, p str
 	if name != att.Name {
 		if att.Name, err = t.store.RenameGalleryFile(ctx, chat.UserID, att.ID, name); err != nil {
 			if errors.Is(err, models.ErrInvalidFileName) {
-				return agentFileWriteResult{}, agentFileErrorf("%v", err)
+				return agentFileWriteResult{}, fileRefusalf("%v", err)
 			}
 			return agentFileWriteResult{}, err
 		}
