@@ -17,6 +17,7 @@
   A non-destructive migration keeps the columns but drops their foreign keys, so a value left behind would point at a deleted mode or bring back a removed link on the next boot.
   `cmd/api-server` runs it between a non-destructive `Schema.Create` and the destructive pass, so `DESTRUCTIVE_MIGRATION=true` cannot drop the columns before they are copied.
   Idempotent: a no-op once the columns are cleared or dropped; `cmd/api-server` calls it on every start that migrates.
+- **`BackfillRitualSlugs`** (`ritual_slugs.go`): gives rituals created before the `slug` column a slug derived from their name, unique per owner (`skills.Slugify` + `skills.UniqueSlug`), so the partial unique index can hold; also called on every migrating start and finds work once.
 
 ## Key types and entry points
 
@@ -47,6 +48,7 @@
 - `poolmetrics_test.go` — pool gauges against an in-memory sqlite `*sql.DB`.
 - `seed_test.go` — `EnsureSeedData` over sqlmock: with catalog seeding off it issues no catalog query, and with it on the catalog step runs.
 - `ritual_links_test.go` — the link backfill against in-memory sqlite with foreign keys on, shaped like a non-destructive Postgres migration: moves once and clears the columns, skips links to deleted modes and jobs, keeps a removed link removed across restarts, and is a no-op without the legacy columns.
+- `ritual_slugs_test.go` — the slug backfill over the generated schema on sqlite: derived slugs, suffixes within an owner, editor-set slugs untouched.
 
 ## Related documentation
 

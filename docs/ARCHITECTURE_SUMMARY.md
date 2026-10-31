@@ -183,6 +183,7 @@ Run `make reflow-package-summaries` to fix a file mechanically; CI enforces it w
  ### Models and Shared Types
  - `internal/models/`: DTOs shared across handlers, agent, store.
  - Keeps HTTP payload schemas, Ent entities, and OpenAI request/response shapes in sync.
+ - `internal/skills/`: pure Agent Skills logic behind skills (rituals), per ADR 0x035: slug rules, the smuggled-Unicode sanitizer and bounds, SKILL.md parse and render, and bundle zips. No database or HTTP; `internal/datastore`, `internal/database` and `internal/handlers/ritual` call it, and the agent's skills index and `load_skill` will.
 
  ### Data Access & Ent
  - `internal/datastore/`: repository layer abstracting Ent queries with ownership, pagination, filters, and vector search.

@@ -79,9 +79,17 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			description text NOT NULL,
 			content text NOT NULL,
 			hotkeys text NOT NULL,
+			slug text NOT NULL DEFAULT '',
+			license text NOT NULL DEFAULT '',
+			compatibility text NOT NULL DEFAULT '',
+			metadata json,
+			allowed_tools json,
+			disable_model_invocation bool NOT NULL DEFAULT false,
+			user_invocable bool NOT NULL DEFAULT true,
 			ritual_personality uuid,
 			user_rituals uuid NOT NULL
 		)`,
+		`CREATE UNIQUE INDEX ritual_slug_user_rituals ON rituals (slug, user_rituals) WHERE slug <> ''`,
 		`CREATE TABLE mood_rituals (
 			mood_id uuid NOT NULL,
 			ritual_id uuid NOT NULL,

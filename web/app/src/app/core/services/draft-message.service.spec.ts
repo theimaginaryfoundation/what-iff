@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { DraftMessageService } from './draft-message.service';
 import { FileAttachment } from '../models/file-attachment.model';
-import { Ritual } from '../models/ritual.model';
+import { Ritual, RITUAL_SKILL_FIELD_DEFAULTS } from '../models/ritual.model';
 
 describe('DraftMessageService', () => {
     let service: DraftMessageService;
@@ -91,6 +91,7 @@ describe('DraftMessageService', () => {
             const message = 'Test message';
             const rituals: Ritual[] = [
                 {
+                    ...RITUAL_SKILL_FIELD_DEFAULTS,
                     id: 'ritual-1',
                     name: 'Test Ritual',
                     description: 'Test description',
@@ -228,6 +229,7 @@ describe('DraftMessageService', () => {
             const chatId = 'chat-1';
             const rituals: Ritual[] = [
                 {
+                    ...RITUAL_SKILL_FIELD_DEFAULTS,
                     id: 'ritual-1',
                     name: 'Test Ritual',
                     description: 'Test description',

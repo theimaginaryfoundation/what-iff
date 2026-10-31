@@ -32,6 +32,37 @@ describe('RitualService', () => {
         expect(service).toBeTruthy();
     });
 
+    describe('import and export', () => {
+        it('posts the bundle as multipart with the personality when given', () => {
+            const file = new File(['---\nname: x\n---'], 'x.zip', { type: 'application/zip' });
+            service.importBundle(file, 'personality-1').subscribe();
+
+            const req = httpMock.expectOne(`${environment.apiUrl}/ritual/import`);
+            expect(req.request.method).toBe('POST');
+            const body = req.request.body as FormData;
+            expect(body.get('file')).toBeInstanceOf(File);
+            expect(body.get('personality_id')).toBe('personality-1');
+            req.flush({ ritual: {}, warnings: [], skipped_files: 0, connectors_linked: [], connectors_missing: [] });
+        });
+
+        it('omits personality_id when none is given', () => {
+            service.importBundle(new File(['x'], 'SKILL.md')).subscribe();
+            const req = httpMock.expectOne(`${environment.apiUrl}/ritual/import`);
+            expect((req.request.body as FormData).has('personality_id')).toBe(false);
+            req.flush({ ritual: {}, warnings: [], skipped_files: 0, connectors_linked: [], connectors_missing: [] });
+        });
+
+        it('fetches the export as a blob response', () => {
+            service.exportRitual('ritual-1').subscribe(res => {
+                expect(res.headers.get('Content-Disposition')).toContain('pdf-forms.zip');
+            });
+            const req = httpMock.expectOne(`${environment.apiUrl}/ritual/ritual-1/export`);
+            expect(req.request.method).toBe('GET');
+            expect(req.request.responseType).toBe('blob');
+            req.flush(new Blob(['zip']), { headers: { 'Content-Disposition': 'attachment; filename="pdf-forms.zip"' } });
+        });
+    });
+
     describe('getAvailableRituals', () => {
         it('should include has_hotkeys filter when provided', () => {
             service

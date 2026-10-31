@@ -20,6 +20,8 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 
 	ritualRouter.HandleFunc("", h.ListRituals).Methods("GET")
 	ritualRouter.HandleFunc("", h.CreateRitual).Methods("POST")
+	ritualRouter.HandleFunc("/import", h.ImportRitual).Methods("POST")
+	ritualRouter.HandleFunc("/{id}/export", h.ExportRitual).Methods("GET")
 	ritualRouter.HandleFunc("/{id}", h.GetRitual).Methods("GET")
 	ritualRouter.HandleFunc("/{id}", h.UpdateRitual).Methods("PUT")
 	ritualRouter.HandleFunc("/{id}", h.DeleteRitual).Methods("DELETE")

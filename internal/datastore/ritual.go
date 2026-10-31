@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"strings"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/ent/chat"
@@ -10,6 +11,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/skills"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -21,14 +23,31 @@ func toRitualModel(e *ent.Ritual) *models.Ritual {
 		return nil
 	}
 
+	license, compatibility := e.License, e.Compatibility
+	meta := e.Metadata
+	if meta == nil {
+		meta = map[string]string{}
+	}
+	allowedTools := e.AllowedTools
+	if allowedTools == nil {
+		allowedTools = []string{}
+	}
+	disableModel, userInvocable := e.DisableModelInvocation, e.UserInvocable
 	ritualModel := models.Ritual{
-		ID:          e.ID,
-		Name:        e.Name,
-		Description: e.Description,
-		Content:     e.Content,
-		Hotkeys:     e.Hotkeys,
-		CreatedAt:   e.CreatedAt,
-		UpdatedAt:   e.UpdatedAt,
+		ID:                     e.ID,
+		Slug:                   e.Slug,
+		Name:                   e.Name,
+		Description:            e.Description,
+		Content:                e.Content,
+		Hotkeys:                e.Hotkeys,
+		License:                &license,
+		Compatibility:          &compatibility,
+		Metadata:               &meta,
+		AllowedTools:           &allowedTools,
+		DisableModelInvocation: &disableModel,
+		UserInvocable:          &userInvocable,
+		CreatedAt:              e.CreatedAt,
+		UpdatedAt:              e.UpdatedAt,
 	}
 	if len(e.Edges.McpServers) > 0 {
 		ids := make([]uuid.UUID, len(e.Edges.McpServers))
@@ -83,12 +102,40 @@ func (d *Datastore) CreateRitual(ctx context.Context, userID uuid.UUID, ritual m
 		return nil, ErrUnauthorized
 	}
 
+	// The slug is the skill's name in the Agent Skills sense; the handler derives it from the
+	// display name when the request has none (skills.Normalize), so an empty one here is a bug.
+	slug := strings.TrimSpace(ritual.Slug)
+	if slug == "" {
+		slug = skills.Slugify(ritual.Name)
+	}
+	taken, err := ritualSlugTaken(ctx, tx.Client(), userID, slug, uuid.Nil)
+	if err != nil {
+		d.logger.Error(i18n.T1("query.failed", "Entity", "ritual"), zap.Error(err))
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return nil, err
+	}
+	if taken {
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return nil, ErrRitualSlugTaken
+	}
+
 	// Create ritual
 	create := tx.Ritual.Create().
 		SetName(ritual.Name).
+		SetSlug(slug).
 		SetDescription(ritual.Description).
 		SetContent(ritual.Content).
 		SetHotkeys(ritual.Hotkeys).
+		SetLicense(ritual.LicenseText()).
+		SetCompatibility(ritual.CompatibilityText()).
+		SetMetadata(ritual.MetadataMap()).
+		SetAllowedTools(ritual.AllowedToolList()).
+		SetDisableModelInvocation(!ritual.IsModelInvocable()).
+		SetUserInvocable(ritual.IsUserInvocable()).
 		SetOwnerID(userID)
 	if ritual.MCPServerIDs != nil && len(*ritual.MCPServerIDs) > 0 {
 		create.AddMcpServerIDs((*ritual.MCPServerIDs)...)
@@ -100,6 +147,12 @@ func (d *Datastore) CreateRitual(ctx context.Context, userID uuid.UUID, ritual m
 
 	entRitual, err := create.Save(ctx)
 	if err != nil {
+		if ent.IsConstraintError(err) {
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, ErrRitualSlugTaken
+		}
 		d.logger.Error(i18n.T1("create.failed", "Entity", "ritual"), zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
@@ -294,6 +347,10 @@ func (d *Datastore) ListRituals(ctx context.Context, userID uuid.UUID, pageNum, 
 		)
 	}
 
+	if filters.Slug != nil && *filters.Slug != "" {
+		query = query.Where(entritual.Slug(*filters.Slug))
+	}
+
 	if filters.PersonalityID != nil {
 		query = query.Where(entritual.HasPersonalityWith(personality.ID(*filters.PersonalityID)))
 	}
@@ -444,12 +501,47 @@ func (d *Datastore) UpdateRitual(ctx context.Context, userID uuid.UUID, ritual m
 		}
 	}
 
-	// Update ritual
+	// Update ritual. An empty slug keeps the stored one; the pointer fields follow the same rule.
 	update := tx.Ritual.UpdateOneID(ritual.ID).
 		SetName(ritual.Name).
 		SetDescription(ritual.Description).
 		SetContent(ritual.Content).
 		SetHotkeys(ritual.Hotkeys)
+	if slug := strings.TrimSpace(ritual.Slug); slug != "" {
+		taken, err := ritualSlugTaken(ctx, tx.Client(), userID, slug, ritual.ID)
+		if err != nil {
+			d.logger.Error(i18n.T1("query.failed", "Entity", "ritual"), zap.Error(err))
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, err
+		}
+		if taken {
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, ErrRitualSlugTaken
+		}
+		update.SetSlug(slug)
+	}
+	if ritual.License != nil {
+		update.SetLicense(*ritual.License)
+	}
+	if ritual.Compatibility != nil {
+		update.SetCompatibility(*ritual.Compatibility)
+	}
+	if ritual.Metadata != nil {
+		update.SetMetadata(ritual.MetadataMap())
+	}
+	if ritual.AllowedTools != nil {
+		update.SetAllowedTools(ritual.AllowedToolList())
+	}
+	if ritual.DisableModelInvocation != nil {
+		update.SetDisableModelInvocation(*ritual.DisableModelInvocation)
+	}
+	if ritual.UserInvocable != nil {
+		update.SetUserInvocable(*ritual.UserInvocable)
+	}
 	if ritual.MCPServerIDs != nil {
 		update.ClearMcpServers()
 		if len(*ritual.MCPServerIDs) > 0 {
@@ -465,6 +557,12 @@ func (d *Datastore) UpdateRitual(ctx context.Context, userID uuid.UUID, ritual m
 
 	entRitual, err := update.Save(ctx)
 	if err != nil {
+		if ent.IsConstraintError(err) {
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, ErrRitualSlugTaken
+		}
 		d.logger.Error(i18n.T1("update.failed", "Entity", "ritual"), zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
@@ -599,9 +697,11 @@ func (d *Datastore) GetAvailableRituals(ctx context.Context, userID, chatID uuid
 		return nil, err
 	}
 
-	// Build query with user authorization and personality filtering
+	// Build query with user authorization and personality filtering. This is the user's
+	// invocation surface (the /skill picker and hotkeys), so skills marked not user-invocable are
+	// left out; the model may still load them (ADR 0x035 §1).
 	query := tx.Ritual.Query().
-		Where(entritual.HasOwnerWith(user.ID(userID))).
+		Where(entritual.HasOwnerWith(user.ID(userID)), entritual.UserInvocable(true)).
 		WithOwner().
 		WithPersonality().
 		WithMcpServers()
@@ -699,4 +799,39 @@ func (d *Datastore) GetAvailableRituals(ctx context.Context, userID, chatID uuid
 		TotalCount: totalCount,
 		Page:       pageNum,
 	}, nil
+}
+
+// ritualSlugTaken reports whether one of userID's other rituals (not excludeID) has slug.
+func ritualSlugTaken(ctx context.Context, client *ent.Client, userID uuid.UUID, slug string, excludeID uuid.UUID) (bool, error) {
+	q := client.Ritual.Query().Where(
+		entritual.Slug(slug),
+		entritual.HasOwnerWith(user.ID(userID)),
+	)
+	if excludeID != uuid.Nil {
+		q = q.Where(entritual.IDNEQ(excludeID))
+	}
+	return q.Exist(ctx)
+}
+
+// RitualSlugTaken reports whether slug is already used by one of userID's rituals other than
+// excludeID (uuid.Nil to check them all). Import uses it to pick a free slug.
+func (d *Datastore) RitualSlugTaken(ctx context.Context, userID uuid.UUID, slug string, excludeID uuid.UUID) (bool, error) {
+	return ritualSlugTaken(ctx, d.dbClient, userID, slug, excludeID)
+}
+
+// GetRitualBySlug returns userID's ritual with the given slug, or ErrRitualNotFound.
+func (d *Datastore) GetRitualBySlug(ctx context.Context, userID uuid.UUID, slug string) (*models.Ritual, error) {
+	entRitual, err := d.dbClient.Ritual.Query().
+		Where(entritual.Slug(slug), entritual.HasOwnerWith(user.ID(userID))).
+		WithPersonality().
+		WithMcpServers().
+		Only(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			return nil, ErrRitualNotFound
+		}
+		d.logger.Error(i18n.T1("query.failed", "Entity", "ritual"), zap.Error(err))
+		return nil, err
+	}
+	return toRitualModel(entRitual), nil
 }

@@ -20,29 +20,68 @@
 
   <div>
     <label class="ritual-form__label">
-      Description
+      Skill name (slug)
       <input
-        class="ritual-form__input"
-        placeholder="Brief description of what this skill does"
-        [attr.aria-describedby]="hintId('description')"
-        [ngModel]="description()"
-        (ngModelChange)="description.set($event)" />
+        class="ritual-form__input ritual-form__input--mono"
+        placeholder="e.g., source-analysis"
+        spellcheck="false"
+        [attr.maxlength]="slugMax"
+        [attr.aria-invalid]="slug() && !slugValid() ? 'true' : null"
+        [attr.aria-describedby]="hintId('slug')"
+        [ngModel]="slug()"
+        (ngModelChange)="onSlugChange($event)" />
     </label>
-    <p class="ritual-form__hint" [id]="hintId('description')">A short summary to help you pick the right skill.</p>
+    <p class="ritual-form__hint" [id]="hintId('slug')" [class.ritual-form__hint--invalid]="slug() && !slugValid()">
+      @if (slug() && !slugValid()) {
+        Lowercase letters, digits and single hyphens only, up to {{ slugMax }} characters.
+      } @else {
+        How the agent and other tools refer to this skill. Filled in from the name until you change it.
+      }
+    </p>
   </div>
 
   <div>
     <label class="ritual-form__label">
-      Content (prompt)
+      Description
       <textarea
-        rows="6"
+        rows="2"
+        class="ritual-form__textarea ritual-form__textarea--short"
+        placeholder="What this skill does and when to use it"
+        [attr.aria-invalid]="descriptionTooLong() ? 'true' : null"
+        [attr.aria-describedby]="hintId('description')"
+        [ngModel]="description()"
+        (ngModelChange)="description.set($event)"></textarea>
+    </label>
+    <p class="ritual-form__hint ritual-form__hint--row" [id]="hintId('description')" [class.ritual-form__hint--invalid]="descriptionTooLong()">
+      <span>Say when to use it: the agent reads this line to decide whether to load the skill.</span>
+      <span class="ritual-form__counter">{{ description().length }}/{{ descriptionMax }}</span>
+    </p>
+  </div>
+
+  <div>
+    <label class="ritual-form__label">
+      Instructions
+      <textarea
+        rows="8"
         class="ritual-form__textarea"
-        placeholder="The prompt text that will be inserted into chat when this skill is called..."
+        placeholder="The instructions the agent follows when this skill is active..."
+        [attr.aria-invalid]="bodyTooLong() ? 'true' : null"
         [attr.aria-describedby]="hintId('content')"
         [ngModel]="content()"
         (ngModelChange)="content.set($event)"></textarea>
     </label>
-    <p class="ritual-form__hint" [id]="hintId('content')">Added to your message when you call the skill.</p>
+    <p class="ritual-form__hint ritual-form__hint--row" [id]="hintId('content')" [class.ritual-form__hint--invalid]="bodyTooLong()">
+      <span>
+        @if (bodyTooLong()) {
+          Too long: instructions are capped at 64 KB.
+        } @else if (bodyOverSoftLimit()) {
+          Long skills cost context on every turn they are active. Keep the instructions focused.
+        } @else {
+          Markdown. Added to the agent's context when the skill is called or loaded.
+        }
+      </span>
+      <span class="ritual-form__counter" [class.ritual-form__counter--warn]="bodyOverSoftLimit()">~{{ bodyTokens() }} tokens</span>
+    </p>
   </div>
 
   <div>
@@ -64,7 +103,7 @@
     </p>
   </div>
 
-  <div>
+  <div data-section="connectors">
     <span class="ritual-form__label" [id]="hintId('mcp-label')">Connectors (optional)</span>
     @if (mcpServers().length > 0) {
       <div class="ritual-form__checklist" role="group" [attr.aria-labelledby]="hintId('mcp-label')" [attr.aria-describedby]="hintId('mcp')">
@@ -82,8 +121,55 @@
       <p class="ritual-form__hint">No connectors to pick from yet. Add one on the Tools page.</p>
     }
     <p class="ritual-form__hint" [id]="hintId('mcp')">
-      Turned on for the turn when this skill is called, in addition to the connectors already enabled for the thread. You can
+      Brought into scope while this skill is active, in addition to the connectors already enabled for the thread. You can
       also link skills from a connector on the Tools page.
+    </p>
+  </div>
+
+  <div data-section="tools">
+    <span class="ritual-form__label" [id]="hintId('tools-label')">Tools loaded with the skill (optional)</span>
+    @if (tools().length > 0) {
+      <div class="ritual-form__checklist" role="group" [attr.aria-labelledby]="hintId('tools-label')" [attr.aria-describedby]="hintId('tools')">
+        @for (tool of tools(); track tool.id) {
+          <label class="ritual-form__check">
+            <input
+              type="checkbox"
+              [checked]="isToolSelected(tool.id)"
+              (change)="toggleTool(tool.id, $any($event.target).checked)" />
+            <span>{{ tool.label }}</span>
+          </label>
+        }
+      </div>
+    }
+    @if (foreignAllowedTools().length > 0) {
+      <p class="ritual-form__hint">
+        Kept from import, not offered here:
+        @for (name of foreignAllowedTools(); track name) {
+          <code class="ritual-form__code">{{ name }}</code>
+        }
+      </p>
+    }
+    <p class="ritual-form__hint" [id]="hintId('tools')">
+      Loaded for the agent as soon as the skill is active, so it can use them without a second step. Never widens what a
+      thread allows: tools you have turned off stay off.
+    </p>
+  </div>
+
+  <div data-section="activation">
+    <span class="ritual-form__label" [id]="hintId('activation-label')">Who can activate it</span>
+    <div class="ritual-form__checklist ritual-form__checklist--static" role="group" [attr.aria-labelledby]="hintId('activation-label')">
+      <label class="ritual-form__check">
+        <input type="checkbox" [checked]="modelInvocable()" (change)="modelInvocable.set($any($event.target).checked)" />
+        <span>The agent may load this skill itself when a task calls for it</span>
+      </label>
+      <label class="ritual-form__check">
+        <input type="checkbox" [checked]="userInvocable()" (change)="userInvocable.set($any($event.target).checked)" />
+        <span>Show it in the '/' picker and let hotkeys call it</span>
+      </label>
+    </div>
+    <p class="ritual-form__hint">
+      Turn the first off for a skill only you, a mode or a job should trigger; the second off for a skill meant for the
+      agent alone.
     </p>
   </div>
 
@@ -98,6 +184,38 @@
     </label>
     <p class="ritual-form__hint">On the chat page, adds this skill to your next message. Key sequences work too.</p>
   </div>
+
+  <details class="ritual-form__details">
+    <summary class="ritual-form__label ritual-form__summary">Bundle details (optional)</summary>
+    <div class="ritual-form__details-body">
+      <div>
+        <label class="ritual-form__label">
+          License
+          <input
+            class="ritual-form__input"
+            placeholder="e.g., MIT"
+            [attr.maxlength]="shortFieldMax"
+            [ngModel]="license()"
+            (ngModelChange)="license.set($event)" />
+        </label>
+      </div>
+      <div>
+        <label class="ritual-form__label">
+          Compatibility
+          <input
+            class="ritual-form__input"
+            placeholder="e.g., Needs Python with pypdf"
+            [attr.maxlength]="shortFieldMax"
+            [attr.aria-describedby]="hintId('compatibility')"
+            [ngModel]="compatibility()"
+            (ngModelChange)="compatibility.set($event)" />
+        </label>
+        <p class="ritual-form__hint" [id]="hintId('compatibility')">
+          What the skill needs from its environment. Shown with the skill when it is shared or exported as a SKILL.md bundle.
+        </p>
+      </div>
+    </div>
+  </details>
 
   <footer class="ritual-form__footer">
     <button

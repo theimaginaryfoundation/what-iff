@@ -2,6 +2,7 @@ package ritual
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/skills"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -32,23 +34,18 @@ func (h *Handler) CreateRitual(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
-	if req.Name == "" {
-		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Ritual name is required", nil)
-		return
-	}
-	if req.Description == "" {
-		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Ritual description is required", nil)
-		return
-	}
-	if req.Content == "" {
-		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Ritual content is required", nil)
+	// Trim, sanitize, derive the slug from the name when none was given, and check every bound.
+	if err := skills.Normalize(&req, true); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, invalidSkillMessage(err), nil)
 		return
 	}
 
 	// Create ritual
 	ritual, err := h.ds.CreateRitual(r.Context(), userID, req)
-	if err != nil {
+	if err == datastore.ErrRitualSlugTaken {
+		handlerutils.RespondWithError(w, h.logger, http.StatusConflict, handlerutils.CodeNotSet, slugTakenMessage(req.Slug), nil)
+		return
+	} else if err != nil {
 		h.logger.Error("failed to create ritual",
 			zap.String("user_id", userID.String()),
 			zap.Error(err))
@@ -261,17 +258,9 @@ func (h *Handler) UpdateRitual(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
-	if req.Name == "" {
-		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Ritual name is required", nil)
-		return
-	}
-	if req.Description == "" {
-		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Ritual description is required", nil)
-		return
-	}
-	if req.Content == "" {
-		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Ritual content is required", nil)
+	// Trim, sanitize and check bounds. An omitted slug keeps the stored one, so it is not derived here.
+	if err := skills.Normalize(&req, false); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, invalidSkillMessage(err), nil)
 		return
 	}
 
@@ -282,6 +271,9 @@ func (h *Handler) UpdateRitual(w http.ResponseWriter, r *http.Request) {
 	ritual, err := h.ds.UpdateRitual(r.Context(), userID, req)
 	if ent.IsNotFound(err) || err == datastore.ErrRitualNotFound {
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Ritual not found", err)
+		return
+	} else if err == datastore.ErrRitualSlugTaken {
+		handlerutils.RespondWithError(w, h.logger, http.StatusConflict, handlerutils.CodeNotSet, slugTakenMessage(req.Slug), nil)
 		return
 	} else if err == datastore.ErrInvalidRequestBody {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid mcp_server_ids", nil)
@@ -335,4 +327,18 @@ func (h *Handler) DeleteRitual(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// invalidSkillMessage turns a skills.ErrInvalid into the user-facing message: the detail after
+// the "invalid skill: " prefix, capitalised.
+func invalidSkillMessage(err error) string {
+	msg := strings.TrimPrefix(err.Error(), skills.ErrInvalid.Error()+": ")
+	if msg == "" {
+		return "Invalid skill"
+	}
+	return strings.ToUpper(msg[:1]) + msg[1:]
+}
+
+func slugTakenMessage(slug string) string {
+	return fmt.Sprintf("Another of your skills already uses the slug %q", slug)
 }
