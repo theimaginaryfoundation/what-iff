@@ -10,9 +10,11 @@ import { MUTATION_ACK_TIMEOUT } from '../timeouts';
  * `aria-label="Threads"` region except the modals, which portal to the body.
  */
 export class ThreadListPanel {
+  private readonly shell: AppShell;
   readonly confirmation: ConfirmationModal;
 
   constructor(private readonly page: Page) {
+    this.shell = new AppShell(page);
     this.confirmation = new ConfirmationModal(page);
     this.panel = this.page.getByRole('complementary', { name: 'Threads' });
     this.heading = this.page.getByRole('heading', { name: 'Thread Manager' });
@@ -320,7 +322,7 @@ export class ThreadListPanel {
     if (await headerButton.isVisible()) {
       await headerButton.click();
     } else {
-      await new AppShell(this.page).quickAction('Import threads');
+      await this.shell.quickAction('Import threads');
     }
     await this.page.waitForURL(/\/data$/);
   }
