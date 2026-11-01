@@ -39,6 +39,7 @@ func createFileAttachmentTestSchema(t *testing.T, db *sql.DB) {
 			context_only bool NOT NULL DEFAULT false,
 			created_at datetime NOT NULL,
 			origin text NOT NULL DEFAULT 'user',
+			skill_id uuid,
 			created_by_personality_id uuid,
 			created_by_chat_id uuid,
 			updated_at datetime,

@@ -90,21 +90,3 @@ func moveRitualLinks(ctx context.Context, db *sql.DB, b ritualLinkBackfill) (int
 	}
 	return n, nil
 }
-
-// columnExists reports whether table has the named column, on PostgreSQL or SQLite (tests).
-// databaseType() is DB_TYPE, defaulting to postgres. Both names are package constants, never
-// input.
-func columnExists(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
-	var query string
-	switch databaseType() {
-	case "sqlite3", "sqlite":
-		query = fmt.Sprintf(`SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = '%s'`, table, column)
-	default:
-		query = fmt.Sprintf(`SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '%s' AND column_name = '%s'`, table, column)
-	}
-	var count int
-	if err := db.QueryRowContext(ctx, query).Scan(&count); err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}

@@ -202,7 +202,8 @@
           [creating]="creating()"
           [error]="editorError()"
           (cancel)="closeEditor()"
-          (save)="onSaveFromEditor($event)" />
+          (save)="onSaveFromEditor($event)"
+          (imported)="onImportedIntoEditor($event)" />
       </div>
     </div>
   </div>

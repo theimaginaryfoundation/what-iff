@@ -185,6 +185,12 @@
     <p class="ritual-form__hint">On the chat page, adds this skill to your next message. Key sequences work too.</p>
   </div>
 
+  @if (ritual(); as existing) {
+    <app-ritual-files-panel [ritual]="existing" (imported)="imported.emit($event)" />
+  } @else {
+    <p class="ritual-form__hint">Reference files and scripts can be added once the skill is created.</p>
+  }
+
   <details class="ritual-form__details">
     <summary class="ritual-form__label ritual-form__summary">Bundle details (optional)</summary>
     <div class="ritual-form__details-body">

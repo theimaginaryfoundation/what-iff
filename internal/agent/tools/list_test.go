@@ -62,6 +62,9 @@ func (f *fakeListStore) ListRituals(_ context.Context, _ uuid.UUID, pageNum, pag
 	f.lastPageNum, f.lastPageSize = pageNum, pageSize
 	return paginatePage(toAny(f.rituals), pageNum, pageSize), nil
 }
+func (f *fakeListStore) CountSkillFiles(context.Context, uuid.UUID, []uuid.UUID) (map[uuid.UUID]int, error) {
+	return map[uuid.UUID]int{}, nil
+}
 func (f *fakeListStore) ListFileAttachments(_ context.Context, _ uuid.UUID, pageNum, pageSize int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error) {
 	f.lastFileFilters = filters
 	f.lastPageNum, f.lastPageSize = pageNum, pageSize
@@ -673,6 +676,9 @@ func (e *erroringListStore) ListPersonalities(_ context.Context, _ uuid.UUID, _,
 	return nil, errListStoreBoom
 }
 func (e *erroringListStore) ListRituals(_ context.Context, _ uuid.UUID, _, _ int, _ models.RitualFilters) (*models.PaginatedResponse, error) {
+	return nil, errListStoreBoom
+}
+func (e *erroringListStore) CountSkillFiles(context.Context, uuid.UUID, []uuid.UUID) (map[uuid.UUID]int, error) {
 	return nil, errListStoreBoom
 }
 func (e *erroringListStore) ListFileAttachments(_ context.Context, _ uuid.UUID, _, _ int, _ models.FileAttachmentFilters) (*models.PaginatedResponse, error) {

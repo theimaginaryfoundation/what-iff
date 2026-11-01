@@ -1,5 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 
 import { Ritual } from '../../../core/models/ritual.model';
 import { RitualFormComponent, RitualFormSave } from './ritual-form.component';
@@ -28,7 +30,7 @@ describe('RitualFormComponent', () => {
     beforeEach(async () => {
         await TestBed.configureTestingModule({
             imports: [RitualFormComponent],
-            providers: [provideZonelessChangeDetection()],
+            providers: [provideZonelessChangeDetection(), provideHttpClient(), provideHttpClientTesting()],
         }).compileComponents();
 
         fixture = TestBed.createComponent(RitualFormComponent);

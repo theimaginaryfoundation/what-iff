@@ -9,6 +9,7 @@ import {
   RitualFilters,
   PaginatedRitualResponse,
   RitualImportResult,
+  RitualFile,
   LoadedSkill,
 } from '../models/ritual.model';
 
@@ -77,13 +78,33 @@ export class RitualService {
    * Imports a skill from an Agent Skills bundle: a zip with SKILL.md at its root or in one top-level
    * folder, or a lone SKILL.md. A taken slug gets a numeric suffix; the result's warnings say so.
    */
-  importBundle(file: File, personalityId?: string | null): Observable<RitualImportResult> {
+  importBundle(file: File, personalityId?: string | null, intoRitualId?: string | null): Observable<RitualImportResult> {
     const form = new FormData();
     form.append('file', file, file.name);
     if (personalityId) {
       form.append('personality_id', personalityId);
     }
+    if (intoRitualId) {
+      form.append('ritual_id', intoRitualId);
+    }
     return this.http.post<RitualImportResult>(`${this.apiUrl}/import`, form);
+  }
+
+  /** The skill's bundle files (reference documents, scripts, assets). */
+  listSkillFiles(ritualId: string): Observable<RitualFile[]> {
+    return this.http.get<RitualFile[]>(`${this.apiUrl}/${ritualId}/files`);
+  }
+
+  /** Adds a file to the bundle at `path` (e.g. "references/FORMS.md"); a file already there is replaced. */
+  uploadSkillFile(ritualId: string, file: File, path: string): Observable<RitualFile> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    form.append('path', path);
+    return this.http.post<RitualFile>(`${this.apiUrl}/${ritualId}/files`, form);
+  }
+
+  deleteSkillFile(ritualId: string, fileId: string): Observable<void> {
+    return this.http.delete<void>(`${this.apiUrl}/${ritualId}/files/${fileId}`);
   }
 
   /** The skills the agent loaded in a thread with load_skill, oldest load first. */

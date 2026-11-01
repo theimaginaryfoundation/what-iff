@@ -78,6 +78,16 @@ func (t *ListTool) listSkills(ctx context.Context, chat *models.Chat, a listArgs
 	for _, id := range loadedIDs {
 		loaded[id] = struct{}{}
 	}
+	var ids []uuid.UUID
+	for _, r := range page.Results {
+		if ritual, ok := r.(*models.Ritual); ok && ritual != nil {
+			ids = append(ids, ritual.ID)
+		}
+	}
+	fileCounts, err := t.store.CountSkillFiles(ctx, chat.UserID, ids)
+	if err != nil {
+		return t.fail(listKindSkills, fmt.Sprintf("failed to count skill files: %v", err))
+	}
 	items := make([]listItem, 0, len(page.Results))
 	for _, r := range page.Results {
 		ritual, ok := r.(*models.Ritual)
@@ -85,17 +95,19 @@ func (t *ListTool) listSkills(ctx context.Context, chat *models.Chat, a listArgs
 			continue
 		}
 		_, isLoaded := loaded[ritual.ID]
+		hasFiles := fileCounts[ritual.ID] > 0
 		items = append(items, listItem{
 			ID:          ritual.ID.String(),
 			Slug:        ritual.Slug,
 			Name:        ritual.Name,
 			Description: ritual.Description,
 			Loaded:      &isLoaded,
+			HasFiles:    &hasFiles,
 		})
 	}
 	meta := listPageMeta{Page: pageNum, Limit: limit, TotalCount: page.TotalCount}
 	note := listTruncationNote("skills", meta, len(items))
-	note = joinNotes(note, "Load a skill's instructions with load_skill and its slug; loaded is whether this chat has it loaded now.")
+	note = joinNotes(note, "Load a skill's instructions with load_skill and its slug; loaded is whether this chat has it loaded now; has_files means the bundle has reference files or scripts under skills/<slug>/.")
 	return t.okPaged(listKindSkills, items, note, meta)
 }
 
@@ -176,10 +188,10 @@ func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs)
 
 	switch origin := models.FileOrigin(strings.ToLower(strings.TrimSpace(a.Origin))); origin {
 	case "":
-	case models.FileOriginAgent, models.FileOriginUser:
+	case models.FileOriginAgent, models.FileOriginUser, models.FileOriginSkill:
 		filters.Origin = origin
 	default:
-		return t.fail(listKindFiles, fmt.Sprintf("unknown origin %q; use \"agent\" or \"user\"", a.Origin))
+		return t.fail(listKindFiles, fmt.Sprintf("unknown origin %q; use \"agent\", \"user\" or \"skill\"", a.Origin))
 	}
 
 	switch normalizeFileScope(a.Scope) {

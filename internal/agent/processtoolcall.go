@@ -49,7 +49,8 @@ func (a *Agent) dispatchToolUse(ctx context.Context, chatCtx *chatContext, use p
 		}
 		return "", nil, fmt.Errorf("unknown tool: %s", use.Name)
 	}
-	return handler(ctx, use.Input)
+	// Tools a build contributes see the turn's chat context too (turnChatContextFrom).
+	return handler(withTurnChatContext(ctx, chatCtx), use.Input)
 }
 
 type toolHandler func(context.Context, []byte) (string, []*models.FileAttachment, error)

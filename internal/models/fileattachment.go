@@ -68,6 +68,8 @@ type FileAttachment struct {
 	Origin                 FileOrigin `json:"origin,omitempty"`
 	CreatedByPersonalityID *uuid.UUID `json:"created_by_personality_id,omitempty"`
 	CreatedByChatID        *uuid.UUID `json:"created_by_chat_id,omitempty"`
+	// SkillID is the skill whose bundle the file belongs to, for Origin == FileOriginSkill (ADR 0x035).
+	SkillID *uuid.UUID `json:"skill_id,omitempty"`
 	// UpdatedAt is when an agent last changed the content; nil for a file never changed.
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 	// ChunkStatus is the search-chunking state ("pending", "chunked", "failed"); "" for a file
@@ -91,6 +93,10 @@ func (f *FileAttachment) AgentAuthored() bool { return f.Origin == FileOriginAge
 // Chunked reports whether the file's text has been chunked for search.
 func (f *FileAttachment) Chunked() bool { return f.ChunkStatus == "chunked" }
 
+// IsSkillFile reports whether the file belongs to a skill bundle (ADR 0x035): read-only to agents
+// and to gallery moves, managed in the skill editor, never chunked.
+func (f *FileAttachment) IsSkillFile() bool { return f != nil && f.Origin == FileOriginSkill }
+
 // FileOrigin says who wrote a file: an agent's file tools, or the user (uploads, imports and
 // everything generated for a reply). Stored as file_attachments.origin.
 type FileOrigin string
@@ -98,6 +104,7 @@ type FileOrigin string
 const (
 	FileOriginAgent FileOrigin = "agent"
 	FileOriginUser  FileOrigin = "user"
+	FileOriginSkill FileOrigin = "skill"
 )
 
 // FileAttachmentFilters defines filters for listing file attachments
@@ -120,7 +127,9 @@ type FileAttachmentFilters struct {
 	// FolderPrefix matches that folder and everything beneath it ("charts" matches "charts" and
 	// "charts/oura", not "charts-old"). A normalized path; "" matches everything.
 	FolderPrefix *string `json:"folder_prefix,omitempty"`
-	// Origin narrows to files of that origin; empty applies no narrowing.
+	// Origin narrows to files of that origin. Empty applies no narrowing except that skill bundle
+	// files are left out unless the listing is under the reserved skills folder (they belong to the
+	// skill editor, not the gallery).
 	Origin FileOrigin `json:"origin,omitempty"`
 	// Kind narrows to images or to every other file; empty (or GalleryKindAll) applies no narrowing.
 	Kind    GalleryKind `json:"kind,omitempty"`

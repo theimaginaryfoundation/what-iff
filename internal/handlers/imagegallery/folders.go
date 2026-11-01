@@ -89,6 +89,10 @@ func (h *Handler) MoveImages(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, folderErrorMessage(err), err)
 		return
 	}
+	if models.IsReservedFolder(folder) {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, reservedFolderMessage, nil)
+		return
+	}
 	moved, err := h.ds.MoveFileAttachmentsToFolder(r.Context(), userID, req.IDs, folder)
 	if err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to move files", err)
@@ -120,6 +124,10 @@ func (h *Handler) MoveFolder(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, folderErrorMessage(err), err)
 		return
 	}
+	if models.IsReservedFolder(from) || models.IsReservedFolder(to) {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, reservedFolderMessage, nil)
+		return
+	}
 	moved, err := h.ds.MoveGalleryFolder(r.Context(), userID, from, to)
 	switch {
 	case err == nil:
@@ -130,6 +138,9 @@ func (h *Handler) MoveFolder(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to move folder", err)
 	}
 }
+
+// reservedFolderMessage is the text a client sees for a move into or out of the skills folder.
+const reservedFolderMessage = "The skills folder holds skill bundles and is managed in the skill editor"
 
 // folderErrorMessage is the text a client sees for a refused folder path.
 func folderErrorMessage(err error) string {

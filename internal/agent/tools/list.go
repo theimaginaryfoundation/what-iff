@@ -94,8 +94,8 @@ var ListToolSpec = FunctionToolSpec{
 		},
 		"origin": map[string]interface{}{
 			"type":        "string",
-			"enum":        []string{string(models.FileOriginAgent), string(models.FileOriginUser)},
-			"description": "files only: 'agent' for files agents wrote with agent_file_write, 'user' for everything else. Omit for both.",
+			"enum":        []string{string(models.FileOriginAgent), string(models.FileOriginUser), string(models.FileOriginSkill)},
+			"description": "files only: 'agent' for files agents wrote with agent_file_write, 'skill' for skill bundle files (under skills/<slug>/), 'user' for everything else. Omit for the user's and agents' files.",
 		},
 		"view": map[string]interface{}{
 			"type":        "string",
@@ -129,6 +129,8 @@ type listStore interface {
 	ListModels(ctx context.Context) ([]*models.Model, error)
 	ListPersonalities(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.PersonalityFilters) (*models.PaginatedResponse, error)
 	ListRituals(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.RitualFilters) (*models.PaginatedResponse, error)
+	// CountSkillFiles backs kind="skills"' has_files (ADR 0x035 §3).
+	CountSkillFiles(ctx context.Context, userID uuid.UUID, ritualIDs []uuid.UUID) (map[uuid.UUID]int, error)
 	ListFileAttachments(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error)
 	// ListFileAttachmentsInChatScope backs a sandboxed chat's file listing (its own uploads).
 	ListFileAttachmentsInChatScope(ctx context.Context, userID, chatID uuid.UUID, personalityID *uuid.UUID, limit int) ([]*models.FileAttachment, error)
@@ -180,8 +182,9 @@ type listArgs struct {
 type listItem struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name,omitempty"`
-	Slug         string   `json:"slug,omitempty"`   // skills: the name load_skill takes
-	Loaded       *bool    `json:"loaded,omitempty"` // skills: loaded in this chat with load_skill
+	Slug         string   `json:"slug,omitempty"`      // skills: the name load_skill takes
+	Loaded       *bool    `json:"loaded,omitempty"`    // skills: loaded in this chat with load_skill
+	HasFiles     *bool    `json:"has_files,omitempty"` // skills: the bundle has reference files or scripts
 	Description  string   `json:"description,omitempty"`
 	Provider     string   `json:"provider,omitempty"`      // models
 	ToolSupport  *bool    `json:"tool_support,omitempty"`  // models

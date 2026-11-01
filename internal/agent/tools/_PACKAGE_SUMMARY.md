@@ -7,7 +7,8 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
 ## Responsibilities
 
 - **Skill lifecycle tools** (`skill_tools.go`, ADR 0x035): `load_skill` and `unload_skill` take skill slugs; the agent package implements them.
-  `list(kind="skills")` reports each skill's `slug` and whether it is `loaded` in the chat, and its `filter` matches slug, name, description and instructions (`ListScope.LoadedSkillIDs` carries the loaded set).
+  `list(kind="skills")` reports each skill's `slug`, whether it is `loaded` in the chat and whether it `has_files`, and its `filter` matches slug, name, description and instructions (`ListScope.LoadedSkillIDs` carries the loaded set).
+  The agent file tools treat skill bundle files (`origin = skill`, under `skills/<slug>/`) as read-only text the model may read, like the user's files; `agent_file_write` refuses the reserved `skills/` folder, and `find_context` reads agent and skill files straight from their objects (`FileAttachment.StoredUnchunked`).
 
 - **Tool catalog/specs:** `FunctionToolSpec`, `FunctionToolDefinition`, and catalog helpers (`catalog.go`, `toolconstants.go`) define the static function-tool surface and user-toggleable metadata.
   `FunctionToolDefinition.HumanDescription` is presentation copy for human-facing surfaces and is intentionally separate from the agent-facing `FunctionToolSpec.Description` prompt.

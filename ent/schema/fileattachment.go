@@ -54,9 +54,13 @@ func (FileAttachment) Fields() []ent.Field {
 		// including all of the user's uploads, is read-only to agents. A string enum (varchar in
 		// Postgres), so a new origin is a new value, not a migration.
 		field.Enum("origin").
-			Values("user", "agent").
+			Values("user", "agent", "skill").
 			Default("user").
-			Comment("Who wrote the file: \"user\" (uploads, imports, reply outputs) or \"agent\" (an agent's file tools). Only agent files can be changed by an agent."),
+			Comment("Who wrote the file: \"user\" (uploads, imports, reply outputs), \"agent\" (an agent's file tools) or \"skill\" (a skill bundle's file, ADR 0x035). Only agent files can be changed by an agent."),
+		field.UUID("skill_id", uuid.UUID{}).
+			Optional().
+			Nillable().
+			Comment("The skill (ritual) whose bundle this file belongs to, for origin = skill; the row goes with the skill."),
 		field.UUID("created_by_personality_id", uuid.UUID{}).
 			Optional().
 			Nillable().
@@ -85,6 +89,12 @@ func (FileAttachment) Edges() []ent.Edge {
 		edge.From("personality", Personality.Type).
 			Ref("file_attachments").
 			Unique(),
+		// A skill bundle's files (ADR 0x035 §3): deleting the skill deletes its files' rows (the
+		// cascade is declared on Ritual.files); the handler releases their objects first.
+		edge.From("skill", Ritual.Type).
+			Ref("files").
+			Unique().
+			Field("skill_id"),
 	}
 }
 
@@ -102,5 +112,7 @@ func (FileAttachment) Indexes() []ent.Index {
 		index.Fields("s3_key").Edges("owner"),
 		// Backs gallery folder navigation and the agent's folder-prefix listing.
 		index.Fields("folder").Edges("owner"),
+		// Backs a skill's file listing and its cascade.
+		index.Fields("skill_id"),
 	}
 }

@@ -88,17 +88,11 @@ type agentFileRef struct {
 	Editable bool   `json:"editable"`
 }
 
-// reservedAgentFolders are top-level folders the app manages, which agent files may not go in.
-// skills/ holds skill bundles, written only by the skill editor and import.
-var reservedAgentFolders = map[string]string{
-	"skills": "your skills",
-}
-
-// checkAgentFolder refuses a folder under a reserved top-level folder.
+// checkAgentFolder refuses a folder under a reserved top-level folder: skills/ holds skill bundles
+// (models.ReservedSkillsFolder, ADR 0x035), written only by the skill editor and import.
 func checkAgentFolder(folder string) error {
-	top, _, _ := strings.Cut(folder, "/")
-	if owner, ok := reservedAgentFolders[strings.ToLower(top)]; ok {
-		return fileRefusalf("the %q folder is managed by %s; write elsewhere", strings.ToLower(top)+"/", owner)
+	if models.IsReservedFolder(strings.ToLower(folder)) {
+		return fileRefusalf("the %q folder is managed by your skills; write elsewhere", models.ReservedSkillsFolder+"/")
 	}
 	return nil
 }
@@ -141,7 +135,10 @@ func (t *AgentFileTool) resolveOwned(ctx context.Context, chat *models.Chat, fil
 	}
 	if !ownsAgentFile(chat, att) {
 		what := "the user's file"
-		if att.AgentAuthored() {
+		switch {
+		case att.IsSkillFile():
+			what = "a skill's file, managed in the skill editor"
+		case att.AgentAuthored():
 			what = "a file another agent created"
 		}
 		return nil, fileRefusalf("%q is %s, which you can read but not change. To work from it, copy it to a new file of your own with action \"copy\".", FilePath(att), what)
