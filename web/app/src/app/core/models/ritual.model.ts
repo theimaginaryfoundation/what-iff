@@ -88,6 +88,12 @@ export function slugifySkillName(name: string): string {
   return slug || 'skill';
 }
 
+/** The slug a copy of a skill starts with: the source's plus `-copy`, kept within the limit. */
+export function copySkillSlug(slug: string): string {
+  const base = slug.trim() || 'skill';
+  return `${base.slice(0, RITUAL_SLUG_MAX - '-copy'.length).replace(/-+$/g, '')}-copy`;
+}
+
 /** Rough token count for a body, about four characters a token, like the server's estimate. */
 export function estimateSkillTokens(text: string): number {
   return Math.ceil(new TextEncoder().encode(text).length / 4);
