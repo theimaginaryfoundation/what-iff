@@ -6,10 +6,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"strings"
 	"testing"
 
@@ -247,4 +249,26 @@ func TestCreateAndUpdateRitual_SlugValidationAndConflicts(t *testing.T) {
 	require.Equal(t, "pdf-forms", updated.Slug)
 	require.Equal(t, "PDF Forms", updated.Name)
 	require.False(t, updated.IsUserInvocable())
+}
+
+func TestPartPath_KeepsTheRelativePathTheClientSent(t *testing.T) {
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	for _, name := range []string{"pdf-forms/SKILL.md", "pdf-forms/scripts/fill.py", `pdf-forms\references\FORMS.md`} {
+		h := textproto.MIMEHeader{}
+		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="files"; filename=%q`, name))
+		part, err := mw.CreatePart(h)
+		require.NoError(t, err)
+		_, err = part.Write([]byte("x"))
+		require.NoError(t, err)
+	}
+	require.NoError(t, mw.Close())
+	form, err := multipart.NewReader(&body, mw.Boundary()).ReadForm(1 << 20)
+	require.NoError(t, err)
+
+	var got []string
+	for _, fh := range form.File["files"] {
+		got = append(got, partPath(fh))
+	}
+	require.Equal(t, []string{"pdf-forms/SKILL.md", "pdf-forms/scripts/fill.py", "pdf-forms/references/FORMS.md"}, got)
 }

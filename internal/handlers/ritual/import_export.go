@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -104,17 +105,6 @@ func (h *Handler) ImportRitual(w http.ResponseWriter, r *http.Request) {
 	ritual := parsed.Ritual
 	ritual.PersonalityID = personalityID
 	requested := ritual.Slug
-	ritual.Slug, err = skills.UniqueSlug(requested, func(candidate string) (bool, error) {
-		return h.ds.RitualSlugTaken(r.Context(), userID, candidate, uuid.Nil)
-	})
-	if err != nil {
-		h.respondSkillError(w, err, "Failed to choose a slug")
-		return
-	}
-	if ritual.Slug != requested {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("slug %q is already in use; imported as %q", requested, ritual.Slug))
-	}
-
 	if len(parsed.Connectors) > 0 {
 		ids, linked, missing, err := h.matchConnectorsByName(r, userID, parsed.Connectors)
 		if err != nil {
@@ -129,14 +119,42 @@ func (h *Handler) ImportRitual(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	created, err := h.ds.CreateRitual(r.Context(), userID, ritual)
+	created, err := h.createWithFreeSlug(r, userID, ritual)
 	if err != nil {
 		h.logger.Error("failed to import ritual", zap.String("user_id", userID.String()), zap.Error(err))
-		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to import skill", err)
+		h.respondSkillError(w, err, "Failed to import skill")
 		return
+	}
+	if created.Slug != requested {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("slug %q is already in use; imported as %q", requested, created.Slug))
 	}
 	result.Ritual = created
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusCreated, result)
+}
+
+// importSlugAttempts bounds how often an import re-picks its slug after losing a race to another
+// create with the same one.
+const importSlugAttempts = 3
+
+// createWithFreeSlug creates ritual under the first free slug at or after ritual.Slug. The check
+// and the insert are separate, so a concurrent import of the same skill can take the slug in
+// between; the loser picks again instead of failing.
+func (h *Handler) createWithFreeSlug(r *http.Request, userID uuid.UUID, ritual models.Ritual) (*models.Ritual, error) {
+	requested := ritual.Slug
+	var err error
+	for attempt := 0; attempt < importSlugAttempts; attempt++ {
+		ritual.Slug, err = skills.UniqueSlug(requested, func(candidate string) (bool, error) {
+			return h.ds.RitualSlugTaken(r.Context(), userID, candidate, uuid.Nil)
+		})
+		if err != nil {
+			return nil, err
+		}
+		created, err := h.ds.CreateRitual(r.Context(), userID, ritual)
+		if !errors.Is(err, datastore.ErrRitualSlugTaken) {
+			return created, err
+		}
+	}
+	return nil, datastore.ErrRitualSlugTaken
 }
 
 // readImportBundle builds the bundle from the form: a `file` part that is a zip or a lone
@@ -184,9 +202,22 @@ func readImportBundle(form *multipart.Form) (*skills.Bundle, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: cannot read %s: %v", skills.ErrInvalid, fh.Filename, err)
 		}
-		files = append(files, skills.File{Path: fh.Filename, Data: data})
+		files = append(files, skills.File{Path: partPath(fh), Data: data})
 	}
 	return skills.BundleFromFiles(files)
+}
+
+// partPath is a `files` part's path in the skill directory, as the client sent it. The multipart
+// reader keeps only the base name in FileHeader.Filename, which would flatten `scripts/fill.py`
+// to `fill.py`, so the path is read from the part's Content-Disposition. The bundle reader
+// validates it like a zip entry name (no traversal, no absolute paths).
+func partPath(fh *multipart.FileHeader) string {
+	if _, params, err := mime.ParseMediaType(fh.Header.Get("Content-Disposition")); err == nil {
+		if name := strings.TrimSpace(params["filename"]); name != "" {
+			return strings.ReplaceAll(name, "\\", "/")
+		}
+	}
+	return fh.Filename
 }
 
 // matchConnectorsByName maps the exporter's connector names onto this account's connectors,
@@ -274,6 +305,11 @@ func (h *Handler) ExportRitual(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) respondSkillError(w http.ResponseWriter, err error, fallback string) {
 	if errors.Is(err, skills.ErrInvalid) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, invalidSkillMessage(err), nil)
+		return
+	}
+	if errors.Is(err, datastore.ErrRitualSlugTaken) {
+		handlerutils.RespondWithError(w, h.logger, http.StatusConflict, handlerutils.CodeNotSet,
+			"Another skill was saved with this name at the same moment; try again", nil)
 		return
 	}
 	h.logger.Error(fallback, zap.Error(err))

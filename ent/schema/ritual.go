@@ -1,13 +1,32 @@
 package schema
 
 import (
+	"fmt"
+	"unicode/utf8"
+
 	"entgo.io/ent"
+	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
 	"github.com/google/uuid"
 )
+
+// varchar500 keeps the column MaxLen(500) produced. Postgres counts varchar length in characters,
+// while ent's MaxLen counts bytes, so free text in a non-Latin script that the skills package
+// accepts (it counts runes) failed ent's check with a 500.
+var varchar500 = map[string]string{dialect.Postgres: "varchar(500)"}
+
+// maxRunes is MaxLen counted in characters, matching skills.Normalize and the column.
+func maxRunes(n int) func(string) error {
+	return func(s string) error {
+		if utf8.RuneCountInString(s) > n {
+			return fmt.Errorf("value is longer than %d characters", n)
+		}
+		return nil
+	}
+}
 
 // Ritual holds the schema definition for the Ritual entity.
 type Ritual struct {
@@ -38,11 +57,13 @@ func (Ritual) Fields() []ent.Field {
 			Comment("The skill's name in the Agent Skills sense: 1-64 chars of [a-z0-9-], unique per owner. Empty only on rows created before the column existed, until the startup backfill derives one."),
 		field.String("license").
 			Default("").
-			MaxLen(500).
+			SchemaType(varchar500).
+			Validate(maxRunes(500)).
 			Comment("SKILL.md license: free text"),
 		field.String("compatibility").
 			Default("").
-			MaxLen(500).
+			SchemaType(varchar500).
+			Validate(maxRunes(500)).
 			Comment("SKILL.md compatibility: what the skill needs from the environment, shown when its scripts cannot run here"),
 		field.JSON("metadata", map[string]string{}).
 			Optional().

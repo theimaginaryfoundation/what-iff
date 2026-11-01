@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
@@ -64,6 +66,16 @@ func ParseSkillMD(data []byte) (*Parsed, error) {
 	p := &Parsed{}
 	r := &p.Ritual
 	meta := map[string]string{}
+	keep := func(k, v, from string) {
+		if why := metadataEntryProblem(k, v); why != "" {
+			p.Warnings = append(p.Warnings, fmt.Sprintf("%s %q %s and was dropped", from, k, why))
+			return
+		}
+		meta[k] = v
+	}
+	// Claude Code puts the invocation flags at the top level; our own exports put them in
+	// metadata. A top-level value wins.
+	var disableModel, userInvocable *bool
 	for k, v := range raw {
 		switch strings.ToLower(k) {
 		case "name":
@@ -76,6 +88,10 @@ func ParseSkillMD(data []byte) (*Parsed, error) {
 			r.Compatibility = ptr(yamlScalar(v))
 		case "allowed-tools", "allowed_tools":
 			r.AllowedTools = ptr(parseAllowedTools(v))
+		case "disable-model-invocation", "disable_model_invocation":
+			disableModel = ptr(parseBool(yamlScalar(v), false))
+		case "user-invocable", "user_invocable":
+			userInvocable = ptr(parseBool(yamlScalar(v), true))
 		case "metadata":
 			m, ok := v.(map[string]any)
 			if !ok {
@@ -83,14 +99,19 @@ func ParseSkillMD(data []byte) (*Parsed, error) {
 				continue
 			}
 			for mk, mv := range m {
-				meta[mk] = yamlScalar(mv)
+				keep(mk, yamlScalar(mv), "metadata key")
 			}
 		default:
 			// Keep unknown keys so the file round-trips; nested values are kept as YAML text.
-			if _, taken := meta[k]; !taken {
-				meta[k] = yamlScalar(v)
+			// One too big to keep (a Claude Code hooks block) is dropped, not a failed import.
+			if _, taken := meta[k]; taken {
+				continue
 			}
-			p.Warnings = append(p.Warnings, fmt.Sprintf("unknown frontmatter key %q kept in metadata", k))
+			before := len(p.Warnings)
+			keep(k, yamlScalar(v), "unknown frontmatter key")
+			if len(p.Warnings) == before {
+				p.Warnings = append(p.Warnings, fmt.Sprintf("unknown frontmatter key %q kept in metadata", k))
+			}
 		}
 	}
 
@@ -104,10 +125,23 @@ func ParseSkillMD(data []byte) (*Parsed, error) {
 			}
 		}
 	}
-	r.DisableModelInvocation = ptr(parseBool(meta[MetaDisableModelInvocation], false))
-	r.UserInvocable = ptr(parseBool(meta[MetaUserInvocable], true))
+	if disableModel == nil {
+		disableModel = ptr(parseBool(meta[MetaDisableModelInvocation], false))
+	}
+	if userInvocable == nil {
+		userInvocable = ptr(parseBool(meta[MetaUserInvocable], true))
+	}
+	r.DisableModelInvocation = disableModel
+	r.UserInvocable = userInvocable
 	for _, k := range []string{MetaDisplayName, MetaHotkeys, MetaConnectors, MetaDisableModelInvocation, MetaUserInvocable} {
 		delete(meta, k)
+	}
+	if len(meta) > MaxMetadataEntries {
+		keys := SortedMetadataKeys(meta)
+		for _, k := range keys[MaxMetadataEntries:] {
+			delete(meta, k)
+		}
+		p.Warnings = append(p.Warnings, fmt.Sprintf("only the first %d metadata entries were kept", MaxMetadataEntries))
 	}
 	r.Metadata = &meta
 	if r.License == nil {
@@ -186,7 +220,8 @@ func RenderSkillMD(r *models.Ritual, connectors []string) ([]byte, error) {
 	for k, v := range r.MetadataMap() {
 		meta[k] = v
 	}
-	if strings.TrimSpace(r.Name) != "" && r.Name != r.Slug {
+	// Leave display_name out only when import would derive the same name from the slug.
+	if strings.TrimSpace(r.Name) != "" && r.Name != titleFromSlug(r.Slug) {
 		meta[MetaDisplayName] = r.Name
 	}
 	if h := strings.TrimSpace(r.Hotkeys); h != "" {
@@ -228,9 +263,10 @@ func RenderSkillMD(r *models.Ritual, connectors []string) ([]byte, error) {
 }
 
 // parseAllowedTools accepts the standard's space-delimited string, a comma-delimited one, or a
-// YAML list.
+// YAML list. Separators inside parentheses belong to the entry: Claude Code's
+// `Bash(git add:*), Read` is two tools.
 func parseAllowedTools(v any) []string {
-	var out []string
+	out := []string{}
 	switch t := v.(type) {
 	case []any:
 		for _, item := range t {
@@ -239,13 +275,46 @@ func parseAllowedTools(v any) []string {
 			}
 		}
 	default:
-		s := strings.NewReplacer(",", " ").Replace(yamlScalar(v))
-		out = strings.Fields(s)
-	}
-	if out == nil {
-		out = []string{}
+		var cur strings.Builder
+		depth := 0
+		flush := func() {
+			if s := strings.TrimSpace(cur.String()); s != "" {
+				out = append(out, s)
+			}
+			cur.Reset()
+		}
+		for _, c := range yamlScalar(v) {
+			switch {
+			case c == '(':
+				depth++
+			case c == ')' && depth > 0:
+				depth--
+			case depth == 0 && (c == ',' || unicode.IsSpace(c)):
+				flush()
+				continue
+			}
+			cur.WriteRune(c)
+		}
+		flush()
 	}
 	return out
+}
+
+// metadataEntryProblem says why a metadata entry cannot be kept, or "" when it can. It mirrors
+// NormalizeMetadata's bounds, so a lenient import drops what a strict save would reject.
+func metadataEntryProblem(k, v string) string {
+	key := strings.TrimSpace(SanitizeText(k))
+	switch {
+	case key == "":
+		return "is empty"
+	case utf8.RuneCountInString(key) > MaxMetadataKeyLen:
+		return fmt.Sprintf("is longer than %d characters", MaxMetadataKeyLen)
+	case strings.IndexFunc(key, unicode.IsSpace) >= 0:
+		return "contains whitespace"
+	case utf8.RuneCountInString(strings.TrimSpace(SanitizeText(v))) > MaxMetadataValueLen:
+		return fmt.Sprintf("has a value longer than %d characters", MaxMetadataValueLen)
+	}
+	return ""
 }
 
 // yamlScalar renders a decoded YAML value as the string the spec wants (metadata is string→string).

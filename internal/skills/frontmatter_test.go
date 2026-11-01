@@ -105,10 +105,55 @@ func TestParseSkillMD_SanitizesSmuggledText(t *testing.T) {
 }
 
 func TestRenderSkillMD_MinimalSkill(t *testing.T) {
-	r := models.Ritual{Slug: "notes", Name: "notes", Description: "Keep notes.", Content: "Write things down."}
+	// "Notes" is what import derives from the slug, so no display_name is written.
+	r := models.Ritual{Slug: "notes", Name: "Notes", Description: "Keep notes.", Content: "Write things down."}
 	out, err := RenderSkillMD(&r, nil)
 	require.NoError(t, err)
 	require.Equal(t, "---\nname: notes\ndescription: Keep notes.\n---\n\nWrite things down.\n", string(out))
+}
+
+func TestSkillMD_DisplayNameRoundTrips(t *testing.T) {
+	for _, name := range []string{"notes", "Notes", "My notes"} {
+		r := models.Ritual{Slug: "notes", Name: name, Description: "Keep notes.", Content: "Write things down."}
+		out, err := RenderSkillMD(&r, nil)
+		require.NoError(t, err)
+		p, err := ParseSkillMD(out)
+		require.NoError(t, err)
+		require.Equal(t, name, p.Ritual.Name)
+	}
+}
+
+func TestParseSkillMD_ClaudeCodeTopLevelInvocationFlags(t *testing.T) {
+	p, err := ParseSkillMD([]byte("---\nname: deploy\ndescription: Deploys.\ndisable-model-invocation: true\nuser-invocable: false\n---\nShip it.\n"))
+	require.NoError(t, err)
+	require.True(t, *p.Ritual.DisableModelInvocation)
+	require.False(t, *p.Ritual.UserInvocable)
+	require.Empty(t, *p.Ritual.Metadata, "the flags are mapped, not kept as unknown keys")
+
+	// A top-level value wins over our own metadata copy.
+	p, err = ParseSkillMD([]byte("---\nname: deploy\ndescription: Deploys.\ndisable-model-invocation: true\nmetadata:\n  whatiff-disable-model-invocation: \"false\"\n---\nShip it.\n"))
+	require.NoError(t, err)
+	require.True(t, *p.Ritual.DisableModelInvocation)
+}
+
+func TestParseSkillMD_OversizedUnknownKeyIsDroppedWithAWarning(t *testing.T) {
+	var hooks strings.Builder
+	hooks.WriteString("hooks:\n  PreToolUse:\n")
+	for i := 0; i < 120; i++ {
+		hooks.WriteString("    - matcher: \"Bash\"\n      command: \"./scripts/check-something-long.sh --flag\"\n")
+	}
+	p, err := ParseSkillMD([]byte("---\nname: guarded\ndescription: Has hooks.\n" + hooks.String() + "model: sonnet\n---\nBody.\n"))
+	require.NoError(t, err)
+	_, kept := (*p.Ritual.Metadata)["hooks"]
+	require.False(t, kept)
+	require.Equal(t, "sonnet", (*p.Ritual.Metadata)["model"])
+	require.Contains(t, strings.Join(p.Warnings, "\n"), `"hooks"`)
+}
+
+func TestParseAllowedTools_KeepsSeparatorsInsideParentheses(t *testing.T) {
+	require.Equal(t, []string{"Bash(git add:*)", "Read"}, parseAllowedTools("Bash(git add:*), Read"))
+	require.Equal(t, []string{"Read", "Grep", "web_search"}, parseAllowedTools("Read Grep,web_search"))
+	require.Equal(t, []string{"Bash(git status)", "Edit"}, parseAllowedTools([]any{"Bash(git status)", " Edit "}))
 }
 
 func TestNormalize(t *testing.T) {

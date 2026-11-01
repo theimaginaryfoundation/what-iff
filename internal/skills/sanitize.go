@@ -8,31 +8,56 @@ import (
 )
 
 // SanitizeText removes the characters that hide text from people while a model still reads it:
-// Unicode tag characters, zero-width characters, bidirectional controls and the byte-order mark,
-// plus C0 controls other than tab, newline and carriage return (ADR 0x035 §10). Everything else
-// is kept as typed.
+// Unicode tag characters, zero-width characters, bidirectional controls, the byte-order mark and
+// Hangul fillers, plus C0 controls other than tab, newline and carriage return (ADR 0x035 §10).
+// A variation selector is kept only when it directly follows a visible character, as in the
+// emoji ❤️; a second one in a row, or one with nothing to modify, is removed, since runs of them
+// can encode arbitrary hidden bytes. Everything else is kept as typed.
 func SanitizeText(s string) string {
 	if !needsSanitizing(s) {
 		return s
 	}
 	var b strings.Builder
 	b.Grow(len(s))
+	prevBase := false
 	for _, r := range s {
+		if isVariationSelector(r) {
+			if prevBase {
+				b.WriteRune(r)
+			}
+			prevBase = false
+			continue
+		}
 		if isSmuggledRune(r) {
 			continue
 		}
 		b.WriteRune(r)
+		prevBase = !unicode.IsSpace(r) && !unicode.IsControl(r)
 	}
 	return b.String()
 }
 
 func needsSanitizing(s string) bool {
+	prevSelector := true // a selector at the start has nothing to modify
 	for _, r := range s {
+		if isVariationSelector(r) {
+			if prevSelector {
+				return true
+			}
+			prevSelector = true
+			continue
+		}
 		if isSmuggledRune(r) {
 			return true
 		}
+		prevSelector = unicode.IsSpace(r)
 	}
 	return false
+}
+
+// isVariationSelector reports whether r is one of the 256 variation selectors.
+func isVariationSelector(r rune) bool {
+	return (r >= 0xFE00 && r <= 0xFE0F) || (r >= 0xE0100 && r <= 0xE01EF)
 }
 
 // isSmuggledRune reports whether r is stripped by SanitizeText.
@@ -54,6 +79,8 @@ func isSmuggledRune(r rune) bool {
 		return true // bidi isolates
 	case r >= 0xE0000 && r <= 0xE007F:
 		return true // tag characters
+	case r == 0x115F, r == 0x1160, r == 0x3164, r == 0xFFA0:
+		return true // Hangul fillers, which render as blank space
 	case unicode.Is(unicode.Cf, r):
 		return true // any other format character (soft hyphen stays readable but is not needed)
 	}

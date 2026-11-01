@@ -99,8 +99,8 @@ func Normalize(r *models.Ritual, allowDeriveSlug bool) error {
 }
 
 // NormalizeAllowedTools trims, sanitizes and de-duplicates allowed-tools entries, keeping their
-// order. Entries are opaque tool names (`web_search`, `mcp__github__search`, `Bash(git:*)`): no
-// whitespace, at most MaxAllowedToolLen chars. The result is never nil.
+// order. Entries are opaque tool names (`web_search`, `mcp__github__search`, `Bash(git add:*)`):
+// whitespace only inside parentheses, at most MaxAllowedToolLen chars. The result is never nil.
 func NormalizeAllowedTools(in []string) ([]string, error) {
 	out := make([]string, 0, len(in))
 	seen := map[string]struct{}{}
@@ -112,8 +112,8 @@ func NormalizeAllowedTools(in []string) ([]string, error) {
 		if utf8.RuneCountInString(name) > MaxAllowedToolLen {
 			return nil, fmt.Errorf("%w: an allowed tool name is at most %d characters", ErrInvalid, MaxAllowedToolLen)
 		}
-		if strings.IndexFunc(name, unicode.IsSpace) >= 0 {
-			return nil, fmt.Errorf("%w: allowed tool %q cannot contain whitespace", ErrInvalid, name)
+		if hasSpaceOutsideParens(name) {
+			return nil, fmt.Errorf("%w: allowed tool %q can only contain whitespace inside parentheses", ErrInvalid, name)
 		}
 		if _, dup := seen[name]; dup {
 			continue
@@ -125,6 +125,21 @@ func NormalizeAllowedTools(in []string) ([]string, error) {
 		return nil, fmt.Errorf("%w: at most %d allowed tools", ErrInvalid, MaxAllowedTools)
 	}
 	return out, nil
+}
+
+func hasSpaceOutsideParens(s string) bool {
+	depth := 0
+	for _, c := range s {
+		switch {
+		case c == '(':
+			depth++
+		case c == ')' && depth > 0:
+			depth--
+		case depth == 0 && unicode.IsSpace(c):
+			return true
+		}
+	}
+	return false
 }
 
 // NormalizeMetadata trims and sanitizes metadata keys and values and drops empty keys. The

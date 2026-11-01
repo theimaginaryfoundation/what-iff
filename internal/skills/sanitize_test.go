@@ -14,6 +14,10 @@ func TestSanitizeText(t *testing.T) {
 		{"tag characters go", "hello\U000E0001\U000E0041\U000E007F world", "hello world"},
 		{"BOM and C0 controls go", "\ufeffa\x00b\x1fc\x7fd", "abcd"},
 		{"accented letters stay", "café — naïve ✓ 日本語", "café — naïve ✓ 日本語"},
+		{"an emoji's variation selector stays", "I \u2764\ufe0f this \u845b\U000E0100", "I \u2764\ufe0f this \u845b\U000E0100"},
+		{"runs of variation selectors go", "hi\U0001F600\ufe0f\U000E0131\U000E0142\ufe01 there", "hi\U0001F600\ufe0f there"},
+		{"a variation selector with nothing to modify goes", "\ufe0fstart and \U000E0100end", "start and end"},
+		{"Hangul fillers go", "a\u3164b\u115fc\uffa0d", "abcd"},
 	}
 	for _, c := range cases {
 		require.Equal(t, c.want, SanitizeText(c.in), c.name)
