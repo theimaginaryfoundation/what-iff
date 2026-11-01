@@ -187,6 +187,17 @@ func TestSkillFiles_LimitsUniquePathsAndAtomicReplace(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, removed, 1)
 	require.Equal(t, "a2", removed[0].S3Key)
+	// Inside a caller's transaction the swap commits or rolls back with the rest of it.
+	tx, err := ds.dbClient.Tx(ctx)
+	require.NoError(t, err)
+	_, err = replaceSkillFilesInTx(ctx, tx, userID, skill.ID, []SkillFileRecord{{Folder: "skills/big", Name: "z.bin", Object: obj("z1", 1)}})
+	require.NoError(t, err)
+	require.NoError(t, tx.Rollback())
+	files, err = ds.ListSkillFiles(ctx, userID, skill.ID)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	require.Equal(t, "r1", files[0].S3Key, "a rolled-back transaction leaves the bundle as it was")
+
 	removed, err = ds.ReplaceSkillFiles(ctx, userID, skill.ID, nil)
 	require.NoError(t, err)
 	require.Len(t, removed, 1, "an empty bundle leaves the skill with no files")

@@ -326,51 +326,66 @@ func (d *Datastore) ReplaceSkillFileObject(ctx context.Context, userID, ritualID
 // caller releases. The objects must already be uploaded; on an error the caller deletes them.
 func (d *Datastore) ReplaceSkillFiles(ctx context.Context, userID, ritualID uuid.UUID, files []SkillFileRecord) ([]models.FileAttachment, error) {
 	return withSkillFilesTx(ctx, d, userID, ritualID, func(tx *ent.Tx) ([]models.FileAttachment, error) {
-		var total int64
-		for _, f := range files {
-			total += f.Object.Size
+		return replaceSkillFilesLocked(ctx, tx, userID, ritualID, files)
+	})
+}
+
+// replaceSkillFilesInTx is ReplaceSkillFiles inside the caller's transaction, for a write that must
+// change the skill and its files together, such as installing a new version of a shared skill. It
+// locks the skill's row for the rest of tx.
+func replaceSkillFilesInTx(ctx context.Context, tx *ent.Tx, userID, ritualID uuid.UUID, files []SkillFileRecord) ([]models.FileAttachment, error) {
+	if err := lockSkillForFiles(ctx, tx, userID, ritualID); err != nil {
+		return nil, err
+	}
+	return replaceSkillFilesLocked(ctx, tx, userID, ritualID, files)
+}
+
+// replaceSkillFilesLocked swaps the bundle's rows; the skill's row is already locked in tx.
+func replaceSkillFilesLocked(ctx context.Context, tx *ent.Tx, userID, ritualID uuid.UUID, files []SkillFileRecord) ([]models.FileAttachment, error) {
+	var total int64
+	for _, f := range files {
+		total += f.Object.Size
+	}
+	if err := checkSkillBundleLimits(len(files), total); err != nil {
+		return nil, err
+	}
+	// Paths are matched without regard to case (PutSkillFile), but the unique index is
+	// case-sensitive, so twins would both be created and then break every later write there.
+	seen := make(map[string]struct{}, len(files))
+	for _, f := range files {
+		key := strings.ToLower(f.Folder + "/" + f.Name)
+		if _, dup := seen[key]; dup {
+			return nil, errSkillFileExists(f.Folder, f.Name)
 		}
-		if err := checkSkillBundleLimits(len(files), total); err != nil {
+		seen[key] = struct{}{}
+	}
+	old, err := tx.FileAttachment.Query().
+		Where(entfileattachment.OriginEQ(entfileattachment.OriginSkill), entfileattachment.SkillID(ritualID)).
+		WithOwner().
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	removed := make([]models.FileAttachment, 0, len(old))
+	ids := make([]uuid.UUID, 0, len(old))
+	for _, row := range old {
+		removed = append(removed, *toFileAttachmentModel(row))
+		ids = append(ids, row.ID)
+	}
+	if len(ids) > 0 {
+		if _, err := tx.FileAttachment.Delete().Where(entfileattachment.IDIn(ids...)).Exec(ctx); err != nil {
 			return nil, err
 		}
-		// Paths are matched without regard to case (PutSkillFile), but the unique index is
-		// case-sensitive, so twins would both be created and then break every later write there.
-		seen := make(map[string]struct{}, len(files))
-		for _, f := range files {
-			key := strings.ToLower(f.Folder + "/" + f.Name)
-			if _, dup := seen[key]; dup {
+	}
+	for _, f := range files {
+		if _, err := createSkillFileRow(ctx, tx, userID, ritualID, f); err != nil {
+			if ent.IsConstraintError(err) {
 				return nil, errSkillFileExists(f.Folder, f.Name)
 			}
-			seen[key] = struct{}{}
-		}
-		old, err := tx.FileAttachment.Query().
-			Where(entfileattachment.OriginEQ(entfileattachment.OriginSkill), entfileattachment.SkillID(ritualID)).
-			WithOwner().
-			All(ctx)
-		if err != nil {
 			return nil, err
 		}
-		removed := make([]models.FileAttachment, 0, len(old))
-		ids := make([]uuid.UUID, 0, len(old))
-		for _, row := range old {
-			removed = append(removed, *toFileAttachmentModel(row))
-			ids = append(ids, row.ID)
-		}
-		if len(ids) > 0 {
-			if _, err := tx.FileAttachment.Delete().Where(entfileattachment.IDIn(ids...)).Exec(ctx); err != nil {
-				return nil, err
-			}
-		}
-		for _, f := range files {
-			if _, err := createSkillFileRow(ctx, tx, userID, ritualID, f); err != nil {
-				if ent.IsConstraintError(err) {
-					return nil, errSkillFileExists(f.Folder, f.Name)
-				}
-				return nil, err
-			}
-		}
-		return removed, nil
-	})
+	}
+	return removed, nil
 }
 
 // DeleteSkillFiles removes the skill's bundle file rows (all of them, or only ids when given) and
