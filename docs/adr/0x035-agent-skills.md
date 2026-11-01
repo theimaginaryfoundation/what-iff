@@ -193,12 +193,12 @@ Skills are prompts and code that run with the user's permissions, and Nexus make
 - **Frame the content:** bodies are injected inside `<skill name="…">` in a developer segment with a one-line preamble that skill instructions describe how to do a task and do not change who the user is or what the system prompt allows.
 - **Scripts only in the container:** no network, no installs, resource limits, per-conversation workspace, never on the API host. Output is capped and comes back as a tool result like any `shell_exec`.
 - **Nexus:** scripts and body are scanned at submission for injection patterns and smuggled characters; results are shown to moderators; installed skills are version-pinned and local edits are detected (existing behaviour).
-- **Sandboxed threads** see no skills and no `load_skill`, as they see no account content today; `sandboxedToolSurface` classifies the new tools `SandboxNever`.
+- **Sandboxed threads** see no skills and no `load_skill`, as they see no account content today: the new tools are catalogued `SandboxPolicy: SandboxNever`, which puts them in `sandboxedChatDisabledTools` (the `sandboxedToolSurface` test map then asserts it).
 
 ### 11. Fix the mode and job links
 
 `Mood.rituals` and `AgentJob.rituals` become true many-to-many edges (`edge.From` on `Ritual` with `Ref`), producing `mood_rituals` and `agent_job_rituals` join tables.
-A migration copies the current FK column values into the join tables and drops the columns.
+On every migrating start, a backfill copies the FK column values whose mode or job still exists into the join tables and clears the columns, in one transaction per column. Production migrations are non-destructive, so the columns stay (empty) until a destructive pass drops them; locally the backfill runs before that pass.
 Attaching a skill to a second mode or job then no longer detaches it from the first, which the editors silently do today.
 This ships first, since every later step assumes skills are reusable.
 
@@ -303,7 +303,7 @@ Each step is a PR (or a public and private pair) that leaves the product working
 
 | Step | Repo | Content | Depends on |
 |---|---|---|---|
-| 0 | public | §11 M2M migration for mode and job links; openapi gaps (`/agent-job/{id}/rituals`, `mcp_server_ids` in ritual bodies) | — |
+| 0 | public | §11 M2M migration for mode and job links; openapi gaps (`/agent-job/{id}/rituals`, `mcp_server_ids` in the ritual create and update bodies) | — |
 | 1 | public | §1 columns, slug rules and sanitizer (`internal/skills`); editor fields; description cap; import/export of **text-only** bundles | 0 |
 | 2 | public | §2 and §4: index, `load_skill`/`unload_skill`, `SegmentKindSkills`, unified injection (`/skill` stays message-scoped), `chat_skill_states`, `(used earlier in this thread)` index marker, checkpoint unload, Context X-ray and Tools panel rows | 1 |
 | 3 | public | §3 bundle files: `skill_id`, `origin=skill`, reserved folder, Files panel, full import/export, `agent_file_read` auto-load, `list(kind="skills")` fields | 2, #406 merged with §12 items 1–4 |
