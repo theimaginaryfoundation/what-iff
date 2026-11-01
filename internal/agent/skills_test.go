@@ -142,7 +142,11 @@ func TestPrepareTurnSkills_ScopeLoadedActiveAndIndex(t *testing.T) {
 		activeSlugs = append(activeSlugs, r.Slug)
 	}
 	require.Equal(t, []string{"mode-skill", "notes", "pdf-forms"}, activeSlugs, "loaded ∪ mode ∪ message, sorted by slug")
-	require.True(t, chatCtx.skillsOffered())
+	require.False(t, chatCtx.skillLoadOffered(), "every loadable skill is active, so load_skill has nothing to load")
+	require.True(t, chatCtx.skillUnloadOffered(), "notes is loaded")
+	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, msg)
+	require.True(t, policy.disabledTools[agenttools.LoadSkillToolSpec.Name])
+	require.False(t, policy.disabledTools[agenttools.UnloadSkillToolSpec.Name])
 
 	index := a.skillsIndexDeveloperContext(chatCtx)
 	require.NotContains(t, index, "pdf-forms", "active skills are not listed")
@@ -162,15 +166,24 @@ func TestPrepareTurnSkills_ScopeLoadedActiveAndIndex(t *testing.T) {
 	require.NotContains(t, index, "- notes", "loaded skills are active, not listed")
 
 	// The policy brings the loaded skill into the connector scope and offers the skill tools.
-	policy := a.buildTurnToolPolicy(ctx, next, userID, &models.ChatMessage{})
+	policy = a.buildTurnToolPolicy(ctx, next, userID, &models.ChatMessage{})
 	require.Contains(t, policy.ritualIDs, notes.ID)
 	require.False(t, policy.disabledTools[agenttools.LoadSkillToolSpec.Name])
+
+	// Nothing loaded: unload_skill is not offered.
+	_, err = ds.RemoveChatLoadedSkills(ctx, userID, chat.ID, []uuid.UUID{notes.ID})
+	require.NoError(t, err)
+	bare := &chatContext{userID: userID, chat: chat}
+	a.prepareTurnSkills(ctx, userID, bare, &models.ChatMessage{ChatID: chat.ID})
+	require.True(t, bare.skillLoadOffered())
+	require.False(t, bare.skillUnloadOffered())
 
 	// A sandboxed chat sees nothing.
 	sandboxed := &chatContext{userID: userID, chat: &models.Chat{ID: chat.ID, UserID: userID, ContextScope: sandboxScope(true)}}
 	a.prepareTurnSkills(ctx, userID, sandboxed, msg)
 	require.Empty(t, sandboxed.activeSkills())
-	require.False(t, sandboxed.skillsOffered())
+	require.False(t, sandboxed.skillLoadOffered())
+	require.False(t, sandboxed.skillUnloadOffered())
 	require.Nil(t, sandboxed.loadedSkillIDs())
 }
 
@@ -260,11 +273,15 @@ func TestUnloadSkillsUnusedInSegment(t *testing.T) {
 	a, ds, client, userID, chat := newSkillsAgentFixture(t)
 	ctx := context.Background()
 	tools := []string{"web_search"}
+	reloadedTools := []string{"fetch_page"}
+	staleTools := []string{"generate_image"}
 	kept := createTestSkill(t, ds, userID, models.Ritual{Name: "Kept By Tool", AllowedTools: &tools})
-	reloaded := createTestSkill(t, ds, userID, models.Ritual{Name: "Reloaded"})
-	stale := createTestSkill(t, ds, userID, models.Ritual{Name: "Stale"})
+	reloaded := createTestSkill(t, ds, userID, models.Ritual{Name: "Reloaded", AllowedTools: &reloadedTools})
+	stale := createTestSkill(t, ds, userID, models.Ritual{Name: "Stale", AllowedTools: &staleTools})
 	_, err := ds.AddChatLoadedSkills(ctx, userID, chat.ID, []uuid.UUID{kept.ID, reloaded.ID, stale.ID})
 	require.NoError(t, err)
+	// Loading the skills loaded their allowed_tools; none of them but web_search is called below.
+	require.NoError(t, ds.SetChatLoadedBuiltinTools(ctx, userID, chat.ID, []string{"web_search", "fetch_page", "generate_image"}))
 
 	// The segment holds one load_skill call naming "reloaded" and used web_search.
 	msg, err := client.ChatMessage.Create().SetMessage("hi").SetOrigin(chatmessage.OriginAssistant).SetChatID(chat.ID).Save(ctx)
@@ -277,8 +294,24 @@ func TestUnloadSkillsUnusedInSegment(t *testing.T) {
 	loaded, err := ds.ListChatLoadedSkillIDs(ctx, userID, chat.ID)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []uuid.UUID{kept.ID, reloaded.ID}, loaded, "stale was neither loaded in the segment nor had a tool it brought in called")
+
+	builtins, err := ds.ListChatLoadedBuiltinTools(ctx, userID, chat.ID)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"web_search", "fetch_page"}, builtins,
+		"a skill kept by its load_skill call keeps its allowed_tools; the unloaded skill's go")
 }
 
 func TestSlugsFromLoadSkillInputs(t *testing.T) {
 	require.Equal(t, []string{"a", "b", "c"}, slugsFromLoadSkillInputs([]string{`{"skills":["A ","b"]}`, "not json", `{"skills":["c","all"]}`}))
+}
+
+func TestSubagentInvocableSkills_RefusesUserOnlySkillsUnlessActive(t *testing.T) {
+	open := &models.Ritual{ID: uuid.New(), Slug: "open"}
+	userOnly := &models.Ritual{ID: uuid.New(), Slug: "user-only", DisableModelInvocation: boolPtr(true)}
+	invoked := &models.Ritual{ID: uuid.New(), Slug: "invoked", DisableModelInvocation: boolPtr(true)}
+	chatCtx := &chatContext{skills: &turnSkills{active: []*models.Ritual{invoked}}}
+
+	got := subagentInvocableSkills(chatCtx, []*models.Ritual{open, userOnly, invoked})
+	require.Equal(t, []*models.Ritual{open, invoked}, got, "the user invoked one this turn, so passing it on is fine")
+	require.Equal(t, []*models.Ritual{open}, subagentInvocableSkills(nil, []*models.Ritual{open, userOnly}))
 }

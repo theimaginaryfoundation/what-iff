@@ -3,6 +3,7 @@ package datastore
 import (
 	"context"
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -18,8 +19,9 @@ import (
 )
 
 // Loaded skills (ADR 0x035 §4): the skills the agent loaded in a chat with load_skill, kept in
-// chat_skill_states until unload_skill removes them or a checkpoint finds them unused. Only
-// load_skill writes here; message, mode and job activations are active for their turn alone.
+// chat_skill_states until unload_skill or a checkpoint unloads them. Unloading stamps unloaded_at
+// and keeps the row, so every row is a skill the agent used in the thread. Only load_skill writes
+// here; message, mode and job activations are active for their turn alone.
 
 // chatOwnedBy reports whether chatID belongs to userID, as ErrChatNotFound when it does not.
 func (d *Datastore) chatOwnedBy(ctx context.Context, client *ent.Client, userID, chatID uuid.UUID) error {
@@ -41,7 +43,7 @@ func (d *Datastore) ListChatLoadedSkillIDs(ctx context.Context, userID, chatID u
 		return nil, err
 	}
 	rows, err := d.dbClient.ChatSkillState.Query().
-		Where(entchatskillstate.ChatID(chatID)).
+		Where(entchatskillstate.ChatID(chatID), entchatskillstate.UnloadedAtIsNil()).
 		Order(ent.Asc(entchatskillstate.FieldLoadedAt), ent.Asc(entchatskillstate.FieldID)).
 		All(ctx)
 	if err != nil {
@@ -50,6 +52,26 @@ func (d *Datastore) ListChatLoadedSkillIDs(ctx context.Context, userID, chatID u
 	out := make([]uuid.UUID, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, row.RitualID)
+	}
+	return out, nil
+}
+
+// ListChatSkillIDsEverLoaded returns the ritual ids the agent has loaded in the chat at any time,
+// loaded now or since unloaded, for the index's "used earlier in this thread" marks.
+func (d *Datastore) ListChatSkillIDsEverLoaded(ctx context.Context, userID, chatID uuid.UUID) (map[uuid.UUID]struct{}, error) {
+	if err := d.chatOwnedBy(ctx, d.dbClient, userID, chatID); err != nil {
+		return nil, err
+	}
+	rows, err := d.dbClient.ChatSkillState.Query().
+		Where(entchatskillstate.ChatID(chatID)).
+		Select(entchatskillstate.FieldRitualID).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]struct{}, len(rows))
+	for _, row := range rows {
+		out[row.RitualID] = struct{}{}
 	}
 	return out, nil
 }
@@ -77,23 +99,32 @@ func (d *Datastore) AddChatLoadedSkills(ctx context.Context, userID, chatID uuid
 	}
 	existing, err := tx.ChatSkillState.Query().
 		Where(entchatskillstate.ChatID(chatID), entchatskillstate.RitualIDIn(ritualIDs...)).
-		Select(entchatskillstate.FieldRitualID).
 		All(ctx)
 	if err != nil {
 		_ = tx.Rollback()
 		return nil, err
 	}
-	have := make(map[uuid.UUID]struct{}, len(existing))
+	have := make(map[uuid.UUID]*ent.ChatSkillState, len(existing))
 	for _, row := range existing {
-		have[row.RitualID] = struct{}{}
+		have[row.RitualID] = row
 	}
 	var added []uuid.UUID
+	seen := map[uuid.UUID]struct{}{}
 	for _, id := range ritualIDs {
-		if _, ok := have[id]; ok {
+		if _, dup := seen[id]; dup {
 			continue
 		}
-		have[id] = struct{}{}
-		if err := tx.ChatSkillState.Create().SetChatID(chatID).SetRitualID(id).Exec(ctx); err != nil {
+		seen[id] = struct{}{}
+		row, ok := have[id]
+		switch {
+		case ok && row.UnloadedAt == nil:
+			continue // already loaded
+		case ok:
+			err = tx.ChatSkillState.UpdateOneID(row.ID).ClearUnloadedAt().SetLoadedAt(time.Now()).Exec(ctx)
+		default:
+			err = tx.ChatSkillState.Create().SetChatID(chatID).SetRitualID(id).Exec(ctx)
+		}
+		if err != nil {
 			_ = tx.Rollback()
 			return nil, err
 		}
@@ -115,7 +146,7 @@ func (d *Datastore) RemoveChatLoadedSkills(ctx context.Context, userID, chatID u
 		return nil, err
 	}
 	rows, err := d.dbClient.ChatSkillState.Query().
-		Where(entchatskillstate.ChatID(chatID), entchatskillstate.RitualIDIn(ritualIDs...)).
+		Where(entchatskillstate.ChatID(chatID), entchatskillstate.RitualIDIn(ritualIDs...), entchatskillstate.UnloadedAtIsNil()).
 		All(ctx)
 	if err != nil {
 		return nil, err
@@ -129,10 +160,18 @@ func (d *Datastore) RemoveChatLoadedSkills(ctx context.Context, userID, chatID u
 		removed = append(removed, row.RitualID)
 		rowIDs = append(rowIDs, row.ID)
 	}
-	if _, err := d.dbClient.ChatSkillState.Delete().Where(entchatskillstate.IDIn(rowIDs...)).Exec(ctx); err != nil {
+	if err := d.markChatSkillsUnloaded(ctx, rowIDs); err != nil {
 		return nil, err
 	}
 	return removed, nil
+}
+
+// markChatSkillsUnloaded stamps unloaded_at on the given chat_skill_states rows.
+func (d *Datastore) markChatSkillsUnloaded(ctx context.Context, rowIDs []uuid.UUID) error {
+	return d.dbClient.ChatSkillState.Update().
+		Where(entchatskillstate.IDIn(rowIDs...)).
+		SetUnloadedAt(time.Now()).
+		Exec(ctx)
 }
 
 // RetainChatLoadedSkills unloads every loaded skill of the chat not in keep and returns the
@@ -142,7 +181,7 @@ func (d *Datastore) RetainChatLoadedSkills(ctx context.Context, userID, chatID u
 		return nil, err
 	}
 	rows, err := d.dbClient.ChatSkillState.Query().
-		Where(entchatskillstate.ChatID(chatID)).
+		Where(entchatskillstate.ChatID(chatID), entchatskillstate.UnloadedAtIsNil()).
 		All(ctx)
 	if err != nil {
 		return nil, err
@@ -158,7 +197,7 @@ func (d *Datastore) RetainChatLoadedSkills(ctx context.Context, userID, chatID u
 	if len(rowIDs) == 0 {
 		return nil, nil
 	}
-	if _, err := d.dbClient.ChatSkillState.Delete().Where(entchatskillstate.IDIn(rowIDs...)).Exec(ctx); err != nil {
+	if err := d.markChatSkillsUnloaded(ctx, rowIDs); err != nil {
 		return nil, err
 	}
 	sort.Slice(unloaded, func(i, j int) bool { return unloaded[i].String() < unloaded[j].String() })

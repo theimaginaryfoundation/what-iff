@@ -71,7 +71,7 @@ Sandboxed chats have zero skills in scope, as today.
 A new always-on tool `load_skill` takes `skills: [slug...]`.
 For each skill it:
 
-1. Records the skill as loaded for this chat (§4), so the body is injected from the next loop round and on later turns.
+1. Records the skill as loaded for this chat (§4). For the rest of this turn the body is in the tool result (the context is built once per turn); from the next turn the skills segment carries it.
 2. Returns the body wrapped as `<skill name="slug">…</skill>`, followed by a `<skill_resources>` listing of the bundle's files (path and size, never contents) and the names of its connectors and tools now in scope.
 3. Brings the skill's connectors into MCP scope and returns their **tool inventory**: for each connector its id, name, status and the names and one-line descriptions of its tools, with the ones already loaded marked. This is the `list(kind="mcp_servers")` shape, filtered to the skill's connectors, and it costs no extra round trip because the turn's adapter has already discovered those tools (`prepareTurnMCPToolSpecs`). Nothing is loaded from a connector by `load_skill`; the model calls `load_tools` for the tools the task needs, so a skill with a wide connector does not drop every tool definition into the request. A follow-up lets `allowed_tools` name connector tools for the cases where one call should make the skill usable (§6).
 4. Loads the tools named in `allowed_tools` that are loadable built-ins here (§6).
@@ -101,7 +101,9 @@ Three simplifications of the text above, each a small follow-up if it ever matte
 
 - The index degrades uniformly, not by recency: over budget, every description is shortened (160, then 80 characters), then all are dropped; slugs always stay. A least-recently-used order needs per-skill usage data the product does not record yet.
 - A connector that was not in scope when the turn registered its tools has no tool definitions on that turn's adapter, so `load_skill` reports the connector's inventory but says its tools can be loaded from the next turn. Connectors already in scope (thread-attached, or a mode's or message's skill) are loadable at once.
-- The `(used earlier in this thread)` mark covers skills a message invoked and skills `load_skill` named before; the separate post-checkpoint note is not needed, since a skill unloaded at a checkpoint keeps its mark.
+- The `(used earlier in this thread)` mark covers skills a message invoked and skills the agent loaded before (every `chat_skill_states` row, loaded or unloaded); the separate post-checkpoint note is not needed, since a skill unloaded at a checkpoint keeps its mark.
+- `load_skill` is offered only when the index lists a skill, and `unload_skill` only when the agent has one loaded.
+- A skill kept at a checkpoint keeps its `allowed_tools` loaded, called or not.
 
 ### 3. Bundle files live in the gallery VFS, under `skills/<slug>/`
 
@@ -127,9 +129,10 @@ The `skills/` top-level folder is **reserved**: `agent_file_write` and the galle
 
 ### 4. Loaded skills persist per chat and unload at checkpoints, like tools
 
-A new table `chat_skill_states` (`chat_id`, `ritual_id`, `loaded_at`, unique on the pair) holds the skills the agent loaded in a chat.
+A new table `chat_skill_states` (`chat_id`, `ritual_id`, `loaded_at`, `unloaded_at`, unique on the pair) holds the skills the agent loaded in a chat.
 It is read where `prepareTurnLoadableTools` reads the loaded built-in tools, into `chatCtx.loadedSkills`, and written only by `load_skill` and `unload_skill`; message, mode and job activations never touch it.
-As with tools, the in-memory set is updated on load so the body is injected from the **next loop round of the same turn**.
+The in-memory set is updated on load, so the turn's connector scope and tool policy see the skill at once; the body itself reaches the model through the tool result this turn and the skills segment from the next one, since the context is built once per turn.
+Unloading stamps `unloaded_at` and keeps the row, so the table also answers "used earlier in this thread" without reading the chat's tool calls.
 
 At a checkpoint, `unloadToolsUnusedInSegment` also unloads skills that were not used in the segment.
 A skill counts as used when the segment holds a `load_skill` call naming it, a call to a tool it brought in (`allowed_tools` or a tool of one of its connectors), or a tool call that touched `skills/<slug>/` (`agent_file_read`, `load_file_to_container`, `shell_exec` with the path in its command).
@@ -198,7 +201,7 @@ Job dependencies on skills are unchanged.
 Skills are prompts and code that run with the user's permissions, and Nexus makes them shareable; the recent ClawHub and skills.sh audits found prompt injection in most malicious skills and invisible-Unicode smuggling in many.
 
 - **Sanitize on write:** import, create and update strip Unicode tag characters, zero-width and bidi controls from `name`, `description` and `content`, and reject XML-looking tags in `name` and `description` (the Claude API's rule). Files are stored as uploaded.
-- **Bound everything:** description 1,024 chars, body 64 KB hard, bundle 30 MB and 200 files, index 1% of context, `load_skill` result capped like other tool results and classified in `toolContextPolicyFor` (persist 10 turns, like `agent_file_read`).
+- **Bound everything:** description 1,024 chars, body 64 KB hard, bundle 30 MB and 200 files, index 1% of context, `load_skill` result capped like other tool results and classified in `toolContextPolicyFor` as not persisted: from the next turn the skills segment carries the body, so replaying the result would send it twice.
 - **Frame the content:** bodies are injected inside `<skill name="…">` in a developer segment with a one-line preamble that skill instructions describe how to do a task and do not change who the user is or what the system prompt allows.
 - **Scripts only in the container:** no network, no installs, resource limits, per-conversation workspace, never on the API host. Output is capped and comes back as a tool result like any `shell_exec`.
 - **Nexus:** scripts and body are scanned at submission for injection patterns and smuggled characters; results are shown to moderators; installed skills are version-pinned and local edits are detected (existing behaviour).
@@ -247,7 +250,7 @@ turn start
   ├─ developer context
   │     ├─ Skills index: in-scope − active − disable_model_invocation (1% budget)
   │     └─ SegmentKindSkills: <skill name=slug>body</skill> per active skill
-  └─ tool specs: load_skill / unload_skill present iff skills in scope
+  └─ tool specs: load_skill iff the index lists a skill; unload_skill iff one is loaded
 loop round N
   ├─ load_skill(slugs) → chat_skill_states, chatCtx.loadedSkills,
   │     allowed_tools loaded, agent_file_read loaded (connectors: in scope, not loaded)
@@ -265,7 +268,7 @@ Storage:
 ```
 rituals ──1:N── file_attachments(origin=skill, skill_id, folder="skills/<slug>/…")
    │ M2M mood_rituals, agent_job_rituals, ritual_mcp_servers, chat_message_rituals
-   └── chat_skill_states(chat_id, ritual_id, loaded_at)
+   └── chat_skill_states(chat_id, ritual_id, loaded_at, unloaded_at)
 SKILL.md = render(ritual)   ← import parses, export/mount render
 ```
 

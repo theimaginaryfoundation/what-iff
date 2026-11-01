@@ -51,6 +51,24 @@ func TestChatLoadedSkills_AddRemoveRetain(t *testing.T) {
 	loaded, err = ds.ListChatLoadedSkillIDs(ctx, userID, chat.ID)
 	require.NoError(t, err)
 	require.Empty(t, loaded)
+
+	// Unloaded skills are still known as used earlier in the thread.
+	ever, err := ds.ListChatSkillIDsEverLoaded(ctx, userID, chat.ID)
+	require.NoError(t, err)
+	require.Equal(t, map[uuid.UUID]struct{}{a.ID: {}, b.ID: {}}, ever)
+	removed, err = ds.RemoveChatLoadedSkills(ctx, userID, chat.ID, []uuid.UUID{a.ID})
+	require.NoError(t, err)
+	require.Empty(t, removed, "an unloaded skill is not unloaded twice")
+
+	// Loading one again counts as added and makes it loaded.
+	added, err = ds.AddChatLoadedSkills(ctx, userID, chat.ID, []uuid.UUID{b.ID})
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{b.ID}, added)
+	loaded, err = ds.ListChatLoadedSkillIDs(ctx, userID, chat.ID)
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{b.ID}, loaded)
+	_, err = ds.ListChatSkillIDsEverLoaded(ctx, other, chat.ID)
+	require.ErrorIs(t, err, ErrChatNotFound)
 }
 
 func TestListRitualsInChatScopeAndMessageRitualIDs(t *testing.T) {

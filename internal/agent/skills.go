@@ -181,7 +181,7 @@ func (a *Agent) prepareTurnSkills(ctx context.Context, userID uuid.UUID, chatCtx
 	preloaded = append(preloaded, chatCtx.activeMoodRituals...)
 	s.recomputeActive(preloaded)
 
-	// Skills a message of this thread invoked, plus the ones load_skill named before.
+	// Skills a message of this thread invoked.
 	if used, err := a.ds.ListChatMessageRitualIDs(ctx, userID, chatID); err != nil {
 		a.logger.Warn("skills: failed to read the thread's invoked skills", zap.Error(err))
 	} else {
@@ -189,13 +189,13 @@ func (a *Agent) prepareTurnSkills(ctx context.Context, userID uuid.UUID, chatCtx
 			s.usedEarlier[id] = struct{}{}
 		}
 	}
-	if inputs, err := a.ds.ChatToolInputsSince(ctx, userID, chatID, nil, agenttools.LoadSkillToolSpec.Name); err != nil {
-		a.logger.Warn("skills: failed to read earlier load_skill calls", zap.Error(err))
+	// Skills the agent loaded here before, still loaded or since unloaded: the state rows outlive
+	// an unload, so this is one indexed read rather than a scan of the chat's tool calls.
+	if everLoaded, err := a.ds.ListChatSkillIDsEverLoaded(ctx, userID, chatID); err != nil {
+		a.logger.Warn("skills: failed to read the skills loaded earlier", zap.Error(err))
 	} else {
-		for _, slug := range slugsFromLoadSkillInputs(inputs) {
-			if r, ok := s.bySlug[slug]; ok {
-				s.usedEarlier[r.ID] = struct{}{}
-			}
+		for id := range everLoaded {
+			s.usedEarlier[id] = struct{}{}
 		}
 	}
 }
@@ -217,10 +217,16 @@ func (c *chatContext) activeSkills() []*models.Ritual {
 	return c.skills.active
 }
 
-// skillsOffered reports whether the turn has any skill in scope, which is when load_skill and
-// unload_skill are offered.
-func (c *chatContext) skillsOffered() bool {
-	return c != nil && c.skills != nil && len(c.skills.inScope) > 0
+// skillLoadOffered reports whether load_skill has anything to load this turn: a skill in scope
+// that the model may invoke and that is not already active. It matches a non-empty index.
+func (c *chatContext) skillLoadOffered() bool {
+	return c != nil && c.skills != nil && len(loadableSkillSlugs(c.skills)) > 0
+}
+
+// skillUnloadOffered reports whether unload_skill has anything to unload: a skill the agent
+// loaded in this chat. Message and mode skills are not the agent's to unload.
+func (c *chatContext) skillUnloadOffered() bool {
+	return c != nil && c.skills != nil && len(c.skills.loaded) > 0
 }
 
 // --- skills segment and index ---------------------------------------------------------------
@@ -698,28 +704,29 @@ func (a *Agent) unloadSkillTool(ctx context.Context, chatCtx *chatContext, input
 // unloadSkillsUnusedInSegment is the checkpoint's skill step (ADR 0x035 §4): every skill the agent
 // loaded that the summarized segment did not use is unloaded. A skill counts as used when the
 // segment holds a load_skill call naming it, or a call to one of the built-in tools it brought in
-// (its allowed_tools); usedTools are the segment's tool names. Failures are logged; skills stay.
-func (a *Agent) unloadSkillsUnusedInSegment(ctx context.Context, userID, chatID uuid.UUID, segmentStart *time.Time, usedTools map[string]struct{}) {
+// (its allowed_tools); usedTools are the segment's tool names. It returns the allowed_tools of the
+// skills that stay loaded, which the tool step keeps. Failures are logged; skills stay.
+func (a *Agent) unloadSkillsUnusedInSegment(ctx context.Context, userID, chatID uuid.UUID, segmentStart *time.Time, usedTools map[string]struct{}) (keptTools map[string]struct{}) {
 	if a.ds == nil {
-		return
+		return nil
 	}
 	loadedIDs, err := a.ds.ListChatLoadedSkillIDs(ctx, userID, chatID)
 	if err != nil {
 		a.logger.Warn("checkpoint: failed to read the chat's loaded skills", zap.String("chat_id", chatID.String()), zap.Error(err))
-		return
+		return nil
 	}
 	if len(loadedIDs) == 0 {
-		return
+		return nil
 	}
 	loaded, err := a.ds.GetRitualsByIDs(ctx, userID, loadedIDs)
 	if err != nil {
 		a.logger.Warn("checkpoint: failed to load the chat's loaded skills", zap.String("chat_id", chatID.String()), zap.Error(err))
-		return
+		return nil
 	}
 	inputs, err := a.ds.ChatToolInputsSince(ctx, userID, chatID, segmentStart, agenttools.LoadSkillToolSpec.Name)
 	if err != nil {
 		a.logger.Warn("checkpoint: failed to read the segment's load_skill calls", zap.String("chat_id", chatID.String()), zap.Error(err))
-		return
+		return nil
 	}
 	loadedInSegment := map[string]struct{}{}
 	for _, slug := range slugsFromLoadSkillInputs(inputs) {
@@ -741,7 +748,17 @@ func (a *Agent) unloadSkillsUnusedInSegment(ctx context.Context, userID, chatID 
 	unloaded, err := a.ds.RetainChatLoadedSkills(ctx, userID, chatID, keep)
 	if err != nil {
 		a.logger.Warn("checkpoint: failed to unload unused skills", zap.String("chat_id", chatID.String()), zap.Error(err))
-		return
+		return nil
+	}
+	// A skill that stays loaded keeps its allowed_tools loaded too, even the ones the segment did
+	// not call: they are part of what loading the skill means.
+	keptTools = map[string]struct{}{}
+	for _, r := range loaded {
+		if _, ok := keep[r.ID]; ok {
+			for _, tool := range r.AllowedToolList() {
+				keptTools[tool] = struct{}{}
+			}
+		}
 	}
 	if len(unloaded) > 0 {
 		names := make([]string, 0, len(unloaded))
@@ -755,6 +772,7 @@ func (a *Agent) unloadSkillsUnusedInSegment(ctx context.Context, userID, chatID 
 		a.logger.Info("checkpoint: unloaded skills the segment did not use",
 			zap.String("chat_id", chatID.String()), zap.Strings("skills", names))
 	}
+	return keptTools
 }
 
 // slugsFromLoadSkillInputs extracts the slugs named by recorded load_skill inputs.

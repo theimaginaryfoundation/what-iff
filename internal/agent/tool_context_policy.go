@@ -87,10 +87,11 @@ func toolContextPolicyFor(toolName string) toolContextPolicy {
 		// keep them for a while, then re-read.
 		return toolContextPolicy{persist: true, ttlTurns: agentStoreReadTTLTurns}
 	case tools.LoadSkillToolSpec.Name:
-		// A load_skill result carries the skill's instructions and its connector inventory; from
-		// the next turn the instructions are in the skills segment, so the result only needs to
-		// bridge the turns until then (ADR 0x035 §10).
-		return toolContextPolicy{persist: true, ttlTurns: agentStoreReadTTLTurns}
+		// A load_skill result carries the skill's instructions for the rest of its own turn. From
+		// the next turn the skills segment carries them for as long as the skill stays loaded, so
+		// replaying the result would send the body twice (ADR 0x035 §2). The connector inventory
+		// it also held is a list(kind="mcp_servers") call away, and the tools it loaded stay loaded.
+		return toolContextPolicy{persist: false}
 	case tools.UnloadSkillToolSpec.Name:
 		return toolContextPolicy{persist: false}
 	case tools.ToolNameWebSearch, tools.ToolNameFetchPage:

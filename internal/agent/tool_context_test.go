@@ -29,6 +29,8 @@ func TestToolContextPolicyFor(t *testing.T) {
 		{"update_scratchpad dropped", tools.UpdateScratchpadToolSpec.Name, false, 0, false},
 		{"agent_file_write ack persists", tools.AgentFileWriteToolSpec.Name, true, noTTL, false},
 		{"entity_write dropped", tools.EntityWriteToolSpec.Name, false, 0, false},
+		{"load_skill dropped: the skills segment carries the body", tools.LoadSkillToolSpec.Name, false, 0, false},
+		{"unload_skill dropped", tools.UnloadSkillToolSpec.Name, false, 0, false},
 		{"auto memory enrichment dropped", memoryEnrichmentToolCallName, false, 0, false},
 		{"mcp tickets short TTL + stale", "mcp__jira__get_ticket", true, mcpMessagesTTLTurns, true},
 		{"mcp messages short TTL + stale", "mcp__slack__list_messages", true, mcpMessagesTTLTurns, true},
