@@ -133,7 +133,7 @@ func renderClaudeContext(ctx *ModelContext) ([]anthropic.TextBlockParam, []anthr
 			messages = append(messages, anthropic.NewUserMessage(blocks...))
 		case SegmentKindDeveloperContext:
 			messages = append(messages, anthropic.NewUserMessage(textBlockUnionWithOptionalCache(seg.Content, mark)))
-		case SegmentKindMood:
+		case SegmentKindMood, SegmentKindSkills, SegmentKindSkillsIndex:
 			messages = append(messages, anthropic.NewUserMessage(textBlockUnionWithOptionalCache(seg.Content, mark)))
 		case SegmentKindToolResult:
 			messages = append(messages, anthropic.NewUserMessage(textBlockUnionWithOptionalCache(seg.Content, mark)))
