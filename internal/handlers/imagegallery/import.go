@@ -44,6 +44,11 @@ func (h *Handler) ImportImage(w http.ResponseWriter, r *http.Request) {
 			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, folderErrorMessage(folderErr), folderErr)
 			return
 		}
+		if models.IsReservedFolder(folder) {
+			handlerutils.AbandonFileAttachmentUpload(r.Context(), fileAttachment, tempFilePath)
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, reservedFolderMessage, nil)
+			return
+		}
 		fileAttachment.Folder = folder
 	}
 

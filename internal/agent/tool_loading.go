@@ -186,12 +186,27 @@ func (a *Agent) loadBuiltinTools(ctx context.Context, chatCtx *chatContext, requ
 			Error: fmt.Sprintf("none of the requested tools is a loadable built-in tool in this chat (loadable: %s); pass mcp_server_id to load MCP tools", strings.Join(sortedSetKeys(chatCtx.loadableTools), ", ")),
 		})
 	}
-	current, err := a.ds.ListChatLoadedBuiltinTools(ctx, chatCtx.userID, chatCtx.chat.ID)
+	loaded, alreadyLoaded, err := a.loadBuiltinToolSet(ctx, chatCtx, targets)
 	if err != nil {
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{Error: err.Error()})
 	}
+	res := mcpToolLifecycleResult{Loaded: loaded, AlreadyLoaded: alreadyLoaded, Note: loadedToolsReadyNote}
+	if len(unknown) > 0 {
+		res.Note += fmt.Sprintf(" Ignored names that are not loadable built-in tools here: %s", strings.Join(unknown, ", "))
+	}
+	return marshalMCPToolLifecycleResult(res)
+}
+
+// loadBuiltinToolSet marks targets (loadable built-in tools this turn offers) as loaded in the chat,
+// persisting the set and updating the context so they are sent from the next round. It returns
+// the newly loaded names and the ones that were loaded already. load_skill uses it for a skill's
+// allowed_tools.
+func (a *Agent) loadBuiltinToolSet(ctx context.Context, chatCtx *chatContext, targets []string) (loaded, alreadyLoaded []string, err error) {
+	current, err := a.ds.ListChatLoadedBuiltinTools(ctx, chatCtx.userID, chatCtx.chat.ID)
+	if err != nil {
+		return nil, nil, err
+	}
 	set := sliceToSet(current)
-	var loaded, alreadyLoaded []string
 	for _, name := range targets {
 		if _, ok := set[name]; ok {
 			alreadyLoaded = append(alreadyLoaded, name)
@@ -201,14 +216,10 @@ func (a *Agent) loadBuiltinTools(ctx context.Context, chatCtx *chatContext, requ
 		loaded = append(loaded, name)
 	}
 	if err := a.ds.SetChatLoadedBuiltinTools(ctx, chatCtx.userID, chatCtx.chat.ID, setToSortedSlice(set)); err != nil {
-		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{Error: err.Error()})
+		return nil, nil, err
 	}
 	chatCtx.loadedTools = set
-	res := mcpToolLifecycleResult{Loaded: loaded, AlreadyLoaded: alreadyLoaded, Note: loadedToolsReadyNote}
-	if len(unknown) > 0 {
-		res.Note += fmt.Sprintf(" Ignored names that are not loadable built-in tools here: %s", strings.Join(unknown, ", "))
-	}
-	return marshalMCPToolLifecycleResult(res)
+	return loaded, alreadyLoaded, nil
 }
 
 // resolveRequestedBuiltinTools maps requested names onto the turn's loadable built-in tools

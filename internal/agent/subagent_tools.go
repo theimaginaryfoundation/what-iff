@@ -165,7 +165,15 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 	ritualUUIDs := parseSkillIDs(toolArgs.RitualIDs)
 	if len(ritualUUIDs) > 0 {
 		rituals, fetchErr := a.ds.GetRitualsByIDs(ctx, chatCtx.chat.UserID, ritualUUIDs)
-		if fetchErr == nil && len(rituals) > 0 {
+		if fetchErr != nil {
+			rituals = nil
+		}
+		rituals = subagentInvocableSkills(chatCtx, rituals)
+		ritualUUIDs = ritualUUIDs[:0]
+		for _, r := range rituals {
+			ritualUUIDs = append(ritualUUIDs, r.ID)
+		}
+		if len(rituals) > 0 {
 			message += FormatRituals(rituals)
 		}
 	}
@@ -550,4 +558,22 @@ func marshalSubagentToolResult(result any) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// subagentInvocableSkills keeps the skills the model may hand to a sub-agent: those it could load
+// itself, plus any already active this turn (a /skill the user invoked or the mode's). A skill
+// marked disable_model_invocation is the user's to start, so the model cannot start it by
+// passing it to run_subagent either.
+func subagentInvocableSkills(chatCtx *chatContext, rituals []*models.Ritual) []*models.Ritual {
+	var s *turnSkills
+	if chatCtx != nil {
+		s = chatCtx.skills
+	}
+	out := rituals[:0:0]
+	for _, r := range rituals {
+		if r != nil && (r.IsModelInvocable() || s.isActive(r.ID)) {
+			out = append(out, r)
+		}
+	}
+	return out
 }

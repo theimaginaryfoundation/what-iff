@@ -25,6 +25,12 @@ const (
 	listKindMCPServers    = "mcp_servers"
 )
 
+// File view values (files kind).
+const (
+	listFileViewList = "list"
+	listFileViewTree = "tree"
+)
+
 // File scope values (files kind).
 const (
 	listFileScopeAll          = "all"
@@ -51,7 +57,7 @@ const ListDescription = `List your available resources. Pick a kind:
 - models — chat models you can run (id, name, provider, tool support).
 - personalities — personalities you can switch to or run as a subagent.
 - skills — skills you can attach to a subagent or scheduled job (id, name, description).
-- files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf"), scope ("personality" docs, "conversation" attachments, or "all") and folder. Images dominate most libraries, so pass file_type to cut through them. Files, images and documents alike, can be filed in gallery folders (e.g. "charts/oura"); folder lists that folder and everything beneath it, and each row shows its folder.
+- files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf"), scope ("personality" docs, "conversation" attachments, or "all"), folder, and origin ("agent" for files agents wrote, "user" for the rest). view="tree" draws one page of them (up to 200 by default) as a folder tree; with folder set, that is the folder's tree. Images dominate most libraries, so pass file_type to cut through them. Files, images and documents alike, can be filed in gallery folders (e.g. "charts/oura"); folder lists that folder and everything beneath it, and each row shows its folder.
 - conversations — your past conversations, including archived imports, that have messages, most-recent first (id, name). Pass an id to find_context (mode="conversation"/"origin") to read one.
 - jobs — your scheduled jobs (id, name, status, schedule, thread_id, next_runtime for still-active ones, and the start of each prompt as description). Active by default; set include_completed=true to also see paused jobs and finished/failed one-offs. Pass a job's id as filter to read that job in full: its whole prompt, model_id and skill_ids.
 - mcp_servers — MCP servers available to the current conversation (attached to it, or linked to a skill that is active now), with discoverable MCP tools and currently loaded tools for this chat.
@@ -86,6 +92,16 @@ var ListToolSpec = FunctionToolSpec{
 			"enum":        []string{listFileScopeAll, listFileScopePersonality, listFileScopeConversation},
 			"description": "files only: 'personality' (this personality's docs), 'conversation' (conversation uploads), or 'all' (default).",
 		},
+		"origin": map[string]interface{}{
+			"type":        "string",
+			"enum":        []string{string(models.FileOriginAgent), string(models.FileOriginUser), string(models.FileOriginSkill)},
+			"description": "files only: 'agent' for files agents wrote with agent_file_write, 'skill' for skill bundle files (under skills/<slug>/), 'user' for everything else. Omit for the user's and agents' files.",
+		},
+		"view": map[string]interface{}{
+			"type":        "string",
+			"enum":        []string{listFileViewList, listFileViewTree},
+			"description": "files only: 'list' (default) returns rows with ids; 'tree' draws this page's files (default limit 200) as a folder tree of paths, like the tree command; pass folder to draw one folder, and page for the rest.",
+		},
 		"include_completed": map[string]interface{}{
 			"type":        "boolean",
 			"description": "jobs only: when true, also include finished/failed jobs. Default false (active scheduled jobs only).",
@@ -113,6 +129,8 @@ type listStore interface {
 	ListModels(ctx context.Context) ([]*models.Model, error)
 	ListPersonalities(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.PersonalityFilters) (*models.PaginatedResponse, error)
 	ListRituals(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.RitualFilters) (*models.PaginatedResponse, error)
+	// CountSkillFiles backs kind="skills"' has_files (ADR 0x035 §3).
+	CountSkillFiles(ctx context.Context, userID uuid.UUID, ritualIDs []uuid.UUID) (map[uuid.UUID]int, error)
 	ListFileAttachments(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error)
 	// ListFileAttachmentsInChatScope backs a sandboxed chat's file listing (its own uploads).
 	ListFileAttachmentsInChatScope(ctx context.Context, userID, chatID uuid.UUID, personalityID *uuid.UUID, limit int) ([]*models.FileAttachment, error)
@@ -152,6 +170,8 @@ type listArgs struct {
 	FileType         string `json:"file_type,omitempty"`
 	Scope            string `json:"scope,omitempty"`
 	Folder           string `json:"folder,omitempty"`
+	Origin           string `json:"origin,omitempty"`
+	View             string `json:"view,omitempty"`
 	IncludeCompleted bool   `json:"include_completed,omitempty"`
 	Limit            int    `json:"limit,omitempty"`
 	Page             int    `json:"page,omitempty"`
@@ -162,11 +182,15 @@ type listArgs struct {
 type listItem struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name,omitempty"`
+	Slug         string   `json:"slug,omitempty"`      // skills: the name load_skill takes
+	Loaded       *bool    `json:"loaded,omitempty"`    // skills: loaded in this chat with load_skill
+	HasFiles     *bool    `json:"has_files,omitempty"` // skills: the bundle has reference files or scripts
 	Description  string   `json:"description,omitempty"`
 	Provider     string   `json:"provider,omitempty"`      // models
 	ToolSupport  *bool    `json:"tool_support,omitempty"`  // models
 	FileType     string   `json:"file_type,omitempty"`     // files
 	Folder       string   `json:"folder,omitempty"`        // files (gallery files that are filed in a folder)
+	Origin       string   `json:"origin,omitempty"`        // files: the origin when not "user", e.g. "agent" (ADR 0x034)
 	Status       string   `json:"status,omitempty"`        // jobs, mcp_servers
 	StatusDetail string   `json:"status_detail,omitempty"` // mcp_servers
 	MCPTools     []string `json:"tools,omitempty"`         // mcp_servers
@@ -188,6 +212,7 @@ type listResult struct {
 	TotalCount int        `json:"total_count,omitempty"`
 	HasMore    bool       `json:"has_more,omitempty"`
 	Items      []listItem `json:"items"`
+	Tree       string     `json:"tree,omitempty"` // files with view="tree", in place of items
 	Note       string     `json:"note,omitempty"`
 	Error      string     `json:"error,omitempty"`
 }
@@ -206,15 +231,28 @@ type listPageMeta struct {
 // agrees with what load_tools can load and what the turn registers.
 type MCPScopeFunc func(ctx context.Context) ([]*models.MCPServer, error)
 
+// ListScope is what the agent knows about the turn that a listing reflects: the connectors in
+// scope (kind="mcp_servers") and the skills loaded in the chat (kind="skills").
+type ListScope struct {
+	MCPServers     MCPScopeFunc
+	LoadedSkillIDs []uuid.UUID
+}
+
 // List executes a list tool call, routing on `kind`. kind="mcp_servers" lists only the
-// connectors attached to the thread; use ListInMCPScope to include the active skills' connectors.
+// connectors attached to the thread; use ListWithScope to include the active skills' connectors.
 func (t *ListTool) List(ctx context.Context, chat *models.Chat, args []byte) (string, error) {
-	return t.ListInMCPScope(ctx, chat, args, nil)
+	return t.ListWithScope(ctx, chat, args, ListScope{})
 }
 
 // ListInMCPScope is List with an explicit resolver for the connectors in scope this turn
 // (kind="mcp_servers" only). A nil resolver falls back to the thread-attached connectors.
 func (t *ListTool) ListInMCPScope(ctx context.Context, chat *models.Chat, args []byte, mcpScope MCPScopeFunc) (string, error) {
+	return t.ListWithScope(ctx, chat, args, ListScope{MCPServers: mcpScope})
+}
+
+// ListWithScope is List with the turn's scope (see ListScope).
+func (t *ListTool) ListWithScope(ctx context.Context, chat *models.Chat, args []byte, scope ListScope) (string, error) {
+	mcpScope := scope.MCPServers
 	var a listArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return t.fail("", fmt.Sprintf("invalid arguments: %v", err))
@@ -230,7 +268,7 @@ func (t *ListTool) ListInMCPScope(ctx context.Context, chat *models.Chat, args [
 	case listKindPersonalities:
 		return t.listPersonalities(ctx, chat, a)
 	case listKindSkills:
-		return t.listSkills(ctx, chat, a)
+		return t.listSkills(ctx, chat, a, scope.LoadedSkillIDs)
 	case listKindFiles:
 		return t.listFiles(ctx, chat, a)
 	case listKindConversations:
@@ -275,6 +313,10 @@ func (t *ListTool) ok(kind string, items []listItem, note string) (string, error
 }
 
 func (t *ListTool) okPaged(kind string, items []listItem, note string, meta listPageMeta) (string, error) {
+	return marshalToolResult(pagedListResult(kind, items, note, meta), listToolName)
+}
+
+func pagedListResult(kind string, items []listItem, note string, meta listPageMeta) listResult {
 	if items == nil {
 		items = []listItem{}
 	}
@@ -285,7 +327,7 @@ func (t *ListTool) okPaged(kind string, items []listItem, note string, meta list
 		shownThrough := (meta.Page-1)*meta.Limit + len(items)
 		res.HasMore = shownThrough < meta.TotalCount
 	}
-	return marshalToolResult(res, listToolName)
+	return res
 }
 
 // clampLimit resolves a requested limit against a default and hard maximum.

@@ -3036,6 +3036,88 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /agent-job/{id}/rituals/{ritualId}:
+    post:
+      summary: Attach a skill to an agent job
+      description: Links a skill (ritual) the user owns to the job. A skill can be attached to any number of jobs and modes at once.
+      tags: [AgentJob Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: AgentJob ID
+          schema:
+            type: string
+            format: uuid
+        - name: ritualId
+          in: path
+          required: true
+          description: Skill (ritual) ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Skill attached (or already attached)
+        '400':
+          description: Invalid job or skill ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: AgentJob or skill not found for this user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Detach a skill from an agent job
+      description: Removes the link between the job and the skill. Other jobs and modes that use the skill are unaffected.
+      tags: [AgentJob Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: AgentJob ID
+          schema:
+            type: string
+            format: uuid
+        - name: ritualId
+          in: path
+          required: true
+          description: Skill (ritual) ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Skill detached (or was not attached)
+        '400':
+          description: Invalid job or skill ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: AgentJob or skill not found for this user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   # Personality Management Endpoints
   /personality:
     get:
@@ -4198,6 +4280,194 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /memory/entities:
+    get:
+      summary: List entity wiki pages
+      description: >
+        Lists the user's entity pages (ADR 0x034), most recently changed first. Agents write these
+        short pages about people, places and projects with the entity_write tool; global ones are
+        shared by every personality, and pinned ones (written by a personality with
+        auto_pin_memories on) by that personality only.
+      tags: [Memory Management]
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: query
+          in: query
+          description: Case-insensitive match on the name or text.
+          schema:
+            type: string
+        - name: personality_id
+          in: query
+          description: Only entities pinned to this personality.
+          schema:
+            type: string
+            format: uuid
+        - name: global_only
+          in: query
+          description: Only global entities.
+          schema:
+            type: boolean
+        - name: archived
+          in: query
+          description: >-
+            List the entities an agent deleted (archived) instead of the live ones. Archived
+            entities are hidden from agents and can be restored.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Entities retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      results:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AgentEntity'
+        '400':
+          description: Invalid personality_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /memory/entities/{id}:
+    patch:
+      summary: Edit an entity's text
+      description: Replaces the entity's text. The edit is the user's, so the agent provenance is cleared.
+      tags: [Memory Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: string
+                  maxLength: 5000
+      responses:
+        '200':
+          description: Entity updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentEntity'
+        '400':
+          description: Missing body, or text over 5000 characters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Entity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Delete an entity
+      description: Removes a live or archived entity for good.
+      tags: [Memory Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Entity deleted
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Entity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /memory/entities/{id}/restore:
+    post:
+      summary: Restore an archived entity
+      description: >-
+        Brings back an entity an agent deleted (archived). The restore is the user's, so the agent
+        provenance is cleared.
+      tags: [Memory Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Entity restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentEntity'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No archived entity with this id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: A live entity in the same scope has taken the name since it was archived
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /memory/compaction-events:
     get:
       summary: List compaction (checkpoint) audit events
@@ -5020,6 +5290,12 @@ paths:
                   type: string
                   format: uuid
                   description: ID of the personality this ritual is associated with (optional)
+                mcp_server_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: Connectors (MCP servers) whose tools this ritual brings along. Replaces the existing links.
               required:
                 - name
                 - description
@@ -5045,6 +5321,282 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Another of the account's skills already uses the requested slug
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /ritual/import:
+    post:
+      summary: Import a skill from an Agent Skills bundle
+      description: >-
+        Creates a skill from an Agent Skills bundle (ADR 0x035 §7), or with `ritual_id` replaces an
+        existing skill's contents. Send a multipart form with either `file` (a zip with SKILL.md at its
+        root or inside one top-level folder, or a lone SKILL.md) or several `files` parts whose filenames
+        are paths inside the skill directory. Frontmatter is parsed leniently: a missing or invalid
+        `name` is derived with a warning, unknown keys are kept in `metadata`, and only a missing
+        `description` or body is an error. A slug the account already uses gets a numeric suffix. The
+        bundle's other files are stored under `skills/<slug>/` and replace the skill's previous files;
+        a re-import that sends only a SKILL.md keeps them (`files_kept`). Two paths that differ only in
+        case are refused.
+      tags: [Ritual Management]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: A skill zip or a SKILL.md
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: The skill directory's files, named by their relative paths
+                personality_id:
+                  type: string
+                  format: uuid
+                  description: Bind the imported skill to this personality
+                ritual_id:
+                  type: string
+                  format: uuid
+                  description: Re-import into this skill, which keeps its slug, personality and connectors
+      responses:
+        '200':
+          description: Existing skill re-imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RitualImportResult'
+        '201':
+          description: Skill imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RitualImportResult'
+        '400':
+          description: Not a bundle, no SKILL.md, or SKILL.md without a description or body; `message` says which
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No skill with `ritual_id`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Another skill took every slug tried, in concurrent imports of the same skill
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Bundle larger than 30 MB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /ritual/{id}/export:
+    get:
+      summary: Export a skill as an Agent Skills bundle
+      description: >-
+        A zip holding `<slug>/SKILL.md`, rendered from the skill's fields: `name` (the slug),
+        `description`, `license`, `compatibility`, `allowed-tools`, and `metadata` with
+        `display_name`, `whatiff-hotkeys`, `whatiff-connectors` (connector names) and the invocation
+        flags. Imports unchanged into any Agent Skills harness.
+      tags: [Ritual Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Ritual ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The bundle
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: attachment; filename="<slug>.zip"
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Ritual not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The skill's files total more than the 30 MB bundle limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /ritual/{id}/files:
+    get:
+      summary: List a skill's bundle files
+      description: The skill's reference documents, scripts and assets (ADR 0x035 §3), filed in the gallery under `skills/<slug>/` and read-only to agents.
+      tags: [Ritual Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The bundle's files, by folder then name
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SkillFile'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Ritual not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      summary: Add or replace a skill bundle file
+      description: |
+        Stores one file in the skill's bundle at `path`, replacing a file already there. Any content
+        type; at most 10 MB a file, 200 files and 30 MB a skill. `SKILL.md` at the bundle root is
+        rendered from the skill and cannot be uploaded.
+      tags: [Ritual Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                path:
+                  type: string
+                  description: The file's place in the bundle, e.g. `references/FORMS.md`. Defaults to `references/<filename>`.
+      responses:
+        '201':
+          description: The stored file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillFile'
+        '400':
+          description: Invalid path, the reserved SKILL.md, or over the bundle's file or byte limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Ritual not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The file is larger than 10 MB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '501':
+          description: This deployment has no file storage for skill files
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /ritual/{id}/files/{fileId}:
+    delete:
+      summary: Delete a skill bundle file
+      tags: [Ritual Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Ritual or file not found
           content:
             application/json:
               schema:
@@ -5119,6 +5671,12 @@ paths:
                   type: string
                   format: uuid
                   description: ID of the personality this ritual is associated with (optional, set to null to make it global)
+                mcp_server_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: Connectors (MCP servers) whose tools this ritual brings along. Replaces the existing links when present; omit to leave them unchanged.
               required:
                 - name
                 - description
@@ -5144,6 +5702,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Another of the account's skills already uses the requested slug
           content:
             application/json:
               schema:
@@ -7204,6 +7768,83 @@ paths:
                           $ref: '#/components/schemas/Ritual'
         '400':
           description: Invalid chat ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chat/{chatId}/loaded-skills:
+    get:
+      summary: List the skills the agent loaded in a thread
+      description: >-
+        The skills the agent loaded with `load_skill` (ADR 0x035), oldest load first. Skills a mode
+        or a message preloads are active for their turn only and are not listed. Loaded skills stay
+        until unloaded here, by the agent, or by a checkpoint that found them unused.
+      tags: [Chat Management]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Loaded skills
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LoadedSkill'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chat/{chatId}/loaded-skills/{ritualId}:
+    delete:
+      summary: Unload a skill the agent loaded in a thread
+      description: Forgets the skill as loaded; its instructions leave the thread's context from the next turn.
+      tags: [Chat Management]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: ritualId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Unloaded (or was not loaded)
+        '400':
+          description: Invalid skill ID
           content:
             application/json:
               schema:
@@ -10780,7 +11421,37 @@ components:
             filter. `generated` = attached to an assistant message or produced by a
             generation pipeline (expression grid, portrait); `imported` = uploaded by
             the user (gallery import, personality upload, user chat message).
+            Agent-authored files are `generated`.
             Omitted when the server could not determine it.
+        origin:
+          type: string
+          enum: [user, agent, skill]
+          description: >-
+            Who wrote the file (ADR 0x034, 0x035). `user` = uploads, imports and reply outputs;
+            `agent` = written by an agent's file tools; `skill` = a skill bundle's file under
+            `skills/<slug>/`, read-only and managed in the skill editor. Only `agent` files can be
+            changed by an agent, and only by the personality (or, with none, the thread) that created
+            them. More values may be added, so treat an unknown one like `user`.
+        skill_id:
+          type: string
+          format: uuid
+          description: For origin "skill", the skill whose bundle the file belongs to.
+        size_bytes:
+          type: integer
+          format: int64
+          description: Bytes in the stored object, for origin "skill" (counted against the bundle's 30 MB limit).
+        created_by_personality_id:
+          type: string
+          format: uuid
+          description: Personality whose agent created the file (agent-authored files only).
+        created_by_chat_id:
+          type: string
+          format: uuid
+          description: Thread the agent created the file in, when it had no personality (agent-authored files only).
+        updated_at:
+          type: string
+          format: date-time
+          description: When an agent last changed the file's content. Omitted for files never changed.
       required:
         - id
         - user_id
@@ -11311,6 +11982,31 @@ components:
         - active
 
     # Ritual Management Schemas
+    SkillFile:
+      type: object
+      description: A file of a skill's bundle (ADR 0x035 §3).
+      required: [id, path, file_type, folder, name, size_bytes, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        path:
+          type: string
+          description: The file's place in the bundle, e.g. `scripts/fill.py`.
+        file_type:
+          type: string
+        folder:
+          type: string
+          description: Its gallery folder, `skills/<slug>/<subdir>`, the path agents read it at.
+        name:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+
     Ritual:
       type: object
       properties:
@@ -11339,6 +12035,43 @@ components:
             type: string
             format: uuid
           description: MCP servers to enable when this ritual is triggered (omit on update to leave links unchanged).
+        slug:
+          type: string
+          maxLength: 64
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: >-
+            The skill's name in the Agent Skills sense (ADR 0x035): 1-64 chars of [a-z0-9-], unique
+            among the account's skills. Omit on create to derive it from `name`; omit on update to keep
+            the stored slug. Taken slugs answer 409.
+        license:
+          type: string
+          maxLength: 500
+          description: SKILL.md `license`. Omit on update to leave unchanged.
+        compatibility:
+          type: string
+          maxLength: 500
+          description: >-
+            SKILL.md `compatibility`, what the skill needs from its environment. Omit on update to leave unchanged.
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: SKILL.md `metadata`, string to string. Keys starting with `whatiff-` are reserved. Omit on update to leave unchanged.
+        allowed_tools:
+          type: array
+          items:
+            type: string
+          description: >-
+            SKILL.md `allowed-tools`: tools loaded with the skill when it is activated. Never a permission
+            grant; the thread's disabled tools still win. Omit on update to leave unchanged.
+        disable_model_invocation:
+          type: boolean
+          default: false
+          description: When true the skill is left out of the model's skills index; only the user, a mode or a job can activate it.
+        user_invocable:
+          type: boolean
+          default: true
+          description: When false the skill is hidden from the /skill picker and hotkeys (and from `available-rituals`); the model may still load it.
         created_at:
           type: string
           format: date-time
@@ -11364,6 +12097,94 @@ components:
         updated_at: "2024-01-01T00:00:00Z"
 
     # Memory Management Schemas
+    LoadedSkill:
+      type: object
+      description: A skill the agent loaded in a thread with load_skill (ADR 0x035).
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+      required: [id, slug, name, description]
+
+    RitualImportResult:
+      type: object
+      properties:
+        ritual:
+          $ref: '#/components/schemas/Ritual'
+        warnings:
+          type: array
+          items:
+            type: string
+          description: Lenient-parse repairs and import-time substitutions to show the user
+        files_imported:
+          type: integer
+          description: Bundle files stored under skills/<slug>/
+        files_kept:
+          type: boolean
+          description: True when a re-import sent only a SKILL.md and the skill's files were left as they were
+        connectors_linked:
+          type: array
+          items:
+            type: string
+          description: Exporter connector names matched to this account's connectors
+        connectors_missing:
+          type: array
+          items:
+            type: string
+          description: Exporter connector names with no match here
+      required: [ritual, warnings, files_imported, files_kept, connectors_linked, connectors_missing]
+
+    AgentEntity:
+      type: object
+      description: One entity wiki page (ADR 0x034).
+      required: [id, user_id, key, title, body, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        key:
+          type: string
+          description: Normalized lookup key (lowercase, single spaces).
+        title:
+          type: string
+          description: The name as first written.
+        body:
+          type: string
+          maxLength: 5000
+        pinned_personality_id:
+          type: string
+          format: uuid
+          description: Set when only this personality sees the entity; absent for a global entity.
+        pinned_personality_name:
+          type: string
+        last_personality_id:
+          type: string
+          format: uuid
+          description: Personality whose agent last wrote it; absent when the user last edited it.
+        last_chat_id:
+          type: string
+          format: uuid
+          description: Conversation that last wrote it; absent when the user last edited it.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        archived_at:
+          type: string
+          format: date-time
+          description: When an agent deleted (archived) the entity; absent for a live entity.
+
     Memory:
       type: object
       properties:

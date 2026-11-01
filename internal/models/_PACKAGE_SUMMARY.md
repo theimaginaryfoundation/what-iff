@@ -12,6 +12,7 @@
 - **Gallery folder paths (`folder.go`):** `NormalizeFolder` is the one definition of a valid folder path, used by the gallery API and the agent tools (trimmed, lower-cased, `/` or `\` separate, no `.` or `..`, at most 8 levels and 255 characters), plus `FolderIsWithin` and `FolderCount`.
   `GalleryKind` (`images`, `files`, `all`) narrows the gallery and its folder counts; `ParseGalleryKind` reads an empty value as `images`, so clients that do not ask keep the image-only list.
   `ExpressionFolder` gives the folder a personality's generated expression images are filed under (`expressions/<name>`, always one level, always valid), so they do not crowd the top level of the gallery.
+  `ReservedSkillsFolder` (`skills`) holds skill bundles (ADR 0x035 §3); `IsReservedFolder` matches it and anything beneath, ignoring case, and `ErrReservedFolder` is what the datastore and tools return for any other write there.
 - Keeps handler payloads decoupled from Ent generated types (handlers map to/from Ent in datastore or thin adapters).
 
 ## Key types and entry points

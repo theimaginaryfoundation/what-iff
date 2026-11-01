@@ -109,6 +109,7 @@ func TestMoveFilesRefusesBadArgumentsWithoutTouchingTheStore(t *testing.T) {
 		"folder too deep": fmt.Sprintf(`{"ids":[%q],"folder":"%s"}`, uuid.New(), strings.Repeat("a/", 9)),
 		"neither":         fmt.Sprintf(`{"ids":[%q]}`, uuid.New()),
 		"rename many":     fmt.Sprintf(`{"ids":[%q,%q],"name":"x"}`, uuid.New(), uuid.New()),
+		"skills folder":   fmt.Sprintf(`{"ids":[%q],"folder":"Skills/pdf-forms"}`, uuid.New()),
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := &fakeMoveStore{}

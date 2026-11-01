@@ -10,6 +10,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
+	entchatskillstate "github.com/theimaginaryfoundation/what-iff/ent/chatskillstate"
 	entmemory "github.com/theimaginaryfoundation/what-iff/ent/memory"
 	entmodel "github.com/theimaginaryfoundation/what-iff/ent/model"
 	entmood "github.com/theimaginaryfoundation/what-iff/ent/mood"
@@ -1117,6 +1118,15 @@ func (d *Datastore) DeleteChat(ctx context.Context, userID, id uuid.UUID) error 
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}
 		return ErrChatNotFound
+	}
+
+	// Skill states carry the chat ID without a foreign key, so nothing cascades to them.
+	if _, err := tx.ChatSkillState.Delete().Where(entchatskillstate.ChatID(id)).Exec(ctx); err != nil {
+		d.logger.Error(i18n.T1("delete.failed", "Entity", "chat skill state"), zap.Error(err))
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return err
 	}
 
 	// Delete chat (this will cascade delete messages due to FK constraint)
