@@ -10,54 +10,68 @@ import (
 // SanitizeText removes the characters that hide text from people while a model still reads it:
 // Unicode tag characters, zero-width characters, bidirectional controls, the byte-order mark and
 // Hangul fillers, plus C0 controls other than tab, newline and carriage return (ADR 0x035 §10).
-// A variation selector is kept only when it directly follows a visible character, as in the
-// emoji ❤️; a second one in a row, or one with nothing to modify, is removed, since runs of them
-// can encode arbitrary hidden bytes. Everything else is kept as typed.
+// Variation selectors go too, except the text and emoji presentation selectors (U+FE0E, U+FE0F)
+// directly after a character that has both presentations, as in ❤️. Any other selector, after
+// any character, can carry a hidden byte; dropping one changes only which glyph is drawn.
+// Everything else is kept as typed.
 func SanitizeText(s string) string {
 	if !needsSanitizing(s) {
 		return s
 	}
 	var b strings.Builder
 	b.Grow(len(s))
-	prevBase := false
+	var prev rune
 	for _, r := range s {
-		if isVariationSelector(r) {
-			if prevBase {
-				b.WriteRune(r)
-			}
-			prevBase = false
-			continue
-		}
-		if isSmuggledRune(r) {
+		if dropRune(prev, r) {
 			continue
 		}
 		b.WriteRune(r)
-		prevBase = !unicode.IsSpace(r) && !unicode.IsControl(r)
+		prev = r
 	}
 	return b.String()
 }
 
 func needsSanitizing(s string) bool {
-	prevSelector := true // a selector at the start has nothing to modify
+	var prev rune
 	for _, r := range s {
-		if isVariationSelector(r) {
-			if prevSelector {
-				return true
-			}
-			prevSelector = true
-			continue
-		}
-		if isSmuggledRune(r) {
+		if dropRune(prev, r) {
 			return true
 		}
-		prevSelector = unicode.IsSpace(r)
+		prev = r
 	}
 	return false
+}
+
+// dropRune reports whether SanitizeText removes r, given prev, the last rune it kept (0 at the
+// start).
+func dropRune(prev, r rune) bool {
+	if isVariationSelector(r) {
+		return (r != 0xFE0E && r != 0xFE0F) || !hasEmojiPresentation(prev)
+	}
+	return isSmuggledRune(r)
 }
 
 // isVariationSelector reports whether r is one of the 256 variation selectors.
 func isVariationSelector(r rune) bool {
 	return (r >= 0xFE00 && r <= 0xFE0F) || (r >= 0xE0100 && r <= 0xE01EF)
+}
+
+// hasEmojiPresentation reports whether r is in a block where characters take a text or emoji
+// presentation selector: keycap bases, © and ®, the symbol and dingbat blocks, a few CJK
+// symbols, and the emoji planes. Broader than Unicode's list, which is fine: the point is that a
+// selector rides on a visible symbol, one at most, rather than after every letter.
+func hasEmojiPresentation(r rune) bool {
+	switch {
+	case r == '#', r == '*', r >= '0' && r <= '9', r == 0xA9, r == 0xAE:
+		return true
+	case r >= 0x2000 && r <= 0x2BFF:
+		return true // punctuation, letterlike, arrows, technical, enclosed, geometric, misc symbols, dingbats
+	case r == 0x3030, r == 0x303D, r == 0x3297, r == 0x3299:
+		return true
+	case r >= 0x1F000 && r <= 0x1FAFF:
+		return true
+	}
+	return false
 }
 
 // isSmuggledRune reports whether r is stripped by SanitizeText.

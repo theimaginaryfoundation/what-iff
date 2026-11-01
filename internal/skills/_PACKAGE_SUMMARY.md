@@ -9,7 +9,8 @@ It knows nothing about the database or HTTP; `internal/datastore`, `internal/dat
 
 - **Slugs** (`slug.go`): `Slugify` derives a spec-conforming name (`[a-z0-9-]`, 1–64, no leading, trailing or double hyphens) from a display name; `ValidateSlug` checks one; `UniqueSlug` picks `base`, `base-2`, … against a caller-supplied `taken` predicate.
 - **Sanitizing** (`sanitize.go`): `SanitizeText` strips Unicode tag characters, zero-width characters, bidi controls, the BOM, Hangul fillers and C0 controls (tab, newline and carriage return stay); `RejectTags` refuses XML-looking tags in a name or description.
-  A variation selector survives only directly after a visible character (the emoji ❤️); runs of them, which can encode hidden bytes, are removed.
+  Only the text and emoji presentation selectors (U+FE0E, U+FE0F) survive, and only directly after a symbol that has both presentations (the emoji ❤️).
+  Every other variation selector is removed, since one after each character can encode a hidden byte.
 - **Bounds and normalization** (`validate.go`): `Normalize` trims and sanitizes a `models.Ritual` in place, optionally derives its slug, and enforces the limits (`MaxDescriptionLen` 1,024, `MaxBodyBytes` 64 KB, license and compatibility 500, allowed tools and metadata counts and lengths).
   Nil pointer fields are left nil so the caller can mean "unchanged".
   `EstimateTokens` is the rough four-bytes-a-token count the editor and index budget use.
