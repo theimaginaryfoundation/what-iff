@@ -111,3 +111,24 @@ func TestListRitualsInChatScopeAndMessageRitualIDs(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, page.TotalCount)
 }
+
+// Skill states have no foreign key to the chat, so DeleteChat removes them itself.
+func TestDeleteChat_RemovesSkillStates(t *testing.T) {
+	ds, cleanup := newTestDatastore(t, createGeneratedTestSchema)
+	defer cleanup()
+	ctx := context.Background()
+	userID := createMoodTestUser(t, ds)
+	chat, err := ds.dbClient.Chat.Create().SetName("c").SetOwnerID(userID).Save(ctx)
+	require.NoError(t, err)
+	keep, err := ds.dbClient.Chat.Create().SetName("k").SetOwnerID(userID).Save(ctx)
+	require.NoError(t, err)
+	a, err := ds.CreateRitual(ctx, userID, models.Ritual{Name: "A", Description: "d", Content: "c"})
+	require.NoError(t, err)
+	_, err = ds.AddChatLoadedSkills(ctx, userID, chat.ID, []uuid.UUID{a.ID})
+	require.NoError(t, err)
+	_, err = ds.AddChatLoadedSkills(ctx, userID, keep.ID, []uuid.UUID{a.ID})
+	require.NoError(t, err)
+
+	require.NoError(t, ds.DeleteChat(ctx, userID, chat.ID))
+	require.Equal(t, 1, ds.dbClient.ChatSkillState.Query().CountX(ctx), "only the other chat's row is left")
+}
