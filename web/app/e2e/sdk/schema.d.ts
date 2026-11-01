@@ -8456,6 +8456,8 @@ export interface paths {
                          * @description ID of the personality this ritual is associated with (optional)
                          */
                         personality_id?: string;
+                        /** @description Connectors (MCP servers) whose tools this ritual brings along. Replaces the existing links. */
+                        mcp_server_ids?: string[];
                     };
                 };
             };
@@ -8577,6 +8579,8 @@ export interface paths {
                          * @description ID of the personality this ritual is associated with (optional, set to null to make it global)
                          */
                         personality_id?: string;
+                        /** @description Connectors (MCP servers) whose tools this ritual brings along. Replaces the existing links when present; omit to leave them unchanged. */
+                        mcp_server_ids?: string[];
                     };
                 };
             };
