@@ -100,7 +100,7 @@ func columnExists(ctx context.Context, db *sql.DB, table, column string) (bool, 
 	case "sqlite3", "sqlite":
 		query = fmt.Sprintf(`SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = '%s'`, table, column)
 	default:
-		query = fmt.Sprintf(`SELECT COUNT(*) FROM information_schema.columns WHERE table_name = '%s' AND column_name = '%s'`, table, column)
+		query = fmt.Sprintf(`SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '%s' AND column_name = '%s'`, table, column)
 	}
 	var count int
 	if err := db.QueryRowContext(ctx, query).Scan(&count); err != nil {
