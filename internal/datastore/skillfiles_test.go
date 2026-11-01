@@ -174,6 +174,13 @@ func TestSkillFiles_LimitsUniquePathsAndAtomicReplace(t *testing.T) {
 	require.Len(t, files, 1)
 	require.Equal(t, "a2", files[0].S3Key, "a refused replace leaves the bundle as it was")
 
+	// Paths that differ only in case are one path.
+	_, err = ds.ReplaceSkillFiles(ctx, userID, skill.ID, []SkillFileRecord{
+		{Folder: "skills/big/scripts", Name: "Run.py", Object: obj("r0", 3)},
+		{Folder: "skills/big/scripts", Name: "run.py", Object: obj("r0b", 3)},
+	})
+	require.ErrorIs(t, err, skills.ErrInvalid)
+
 	removed, err := ds.ReplaceSkillFiles(ctx, userID, skill.ID, []SkillFileRecord{
 		{Folder: "skills/big/scripts", Name: "run.py", Object: obj("r1", 3)},
 	})

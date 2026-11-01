@@ -59,11 +59,13 @@ func TestReadBundle_RootAndEnclosingFolder(t *testing.T) {
 
 func TestReadBundle_Errors(t *testing.T) {
 	cases := map[string]map[string]string{
-		"no SKILL.md": {"readme.md": "x"},
-		"two skills":  {"a/SKILL.md": "x", "b/SKILL.md": "y"},
-		"traversal":   {"SKILL.md": "x", "../etc/passwd": "y"},
-		"absolute":    {"SKILL.md": "x", "/etc/passwd": "y"},
-		"nested only": {"a/b/SKILL.md": "x"},
+		"no SKILL.md":  {"readme.md": "x"},
+		"two skills":   {"a/SKILL.md": "x", "b/SKILL.md": "y"},
+		"traversal":    {"SKILL.md": "x", "../etc/passwd": "y"},
+		"absolute":     {"SKILL.md": "x", "/etc/passwd": "y"},
+		"nested only":  {"a/b/SKILL.md": "x"},
+		"case twins":   {"SKILL.md": "x", "scripts/Run.py": "a", "scripts/run.py": "b"},
+		"two SKILL.md": {"SKILL.md": "x", "skill.md": "y"},
 	}
 	for name, entries := range cases {
 		data := zipOf(t, entries)
@@ -71,6 +73,9 @@ func TestReadBundle_Errors(t *testing.T) {
 		require.ErrorIs(t, err, ErrInvalid, name)
 	}
 	_, err := ReadBundle(bytes.NewReader([]byte("not a zip")), 9)
+	require.ErrorIs(t, err, ErrInvalid)
+
+	_, err = BundleFromFiles([]File{{Path: "SKILL.md"}, {Path: "Scripts/run.py"}, {Path: "scripts/RUN.py"}})
 	require.ErrorIs(t, err, ErrInvalid)
 }
 

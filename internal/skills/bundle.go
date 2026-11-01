@@ -94,6 +94,9 @@ func ReadBundle(r io.ReaderAt, size int64) (*Bundle, error) {
 			return nil, fmt.Errorf("%w: %s is larger than %d MB", ErrInvalid, rel, MaxBundleFileBytes>>20)
 		}
 		if strings.EqualFold(rel, SkillFileName) {
+			if b.SkillMD != nil {
+				return nil, fmt.Errorf("%w: bundle has more than one %s", ErrInvalid, SkillFileName)
+			}
 			b.SkillMD = data
 			continue
 		}
@@ -138,6 +141,9 @@ func BundleFromFiles(files []File) (*Bundle, error) {
 			return nil, fmt.Errorf("%w: bundle is larger than %d MB", ErrInvalid, MaxBundleBytes>>20)
 		}
 		if strings.EqualFold(rel, SkillFileName) {
+			if b.SkillMD != nil {
+				return nil, fmt.Errorf("%w: bundle has more than one %s", ErrInvalid, SkillFileName)
+			}
 			b.SkillMD = f.Data
 			continue
 		}
@@ -152,6 +158,16 @@ func finishBundle(b *Bundle) (*Bundle, error) {
 	}
 	if len(b.Files) > MaxBundleFiles {
 		return nil, fmt.Errorf("%w: bundle has more than %d files", ErrInvalid, MaxBundleFiles)
+	}
+	// Skill files are matched without regard to case, so two paths that differ only in case would
+	// be one file in the gallery.
+	seen := make(map[string]string, len(b.Files))
+	for _, f := range b.Files {
+		key := strings.ToLower(f.Path)
+		if prev, ok := seen[key]; ok {
+			return nil, fmt.Errorf("%w: %s and %s differ only in case; keep one", ErrInvalid, prev, f.Path)
+		}
+		seen[key] = f.Path
 	}
 	return b, nil
 }

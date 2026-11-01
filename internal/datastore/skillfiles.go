@@ -333,6 +333,16 @@ func (d *Datastore) ReplaceSkillFiles(ctx context.Context, userID, ritualID uuid
 		if err := checkSkillBundleLimits(len(files), total); err != nil {
 			return nil, err
 		}
+		// Paths are matched without regard to case (PutSkillFile), but the unique index is
+		// case-sensitive, so twins would both be created and then break every later write there.
+		seen := make(map[string]struct{}, len(files))
+		for _, f := range files {
+			key := strings.ToLower(f.Folder + "/" + f.Name)
+			if _, dup := seen[key]; dup {
+				return nil, errSkillFileExists(f.Folder, f.Name)
+			}
+			seen[key] = struct{}{}
+		}
 		old, err := tx.FileAttachment.Query().
 			Where(entfileattachment.OriginEQ(entfileattachment.OriginSkill), entfileattachment.SkillID(ritualID)).
 			WithOwner().
