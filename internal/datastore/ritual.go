@@ -147,7 +147,7 @@ func (d *Datastore) CreateRitual(ctx context.Context, userID uuid.UUID, ritual m
 
 	entRitual, err := create.Save(ctx)
 	if err != nil {
-		if ent.IsConstraintError(err) {
+		if isRitualSlugConflict(err) {
 			if rerr := tx.Rollback(); rerr != nil {
 				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 			}
@@ -557,7 +557,7 @@ func (d *Datastore) UpdateRitual(ctx context.Context, userID uuid.UUID, ritual m
 
 	entRitual, err := update.Save(ctx)
 	if err != nil {
-		if ent.IsConstraintError(err) {
+		if isRitualSlugConflict(err) {
 			if rerr := tx.Rollback(); rerr != nil {
 				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 			}
@@ -834,4 +834,18 @@ func (d *Datastore) GetRitualBySlug(ctx context.Context, userID uuid.UUID, slug 
 		return nil, err
 	}
 	return toRitualModel(entRitual), nil
+}
+
+// ritualSlugIndex is the DB name of the per-owner slug index. Matching it in the driver error
+// tells a slug race apart from any other constraint failure (a connector or personality foreign
+// key), which must not be reported as "name taken". Postgres names the index; SQLite names the
+// columns. If the index is renamed this must follow.
+const ritualSlugIndex = "ritual_slug_user_rituals"
+
+func isRitualSlugConflict(err error) bool {
+	if !ent.IsConstraintError(err) {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, ritualSlugIndex) || strings.Contains(msg, "rituals.slug")
 }

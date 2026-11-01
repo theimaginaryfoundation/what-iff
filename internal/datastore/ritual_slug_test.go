@@ -129,3 +129,22 @@ func TestGetAvailableRituals_HidesNonUserInvocableSkills(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, bySlug.TotalCount)
 }
+
+// Only the slug index maps to ErrRitualSlugTaken; a foreign key failure is reported as itself
+// rather than as "name taken", which the import handler would retry and then 409.
+func TestCreateRitual_ConstraintErrorsOtherThanSlug(t *testing.T) {
+	ds, cleanup := newRitualSlugTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := createMoodTestUser(t, ds)
+
+	_, err := ds.CreateRitual(ctx, userID, models.Ritual{Name: "Orphan", Description: "d", Content: "c", PersonalityID: uuid.New()})
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrRitualSlugTaken)
+
+	// The index itself, past the up-front check (as in a race), is recognized.
+	_, err = ds.dbClient.Ritual.Create().SetName("A").SetSlug("dup").SetDescription("d").SetContent("c").SetHotkeys("").SetOwnerID(userID).Save(ctx)
+	require.NoError(t, err)
+	_, err = ds.dbClient.Ritual.Create().SetName("B").SetSlug("dup").SetDescription("d").SetContent("c").SetHotkeys("").SetOwnerID(userID).Save(ctx)
+	require.True(t, isRitualSlugConflict(err), "%v", err)
+}
