@@ -54,6 +54,7 @@ func (Ritual) Fields() []ent.Field {
 		field.String("slug").
 			Default("").
 			MaxLen(64).
+			SchemaType(map[string]string{dialect.Postgres: "text"}). // see the slug index
 			Comment("The skill's name in the Agent Skills sense: 1-64 chars of [a-z0-9-], unique per owner. Empty only on rows created before the column existed, until the startup backfill derives one."),
 		field.String("license").
 			Default("").
@@ -107,10 +108,13 @@ func (Ritual) Edges() []ent.Edge {
 func (Ritual) Indexes() []ent.Index {
 	return []ent.Index{
 		// One slug per owner. Partial so legacy rows awaiting the slug backfill can share "".
+		// The predicate is written the way Postgres stores it, so auto-migrate sees no change and
+		// does not rebuild the index every boot; on a text column (not varchar) that form has no
+		// casts, so SQLite accepts it too.
 		index.Fields("slug").
 			Edges("owner").
 			Unique().
-			Annotations(entsql.IndexWhere("slug <> ''")),
+			Annotations(entsql.IndexWhere("length(slug) > 0")),
 	}
 }
 
