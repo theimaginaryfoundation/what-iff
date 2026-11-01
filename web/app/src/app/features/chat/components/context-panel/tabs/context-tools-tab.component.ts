@@ -8,6 +8,8 @@ import { MCPServer } from '../../../../../core/models/mcp-server.model';
 import { ToolCall } from '../../../../../core/models/toolcall.model';
 import { MCPServerService } from '../../../../../core/services/mcp-server.service';
 import { ToolMeta, ToolService } from '../../../../../core/services/tool.service';
+import { RitualService } from '../../../../../core/services/ritual.service';
+import { LoadedSkill } from '../../../../../core/models/ritual.model';
 import { ChatService } from '../../../../../core/services/chat.service';
 import { apiErrorMessage } from '../../../../../core/utils/api-error.helpers';
 import { ContextPanelService } from '../../../services/context-panel.service';
@@ -86,6 +88,35 @@ type ToolContextTab = 'available' | 'history';
           </ul>
         }
       }
+
+      <details class="mcp-section" open>
+        <summary>
+          Loaded skills
+          <span class="summary-hint" (click)="$event.preventDefault()">
+            <ui-help-hint label="What are loaded skills?" heading="Loaded skills" align="end">
+              Skills the personality loaded itself for this thread. Their instructions stay in context until unloaded here,
+              by the personality, or when a checkpoint finds them unused. Skills called with / or set on a mode apply to
+              their turn and are not listed.
+            </ui-help-hint>
+          </span>
+        </summary>
+        @if (skillsLoading()) {
+          <p class="state">Loading skills…</p>
+        } @else if (loadedSkills().length === 0) {
+          <p class="state">No skills loaded in this thread.</p>
+        } @else {
+          <div class="mcp-grid">
+            <ul>
+              @for (skill of loadedSkills(); track skill.id) {
+                <li>
+                  <span class="skill-name" [uiTooltip]="skill.description">{{ skill.name }} <code>{{ skill.slug }}</code></span>
+                  <button type="button" uiTooltip="Drop this skill's instructions from the thread" (click)="unloadSkill(skill)">Unload</button>
+                </li>
+              }
+            </ul>
+          </div>
+        }
+      </details>
 
       <details class="mcp-section">
         <summary>
@@ -286,6 +317,12 @@ type ToolContextTab = 'available' | 'history';
         overflow-wrap: anywhere;
       }
 
+      .skill-name code {
+        color: var(--color-text-muted);
+        font-size: 0.7rem;
+        margin-left: 0.25rem;
+      }
+
       .mcp-grid button {
         border: 1px solid var(--color-border-base);
         border-radius: 0.45rem;
@@ -323,6 +360,7 @@ export class ContextToolsTabComponent implements OnChanges {
 
   private readonly toolService = inject(ToolService);
   private readonly mcpService = inject(MCPServerService);
+  private readonly ritualService = inject(RitualService);
   private readonly chatService = inject(ChatService);
   private readonly contextPanel = inject(ContextPanelService);
   private readonly router = inject(Router);
@@ -334,6 +372,8 @@ export class ContextToolsTabComponent implements OnChanges {
   readonly tools = signal<ToolMeta[]>([]);
   readonly connected = signal<MCPServer[]>([]);
   readonly available = signal<MCPServer[]>([]);
+  readonly skillsLoading = signal(false);
+  readonly loadedSkills = signal<LoadedSkill[]>([]);
 
   ngOnChanges(changes: SimpleChanges): void {
     const chatChange = changes['chat'];
@@ -393,6 +433,17 @@ export class ContextToolsTabComponent implements OnChanges {
     }
   }
 
+  async unloadSkill(skill: LoadedSkill): Promise<void> {
+    const chatId = this.chat()?.id;
+    if (!chatId) return;
+    try {
+      await firstValueFrom(this.ritualService.unloadSkill(chatId, skill.id));
+      await this.loadSkills(chatId);
+    } catch (error) {
+      this.error.set(apiErrorMessage(error, 'Failed to unload skill'));
+    }
+  }
+
   openIntegrations(): void {
     void this.router.navigate(['/integrations']);
   }
@@ -409,7 +460,22 @@ export class ContextToolsTabComponent implements OnChanges {
   private async loadForChat(): Promise<void> {
     const chatId = this.chat()?.id;
     this.error.set(null);
-    await Promise.all([this.loadTools(), this.loadMcp(chatId)]);
+    await Promise.all([this.loadTools(), this.loadMcp(chatId), this.loadSkills(chatId)]);
+  }
+
+  private async loadSkills(chatId: string | undefined): Promise<void> {
+    if (!chatId) {
+      this.loadedSkills.set([]);
+      return;
+    }
+    this.skillsLoading.set(true);
+    try {
+      this.loadedSkills.set(await firstValueFrom(this.ritualService.listLoadedSkills(chatId)));
+    } catch (error) {
+      this.error.set(apiErrorMessage(error, 'Failed to load the thread\'s skills'));
+    } finally {
+      this.skillsLoading.set(false);
+    }
   }
 
   private async loadTools(): Promise<void> {

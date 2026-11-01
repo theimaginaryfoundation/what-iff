@@ -117,6 +117,8 @@ type Agent struct {
 	recallTool     *tools.RecallTool
 	listTool       *tools.ListTool
 	moveFilesTool  *tools.MoveFilesTool
+	entityTool     *tools.EntityTool
+	agentFileTool  *tools.AgentFileTool
 	// archiveMemoryTool is archive_memory (ADR 0x036).
 	archiveMemoryTool *tools.ArchiveMemoryTool
 	chunkPipeline     *filechunker.FileChunkPipeline
@@ -292,6 +294,8 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		scratchpadTool:               tools.NewScratchpadTool(ds, logger),
 		listTool:                     tools.NewListTool(ds, logger),
 		moveFilesTool:                tools.NewMoveFilesTool(ds, logger),
+		entityTool:                   tools.NewEntityTool(ds, logger),
+		agentFileTool:                tools.NewAgentFileTool(ds, fileStore, logger),
 		archiveMemoryTool:            tools.NewArchiveMemoryTool(ds, logger),
 		mcpClient:                    mcpclient.New(nil, logger),
 		chunkPipeline:                newChunkPipelineForMode(cfg.LLMBackend != "vendor", &oaiClient, ds, logger),
@@ -640,6 +644,8 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		LiveMemories:               chatCtx.liveMemories,
 		ActiveMood:                 chatCtx.activeMood,
 		ActiveMoodRituals:          chatCtx.activeMoodRituals,
+		ActiveSkills:               chatCtx.activeSkills(),
+		SkillsIndex:                a.skillsIndexDeveloperContext(chatCtx),
 		IsAutoMood:                 chatCtx.chat.IsAutoMood,
 		MoodToolsAvailable:         a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
 		Attachments:                chatMessage.Attachments,
@@ -928,6 +934,8 @@ type chatContext struct {
 	loadableTools map[string]struct{}
 	// loadedTools are the built-in tools loaded in this chat.
 	loadedTools map[string]struct{}
+	// skills are the turn's skills: scope, loaded set, active set (ADR 0x035; see prepareTurnSkills).
+	skills *turnSkills
 	// mcpSessions stores MCP session ids for this single conversation turn.
 	mcpSessions map[string]string
 }
@@ -1013,6 +1021,8 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 		moodRituals = nil
 	}
 	chatCtx.activeMoodRituals = moodRituals
+	// Skills in scope, loaded in the chat and active this turn (ADR 0x035); needs the mode's skills.
+	a.prepareTurnSkills(ctx, chatJob.UserID, chatCtx, chatMessage)
 	doneMood()
 
 	turnActionType := models.ActionTypeChatMessage
@@ -2393,11 +2403,11 @@ func appendMemoryMessages(messages []responses.ResponseInputItemUnionParam, memo
 	return messages
 }
 
-// prepareUserMessage prepares the user message, enriching it with rituals if applicable.
-// The message is prefixed with a [sys:…] timestamp derived from chatMessage.SentAt
-// (see agentMessageTimestampLayout). Falls back to time.Now() only when SentAt is
-// zero (e.g. ephemeral/job-constructed messages).
-func (a *Agent) prepareUserMessage(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage) (string, error) {
+// prepareUserMessage prepares the user message. The message is prefixed with a [sys:…] timestamp
+// derived from chatMessage.SentAt (see agentMessageTimestampLayout). Falls back to time.Now() only
+// when SentAt is zero (e.g. ephemeral/job-constructed messages). The message's skills are not
+// appended here: their instructions go into the skills segment (ADR 0x035, prepareTurnSkills).
+func (a *Agent) prepareUserMessage(ctx context.Context, _ uuid.UUID, chatMessage *models.ChatMessage) (string, error) {
 	tz, _ := middleware.GetClientTimezoneFromContext(ctx)
 	normalizedTZ := normalizeTimezoneName(tz)
 
@@ -2405,18 +2415,7 @@ func (a *Agent) prepareUserMessage(ctx context.Context, userID uuid.UUID, chatMe
 	if sentAt.IsZero() {
 		sentAt = time.Now()
 	}
-
-	body := chatMessage.Message
-	if len(chatMessage.Rituals) > 0 {
-		enrichedMessage, err := a.EnrichUserMessageWithRituals(ctx, userID, chatMessage)
-		if err != nil {
-			a.logger.Error("failed to enrich user message with rituals", zap.Error(err))
-		} else {
-			body = enrichedMessage
-		}
-	}
-
-	return formatUserMessageWithTime(sentAt, normalizedTZ, body), nil
+	return formatUserMessageWithTime(sentAt, normalizedTZ, chatMessage.Message), nil
 }
 
 var tzLocationCache sync.Map // map[string]*time.Location

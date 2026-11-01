@@ -170,11 +170,21 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 		chatMessage = nil
 	}
 
+	// Skills the agent loaded in the chat bring their connectors into scope too (ADR 0x035);
+	// loadedSkillIDs is nil for a sandboxed chat. load_skill is offered only when the index lists
+	// a skill, and unload_skill only when the agent has a skill loaded.
+	ritualIDs := append(mergedRitualIDsForTools(chatMessage, toolRitualMood(chatCtx)), chatCtx.loadedSkillIDs()...)
+	if !chatCtx.skillLoadOffered() {
+		disabledTools[agenttools.LoadSkillToolSpec.Name] = true
+	}
+	if !chatCtx.skillUnloadOffered() {
+		disabledTools[agenttools.UnloadSkillToolSpec.Name] = true
+	}
 	policy := turnToolPolicy{
 		toolsEnabled:  chatCtx.chat.ToolsEnabled,
 		disabledTools: disabledTools,
 		showMoodTools: a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
-		ritualIDs:     mergedRitualIDsForTools(chatMessage, toolRitualMood(chatCtx)),
+		ritualIDs:     ritualIDs,
 	}
 	if !policy.toolsEnabled {
 		return policy

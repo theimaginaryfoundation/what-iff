@@ -24,6 +24,10 @@ var sandboxedToolSurface = map[string]struct {
 	agenttools.MoveFilesToolSpec.Name:         {false, "sorts the owner's account-wide gallery images into folders"},
 	agenttools.CreateAgentJobToolSpec.Name:    {false, "schedules a job in a new ordinary chat and can attach the owner's skills and their MCP servers"},
 	agenttools.UpdateAgentJobToolSpec.Name:    {false, "changes the owner's jobs, which run outside the sandbox and can attach skills and MCP servers"},
+	agenttools.AgentFileReadToolSpec.Name:     {false, "reads the owner's account-wide files"},
+	agenttools.AgentFileWriteToolSpec.Name:    {false, "writes files into the owner's account-wide file area"},
+	agenttools.EntityGetToolSpec.Name:         {false, "reads the owner's entity wiki, shared by their conversations"},
+	agenttools.EntityWriteToolSpec.Name:       {false, "writes the owner's entity wiki, shared by their conversations"},
 	agenttools.CreateMemoryToolSpec.Name:      {true, "always writes a Chat-scoped memory in a sandbox"},
 	agenttools.ArchiveMemoryToolSpec.Name:     {false, "changes the owner's memory; a sandbox strangers talk in must not erase what the owner's agent knows"},
 	agenttools.ListToolSpec.Name:              {true, "jobs, skills and personalities are refused; conversations is just this one; only this conversation's own files"},
@@ -33,6 +37,8 @@ var sandboxedToolSurface = map[string]struct {
 	agenttools.GenerateImageToolSpec.Name:     {true, "default off; no account data read"},
 	agenttools.LoadToolsToolSpec.Name:         {true, "only connectors attached to this chat, and built-in tools the sandbox offers"},
 	agenttools.UnloadToolsToolSpec.Name:       {true, "only connectors attached to this chat"},
+	agenttools.LoadSkillToolSpec.Name:         {false, "skills are the owner's account data (their text and linked connectors); a sandbox sees none"},
+	agenttools.UnloadSkillToolSpec.Name:       {false, "nothing to unload where no skill can be loaded"},
 	agenttools.WebSearchFunctionToolSpec.Name: {true, "default off; no account data read (offered only when a backend is configured)"},
 	agenttools.FetchPageToolSpec.Name:         {true, "default off; no account data read (offered only when a backend is configured)"},
 	agenttools.RecallToolSpec.Name:            {true, "only this conversation's memories and summary"},
@@ -47,6 +53,8 @@ var sandboxedToolSurface = map[string]struct {
 var conditionalSandboxedTools = map[string]struct{}{
 	agenttools.WebSearchFunctionToolSpec.Name: {},
 	agenttools.FetchPageToolSpec.Name:         {},
+	agenttools.LoadSkillToolSpec.Name:         {}, // only when the chat has skills in scope
+	agenttools.UnloadSkillToolSpec.Name:       {},
 	discordPostToolName:                       {}, // only where the persona's bot has a connected channel
 	buzzPostToolName:                          {}, // only where the persona has a bound Buzz channel
 	slackPostToolName:                         {}, // only where the persona's Slack app has a bound channel

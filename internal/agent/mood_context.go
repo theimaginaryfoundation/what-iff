@@ -278,32 +278,27 @@ func formatMoodContextBlock(mood *models.Mood, rituals []*models.Ritual, opts mo
 		b.WriteString(snippet)
 	}
 	if ritualText != "" {
-		b.WriteString("\n\nAttached skills for this mode:\n")
+		b.WriteString("\n\nSkills preloaded by this mode (their instructions are in the active skills block): ")
 		b.WriteString(ritualText)
 	}
 	return b.String()
 }
 
-// formatMoodRitualsForContext renders mode-attached skills as a bullet list for the mode
-// context segment. User-message ritual enrichment uses FormatRituals instead.
+// formatMoodRitualsForContext names the mode's skills for the mode context segment. Their
+// instructions are injected once, in the skills segment (ADR 0x035), not here.
 func formatMoodRitualsForContext(rituals []*models.Ritual) string {
-	if len(rituals) == 0 {
-		return ""
-	}
-	var b strings.Builder
+	var names []string
 	for _, ritual := range rituals {
-		content := strings.TrimSpace(ritual.Content)
-		if content == "" {
+		if ritual == nil || strings.TrimSpace(ritual.Content) == "" {
 			continue
 		}
 		name := strings.TrimSpace(ritual.Name)
 		if name == "" {
-			b.WriteString(fmt.Sprintf("- %s\n", content))
-			continue
+			name = skillSlug(ritual)
 		}
-		b.WriteString(fmt.Sprintf("- %s: %s\n", name, content))
+		names = append(names, name)
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return strings.Join(names, ", ")
 }
 
 // appendMoodContextForChatTurn appends the formatted mode block after merged additional

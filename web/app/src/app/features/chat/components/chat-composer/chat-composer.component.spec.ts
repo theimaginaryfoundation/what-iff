@@ -1,4 +1,5 @@
 import type { MockedObject } from "vitest";
+import { RITUAL_SKILL_FIELD_DEFAULTS } from '../../../../core/models/ritual.model';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
@@ -50,7 +51,7 @@ describe('ChatComposerComponent', () => {
         ritualService = {
             getAvailableRituals: vi.fn().mockName("RitualService.getAvailableRituals"),
         } as unknown as RitualServiceMock;
-        ritualService.getAvailableRituals.mockReturnValue(of({ results: [{ id: 'r1', name: 'Alpha', description: '', content: '', hotkeys: '', personality_id: null, created_at: '', updated_at: '' }], total_count: 1, page: 1 }));
+        ritualService.getAvailableRituals.mockReturnValue(of({ results: [{ ...RITUAL_SKILL_FIELD_DEFAULTS, id: 'r1', name: 'Alpha', description: '', content: '', hotkeys: '', personality_id: null, created_at: '', updated_at: '' }], total_count: 1, page: 1 }));
 
         imageGallery = {
             listImages: vi.fn().mockName("ImageGalleryService.listImages"),

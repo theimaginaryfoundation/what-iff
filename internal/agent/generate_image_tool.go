@@ -88,6 +88,10 @@ func parseGenerateImageFolder(raw *string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid folder: %w", err)
 	}
+	if models.IsReservedFolder(folder) {
+		// Checked before the image is generated; the datastore refuses it too.
+		return "", models.ErrReservedFolder
+	}
 	return folder, nil
 }
 

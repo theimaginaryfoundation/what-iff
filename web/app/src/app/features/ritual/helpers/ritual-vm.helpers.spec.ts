@@ -1,4 +1,4 @@
-import { Ritual } from '../../../core/models/ritual.model';
+import { Ritual, RITUAL_SKILL_FIELD_DEFAULTS } from '../../../core/models/ritual.model';
 import { groupByAffinity, toRitualRowVm } from './ritual-vm.helpers';
 
 describe('ritual-vm.helpers', () => {
@@ -8,6 +8,7 @@ describe('ritual-vm.helpers', () => {
     ]);
 
     const ritual = (overrides: Partial<Ritual>): Ritual => ({
+        ...RITUAL_SKILL_FIELD_DEFAULTS,
         id: 'r-1',
         name: 'Morning brief',
         description: 'Start the day',

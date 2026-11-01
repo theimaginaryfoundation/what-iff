@@ -212,7 +212,7 @@ func RenderOpenAIInputItems(ctx *ModelContext) []responses.ResponseInputItemUnio
 			out = append(out, responses.ResponseInputItemParamOfMessage(seg.Content, RoleDeveloper))
 		case SegmentKindToolResult:
 			out = append(out, responses.ResponseInputItemParamOfMessage(seg.Content, RoleDeveloper))
-		case SegmentKindMood:
+		case SegmentKindMood, SegmentKindSkills, SegmentKindSkillsIndex:
 			out = append(out, responses.ResponseInputItemParamOfMessage(seg.Content, RoleDeveloper))
 		case SegmentKindDeveloperContext:
 			out = append(out, responses.ResponseInputItemParamOfMessage(seg.Content, RoleDeveloper))
