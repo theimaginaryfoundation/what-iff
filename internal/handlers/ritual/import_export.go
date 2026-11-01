@@ -1,7 +1,6 @@
 package ritual
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -320,21 +319,41 @@ func (h *Handler) ExportRitual(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to render SKILL.md", err)
 		return
 	}
-	bundleFiles, err := h.exportSkillFiles(r.Context(), userID, ritual)
+	rows, err := h.exportSkillFileRows(r.Context(), userID, ritual)
 	if err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the skill's files", err)
 		return
 	}
-	var buf bytes.Buffer
-	if err := skills.WriteBundle(&buf, slug, skillMD, bundleFiles); err != nil {
-		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to build skill bundle", err)
+	var total int64
+	for _, row := range rows {
+		if row.SizeBytes != nil {
+			total += *row.SizeBytes
+		}
+	}
+	if total > skills.MaxBundleBytes {
+		// Uploads are capped at the bundle limit, so only rows from before that check get here.
+		handlerutils.RespondWithError(w, h.logger, http.StatusRequestEntityTooLarge, handlerutils.CodeNotSet,
+			fmt.Sprintf("This skill's files total more than %d MB; remove some before exporting", skills.MaxBundleBytes>>20), nil)
 		return
 	}
+
+	// The zip is streamed: one file is in memory at a time, never the whole bundle and the zip.
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, slug))
-	w.Header().Set("Content-Length", fmt.Sprint(buf.Len()))
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(buf.Bytes())
+	bw, err := skills.NewBundleWriter(w, slug, skillMD)
+	if err == nil {
+		err = h.writeSkillFiles(r.Context(), bw, ritual, rows)
+	}
+	if err == nil {
+		err = bw.Close()
+	}
+	if err != nil {
+		// The status is already sent; abort the response so the client sees a failed download
+		// rather than a truncated zip that looks complete.
+		h.logger.Error("export: skill bundle failed mid-stream", zap.String("ritual_id", ritual.ID.String()), zap.Error(err))
+		panic(http.ErrAbortHandler)
+	}
 }
 
 // respondSkillError maps a skills.ErrInvalid to 400 with its detail, anything else to 500.
@@ -360,27 +379,29 @@ func quoteAll(items []string) []string {
 	return out
 }
 
-// exportSkillFiles reads the skill's bundle files from the object store for an export. A file whose
-// object is missing is skipped with a log line rather than failing the export.
-func (h *Handler) exportSkillFiles(ctx context.Context, userID uuid.UUID, ritual *models.Ritual) ([]skills.File, error) {
-	rows, err := h.ds.ListSkillFiles(ctx, userID, ritual.ID)
-	if err != nil {
-		return nil, err
-	}
-	if len(rows) == 0 || h.files == nil {
+// exportSkillFileRows lists the skill's bundle files for an export; none without an object store.
+func (h *Handler) exportSkillFileRows(ctx context.Context, userID uuid.UUID, ritual *models.Ritual) ([]*models.FileAttachment, error) {
+	if h.files == nil {
 		return nil, nil
 	}
-	out := make([]skills.File, 0, len(rows))
+	return h.ds.ListSkillFiles(ctx, userID, ritual.ID)
+}
+
+// writeSkillFiles downloads each bundle file and adds it to the zip, one at a time. A file whose
+// object is missing is skipped with a log line rather than failing the export.
+func (h *Handler) writeSkillFiles(ctx context.Context, bw *skills.BundleWriter, ritual *models.Ritual, rows []*models.FileAttachment) error {
 	for _, row := range rows {
 		data, err := h.files.DownloadFile(ctx, row.S3Key)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", row.Name, err)
+			return fmt.Errorf("read %s: %w", row.Name, err)
 		}
 		if data == nil {
 			h.logger.Warn("export: skill file object missing", zap.String("file_attachment_id", row.ID.String()), zap.String("key", row.S3Key))
 			continue
 		}
-		out = append(out, skills.File{Path: datastore.SkillFileRelPath(row, ritualSlug(ritual)), Data: data})
+		if err := bw.Add(skills.File{Path: datastore.SkillFileRelPath(row, ritualSlug(ritual)), Data: data}); err != nil {
+			return err
+		}
 	}
-	return out, nil
+	return nil
 }

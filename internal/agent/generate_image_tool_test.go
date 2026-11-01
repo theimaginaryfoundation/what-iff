@@ -310,6 +310,10 @@ func TestParseGenerateImageFolder(t *testing.T) {
 
 	_, err = parseGenerateImageFolder(&bad)
 	require.ErrorIs(t, err, models.ErrInvalidFolder)
+
+	reserved := "skills/pdf-forms/assets"
+	_, err = parseGenerateImageFolder(&reserved)
+	require.ErrorIs(t, err, models.ErrReservedFolder, "refused before an image is generated")
 }
 
 func TestGenerateImageTool_InvalidFolderReturnsErrorResult(t *testing.T) {

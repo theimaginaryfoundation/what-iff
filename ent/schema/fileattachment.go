@@ -73,6 +73,11 @@ func (FileAttachment) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("When an agent last changed the content. Null for files never changed after upload."),
+		field.Int64("size_bytes").
+			Optional().
+			Nillable().
+			NonNegative().
+			Comment("Bytes in the stored object. Set for skill bundle files, so the bundle's 30 MB limit is checked without reading objects (ADR 0x035 §3); null on other rows."),
 	}
 }
 
@@ -112,7 +117,8 @@ func (FileAttachment) Indexes() []ent.Index {
 		index.Fields("s3_key").Edges("owner"),
 		// Backs gallery folder navigation and the agent's folder-prefix listing.
 		index.Fields("folder").Edges("owner"),
-		// Backs a skill's file listing and its cascade.
-		index.Fields("skill_id"),
+		// Backs a skill's file listing and its cascade, and keeps one file per path in a bundle.
+		// Rows outside a bundle have a null skill_id and never conflict.
+		index.Fields("skill_id", "folder", "name").Unique(),
 	}
 }

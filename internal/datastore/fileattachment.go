@@ -48,6 +48,7 @@ func toFileAttachmentModel(e *ent.FileAttachment) *models.FileAttachment {
 
 		Origin:                 models.FileOrigin(e.Origin),
 		SkillID:                e.SkillID,
+		SizeBytes:              e.SizeBytes,
 		CreatedByPersonalityID: e.CreatedByPersonalityID,
 		CreatedByChatID:        e.CreatedByChatID,
 		UpdatedAt:              e.UpdatedAt,
@@ -212,6 +213,11 @@ func (d *Datastore) CreateFileAttachment(ctx context.Context, userID uuid.UUID, 
 
 	if fileAttachment.Folder != "" {
 		folder, ferr := models.NormalizeFolder(fileAttachment.Folder)
+		if ferr == nil && models.IsReservedFolder(folder) && !fileAttachment.IsSkillFile() {
+			// Only a skill's own bundle files live under skills/ (ADR 0x035 §3); refusing here
+			// covers every writer (uploads, generated images, agent tools, imports).
+			ferr = models.ErrReservedFolder
+		}
 		if ferr != nil {
 			if rerr := tx.Rollback(); rerr != nil {
 				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
@@ -242,6 +248,7 @@ func (d *Datastore) CreateFileAttachment(ctx context.Context, userID uuid.UUID, 
 	}
 	if fileAttachment.IsSkillFile() {
 		create.SetNillableSkillID(fileAttachment.SkillID)
+		create.SetNillableSizeBytes(fileAttachment.SizeBytes)
 	}
 	if fileAttachment.AgentAuthored() {
 		create.SetNillableCreatedByPersonalityID(fileAttachment.CreatedByPersonalityID).

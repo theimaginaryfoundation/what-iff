@@ -312,16 +312,9 @@ func (h *Handler) DeleteRitual(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The cascade removes the bundle's file rows without touching the object store, so read them
-	// first and release their objects afterwards (ADR 0x035 §3).
-	bundleFiles, err := h.ds.ListRitualFileAttachmentObjectRefs(r.Context(), userID, ritualID)
-	if err != nil {
-		h.logger.Warn("failed to list a skill's files for object cleanup",
-			zap.String("user_id", userID.String()), zap.String("ritual_id", ritualID.String()), zap.Error(err))
-	}
-
-	// Delete ritual
-	err = h.ds.DeleteRitual(r.Context(), userID, ritualID)
+	// The cascade removes the bundle's file rows without touching the object store; the delete
+	// returns them so their objects can be released (ADR 0x035 §3).
+	bundleFiles, err := h.ds.DeleteRitualWithFiles(r.Context(), userID, ritualID)
 	if ent.IsNotFound(err) || err == datastore.ErrRitualNotFound {
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Ritual not found", err)
 		return

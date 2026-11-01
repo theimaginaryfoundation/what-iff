@@ -6,6 +6,7 @@ import (
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/ent/chat"
+	entfileattachment "github.com/theimaginaryfoundation/what-iff/ent/fileattachment"
 	"github.com/theimaginaryfoundation/what-iff/ent/personality"
 	entritual "github.com/theimaginaryfoundation/what-iff/ent/ritual"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
@@ -607,66 +608,36 @@ func (d *Datastore) UpdateRitual(ctx context.Context, userID uuid.UUID, ritual m
 	return toRitualModel(entRitual), nil
 }
 
-// DeleteRitual deletes a ritual
+// DeleteRitual deletes the user's skill; see DeleteRitualWithFiles, whose bundle rows it drops.
+// Callers that can reach the object store should use DeleteRitualWithFiles and release them.
 func (d *Datastore) DeleteRitual(ctx context.Context, userID, id uuid.UUID) error {
-	// Start transaction
-	tx, err := d.dbClient.Tx(ctx)
-	if err != nil {
-		d.logger.Error(i18n.T("tx.start_failed"), zap.Error(err))
-		return err
-	}
+	_, err := d.DeleteRitualWithFiles(ctx, userID, id)
+	return err
+}
 
-	// Rollback in case of error
-	defer func() {
-		if v := recover(); v != nil {
-			tx.Rollback()
-			panic(v)
+// DeleteRitualWithFiles deletes the user's skill and returns its bundle file rows, which the
+// cascade removes without touching the object store, so the caller can release their objects
+// (ADR 0x035 §3). The rows are read inside the delete's transaction with the skill's row locked,
+// the lock bundle writes take, so a file uploaded concurrently is either returned or never written.
+func (d *Datastore) DeleteRitualWithFiles(ctx context.Context, userID, id uuid.UUID) ([]models.FileAttachment, error) {
+	return withSkillFilesTx(ctx, d, userID, id, func(tx *ent.Tx) ([]models.FileAttachment, error) {
+		rows, err := tx.FileAttachment.Query().
+			Where(entfileattachment.OriginEQ(entfileattachment.OriginSkill), entfileattachment.SkillID(id)).
+			WithOwner().
+			All(ctx)
+		if err != nil {
+			return nil, err
 		}
-	}()
-
-	// Check if ritual exists and belongs to the user
-	exists, err := tx.Ritual.Query().
-		Where(
-			entritual.ID(id),
-			entritual.HasOwnerWith(
-				user.ID(userID),
-			),
-		).
-		Exist(ctx)
-
-	if err != nil {
-		d.logger.Error(i18n.T1("query.failed", "Entity", "ritual"), zap.Error(err))
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		if err := tx.Ritual.DeleteOneID(id).Exec(ctx); err != nil {
+			d.logger.Error(i18n.T1("delete.failed", "Entity", "ritual"), zap.Error(err))
+			return nil, err
 		}
-		return err
-	}
-
-	if !exists {
-		d.logger.Error(i18n.T2("ritual.not_found_or_unauthorized", "RitualID", id.String(), "UserID", userID.String()))
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		files := make([]models.FileAttachment, 0, len(rows))
+		for _, row := range rows {
+			files = append(files, *toFileAttachmentModel(row))
 		}
-		return ErrRitualNotFound
-	}
-
-	// Delete ritual
-	err = tx.Ritual.DeleteOneID(id).Exec(ctx)
-	if err != nil {
-		d.logger.Error(i18n.T1("delete.failed", "Entity", "ritual"), zap.Error(err))
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-		}
-		return err
-	}
-
-	// Commit transaction
-	if err := tx.Commit(); err != nil {
-		d.logger.Error(i18n.T("tx.commit_failed"), zap.Error(err))
-		return err
-	}
-
-	return nil
+		return files, nil
+	})
 }
 
 // GetAvailableRituals returns a paginated list of available rituals for a particular chat that match optional filter criteria

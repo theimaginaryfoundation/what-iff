@@ -88,6 +88,9 @@ func (d *Datastore) MoveFileAttachmentsToFolder(ctx context.Context, userID uuid
 	if len(ids) == 0 {
 		return 0, nil
 	}
+	if models.IsReservedFolder(folder) {
+		return 0, models.ErrReservedFolder
+	}
 	match, err := d.galleryOriginalsOf(ctx, userID, ids)
 	if err != nil {
 		d.logger.Error("failed to resolve files to move", zap.Error(err))
@@ -182,6 +185,9 @@ func (d *Datastore) MoveGalleryFolder(ctx context.Context, userID uuid.UUID, fro
 	}
 	if from == to {
 		return 0, nil
+	}
+	if models.IsReservedFolder(from) || models.IsReservedFolder(to) {
+		return 0, models.ErrReservedFolder
 	}
 	if models.FolderIsWithin(to, from) {
 		return 0, ErrFolderIntoItself

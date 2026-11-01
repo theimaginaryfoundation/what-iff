@@ -156,30 +156,68 @@ func finishBundle(b *Bundle) (*Bundle, error) {
 	return b, nil
 }
 
-// WriteBundle writes `<slug>/SKILL.md` and the files under `<slug>/` as a zip.
-func WriteBundle(w io.Writer, slug string, skillMD []byte, files []File) error {
-	zw := zip.NewWriter(w)
-	write := func(name string, data []byte) error {
-		f, err := zw.Create(slug + "/" + name)
-		if err != nil {
-			return err
-		}
-		_, err = f.Write(data)
+// IsReservedBundlePath reports whether rel, a path inside a bundle, is the bundle's SKILL.md,
+// which is rendered from the skill rather than stored as one of its files.
+func IsReservedBundlePath(rel string) bool {
+	return strings.EqualFold(strings.Trim(rel, "/"), SkillFileName)
+}
+
+// BundleWriter writes a skill zip entry by entry, so an export holds one file in memory at a time
+// rather than the whole bundle and the zip.
+type BundleWriter struct {
+	zw   *zip.Writer
+	slug string
+}
+
+// NewBundleWriter starts a zip on w holding `<slug>/SKILL.md`.
+func NewBundleWriter(w io.Writer, slug string, skillMD []byte) (*BundleWriter, error) {
+	b := &BundleWriter{zw: zip.NewWriter(w), slug: slug}
+	if err := b.write(SkillFileName, skillMD); err != nil {
+		return nil, fmt.Errorf("write bundle: %w", err)
+	}
+	return b, nil
+}
+
+func (b *BundleWriter) write(name string, data []byte) error {
+	f, err := b.zw.Create(b.slug + "/" + name)
+	if err != nil {
 		return err
 	}
-	if err := write(SkillFileName, skillMD); err != nil {
+	_, err = f.Write(data)
+	return err
+}
+
+// Add writes one bundle file under `<slug>/`. A file at the reserved SKILL.md path is skipped, so
+// the zip never holds two of them.
+func (b *BundleWriter) Add(f File) error {
+	p, err := cleanBundlePath(f.Path)
+	if err != nil {
+		return err
+	}
+	if IsReservedBundlePath(p) {
+		return nil
+	}
+	if err := b.write(p, f.Data); err != nil {
 		return fmt.Errorf("write bundle: %w", err)
 	}
+	return nil
+}
+
+// Close finishes the zip.
+func (b *BundleWriter) Close() error { return b.zw.Close() }
+
+// WriteBundle writes `<slug>/SKILL.md` and the files under `<slug>/` as a zip.
+func WriteBundle(w io.Writer, slug string, skillMD []byte, files []File) error {
+	b, err := NewBundleWriter(w, slug, skillMD)
+	if err != nil {
+		return err
+	}
 	for _, f := range files {
-		p, err := cleanBundlePath(f.Path)
-		if err != nil {
+		if err := b.Add(f); err != nil {
 			return err
 		}
-		if err := write(p, f.Data); err != nil {
-			return fmt.Errorf("write bundle: %w", err)
-		}
 	}
-	return zw.Close()
+	return b.Close()
 }
 
 // bundleRoot finds where SKILL.md sits: "" at the root, or the single top-level directory that

@@ -275,7 +275,7 @@ func TestLoadSkillTool_ListsBundleFilesAndLoadsFileRead(t *testing.T) {
 	pdf := createTestSkill(t, ds, userID, models.Ritual{Name: "PDF Forms"})
 	folder, name, err := datastore.SkillFileFolder(pdf.Slug, "references/FORMS.md")
 	require.NoError(t, err)
-	_, err = ds.CreateSkillFile(ctx, userID, pdf.ID, folder, name, "text/markdown", "users/u/skills/s/forms.md")
+	_, err = ds.CreateSkillFile(ctx, userID, pdf.ID, folder, name, datastore.SkillFileObject{Key: "users/u/skills/s/forms.md", FileType: "text/markdown", Size: 4})
 	require.NoError(t, err)
 	plain := createTestSkill(t, ds, userID, models.Ritual{Name: "Plain"})
 
@@ -309,7 +309,7 @@ func TestLoadSkillTool_ScriptsNoteWithoutARunner(t *testing.T) {
 	scripted := createTestSkill(t, ds, userID, models.Ritual{Name: "Scripted", Compatibility: strPtr("needs python")})
 	folder, name, err := datastore.SkillFileFolder(scripted.Slug, "scripts/run.py")
 	require.NoError(t, err)
-	_, err = ds.CreateSkillFile(ctx, userID, scripted.ID, folder, name, "text/x-python", "users/u/skills/s/run.py")
+	_, err = ds.CreateSkillFile(ctx, userID, scripted.ID, folder, name, datastore.SkillFileObject{Key: "users/u/skills/s/run.py", FileType: "text/x-python", Size: 4})
 	require.NoError(t, err)
 
 	chatCtx := &chatContext{userID: userID, chat: chat}

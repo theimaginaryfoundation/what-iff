@@ -79,6 +79,8 @@ export interface RitualFile {
   /** Gallery location: skills/<slug>/<subdir> and the file name; the agent reads it at folder/name. */
   folder: string;
   name: string;
+  /** Bytes, counted against the bundle's 30 MB limit. */
+  size_bytes: number;
   created_at: string;
 }
 

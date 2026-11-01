@@ -37,6 +37,7 @@ type SkillFile struct {
 	// agent reads it at.
 	Folder    string    `json:"folder"`
 	Name      string    `json:"name"`
+	SizeBytes int64     `json:"size_bytes"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -57,10 +58,14 @@ func (h *Handler) ListSkillFiles(w http.ResponseWriter, r *http.Request) {
 func skillFilesResponse(ritual *models.Ritual, files []*models.FileAttachment) []SkillFile {
 	out := make([]SkillFile, 0, len(files))
 	for _, f := range files {
-		out = append(out, SkillFile{
+		sf := SkillFile{
 			ID: f.ID, Path: datastore.SkillFileRelPath(f, ritualSlug(ritual)), FileType: f.FileType,
 			Folder: f.Folder, Name: f.Name, CreatedAt: f.CreatedAt,
-		})
+		}
+		if f.SizeBytes != nil {
+			sf.SizeBytes = *f.SizeBytes
+		}
+		out = append(out, sf)
 	}
 	return out
 }
@@ -175,74 +180,69 @@ func ritualSlug(r *models.Ritual) string {
 	return skills.Slugify(r.Name)
 }
 
+// placeSkillFile checks a bundle file and works out where it goes: its folder and name under
+// skills/<slug>/ and its content type. Problems wrap skills.ErrInvalid.
+func placeSkillFile(ritual *models.Ritual, file skills.File) (folder, name, fileType string, err error) {
+	if len(file.Data) > skills.MaxBundleFileBytes {
+		return "", "", "", fmt.Errorf("%w: %s is larger than %d MB", skills.ErrInvalid, file.Path, skills.MaxBundleFileBytes>>20)
+	}
+	folder, name, err = datastore.SkillFileFolder(ritualSlug(ritual), file.Path)
+	if err != nil {
+		return "", "", "", fmt.Errorf("%w: bundle path %q: %v", skills.ErrInvalid, file.Path, err)
+	}
+	if name, err = models.NormalizeFileName(name, name); err != nil {
+		return "", "", "", fmt.Errorf("%w: bundle path %q: %v", skills.ErrInvalid, file.Path, err)
+	}
+	return folder, name, detectSkillFileType(name, file.Data), nil
+}
+
+// uploadSkillObject stores data as a new object of the skill's bundle and returns it.
+func (h *Handler) uploadSkillObject(ctx context.Context, userID uuid.UUID, ritual *models.Ritual, name, fileType string, data []byte) (datastore.SkillFileObject, error) {
+	key := storage.FileKeyForSkillFile(userID, ritual.ID, uuid.New(), name)
+	if err := h.files.UploadFile(ctx, key, data, fileType); err != nil {
+		return datastore.SkillFileObject{}, err
+	}
+	return datastore.SkillFileObject{Key: key, FileType: fileType, Size: int64(len(data))}, nil
+}
+
 // storeSkillFile uploads one bundle file for the skill and records it under skills/<slug>/<path>.
-// With replace, a file already at that path gets the new content (its old object is released);
-// without, it is an error. The bundle's limits are enforced against what the skill already holds.
+// With replace, a file already at that path gets the new content; without, it is an error. The
+// datastore checks the bundle's file and byte limits under a lock on the skill. A replaced object
+// is released only when nothing else (a chat reply, a gallery copy) still references it.
 func (h *Handler) storeSkillFile(ctx context.Context, userID uuid.UUID, ritual *models.Ritual, file skills.File, replace bool) (*models.FileAttachment, error) {
 	if h.files == nil {
 		return nil, fmt.Errorf("%w: this deployment has no file storage for skill files", skills.ErrInvalid)
 	}
-	if len(file.Data) > skills.MaxBundleFileBytes {
-		return nil, fmt.Errorf("%w: %s is larger than %d MB", skills.ErrInvalid, file.Path, skills.MaxBundleFileBytes>>20)
-	}
-	folder, name, err := datastore.SkillFileFolder(ritualSlug(ritual), file.Path)
-	if err != nil {
-		return nil, fmt.Errorf("%w: bundle path %q: %v", skills.ErrInvalid, file.Path, err)
-	}
-	if name, err = models.NormalizeFileName(name, name); err != nil {
-		return nil, fmt.Errorf("%w: bundle path %q: %v", skills.ErrInvalid, file.Path, err)
-	}
-	existing, err := h.ds.FindSkillFile(ctx, userID, ritual.ID, folder, name)
+	folder, name, fileType, err := placeSkillFile(ritual, file)
 	if err != nil {
 		return nil, err
 	}
-	if existing == nil {
-		files, err := h.ds.ListSkillFiles(ctx, userID, ritual.ID)
-		if err != nil {
-			return nil, err
-		}
-		if len(files) >= skills.MaxBundleFiles {
-			return nil, fmt.Errorf("%w: this skill already holds %d files, the limit", skills.ErrInvalid, skills.MaxBundleFiles)
-		}
-	} else if !replace {
-		return nil, fmt.Errorf("%w: a file is already at %s", skills.ErrInvalid, file.Path)
-	}
-
-	fileType := detectSkillFileType(name, file.Data)
-	objectID := uuid.New()
-	key := storage.FileKeyForSkillFile(userID, ritual.ID, objectID, name)
-	if err := h.files.UploadFile(ctx, key, file.Data, fileType); err != nil {
+	obj, err := h.uploadSkillObject(ctx, userID, ritual, name, fileType, file.Data)
+	if err != nil {
 		return nil, fmt.Errorf("store %s: %w", file.Path, err)
 	}
-	if existing != nil {
-		oldKey, err := h.ds.ReplaceSkillFileObject(ctx, userID, ritual.ID, existing.ID, key, fileType)
-		if err != nil {
-			h.dropObject(ctx, key)
-			return nil, err
-		}
-		if oldKey != "" && oldKey != key {
-			h.dropObject(ctx, oldKey)
-		}
-		existing.S3Key, existing.FileType = key, fileType
-		return existing, nil
-	}
-	created, err := h.ds.CreateSkillFile(ctx, userID, ritual.ID, folder, name, fileType, key)
+	stored, oldKey, err := h.ds.PutSkillFile(ctx, userID, ritual.ID, folder, name, obj, replace)
 	if err != nil {
-		h.dropObject(ctx, key)
+		h.dropObject(ctx, obj.Key)
 		return nil, err
 	}
-	return created, nil
+	if oldKey != "" && oldKey != obj.Key {
+		storage.ReleaseReplacedObject(context.WithoutCancel(ctx), h.logger, h.files, h.ds, oldKey)
+	}
+	return stored, nil
 }
 
-// storeBundleFiles stores every file of an imported bundle for the skill, replacing what the skill
-// held. It returns how many were stored and the problems it hit (the import goes on past a bad file).
+// storeBundleFiles makes an imported bundle's files the skill's whole bundle, replacing what it
+// held; a bundle with no files leaves the skill with none. A file that cannot be placed (a bad
+// path, too large) is skipped with a warning. Every object is uploaded before anything changes, and
+// the rows are swapped in one transaction, so a storage failure keeps the previous files rather
+// than leaving part of each. It returns how many files the skill now has and the warnings.
 func (h *Handler) storeBundleFiles(ctx context.Context, userID uuid.UUID, ritual *models.Ritual, files []skills.File) (int, []string) {
-	if len(files) == 0 || h.files == nil {
-		var warnings []string
+	if h.files == nil {
 		if len(files) > 0 {
-			warnings = append(warnings, fmt.Sprintf("%d bundle file(s) were not stored: this deployment has no file storage", len(files)))
+			return 0, []string{fmt.Sprintf("%d bundle file(s) were not stored: this deployment has no file storage", len(files))}
 		}
-		return 0, warnings
+		return 0, nil
 	}
 	var total int
 	for _, f := range files {
@@ -251,21 +251,38 @@ func (h *Handler) storeBundleFiles(ctx context.Context, userID uuid.UUID, ritual
 	if total > skills.MaxBundleBytes {
 		return 0, []string{fmt.Sprintf("bundle files were not stored: together they exceed %d MB", skills.MaxBundleBytes>>20)}
 	}
-	removed, err := h.ds.DeleteSkillFiles(ctx, userID, ritual.ID, nil)
-	if err != nil {
-		return 0, []string{"could not replace the skill's existing files: " + err.Error()}
-	}
-	h.releaseSkillObjects(ctx, userID, removed)
-	stored := 0
 	var warnings []string
+	records := make([]datastore.SkillFileRecord, 0, len(files))
+	dropUploaded := func() {
+		for _, rec := range records {
+			h.dropObject(ctx, rec.Object.Key)
+		}
+	}
 	for _, f := range files {
-		if _, err := h.storeSkillFile(ctx, userID, ritual, f, true); err != nil {
+		folder, name, fileType, err := placeSkillFile(ritual, f)
+		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s was not stored: %s", f.Path, strings.TrimPrefix(err.Error(), skills.ErrInvalid.Error()+": ")))
 			continue
 		}
-		stored++
+		obj, err := h.uploadSkillObject(ctx, userID, ritual, name, fileType, f.Data)
+		if err != nil {
+			h.logger.Warn("skill import: bundle file upload failed", zap.String("path", f.Path), zap.Error(err))
+			dropUploaded()
+			return 0, append(warnings, "the bundle's files could not be stored, so the skill keeps its previous files; try the import again")
+		}
+		records = append(records, datastore.SkillFileRecord{Folder: folder, Name: name, Object: obj})
 	}
-	return stored, warnings
+	removed, err := h.ds.ReplaceSkillFiles(ctx, userID, ritual.ID, records)
+	if err != nil {
+		dropUploaded()
+		if errors.Is(err, skills.ErrInvalid) {
+			return 0, append(warnings, "bundle files were not stored: "+strings.TrimPrefix(err.Error(), skills.ErrInvalid.Error()+": "))
+		}
+		h.logger.Warn("skill import: replacing the bundle's files failed", zap.String("ritual_id", ritual.ID.String()), zap.Error(err))
+		return 0, append(warnings, "the bundle's files could not be stored, so the skill keeps its previous files; try the import again")
+	}
+	h.releaseSkillObjects(ctx, userID, removed)
+	return len(records), warnings
 }
 
 // releaseSkillObjects deletes the objects of removed bundle file rows that nothing else references.

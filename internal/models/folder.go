@@ -62,9 +62,15 @@ func NormalizeFolder(raw string) (string, error) {
 // agent file tools and gallery moves refuse it.
 const ReservedSkillsFolder = "skills"
 
-// IsReservedFolder reports whether a normalized folder path is the skills folder or beneath it.
+// ErrReservedFolder is returned for a write into ReservedSkillsFolder by anything but a skill's
+// own bundle files.
+var ErrReservedFolder = errors.New(`the "skills/" folder holds skill bundles; choose another folder`)
+
+// IsReservedFolder reports whether a normalized folder path is the skills folder or beneath it,
+// ignoring case, so "Skills/x" is refused too.
 func IsReservedFolder(folder string) bool {
-	return folder == ReservedSkillsFolder || strings.HasPrefix(folder, ReservedSkillsFolder+folderSeparator)
+	top, _, _ := strings.Cut(folder, folderSeparator)
+	return strings.EqualFold(top, ReservedSkillsFolder)
 }
 
 // FolderIsWithin reports whether path is folder itself or beneath it. Both must be normalized.

@@ -70,6 +70,8 @@ type FileAttachment struct {
 	CreatedByChatID        *uuid.UUID `json:"created_by_chat_id,omitempty"`
 	// SkillID is the skill whose bundle the file belongs to, for Origin == FileOriginSkill (ADR 0x035).
 	SkillID *uuid.UUID `json:"skill_id,omitempty"`
+	// SizeBytes is the stored object's size, set for skill bundle files (ADR 0x035 §3).
+	SizeBytes *int64 `json:"size_bytes,omitempty"`
 	// UpdatedAt is when an agent last changed the content; nil for a file never changed.
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 	// ChunkStatus is the search-chunking state ("pending", "chunked", "failed"); "" for a file

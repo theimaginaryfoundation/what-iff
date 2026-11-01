@@ -19,13 +19,13 @@ It knows nothing about the database or HTTP; `internal/datastore`, `internal/dat
   A metadata entry that `Normalize` would refuse (an 80-line `hooks:` block, a key with spaces) is dropped with a warning instead of failing the import, and entries past the count limit are dropped the same way.
   What Iff's extras travel under `metadata`: `display_name`, `whatiff-hotkeys`, `whatiff-connectors` (names), `whatiff-disable-model-invocation`, `whatiff-user-invocable`; parsing consumes them back into fields.
   `display_name` is left out only when import would derive the same name from the slug, so every display name round-trips.
-- **Bundles** (`bundle.go`): `ReadBundle` unpacks a zip with SKILL.md at the root or inside one top-level folder, skipping archiver junk and refusing traversal and oversize members (`MaxBundleFiles` 200, `MaxBundleBytes` 30 MB, `MaxBundleFileBytes` 10 MB); `BundleFromFiles` does the same for uploaded parts; `WriteBundle` writes `<slug>/SKILL.md` plus files.
+- **Bundles** (`bundle.go`): `ReadBundle` unpacks a zip with SKILL.md at the root or inside one top-level folder, skipping archiver junk and refusing traversal and oversize members (`MaxBundleFiles` 200, `MaxBundleBytes` 30 MB, `MaxBundleFileBytes` 10 MB); `BundleFromFiles` does the same for uploaded parts; `BundleWriter` streams `<slug>/SKILL.md` plus files entry by entry (`WriteBundle` wraps it), skipping a file at the reserved root `SKILL.md` path (`IsReservedBundlePath`).
 
 ## Key types and entry points
 
 - `Normalize`, `Slugify`, `ValidateSlug`, `UniqueSlug`, `SanitizeText`, `RejectTags`.
 - `ParseSkillMD` → `*Parsed` (a `models.Ritual` with every pointer field set, connector names, warnings); `RenderSkillMD`.
-- `ReadBundle`, `BundleFromFiles`, `WriteBundle`, `Bundle`, `File`.
+- `ReadBundle`, `BundleFromFiles`, `BundleWriter`, `WriteBundle`, `IsReservedBundlePath`, `Bundle`, `File`.
 - `ErrInvalid` wraps every validation failure, so a handler maps any of them to a 400 with the detail as the message.
 
 ## Dependencies

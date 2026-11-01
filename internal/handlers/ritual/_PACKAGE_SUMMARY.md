@@ -10,8 +10,12 @@ HTTP API for **rituals** (reusable prompt/action templates) and **bindings** —
 - **Agent Skills import and export** (`import_export.go`, ADR 0x035 §7): `POST /ritual/import` takes a multipart `file` (a skill zip or a lone SKILL.md) or `files` parts named by path (read from each part's Content-Disposition, since the multipart reader keeps only the base name), parses SKILL.md through `internal/skills`, and answers an `ImportResult` with warnings, the count of bundle files this version does not store, and which exporter connector names matched this account's connectors.
   `GET /ritual/{id}/export` renders `<slug>/SKILL.md` into a zip with the bundle's files at their paths.
   With `ritual_id`, import replaces an existing skill's text and files (the slug, personality and connectors stay).
-- **Bundle files** (`skill_files.go`, ADR 0x035 §3): `GET /ritual/{id}/files`, `POST /ritual/{id}/files` (multipart `file` + `path`, replaces a file at the same path, any content type, 10 MB a file, 200 a skill) and `DELETE /ritual/{id}/files/{fileId}`.
-  Objects live under `users/{uid}/skills/{skill_id}/` (`storage.FileKeyForSkillFile`), one per version; replaced and removed files release their objects through `storage.ReleaseAttachmentObjects`, and `DeleteRitual` reads the bundle's rows before the cascade for the same reason.
+- **Bundle files** (`skill_files.go`, ADR 0x035 §3): `GET /ritual/{id}/files`, `POST /ritual/{id}/files` (multipart `file` + `path`, replaces a file at the same path, any content type, 10 MB a file, 200 files and 30 MB a skill, never the bundle root's `SKILL.md`) and `DELETE /ritual/{id}/files/{fileId}`.
+  Objects live under `users/{uid}/skills/{skill_id}/` (`storage.FileKeyForSkillFile`), one per version.
+  A replaced object goes through `storage.ReleaseReplacedObject` and removed files through `storage.ReleaseAttachmentObjects`, both reference-counted, since a chat reply or gallery copy can share the object; `DeleteRitual` gets the bundle's rows back from `DeleteRitualWithFiles` for the same reason.
+  The datastore checks the file and byte limits under a lock on the skill (`PutSkillFile`).
+  Re-import uploads every new object before anything changes and swaps the rows in one transaction (`ReplaceSkillFiles`), so a storage failure keeps the previous files; a bundle with no files leaves the skill with none.
+  Export streams the zip (`skills.BundleWriter`), one file in memory at a time, and answers 413 for a bundle over the limit.
   The handler takes the object store (`NewHandler(ds, files, logger)`); without one, uploads answer 501 and import stores the text only, with a warning.
 
 ## Dependencies

@@ -8650,11 +8650,215 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description The skill's files total more than the 30 MB bundle limit */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a skill's bundle files
+         * @description The skill's reference documents, scripts and assets (ADR 0x035 §3), filed in the gallery under `skills/<slug>/` and read-only to agents.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The bundle's files, by folder then name */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SkillFile"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Add or replace a skill bundle file
+         * @description Stores one file in the skill's bundle at `path`, replacing a file already there. Any content
+         *     type; at most 10 MB a file, 200 files and 30 MB a skill. `SKILL.md` at the bundle root is
+         *     rendered from the skill and cannot be uploaded.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /** Format: binary */
+                        file: string;
+                        /** @description The file's place in the bundle, e.g. `references/FORMS.md`. Defaults to `references/<filename>`. */
+                        path?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The stored file */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SkillFile"];
+                    };
+                };
+                /** @description Invalid path, the reserved SKILL.md, or over the bundle's file or byte limit */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file is larger than 10 MB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description This deployment has no file storage for skill files */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/{id}/files/{fileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a skill bundle file */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    fileId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual or file not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -14795,6 +14999,11 @@ export interface components {
              */
             skill_id?: string;
             /**
+             * Format: int64
+             * @description Bytes in the stored object, for origin "skill" (counted against the bundle's 30 MB limit).
+             */
+            size_bytes?: number;
+            /**
              * Format: uuid
              * @description Personality whose agent created the file (agent-authored files only).
              */
@@ -15097,6 +15306,21 @@ export interface components {
         PersonalityMediaJobConflict: {
             message: string;
             active: components["schemas"]["ActivePersonalityMediaJob"];
+        };
+        /** @description A file of a skill's bundle (ADR 0x035 §3). */
+        SkillFile: {
+            /** Format: uuid */
+            id: string;
+            /** @description The file's place in the bundle, e.g. `scripts/fill.py`. */
+            path: string;
+            file_type: string;
+            /** @description Its gallery folder, `skills/<slug>/<subdir>`, the path agents read it at. */
+            folder: string;
+            name: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /** Format: date-time */
+            created_at: string;
         };
         /**
          * @example {

@@ -43,6 +43,7 @@ func createFileAttachmentTestSchema(t *testing.T, db *sql.DB) {
 			created_by_personality_id uuid,
 			created_by_chat_id uuid,
 			updated_at datetime,
+			size_bytes integer,
 			chat_message_file_attachments uuid,
 			mood_images uuid,
 			personality_file_attachments uuid,

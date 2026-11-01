@@ -5439,6 +5439,144 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '413':
+          description: The skill's files total more than the 30 MB bundle limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /ritual/{id}/files:
+    get:
+      summary: List a skill's bundle files
+      description: The skill's reference documents, scripts and assets (ADR 0x035 §3), filed in the gallery under `skills/<slug>/` and read-only to agents.
+      tags: [Ritual Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The bundle's files, by folder then name
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SkillFile'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Ritual not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      summary: Add or replace a skill bundle file
+      description: |
+        Stores one file in the skill's bundle at `path`, replacing a file already there. Any content
+        type; at most 10 MB a file, 200 files and 30 MB a skill. `SKILL.md` at the bundle root is
+        rendered from the skill and cannot be uploaded.
+      tags: [Ritual Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                path:
+                  type: string
+                  description: The file's place in the bundle, e.g. `references/FORMS.md`. Defaults to `references/<filename>`.
+      responses:
+        '201':
+          description: The stored file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillFile'
+        '400':
+          description: Invalid path, the reserved SKILL.md, or over the bundle's file or byte limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Ritual not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The file is larger than 10 MB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '501':
+          description: This deployment has no file storage for skill files
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /ritual/{id}/files/{fileId}:
+    delete:
+      summary: Delete a skill bundle file
+      tags: [Ritual Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Ritual or file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /ritual/{id}:
     get:
@@ -11274,6 +11412,10 @@ components:
           type: string
           format: uuid
           description: For origin "skill", the skill whose bundle the file belongs to.
+        size_bytes:
+          type: integer
+          format: int64
+          description: Bytes in the stored object, for origin "skill" (counted against the bundle's 30 MB limit).
         created_by_personality_id:
           type: string
           format: uuid
@@ -11816,6 +11958,31 @@ components:
         - active
 
     # Ritual Management Schemas
+    SkillFile:
+      type: object
+      description: A file of a skill's bundle (ADR 0x035 §3).
+      required: [id, path, file_type, folder, name, size_bytes, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        path:
+          type: string
+          description: The file's place in the bundle, e.g. `scripts/fill.py`.
+        file_type:
+          type: string
+        folder:
+          type: string
+          description: Its gallery folder, `skills/<slug>/<subdir>`, the path agents read it at.
+        name:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+
     Ritual:
       type: object
       properties:

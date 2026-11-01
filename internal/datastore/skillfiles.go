@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	entritual "github.com/theimaginaryfoundation/what-iff/ent/ritual"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/skills"
 )
 
 // Skill bundle files (ADR 0x035 §3): file_attachments rows with origin = skill and a skill_id,
@@ -24,7 +26,11 @@ import (
 // SkillFileFolder is the gallery folder a bundle file at relPath ("scripts/fill.py") sits in for
 // the skill with slug: "skills/<slug>/scripts". The folder is normalized like any gallery folder.
 func SkillFileFolder(slug, relPath string) (folder, name string, err error) {
-	dir, base := path.Split(strings.Trim(strings.ReplaceAll(relPath, "\\", "/"), "/"))
+	rel := strings.Trim(strings.ReplaceAll(relPath, "\\", "/"), "/")
+	if skills.IsReservedBundlePath(rel) {
+		return "", "", fmt.Errorf("%w: %s is the skill's instructions, edited in the skill itself", models.ErrInvalidFolder, skills.SkillFileName)
+	}
+	dir, base := path.Split(rel)
 	// Concatenate rather than path.Join: Join would resolve a ".." out of the skill's folder, while
 	// NormalizeFolder refuses it.
 	folder, err = models.NormalizeFolder(models.ReservedSkillsFolder + "/" + slug + "/" + dir)
@@ -118,50 +124,243 @@ func (d *Datastore) FindSkillFile(ctx context.Context, userID, ritualID uuid.UUI
 	return toFileAttachmentModel(row), nil
 }
 
-// CreateSkillFile records a bundle file for the skill: a file_attachments row with origin = skill at
-// folder/name pointing at s3Key. The skill must belong to the user.
-func (d *Datastore) CreateSkillFile(ctx context.Context, userID, ritualID uuid.UUID, folder, name, fileType, s3Key string) (*models.FileAttachment, error) {
-	owned, err := d.dbClient.Ritual.Query().
-		Where(entritual.ID(ritualID), entritual.HasOwnerWith(user.ID(userID))).
-		Exist(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !owned {
-		return nil, ErrRitualNotFound
-	}
-	id := ritualID
-	return d.CreateFileAttachment(ctx, userID, models.FileAttachment{
-		Name:     name,
-		FileType: fileType,
-		S3Key:    s3Key,
-		Folder:   folder,
-		Origin:   models.FileOriginSkill,
-		SkillID:  &id,
-	})
+// SkillFileObject is a stored object for a bundle file: its key, content type and size.
+type SkillFileObject struct {
+	Key      string
+	FileType string
+	Size     int64
 }
 
-// ReplaceSkillFileObject points the skill file id at newKey (a newly uploaded version) and returns
-// the key it replaced, so the caller can release the old object.
-func (d *Datastore) ReplaceSkillFileObject(ctx context.Context, userID, ritualID, id uuid.UUID, newKey, fileType string) (string, error) {
-	row, err := d.dbClient.FileAttachment.Query().
-		Where(
-			entfileattachment.ID(id),
-			entfileattachment.HasOwnerWith(user.ID(userID)),
-			entfileattachment.OriginEQ(entfileattachment.OriginSkill),
-			entfileattachment.SkillID(ritualID),
-		).
+// SkillFileRecord is one file of a bundle being written: where it sits and its stored object.
+type SkillFileRecord struct {
+	Folder, Name string
+	Object       SkillFileObject
+}
+
+// lockSkillForFiles locks the skill's row for the rest of tx, after checking it belongs to the
+// user, so writers of the same bundle run one at a time and the file and byte limits hold.
+func lockSkillForFiles(ctx context.Context, tx *ent.Tx, userID, ritualID uuid.UUID) error {
+	_, err := tx.Ritual.Query().
+		Where(entritual.ID(ritualID), entritual.HasOwnerWith(user.ID(userID))).
+		Modify(lockRowsForUpdate).
 		Only(ctx)
+	if ent.IsNotFound(err) {
+		return ErrRitualNotFound
+	}
+	return err
+}
+
+// skillBundleUsage is how many files and bytes the skill's bundle holds, leaving out exceptID.
+func skillBundleUsage(ctx context.Context, tx *ent.Tx, ritualID, exceptID uuid.UUID) (files int, bytes int64, err error) {
+	rows, err := tx.FileAttachment.Query().
+		Where(entfileattachment.OriginEQ(entfileattachment.OriginSkill), entfileattachment.SkillID(ritualID)).
+		Select(entfileattachment.FieldID, entfileattachment.FieldSizeBytes).
+		All(ctx)
 	if err != nil {
+		return 0, 0, err
+	}
+	for _, row := range rows {
+		if row.ID == exceptID {
+			continue
+		}
+		files++
+		if row.SizeBytes != nil {
+			bytes += *row.SizeBytes
+		}
+	}
+	return files, bytes, nil
+}
+
+// checkSkillBundleLimits refuses a bundle of files files and bytes bytes over the limits.
+func checkSkillBundleLimits(files int, bytes int64) error {
+	if files > skills.MaxBundleFiles {
+		return fmt.Errorf("%w: a skill holds at most %d files", skills.ErrInvalid, skills.MaxBundleFiles)
+	}
+	if bytes > skills.MaxBundleBytes {
+		return fmt.Errorf("%w: a skill's files total at most %d MB", skills.ErrInvalid, skills.MaxBundleBytes>>20)
+	}
+	return nil
+}
+
+// errSkillFileExists is what a write without replace returns for a path the bundle already holds.
+func errSkillFileExists(folder, name string) error {
+	return fmt.Errorf("%w: a file is already at %s/%s", skills.ErrInvalid, folder, name)
+}
+
+func withSkillFilesTx[T any](ctx context.Context, d *Datastore, userID, ritualID uuid.UUID, fn func(tx *ent.Tx) (T, error)) (T, error) {
+	var zero T
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		return zero, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSkillForFiles(ctx, tx, userID, ritualID); err != nil {
+		return zero, err
+	}
+	out, err := fn(tx)
+	if err != nil {
+		return zero, err
+	}
+	if err := tx.Commit(); err != nil {
+		return zero, err
+	}
+	return out, nil
+}
+
+// PutSkillFile records obj as the bundle file at folder/name: a new row, or, with replace, the
+// row already there pointed at obj. It returns the file and the key it replaced ("" for a new
+// file), which the caller releases with storage.ReleaseReplacedObject. The skill's row is locked,
+// so the file-count and byte limits hold under concurrent uploads, and the unique index on
+// (skill_id, folder, name) backs the path check. Limit and path problems wrap skills.ErrInvalid.
+func (d *Datastore) PutSkillFile(ctx context.Context, userID, ritualID uuid.UUID, folder, name string, obj SkillFileObject, replace bool) (*models.FileAttachment, string, error) {
+	type result struct {
+		file   *models.FileAttachment
+		oldKey string
+	}
+	res, err := withSkillFilesTx(ctx, d, userID, ritualID, func(tx *ent.Tx) (result, error) {
+		existing, err := tx.FileAttachment.Query().
+			Where(
+				entfileattachment.OriginEQ(entfileattachment.OriginSkill),
+				entfileattachment.SkillID(ritualID),
+				entfileattachment.FolderEQ(folder),
+				entfileattachment.NameEqualFold(strings.TrimSpace(name)),
+			).
+			Only(ctx)
+		switch {
+		case ent.IsNotFound(err):
+			existing = nil
+		case err != nil:
+			return result{}, err
+		}
+		if existing != nil && !replace {
+			return result{}, errSkillFileExists(folder, name)
+		}
+		var except uuid.UUID
+		if existing != nil {
+			except = existing.ID
+		}
+		files, bytes, err := skillBundleUsage(ctx, tx, ritualID, except)
+		if err != nil {
+			return result{}, err
+		}
+		if err := checkSkillBundleLimits(files+1, bytes+obj.Size); err != nil {
+			return result{}, err
+		}
+		if existing != nil {
+			row, err := tx.FileAttachment.UpdateOneID(existing.ID).
+				SetS3Key(obj.Key).SetFileType(obj.FileType).SetSizeBytes(obj.Size).
+				Save(ctx)
+			if err != nil {
+				return result{}, err
+			}
+			return result{file: toFileAttachmentModel(row), oldKey: existing.S3Key}, nil
+		}
+		row, err := createSkillFileRow(ctx, tx, userID, ritualID, SkillFileRecord{Folder: folder, Name: name, Object: obj})
+		if ent.IsConstraintError(err) {
+			return result{}, errSkillFileExists(folder, name)
+		}
+		if err != nil {
+			return result{}, err
+		}
+		return result{file: toFileAttachmentModel(row)}, nil
+	})
+	return res.file, res.oldKey, err
+}
+
+func createSkillFileRow(ctx context.Context, tx *ent.Tx, userID, ritualID uuid.UUID, rec SkillFileRecord) (*ent.FileAttachment, error) {
+	return tx.FileAttachment.Create().
+		SetOwnerID(userID).
+		SetName(rec.Name).
+		SetFileType(rec.Object.FileType).
+		SetS3Key(rec.Object.Key).
+		SetFolder(rec.Folder).
+		SetOrigin(entfileattachment.OriginSkill).
+		SetSkillID(ritualID).
+		SetSizeBytes(rec.Object.Size).
+		Save(ctx)
+}
+
+// CreateSkillFile records a new bundle file for the skill at folder/name pointing at obj; it is
+// PutSkillFile without replace.
+func (d *Datastore) CreateSkillFile(ctx context.Context, userID, ritualID uuid.UUID, folder, name string, obj SkillFileObject) (*models.FileAttachment, error) {
+	file, _, err := d.PutSkillFile(ctx, userID, ritualID, folder, name, obj, false)
+	return file, err
+}
+
+// ReplaceSkillFileObject points the skill file id at obj (a newly uploaded version) and returns
+// the key it replaced, for storage.ReleaseReplacedObject. The byte limit is checked against the
+// rest of the bundle.
+func (d *Datastore) ReplaceSkillFileObject(ctx context.Context, userID, ritualID, id uuid.UUID, obj SkillFileObject) (string, error) {
+	return withSkillFilesTx(ctx, d, userID, ritualID, func(tx *ent.Tx) (string, error) {
+		row, err := tx.FileAttachment.Query().
+			Where(
+				entfileattachment.ID(id),
+				entfileattachment.OriginEQ(entfileattachment.OriginSkill),
+				entfileattachment.SkillID(ritualID),
+			).
+			Only(ctx)
 		if ent.IsNotFound(err) {
 			return "", ErrFileAttachmentNotFound
 		}
-		return "", err
-	}
-	if err := d.dbClient.FileAttachment.UpdateOneID(id).SetS3Key(newKey).SetFileType(fileType).Exec(ctx); err != nil {
-		return "", err
-	}
-	return row.S3Key, nil
+		if err != nil {
+			return "", err
+		}
+		files, bytes, err := skillBundleUsage(ctx, tx, ritualID, id)
+		if err != nil {
+			return "", err
+		}
+		if err := checkSkillBundleLimits(files+1, bytes+obj.Size); err != nil {
+			return "", err
+		}
+		if err := tx.FileAttachment.UpdateOneID(id).
+			SetS3Key(obj.Key).SetFileType(obj.FileType).SetSizeBytes(obj.Size).
+			Exec(ctx); err != nil {
+			return "", err
+		}
+		return row.S3Key, nil
+	})
+}
+
+// ReplaceSkillFiles makes files the skill's whole bundle in one transaction: the old rows go and
+// the new ones are created, or nothing changes. It returns the removed rows, whose objects the
+// caller releases. The objects must already be uploaded; on an error the caller deletes them.
+func (d *Datastore) ReplaceSkillFiles(ctx context.Context, userID, ritualID uuid.UUID, files []SkillFileRecord) ([]models.FileAttachment, error) {
+	return withSkillFilesTx(ctx, d, userID, ritualID, func(tx *ent.Tx) ([]models.FileAttachment, error) {
+		var total int64
+		for _, f := range files {
+			total += f.Object.Size
+		}
+		if err := checkSkillBundleLimits(len(files), total); err != nil {
+			return nil, err
+		}
+		old, err := tx.FileAttachment.Query().
+			Where(entfileattachment.OriginEQ(entfileattachment.OriginSkill), entfileattachment.SkillID(ritualID)).
+			WithOwner().
+			All(ctx)
+		if err != nil {
+			return nil, err
+		}
+		removed := make([]models.FileAttachment, 0, len(old))
+		ids := make([]uuid.UUID, 0, len(old))
+		for _, row := range old {
+			removed = append(removed, *toFileAttachmentModel(row))
+			ids = append(ids, row.ID)
+		}
+		if len(ids) > 0 {
+			if _, err := tx.FileAttachment.Delete().Where(entfileattachment.IDIn(ids...)).Exec(ctx); err != nil {
+				return nil, err
+			}
+		}
+		for _, f := range files {
+			if _, err := createSkillFileRow(ctx, tx, userID, ritualID, f); err != nil {
+				if ent.IsConstraintError(err) {
+					return nil, errSkillFileExists(f.Folder, f.Name)
+				}
+				return nil, err
+			}
+		}
+		return removed, nil
+	})
 }
 
 // DeleteSkillFiles removes the skill's bundle file rows (all of them, or only ids when given) and
@@ -192,12 +391,6 @@ func (d *Datastore) DeleteSkillFiles(ctx context.Context, userID, ritualID uuid.
 		return nil, err
 	}
 	return out, nil
-}
-
-// ListRitualFileAttachmentObjectRefs returns the bundle file rows a DeleteRitual cascade will
-// remove, with the fields that locate their objects.
-func (d *Datastore) ListRitualFileAttachmentObjectRefs(ctx context.Context, userID, ritualID uuid.UUID) ([]models.FileAttachment, error) {
-	return d.listFileAttachmentObjectRefs(ctx, userID, entfileattachment.SkillID(ritualID))
 }
 
 // moveSkillFilesToSlug refiles a skill's bundle files from skills/<oldSlug>/… to skills/<newSlug>/…
