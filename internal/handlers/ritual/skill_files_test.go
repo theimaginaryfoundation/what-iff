@@ -147,8 +147,22 @@ func TestReimport_StorageFailureKeepsThePreviousFiles(t *testing.T) {
 	}
 	require.Equal(t, []string{"a.py", "b.py"}, names)
 
-	// A bundle with no files leaves the skill with none.
+	// A lone SKILL.md updates the skill and keeps its files.
 	h.files = mem
+	body, ctype := multipartFile(t, "file", "SKILL.md", []byte(testSkillMD), map[string]string{"ritual_id": first.Ritual.ID.String()})
+	req := asUser(httptest.NewRequest(http.MethodPost, "/ritual/import", body), userID)
+	req.Header.Set("Content-Type", ctype)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var mdOnly ImportResult
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &mdOnly))
+	require.True(t, mdOnly.FilesKept)
+	files, err = h.ds.ListSkillFiles(context.Background(), userID, first.Ritual.ID)
+	require.NoError(t, err)
+	require.Len(t, files, 2)
+
+	// A bundle with no files leaves the skill with none.
 	res = importZip(map[string]string{"pdf-forms/SKILL.md": testSkillMD}, first.Ritual.ID.String())
 	require.Zero(t, res.FilesImported)
 	files, err = h.ds.ListSkillFiles(context.Background(), userID, first.Ritual.ID)

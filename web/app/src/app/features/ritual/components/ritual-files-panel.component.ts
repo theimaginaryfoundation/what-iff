@@ -253,7 +253,10 @@ export class RitualFilesPanelComponent implements OnChanges {
     if (!file) return;
     await this.run(async () => {
       const result = await firstValueFrom(this.ritualService.importBundle(file, null, this.ritual().id));
-      this.notice.set([`Replaced from bundle: ${result.files_imported} file(s).`, ...result.warnings].join(' '));
+      const summary = result.files_kept
+        ? 'Updated SKILL.md; the files were kept.'
+        : `Replaced from bundle: ${result.files_imported} file(s).`;
+      this.notice.set([summary, ...result.warnings].join(' '));
       this.imported.emit(result.ritual);
       await this.load();
     }, 'Could not import that bundle.');

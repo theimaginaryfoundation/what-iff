@@ -35,6 +35,9 @@ type ImportResult struct {
 	Warnings []string `json:"warnings"`
 	// FilesImported counts the bundle files stored under skills/<slug>/ (ADR 0x035 §3).
 	FilesImported int `json:"files_imported"`
+	// FilesKept is true when a re-import sent only a SKILL.md, so the skill's existing files were
+	// left as they were rather than replaced by an empty bundle.
+	FilesKept bool `json:"files_kept"`
 	// ConnectorsLinked and ConnectorsMissing report the exporter's connector names matched to this
 	// account's connectors by name, and the ones with no match.
 	ConnectorsLinked  []string `json:"connectors_linked"`
@@ -72,7 +75,7 @@ func (h *Handler) ImportRitual(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	bundle, err := readImportBundle(r.MultipartForm)
+	bundle, skillMDOnly, err := readImportBundle(r.MultipartForm)
 	if err != nil {
 		h.respondSkillError(w, err, "Failed to read skill bundle")
 		return
@@ -152,9 +155,14 @@ func (h *Handler) ImportRitual(w http.ResponseWriter, r *http.Request) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("slug %q is already in use; imported as %q", requested, saved.Slug))
 	}
 	result.Ritual = saved
-	stored, fileWarnings := h.storeBundleFiles(r.Context(), userID, saved, bundle.Files)
-	result.FilesImported = stored
-	result.Warnings = append(result.Warnings, fileWarnings...)
+	if existing != nil && skillMDOnly {
+		// A lone SKILL.md updates the instructions; only a bundle replaces the files.
+		result.FilesKept = true
+	} else {
+		stored, fileWarnings := h.storeBundleFiles(r.Context(), userID, saved, bundle.Files)
+		result.FilesImported = stored
+		result.Warnings = append(result.Warnings, fileWarnings...)
+	}
 	status := http.StatusCreated
 	if existing != nil {
 		status = http.StatusOK
@@ -188,53 +196,57 @@ func (h *Handler) createWithFreeSlug(r *http.Request, userID uuid.UUID, ritual m
 }
 
 // readImportBundle builds the bundle from the form: a `file` part that is a zip or a lone
-// SKILL.md, or `files` parts named by their path in the skill directory.
-func readImportBundle(form *multipart.Form) (*skills.Bundle, error) {
+// SKILL.md, or `files` parts named by their path in the skill directory. skillMDOnly reports the
+// lone SKILL.md case, which carries no word on the files.
+func readImportBundle(form *multipart.Form) (bundle *skills.Bundle, skillMDOnly bool, err error) {
 	if form == nil {
-		return nil, fmt.Errorf("%w: no files in the request", skills.ErrInvalid)
+		return nil, false, fmt.Errorf("%w: no files in the request", skills.ErrInvalid)
 	}
 	if parts := form.File["file"]; len(parts) == 1 {
 		fh := parts[0]
 		f, err := fh.Open()
 		if err != nil {
-			return nil, fmt.Errorf("%w: cannot open upload: %v", skills.ErrInvalid, err)
+			return nil, false, fmt.Errorf("%w: cannot open upload: %v", skills.ErrInvalid, err)
 		}
 		defer f.Close()
 		if strings.EqualFold(fh.Filename, skills.SkillFileName) || strings.HasSuffix(strings.ToLower(fh.Filename), ".md") {
 			data, err := io.ReadAll(io.LimitReader(f, int64(skills.MaxBundleFileBytes)+1))
 			if err != nil {
-				return nil, fmt.Errorf("%w: cannot read upload: %v", skills.ErrInvalid, err)
+				return nil, false, fmt.Errorf("%w: cannot read upload: %v", skills.ErrInvalid, err)
 			}
 			if len(data) > skills.MaxBundleFileBytes {
-				return nil, fmt.Errorf("%w: SKILL.md is larger than %d MB", skills.ErrInvalid, skills.MaxBundleFileBytes>>20)
+				return nil, false, fmt.Errorf("%w: SKILL.md is larger than %d MB", skills.ErrInvalid, skills.MaxBundleFileBytes>>20)
 			}
-			return skills.BundleFromFiles([]skills.File{{Path: skills.SkillFileName, Data: data}})
+			bundle, err := skills.BundleFromFiles([]skills.File{{Path: skills.SkillFileName, Data: data}})
+			return bundle, err == nil, err
 		}
-		return skills.ReadBundle(f, fh.Size)
+		bundle, err := skills.ReadBundle(f, fh.Size)
+		return bundle, false, err
 	}
 	parts := form.File["files"]
 	if len(parts) == 0 {
-		return nil, fmt.Errorf("%w: send the skill as a 'file' zip or as 'files' parts", skills.ErrInvalid)
+		return nil, false, fmt.Errorf("%w: send the skill as a 'file' zip or as 'files' parts", skills.ErrInvalid)
 	}
 	files := make([]skills.File, 0, len(parts))
 	var total int64
 	for _, fh := range parts {
 		total += fh.Size
 		if total > int64(skills.MaxBundleBytes) {
-			return nil, fmt.Errorf("%w: bundle is larger than %d MB", skills.ErrInvalid, skills.MaxBundleBytes>>20)
+			return nil, false, fmt.Errorf("%w: bundle is larger than %d MB", skills.ErrInvalid, skills.MaxBundleBytes>>20)
 		}
 		f, err := fh.Open()
 		if err != nil {
-			return nil, fmt.Errorf("%w: cannot open %s: %v", skills.ErrInvalid, fh.Filename, err)
+			return nil, false, fmt.Errorf("%w: cannot open %s: %v", skills.ErrInvalid, fh.Filename, err)
 		}
 		data, err := io.ReadAll(io.LimitReader(f, int64(skills.MaxBundleFileBytes)+1))
 		_ = f.Close()
 		if err != nil {
-			return nil, fmt.Errorf("%w: cannot read %s: %v", skills.ErrInvalid, fh.Filename, err)
+			return nil, false, fmt.Errorf("%w: cannot read %s: %v", skills.ErrInvalid, fh.Filename, err)
 		}
 		files = append(files, skills.File{Path: partPath(fh), Data: data})
 	}
-	return skills.BundleFromFiles(files)
+	bundle, err = skills.BundleFromFiles(files)
+	return bundle, false, err
 }
 
 // partPath is a `files` part's path in the skill directory, as the client sent it. The multipart

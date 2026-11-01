@@ -66,6 +66,8 @@ export interface RitualImportResult {
   warnings: string[];
   /** Bundle files stored under skills/<slug>/. */
   files_imported: number;
+  /** True when a re-import sent only a SKILL.md and the skill's files were left as they were. */
+  files_kept: boolean;
   connectors_linked: string[];
   connectors_missing: string[];
 }

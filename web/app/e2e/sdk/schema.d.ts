@@ -8517,7 +8517,7 @@ export interface paths {
         put?: never;
         /**
          * Import a skill from an Agent Skills bundle
-         * @description Creates a skill from a SKILL.md (ADR 0x035 §7). Send a multipart form with either `file` (a zip with SKILL.md at its root or inside one top-level folder, or a lone SKILL.md) or several `files` parts whose filenames are paths inside the skill directory. Frontmatter is parsed leniently: a missing or invalid `name` is derived with a warning, unknown keys are kept in `metadata`, and only a missing `description` or body is an error. A slug the account already uses gets a numeric suffix. Bundle files other than SKILL.md are not stored by this version and are counted in `skipped_files`.
+         * @description Creates a skill from an Agent Skills bundle (ADR 0x035 §7), or with `ritual_id` replaces an existing skill's contents. Send a multipart form with either `file` (a zip with SKILL.md at its root or inside one top-level folder, or a lone SKILL.md) or several `files` parts whose filenames are paths inside the skill directory. Frontmatter is parsed leniently: a missing or invalid `name` is derived with a warning, unknown keys are kept in `metadata`, and only a missing `description` or body is an error. A slug the account already uses gets a numeric suffix. The bundle's other files are stored under `skills/<slug>/` and replace the skill's previous files; a re-import that sends only a SKILL.md keeps them (`files_kept`). Two paths that differ only in case are refused.
          */
         post: {
             parameters: {
@@ -8541,10 +8541,24 @@ export interface paths {
                          * @description Bind the imported skill to this personality
                          */
                         personality_id?: string;
+                        /**
+                         * Format: uuid
+                         * @description Re-import into this skill, which keeps its slug, personality and connectors
+                         */
+                        ritual_id?: string;
                     };
                 };
             };
             responses: {
+                /** @description Existing skill re-imported */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RitualImportResult"];
+                    };
+                };
                 /** @description Skill imported */
                 201: {
                     headers: {
@@ -8565,6 +8579,24 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No skill with `ritual_id` */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Another skill took every slug tried, in concurrent imports of the same skill */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -15391,8 +15423,10 @@ export interface components {
             ritual: components["schemas"]["Ritual"];
             /** @description Lenient-parse repairs and import-time substitutions to show the user */
             warnings: string[];
-            /** @description Bundle members other than SKILL.md, not stored by this version */
-            skipped_files: number;
+            /** @description Bundle files stored under skills/<slug>/ */
+            files_imported: number;
+            /** @description True when a re-import sent only a SKILL.md and the skill's files were left as they were */
+            files_kept: boolean;
             /** @description Exporter connector names matched to this account's connectors */
             connectors_linked: string[];
             /** @description Exporter connector names with no match here */

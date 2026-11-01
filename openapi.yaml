@@ -5336,13 +5336,15 @@ paths:
     post:
       summary: Import a skill from an Agent Skills bundle
       description: >-
-        Creates a skill from a SKILL.md (ADR 0x035 §7). Send a multipart form with either `file` (a zip
-        with SKILL.md at its root or inside one top-level folder, or a lone SKILL.md) or several `files`
-        parts whose filenames are paths inside the skill directory. Frontmatter is parsed leniently: a
-        missing or invalid `name` is derived with a warning, unknown keys are kept in `metadata`, and
-        only a missing `description` or body is an error. A slug the account already uses gets a numeric
-        suffix. Bundle files other than SKILL.md are not stored by this version and are counted in
-        `skipped_files`.
+        Creates a skill from an Agent Skills bundle (ADR 0x035 §7), or with `ritual_id` replaces an
+        existing skill's contents. Send a multipart form with either `file` (a zip with SKILL.md at its
+        root or inside one top-level folder, or a lone SKILL.md) or several `files` parts whose filenames
+        are paths inside the skill directory. Frontmatter is parsed leniently: a missing or invalid
+        `name` is derived with a warning, unknown keys are kept in `metadata`, and only a missing
+        `description` or body is an error. A slug the account already uses gets a numeric suffix. The
+        bundle's other files are stored under `skills/<slug>/` and replace the skill's previous files;
+        a re-import that sends only a SKILL.md keeps them (`files_kept`). Two paths that differ only in
+        case are refused.
       tags: [Ritual Management]
       requestBody:
         required: true
@@ -5365,7 +5367,17 @@ paths:
                   type: string
                   format: uuid
                   description: Bind the imported skill to this personality
+                ritual_id:
+                  type: string
+                  format: uuid
+                  description: Re-import into this skill, which keeps its slug, personality and connectors
       responses:
+        '200':
+          description: Existing skill re-imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RitualImportResult'
         '201':
           description: Skill imported
           content:
@@ -5380,6 +5392,18 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No skill with `ritual_id`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Another skill took every slug tried, in concurrent imports of the same skill
           content:
             application/json:
               schema:
@@ -12098,9 +12122,12 @@ components:
           items:
             type: string
           description: Lenient-parse repairs and import-time substitutions to show the user
-        skipped_files:
+        files_imported:
           type: integer
-          description: Bundle members other than SKILL.md, not stored by this version
+          description: Bundle files stored under skills/<slug>/
+        files_kept:
+          type: boolean
+          description: True when a re-import sent only a SKILL.md and the skill's files were left as they were
         connectors_linked:
           type: array
           items:
@@ -12111,7 +12138,7 @@ components:
           items:
             type: string
           description: Exporter connector names with no match here
-      required: [ritual, warnings, skipped_files, connectors_linked, connectors_missing]
+      required: [ritual, warnings, files_imported, files_kept, connectors_linked, connectors_missing]
 
     AgentEntity:
       type: object

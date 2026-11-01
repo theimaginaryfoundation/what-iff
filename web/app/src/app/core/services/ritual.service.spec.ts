@@ -42,21 +42,21 @@ describe('RitualService', () => {
             const body = req.request.body as FormData;
             expect(body.get('file')).toBeInstanceOf(File);
             expect(body.get('personality_id')).toBe('personality-1');
-            req.flush({ ritual: {}, warnings: [], files_imported: 0, connectors_linked: [], connectors_missing: [] });
+            req.flush({ ritual: {}, warnings: [], files_imported: 0, files_kept: false, connectors_linked: [], connectors_missing: [] });
         });
 
         it('omits personality_id when none is given', () => {
             service.importBundle(new File(['x'], 'SKILL.md')).subscribe();
             const req = httpMock.expectOne(`${environment.apiUrl}/ritual/import`);
             expect((req.request.body as FormData).has('personality_id')).toBe(false);
-            req.flush({ ritual: {}, warnings: [], files_imported: 0, connectors_linked: [], connectors_missing: [] });
+            req.flush({ ritual: {}, warnings: [], files_imported: 0, files_kept: false, connectors_linked: [], connectors_missing: [] });
         });
 
         it('imports into an existing skill when asked', () => {
             service.importBundle(new File(['x'], 'SKILL.md'), null, 'ritual-9').subscribe();
             const req = httpMock.expectOne(`${environment.apiUrl}/ritual/import`);
             expect((req.request.body as FormData).get('ritual_id')).toBe('ritual-9');
-            req.flush({ ritual: {}, warnings: [], files_imported: 2, connectors_linked: [], connectors_missing: [] });
+            req.flush({ ritual: {}, warnings: [], files_imported: 2, files_kept: false, connectors_linked: [], connectors_missing: [] });
         });
 
         it('lists, uploads and deletes bundle files', () => {

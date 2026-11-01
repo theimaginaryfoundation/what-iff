@@ -15,6 +15,7 @@ HTTP API for **rituals** (reusable prompt/action templates) and **bindings** —
   A replaced object goes through `storage.ReleaseReplacedObject` and removed files through `storage.ReleaseAttachmentObjects`, both reference-counted, since a chat reply or gallery copy can share the object; `DeleteRitual` gets the bundle's rows back from `DeleteRitualWithFiles` for the same reason.
   The datastore checks the file and byte limits under a lock on the skill (`PutSkillFile`).
   Re-import uploads every new object before anything changes and swaps the rows in one transaction (`ReplaceSkillFiles`), so a storage failure keeps the previous files; a bundle with no files leaves the skill with none.
+  A re-import that sends only a SKILL.md (`file` ending in `.md`) keeps the files and reports `files_kept`.
   Export streams the zip (`skills.BundleWriter`), one file in memory at a time, and answers 413 for a bundle over the limit.
   The handler takes the object store (`NewHandler(ds, files, logger)`); without one, uploads answer 501 and import stores the text only, with a warning.
 
@@ -29,6 +30,7 @@ HTTP API for **rituals** (reusable prompt/action templates) and **bindings** —
   A `skills.ErrInvalid` is a 400 whose message is the detail; `datastore.ErrRitualSlugTaken` is a 409.
 - **Omitted skill fields are left alone on update** (`slug`, `license`, `compatibility`, `metadata`, `allowed_tools`, the invocation flags): they are pointers on `models.Ritual`, so an older client that sends only name, description and content cannot clear them.
 - **Bundle import replaces files wholesale** (delete the skill's rows, store the bundle's), so a re-import is the bundle, not a merge; a bad file is reported in `warnings` and skipped rather than failing the import.
+  The exception is a lone SKILL.md, which says nothing about the files, so they are kept.
 - **Import never fails on a taken slug:** it takes the next free numeric suffix and says so in `warnings`, since the user asked for the bundle, not the name.
   The check and the insert are separate, so an import that loses a race for the slug picks again (`createWithFreeSlug`, three attempts, then 409).
 - **`mcp_server_ids` on update:** `models.Ritual.MCPServerIDs` is a **pointer slice** — omit the JSON field to leave MCP edges unchanged; send an array (including `[]`) to replace the set (`internal/datastore/ritual.go` `UpdateRitual`).
