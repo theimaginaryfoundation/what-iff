@@ -73,16 +73,17 @@ func (AgentEntity) Edges() []ent.Edge {
 func (AgentEntity) Indexes() []ent.Index {
 	return []ent.Index{
 		// One live global entity per key, and one per key for each personality; archived entities
-		// do not count. Two partial indexes because a plain unique index treats every null
+		// do not count. The predicates are written the way Postgres stores them (each term in
+		// parentheses), so auto-migrate sees no change and does not rebuild the indexes every boot. Two partial indexes because a plain unique index treats every null
 		// pinned_personality_id as distinct.
 		index.Fields("key").
 			Edges("owner").
 			Unique().
-			Annotations(entsql.IndexWhere("pinned_personality_id IS NULL AND archived_at IS NULL")),
+			Annotations(entsql.IndexWhere("(pinned_personality_id IS NULL) AND (archived_at IS NULL)")),
 		index.Fields("key", "pinned_personality_id").
 			Edges("owner").
 			Unique().
-			Annotations(entsql.IndexWhere("pinned_personality_id IS NOT NULL AND archived_at IS NULL")),
+			Annotations(entsql.IndexWhere("(pinned_personality_id IS NOT NULL) AND (archived_at IS NULL)")),
 		index.Edges("owner"),
 	}
 }
