@@ -187,21 +187,22 @@ func init() {
 	if autoMigrate {
 		// Run Ent schema migration.
 		// The historical role backfill migration is intentionally disabled because it was one-time only.
-		migrationOptions := []schema.MigrateOption{}
-		if destructiveMigration {
-			migrationOptions = append(migrationOptions, schema.WithDropColumn(true), schema.WithDropIndex(true))
-			logger.Warn("Running destructive database migration options (drop column/index) because DESTRUCTIVE_MIGRATION=true")
-		}
-
-		if err := client.Schema.Create(context.Background(), migrationOptions...); err != nil {
+		if err := client.Schema.Create(context.Background()); err != nil {
 			logger.Fatal("Failed to run database migrations", zap.Error(err))
 		}
-		logger.Debug("Database migrations applied", zap.Bool("destructive_migration", destructiveMigration))
+		logger.Debug("Database migrations applied")
 
 		// Mode and job skill links moved from FK columns on rituals to join tables (ADR 0x035
-		// §11). Copy what the old columns still hold; a destructive migration drops them after.
+		// §11). Move what the old columns still hold before a destructive pass can drop them.
 		if _, err := database.BackfillRitualLinks(context.Background(), sqlDB, logger); err != nil {
 			logger.Fatal("Failed to copy skill links into their join tables", zap.Error(err))
+		}
+
+		if destructiveMigration {
+			logger.Warn("Running destructive database migration options (drop column/index) because DESTRUCTIVE_MIGRATION=true")
+			if err := client.Schema.Create(context.Background(), schema.WithDropColumn(true), schema.WithDropIndex(true)); err != nil {
+				logger.Fatal("Failed to run destructive database migrations", zap.Error(err))
+			}
 		}
 	}
 
