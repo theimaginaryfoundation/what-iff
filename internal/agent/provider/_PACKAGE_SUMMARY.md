@@ -41,6 +41,7 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
   User-authored text never arms the filter and is never rewritten.
 - **User-attached images (chat):** `ModelContextSegment.UserImages` + `AppendUserMessage`.
   Every renderer sends **`UserMessageImage.RawBytes`** inline: OpenAI Responses as an `input_image` data URL, Claude as a base64 block, the Chat Completions vendors as a data URL (the chat path fills the bytes via **`loadImageBytesForVision`**).
+  All of them encode through **`encodeImageBase64`** / **`imageDataURL`** (`image_encoding.go`), which allocate the encoded string once instead of `EncodeToString` plus a `Sprintf` copy (what-iff#419).
   An image without bytes is left out; **`renderClaudeContext`** keeps that turn text-only.
 - **Xiaomi MiMo (Chat Completions):** `XiaomiAdapter` always reasons, streams it as the non-standard `reasoning_content`, and honors **neither** `budget_tokens` nor `reasoning_effort` — only `thinking: {"type":"disabled"}`.
   The adapter raises `MaxCompletionTokens` to `ReasoningMaxOutputTokens`, and when a call finishes with `finish_reason: "length"` and no reply text it is discarded and re-issued once with thinking disabled (which then stays off for the rest of the turn).

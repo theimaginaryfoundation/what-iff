@@ -80,6 +80,8 @@ It is a soft target: memory that is actually live still gets the task killed, wh
 
 ## Consequences
 
+- Our own image encoding (`encodeImageBase64` / `imageDataURL`) now allocates each encoded image once: a 2 MiB image's data URL costs 2.7 MB instead of 10.7 MB.
+  The SDK's marshal amplification is unchanged.
 - The peak heap for a request with 5 history images drops from about 190 MB to about 3 MB, with a 0.05 MB body.
 - Fine detail in older images (small text in a screenshot from earlier turns) is no longer visible to the model; the user can re-attach the image.
 - Images beyond the newest 5 are invisible to the model, though still in the gallery and `find_context`.
