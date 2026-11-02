@@ -11,9 +11,46 @@ import (
 	"go.uber.org/zap"
 )
 
-// historyImagesForMessage collects vision payloads for image attachments on a prior message.
-// The bytes are read from the object store when loadRawBytes is true; with it false there is
-// nothing to send (no provider keeps a copy of the file) and no images are returned.
+// maxHistoryImages caps how many images from prior turns are inlined into a request. History
+// images are there for continuity, which a handful of the most recent ones give; past that each
+// one only adds request size, and every turn re-sends them all (what-iff#419, ADR 0x038).
+const maxHistoryImages = 5
+
+// historyImageSet is the set of prior-turn image attachment IDs a request inlines.
+type historyImageSet map[uuid.UUID]struct{}
+
+// selectHistoryImages picks the attachment IDs of the most recent maxImages images across the
+// replayed turns: history (chronological, post-checkpoint) is newest, then carry-over (the
+// pre-checkpoint turns kept for continuity). Older images are left out of the request.
+func selectHistoryImages(carryOver [][2]*models.ChatMessage, history []*models.ChatMessage, maxImages int) historyImageSet {
+	selected := historyImageSet{}
+	take := func(msg *models.ChatMessage) {
+		if msg == nil {
+			return
+		}
+		for _, att := range msg.Attachments {
+			if len(selected) >= maxImages {
+				return
+			}
+			if att != nil && strings.HasPrefix(att.FileType, models.ImageMIMEPrefix) {
+				selected[att.ID] = struct{}{}
+			}
+		}
+	}
+	for i := len(history) - 1; i >= 0 && len(selected) < maxImages; i-- {
+		take(history[i])
+	}
+	for i := len(carryOver) - 1; i >= 0 && len(selected) < maxImages; i-- {
+		take(carryOver[i][1])
+		take(carryOver[i][0])
+	}
+	return selected
+}
+
+// historyImagesForMessage collects vision payloads for the image attachments on a prior message
+// that are in inline. Prior turns send each image's thumbnail (falling back to the original when
+// none was stored): the model needs continuity there, not detail, and the current turn's
+// attachments are sent at full size separately. An image the store cannot produce is skipped.
 func historyImagesForMessage(
 	ctx context.Context,
 	logger *zap.Logger,
@@ -21,20 +58,30 @@ func historyImagesForMessage(
 	userID uuid.UUID,
 	chatID uuid.UUID,
 	msg *models.ChatMessage,
-	loadRawBytes bool,
+	inline historyImageSet,
 ) []provider.UserMessageImage {
-	if msg == nil || len(msg.Attachments) == 0 {
+	if msg == nil || len(msg.Attachments) == 0 || len(inline) == 0 {
 		return nil
 	}
-	if !loadRawBytes {
-		return nil
+	var out []provider.UserMessageImage
+	for _, att := range msg.Attachments {
+		if att == nil || !strings.HasPrefix(att.FileType, models.ImageMIMEPrefix) {
+			continue
+		}
+		if _, ok := inline[att.ID]; !ok {
+			continue
+		}
+		raw, mediaType := resolveImageBytes(ctx, logger, fileStore, userID, chatID, att, true)
+		if len(raw) == 0 {
+			continue
+		}
+		out = append(out, provider.UserMessageImage{MediaType: mediaType, RawBytes: raw})
 	}
-	imageBytes := loadImageBytesForAttachments(ctx, logger, fileStore, userID, chatID, msg.Attachments)
-	return userMessageImagesFromAttachments(msg.Attachments, imageBytes)
+	return out
 }
 
-// loadImageBytesForAttachments is the canonical path for resolving historical and
-// tool-result image bytes for model context, for every provider's inline image input.
+// loadImageBytesForAttachments resolves the full-size bytes of each image attachment, for the
+// current turn's inline image input (every provider's vision input is built from the store).
 //
 // fileStore and logger may both be nil. A nil store skips object-storage lookups and
 // a nil logger skips debug logging.
@@ -50,28 +97,48 @@ func loadImageBytesForAttachments(
 		if att == nil || !strings.HasPrefix(att.FileType, models.ImageMIMEPrefix) {
 			continue
 		}
-		raw, _ := storage.ResolveAttachmentImageBytes(ctx, logger, fileStore, userID, att, false)
-		if len(raw) == 0 && fileStore != nil && att.S3Key == "" {
-			chatKey := storage.FileKeyForChat(userID, chatID, att.ID, att.Name)
-			data, err := fileStore.DownloadFile(ctx, chatKey)
-			if err == nil && len(data) > 0 {
-				raw = data
-			} else if err != nil && logger != nil {
-				logger.Debug("history vision: chat key miss",
-					zap.String("attachment_id", att.ID.String()),
-					zap.String("key", chatKey),
-					zap.Error(err))
-			}
-		}
-		if len(raw) > 0 {
+		if raw, _ := resolveImageBytes(ctx, logger, fileStore, userID, chatID, att, false); len(raw) > 0 {
 			result[att.ID] = raw
-			continue
-		}
-		if logger != nil {
-			logger.Warn("history vision: could not resolve image bytes",
-				zap.String("attachment_id", att.ID.String()),
-				zap.String("s3_key", att.S3Key))
 		}
 	}
 	return result
+}
+
+// resolveImageBytes is the canonical lookup of an image attachment's bytes for model context:
+// storage.ResolveAttachmentImageBytes, then the chat-scoped key for attachments that predate
+// s3_key. wantThumb prefers the stored thumbnail. It returns the bytes and their media type, or
+// nil (logged) when nothing was found.
+func resolveImageBytes(
+	ctx context.Context,
+	logger *zap.Logger,
+	fileStore storage.FileStore,
+	userID, chatID uuid.UUID,
+	att *models.FileAttachment,
+	wantThumb bool,
+) ([]byte, string) {
+	raw, mediaType := storage.ResolveAttachmentImageBytes(ctx, logger, fileStore, userID, att, wantThumb)
+	if len(raw) == 0 && fileStore != nil && att.S3Key == "" {
+		chatKey := storage.FileKeyForChat(userID, chatID, att.ID, att.Name)
+		data, err := fileStore.DownloadFile(ctx, chatKey)
+		if err == nil && len(data) > 0 {
+			raw, mediaType = data, att.FileType
+		} else if err != nil && logger != nil {
+			logger.Debug("vision: chat key miss",
+				zap.String("attachment_id", att.ID.String()),
+				zap.String("key", chatKey),
+				zap.Error(err))
+		}
+	}
+	if len(raw) == 0 {
+		if logger != nil {
+			logger.Warn("vision: could not resolve image bytes",
+				zap.String("attachment_id", att.ID.String()),
+				zap.String("s3_key", att.S3Key))
+		}
+		return nil, ""
+	}
+	if mediaType == "" {
+		mediaType = att.FileType
+	}
+	return raw, mediaType
 }
