@@ -1,5 +1,5 @@
 import { ChatMessage } from '../../../core/models/message.model';
-import { appendLiveToolCallGroup, appendPendingAssistantGroup, groupMessages, lastUserTurnWithGenerationError, needsPendingAssistantPlaceholder, pendingAssistantPlaceholderMessage, } from './message-grouping.helpers';
+import { appendLiveToolCallGroup, appendPendingAssistantGroup, groupMessages, lastUserTurnWithGenerationError, needsJobRunPlaceholder, needsPendingAssistantPlaceholder, pendingAssistantPlaceholderMessage, } from './message-grouping.helpers';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../chat.constants';
 
 describe('groupMessages', () => {
@@ -158,6 +158,26 @@ describe('needsPendingAssistantPlaceholder', () => {
 
     it('is false once an assistant message exists after the last user', () => {
         expect(needsPendingAssistantPlaceholder([message('1', 'User'), message('2', 'Assistant')], true)).toBe(false);
+    });
+});
+
+describe('needsJobRunPlaceholder', () => {
+    const history = [message('1', 'User'), message('2', 'Assistant')];
+
+    it('shows a run after an earlier reply, which the user-turn rule would hide', () => {
+        expect(needsPendingAssistantPlaceholder(history, true)).toBe(false);
+        expect(needsJobRunPlaceholder(history, true, '2')).toBe(true);
+    });
+
+    it('is false once the run\'s reply lands after the anchor, or when nothing is pending', () => {
+        expect(needsJobRunPlaceholder([...history, message('3', 'Assistant')], true, '2')).toBe(false);
+        expect(needsJobRunPlaceholder(history, false, '2')).toBe(false);
+    });
+
+    it('treats an empty thread or an anchor no longer loaded as "any reply"', () => {
+        expect(needsJobRunPlaceholder([], true, null)).toBe(true);
+        expect(needsJobRunPlaceholder(history, true, null)).toBe(false);
+        expect(needsJobRunPlaceholder(history, true, 'gone')).toBe(false);
     });
 });
 

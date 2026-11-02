@@ -145,6 +145,8 @@ export function pendingAssistantPlaceholderMessage(opts: {
   draftReasoning?: string;
   /** Why the reply has not started (queued behind an earlier turn); shown instead of the dots. */
   pendingStatus?: string;
+  /** Marks whose turn this is when it is not a reply to the user (a job's run, ADR 0x039). */
+  pendingLabel?: string;
   generationPersonality: string;
   thinkingImageUrl: string | null;
 }): ChatMessage {
@@ -154,6 +156,7 @@ export function pendingAssistantPlaceholderMessage(opts: {
     message: opts.draftText,
     model_reasoning: opts.draftReasoning || undefined,
     pending_status: opts.pendingStatus,
+    pending_label: opts.pendingLabel,
     origin: 'Assistant',
     sent_at: CHAT_PENDING_ASSISTANT_PLACEHOLDER_SENT_AT,
     generation_personality: opts.generationPersonality,
@@ -180,6 +183,24 @@ export function needsPendingAssistantPlaceholder(
   }
   if (lastUserIdx < 0) return false;
   for (let i = lastUserIdx + 1; i < messages.length; i++) {
+    if (messages[i].origin === 'Assistant') return false;
+  }
+  return true;
+}
+
+/**
+ * True while a followed job's run (ADR 0x039) is in flight and its reply has not arrived: no
+ * Assistant message yet after the message that was newest when the run was picked up. The run
+ * answers no user message, so needsPendingAssistantPlaceholder's "last user turn" rule can't apply.
+ */
+export function needsJobRunPlaceholder(
+  messages: readonly ChatMessage[],
+  assistantJobPending: boolean,
+  afterMessageId: string | null,
+): boolean {
+  if (!assistantJobPending) return false;
+  const afterIdx = afterMessageId ? messages.findIndex(message => message.id === afterMessageId) : -1;
+  for (let i = afterIdx + 1; i < messages.length; i++) {
     if (messages[i].origin === 'Assistant') return false;
   }
   return true;

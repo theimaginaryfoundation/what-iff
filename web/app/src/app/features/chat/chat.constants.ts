@@ -24,6 +24,12 @@ export const TEXTAREA_LINE_HEIGHT_PX = 24;
  * smaller steps. One small GET per second, for the active thread's turn only.
  */
 export const CHAT_JOB_POLL_INTERVAL_MS = 1000;
+/**
+ * How often an open, idle thread asks the server whether a turn started there without this tab:
+ * a scheduled job's run, a webhook, another tab (ADR 0x039). One small GET, while the tab is
+ * visible and no reply is landing; nothing else pushes a new turn to the client.
+ */
+export const CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS = 5000;
 export const STREAMING_INTERVAL_MS = 25;
 export const STREAMING_SCROLL_CHECK_INTERVAL = 10;
 export const CODE_BLOCK_CHUNK_SIZE = 30;

@@ -107,6 +107,11 @@ export interface JobFilters {
 export interface ActiveChatMessageJob {
   job_id: string;
   status: JobStatus;
-  /** The user turn the job answers (set by the thread-level lookup). */
+  /**
+   * The kind of turn (set by the thread-level lookup): `chat_message` answers a user's message,
+   * `agent_job_run` is a scheduled job's or webhook's run (ADR 0x039).
+   */
+  job_type?: 'chat_message' | 'agent_job_run';
+  /** The user turn the job answers (set by the thread-level lookup); absent for a job's run. */
   message_id?: string;
 }

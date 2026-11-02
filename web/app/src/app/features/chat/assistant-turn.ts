@@ -1,5 +1,5 @@
 import { Signal, computed, signal } from '@angular/core';
-import { Subscription, finalize } from 'rxjs';
+import { Subscription, finalize, interval } from 'rxjs';
 import { take } from 'rxjs/operators';
 
 import { ChatStreamingService } from '../../core/services/chat-streaming.service';
@@ -34,6 +34,23 @@ export interface AssistantTurnDeps {
    * else refetches it until the tab next regains focus.
    */
   onJobSettled?: (chatId: string) => void;
+  /**
+   * Watch the active thread for turns this tab did not start (a scheduled job's run, a webhook,
+   * another tab) every this many ms; omitted, a running turn is only picked up on thread entry
+   * and tab-return syncs (ADR 0x039). The watch lives as long as the turn: dispose() ends it.
+   */
+  watchIntervalMs?: number;
+  /** Whether a watch tick may ask now: the tab is visible and the thread has loaded. */
+  canWatch?: () => boolean;
+}
+
+/**
+ * A scheduled job's (or webhook's) run being followed in the open thread (ADR 0x039). It answers
+ * no saved user message, so its reply is told apart by position: the first assistant message
+ * after the message that was newest when the run was picked up (null when the thread was empty).
+ */
+export interface FollowedJobRun {
+  afterMessageId: string | null;
 }
 
 /**
@@ -60,6 +77,7 @@ export class AssistantTurn {
   private readonly _liveToolCalls = signal<readonly ChatTurnToolCall[]>([]);
   private readonly _waitingOn = signal<ChatTurnWaiting | null>(null);
   private readonly _advancedProgress = signal<ChatTurnAdvancedProgress | null>(null);
+  private readonly _jobRun = signal<FollowedJobRun | null>(null);
   /** Live model reasoning for the pending reply; replaced wholesale on each job snapshot. */
   private readonly _pendingAssistantDraftReasoning = signal('');
 
@@ -91,6 +109,10 @@ export class AssistantTurn {
   /** An Advanced turn's current step and plan (ADR 0x026); null on Standard turns and when idle. */
   readonly advancedProgress = this._advancedProgress.asReadonly();
   readonly pendingAssistantDraftReasoning = this._pendingAssistantDraftReasoning.asReadonly();
+  /** The job's run being followed, when the in-flight turn is one (not a reply to the user); null otherwise. */
+  readonly jobRun = this._jobRun.asReadonly();
+  /** True while the in-flight turn is a job's run, so the turn being generated is not the user's. */
+  readonly jobRunActive = computed(() => this._jobRun() !== null && this.inferenceGenerating());
   /** True while a chat_message job is in flight (after send) but not yet finished. */
   readonly jobPending = computed(() => this._activeChatJobId() !== null);
   /**
@@ -122,6 +144,14 @@ export class AssistantTurn {
       }
     });
     this.subscriptions.add(deps.messageService.messages$.subscribe(messages => this.maybeStreamLatestAssistant(messages)));
+    if (deps.watchIntervalMs) {
+      this.subscriptions.add(
+        interval(deps.watchIntervalMs).subscribe(() => {
+          const threadId = deps.activeThreadId();
+          if (threadId && (deps.canWatch?.() ?? true)) this.resumeIfRunning(threadId);
+        }),
+      );
+    }
   }
 
   /** Forget the turn on a thread switch. Its server-side job keeps running. */
@@ -137,6 +167,7 @@ export class AssistantTurn {
     this._activeJobPhase.set(null);
     this._cancelRequestedJobId.set(null);
     this._streamingMessageId.set(null);
+    this._jobRun.set(null);
     this.clearLiveProgress();
   }
 
@@ -150,6 +181,7 @@ export class AssistantTurn {
     this.expectingAssistantResponse = true;
     this._cancelRequestedJobId.set(null);
     this._activeChatJobId.set(AssistantTurn.PENDING_SEND_JOB_ID);
+    this._jobRun.set(null);
     // The placeholder shows from here; it must not carry the previous turn's tool rows.
     this.clearLiveProgress();
   }
@@ -242,6 +274,7 @@ export class AssistantTurn {
               this.clearLiveProgress();
               this._activeChatJobId.set(null);
               this._activeJobPhase.set(null);
+              this._jobRun.set(null);
             }
             if (this._cancelRequestedJobId() === jobId) {
               this._cancelRequestedJobId.set(null);
@@ -265,10 +298,11 @@ export class AssistantTurn {
 
   /**
    * Picks a running turn back up when the user (re)enters a thread: switching back from another
-   * thread, a refresh, or a tab-focus sync. Job polls are scoped to the active thread (#144), so
-   * this is the only way a turn that kept running while the user was elsewhere gets its
-   * typing placeholder and streaming back. The server is asked for the thread's active job
-   * directly rather than inferring an "unanswered" user turn from the loaded page.
+   * thread, a refresh, or a tab-focus sync, and on each watch tick. Job polls are scoped to the
+   * active thread (#144), so this is the only way a turn that kept running while the user was
+   * elsewhere, or that this tab did not start (a scheduled job's run), gets its typing placeholder
+   * and streaming. The server is asked for the thread's active job directly rather than inferring
+   * an "unanswered" user turn from the loaded page.
    */
   resumeIfRunning(threadId: string): void {
     // A job still in its post-inference phases doesn't block picking up a newer turn (e.g. one
@@ -279,12 +313,35 @@ export class AssistantTurn {
         next: active => {
           if (!this.isActiveThread(threadId) || !active?.job_id) return;
           if (isTerminalJobStatus(active.status)) return;
+          // Already followed by this turn (polls are per tab and torn down on a thread switch, and
+          // followJobRun marks a job's run in the same step that starts its poll): nothing to do.
+          if (this.deps.jobService.isJobBeingPolled(active.job_id)) return;
+          if (active.job_type === 'agent_job_run' && !active.message_id && !isPostInferencePhase(active.status)) {
+            this.followJobRun(threadId, active.job_id);
+            return;
+          }
           if (active.message_id) this.ensureUserTurnLoaded(threadId, active.message_id);
           this.startPolling(active.job_id, threadId);
         },
         error: () => {
           // Best-effort: the thread still renders; a later sync can resume.
         },
+      }),
+    );
+  }
+
+  /**
+   * Follows a job's run that is still generating (ADR 0x039): polled like a user's turn, its reply
+   * placed after the newest message loaded now. One picked up only after it replied is polled as
+   * a plain turn instead (resumeIfRunning), since its reply may already be loaded.
+   */
+  private followJobRun(threadId: string, jobId: string): void {
+    this.subscriptions.add(
+      this.deps.messageService.messages$.pipe(take(1)).subscribe(messages => {
+        if (!this.isActiveThread(threadId)) return;
+        this.startPolling(jobId, threadId);
+        if (this._activeChatJobId() !== jobId) return;
+        this._jobRun.set({ afterMessageId: messages[messages.length - 1]?.id ?? null });
       }),
     );
   }
@@ -317,6 +374,10 @@ export class AssistantTurn {
   private maybeStreamLatestAssistant(messages: readonly ChatMessage[]): void {
     const latest = messages[messages.length - 1];
     if (!latest || latest.origin !== 'Assistant' || !latest.message) return;
+    // A job's run answers no user message: until its reply lands, the newest assistant message
+    // is an earlier reply, which must neither end the run's draft nor animate again.
+    const jobRun = this._jobRun();
+    if (jobRun && !isAfterMessage(messages, jobRun.afterMessageId, latest.id)) return;
     if (this._pendingAssistantDraftText()) {
       this.finishPendingDraftStream();
       return;
@@ -334,12 +395,10 @@ export class AssistantTurn {
     if (!expectedUserId) {
       return true;
     }
-    const userIdx = messages.findIndex(message => message.id === expectedUserId);
-    if (userIdx < 0) {
+    if (!messages.some(message => message.id === expectedUserId)) {
       return false;
     }
-    const assistantIdx = messages.findIndex(message => message.id === assistantMessageId);
-    return assistantIdx > userIdx;
+    return isAfterMessage(messages, expectedUserId, assistantMessageId);
   }
 
   /** The job id and progress payload last applied to the live signals (null after a reset). */
@@ -503,9 +562,26 @@ export function parseChatTurnAdvancedProgress(progress: string | undefined): Cha
   }
 }
 
+/** Marks a followed job's run on its pending reply (ADR 0x039). */
+export const JOB_RUN_PENDING_LABEL = 'Job running';
+
+/** What the composer says while a job's run holds the thread (ADR 0x039). */
+export const JOB_RUN_COMPOSER_NOTICE = 'A job is replying in this thread. You can send once it finishes, or stop it.';
+
 /** The placeholder text for a turn queued behind an earlier one. */
 export function chatTurnWaitingLabel(_waiting: ChatTurnWaiting): string {
   return 'Waiting for the previous reply…';
+}
+
+/**
+ * Whether messageId comes after afterId in the list; with no afterId (or one no longer loaded),
+ * whether it is in the list at all.
+ */
+export function isAfterMessage(messages: readonly ChatMessage[], afterId: string | null, messageId: string): boolean {
+  const idx = messages.findIndex(message => message.id === messageId);
+  if (idx < 0) return false;
+  if (!afterId) return true;
+  return idx > messages.findIndex(message => message.id === afterId);
 }
 
 function isTerminalJobStatus(status: Job['status']): boolean {

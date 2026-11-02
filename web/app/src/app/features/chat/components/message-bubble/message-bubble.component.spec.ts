@@ -352,6 +352,17 @@ describe('MessageBubbleComponent', () => {
         expect(fixture.nativeElement.querySelector('.bubble__pending-dots')).toBeNull();
     });
 
+    it('marks a job\'s run on its pending reply, and only there', () => {
+        fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), pending_label: 'Job running' });
+        fixture.componentRef.setInput('displayContent', 'Checking the forecast');
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.bubble__pending-label')?.textContent).toContain('Job running');
+
+        fixture.componentRef.setInput('message', { ...message('Assistant'), pending_label: 'Job running' });
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.bubble__pending-label')).toBeNull();
+    });
+
     it('renders typing dots for the pending assistant placeholder without copy chrome', () => {
         fixture.componentRef.setInput('message', pendingAssistantMessage());
         fixture.componentRef.setInput('displayContent', '');

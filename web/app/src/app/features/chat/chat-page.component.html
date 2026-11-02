@@ -228,6 +228,7 @@
             [composerPlaceholder]="sendGate.composerPlaceholder(selectedPersonalityName())"
             [disabled]="session.thread()?.archived === true || sendGate.blocked()"
             [busy]="session.composerBusy()"
+            [busyNotice]="composerBusyNotice()"
             [modelPickerDisabled]="session.composerBusy() || session.thread()?.archived === true"
             [isGenerating]="session.isGenerating()"
             [generationRetryTarget]="retryableUserTurn()"

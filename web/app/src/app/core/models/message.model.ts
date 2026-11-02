@@ -94,6 +94,8 @@ export interface ChatMessage {
   generation_expression_reasoning?: string | null;
   /** Client-only, on the pending-reply placeholder: why the reply has not started (shown instead of the dots). */
   pending_status?: string;
+  /** Client-only, on the pending-reply placeholder: whose turn it is when not the user's (a job's run). */
+  pending_label?: string;
   /** Reasoning/thinking the model reported for this assistant turn (GLM, MiMo). Display-only. */
   model_reasoning?: string | null;
   /** Advanced turns only (ADR 0x026): the run's notes, plan and end reason. Replaces model_reasoning there. */

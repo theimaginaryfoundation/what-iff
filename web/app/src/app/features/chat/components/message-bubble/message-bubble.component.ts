@@ -7,7 +7,7 @@ import { ToolCall } from '../../../../core/models/toolcall.model';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../../chat.constants';
 import { parseThreadReferenceBlock } from '../../helpers/thread-reference.helpers';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
-import { BrainIconComponent, ChevRightIconComponent, StarIconComponent } from '../../../../shared/ui/icons/icons';
+import { BrainIconComponent, ChevRightIconComponent, ClockIconComponent, StarIconComponent } from '../../../../shared/ui/icons/icons';
 import { MessageContentComponent } from '../message-content/message-content.component';
 import { AgentRunNotesComponent } from '../agent-run-notes/agent-run-notes.component';
 import { AgentRunView, agentRunView } from '../../helpers/agent-run.helpers';
@@ -15,7 +15,7 @@ import { AgentRunView, agentRunView } from '../../helpers/agent-run.helpers';
 @Component({
   selector: 'app-message-bubble',
   standalone: true,
-  imports: [AgentRunNotesComponent, MessageContentComponent, TooltipDirective, StarIconComponent, BrainIconComponent, ChevRightIconComponent],
+  imports: [AgentRunNotesComponent, MessageContentComponent, TooltipDirective, StarIconComponent, BrainIconComponent, ChevRightIconComponent, ClockIconComponent],
   template: `
     <article
       class="bubble"
@@ -24,6 +24,12 @@ import { AgentRunView, agentRunView } from '../../helpers/agent-run.helpers';
       [class.bubble--bookmarked]="message().bookmarked && !isPendingPlaceholder()"
       [attr.aria-label]="ariaLabel()"
     >
+      @if (isPendingPlaceholder() && message().pending_label; as label) {
+        <span class="bubble__pending-label">
+          <ui-clock-icon [size]="12" />
+          <span>{{ label }}</span>
+        </span>
+      }
       @if (agentRun(); as run) {
         <!-- A saved Advanced reply (ADR 0x026): its per-step working notes, plan and stop reason,
              collapsed like the reasoning below. It carries no model_reasoning. -->
@@ -429,6 +435,21 @@ import { AgentRunView, agentRunView } from '../../helpers/agent-run.helpers';
     .bubble:hover .bubble__meta,
     .bubble:focus-within .bubble__meta {
       opacity: 1;
+    }
+
+    .bubble__pending-label {
+      align-items: center;
+      background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+      border-radius: 999px;
+      color: var(--color-accent);
+      display: flex;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      gap: 0.25rem;
+      letter-spacing: 0.01em;
+      margin-bottom: 0.375rem;
+      padding: 0.125rem 0.5rem;
+      width: fit-content;
     }
 
     .bubble__pending-status {
