@@ -121,15 +121,16 @@ func GenerateThumbnail(data []byte, maxPx int) ([]byte, error) {
 }
 
 // UploadBytesToGalleryPath uploads data to the canonical gallery path for an
-// image attachment and generates + uploads a thumbnail. Both are best-effort:
-// failures are logged but never returned.
+// image attachment, and its thumbnail: thumb when the caller already made one,
+// otherwise one generated here. Both are best-effort: failures are logged but
+// never returned.
 func UploadBytesToGalleryPath(
 	ctx context.Context,
 	fileStore storage.FileStore,
 	logger *zap.Logger,
 	userID, attachmentID uuid.UUID,
 	filename, contentType string,
-	data []byte,
+	data, thumb []byte,
 ) {
 	if fileStore == nil || len(data) == 0 {
 		return
@@ -142,12 +143,14 @@ func UploadBytesToGalleryPath(
 			zap.Error(err))
 	}
 
-	thumb, err := GenerateThumbnail(data, DefaultThumbnailMaxPx)
-	if err != nil {
-		logger.Warn("imageutil: failed to generate thumbnail",
-			zap.String("attachment_id", attachmentID.String()),
-			zap.Error(err))
-		return
+	if len(thumb) == 0 {
+		var err error
+		if thumb, err = GenerateThumbnail(data, DefaultThumbnailMaxPx); err != nil {
+			logger.Warn("imageutil: failed to generate thumbnail",
+				zap.String("attachment_id", attachmentID.String()),
+				zap.Error(err))
+			return
+		}
 	}
 	thumbKey := storage.FileKeyForImageThumbnail(userID, attachmentID)
 	if err := fileStore.UploadFile(ctx, thumbKey, thumb, "image/jpeg"); err != nil {

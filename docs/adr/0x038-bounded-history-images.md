@@ -52,7 +52,17 @@ Images with any transparent pixel stay PNG, because JPEG has no alpha channel an
 Re-encoding still strips EXIF and other metadata, which the Buzz relay's `PrepareMedia` relies on.
 Existing PNG uploads are not converted.
 
-### 4. GOMEMLIMIT in deployed environments (private repo)
+### 4. Images generated in a turn go back to the model as thumbnails
+
+`generate_image` makes each image's 256 px JPEG thumbnail as soon as the image arrives, and carries it on the attachment (`FileAttachment.Thumbnail`, which is never persisted).
+For the rest of the turn the tool loop shows the model that thumbnail rather than the full PNG.
+When the reply is saved, the same thumbnail is stored as the gallery thumbnail, so each image is still decoded only once.
+The model only needs to see what it made, and a thumbnail is what it will see of that image on later turns anyway (decision 1).
+Tool images without a thumbnail keep full detail, because the model has to read them: an MCP screenshot, or a file `find_context` fetched.
+In a simulated GPT-luna turn (Responses API, 3 rounds of `generate_image` × 4 images of 3 MB each), peak heap fell from about 625 MB to about 118 MB.
+That turn shape matches the customer report on its own, without any history.
+
+### 5. GOMEMLIMIT in deployed environments (private repo)
 
 The API container gets `GOMEMLIMIT` at 80% of its share of the task.
 That share is the task memory minus the OTel sidecar's 128 MB, so the limit is 716 MiB in prod and 307 MiB in dev.
@@ -78,7 +88,9 @@ It is a soft target: memory that is actually live still gets the task killed, wh
 
 ## Not done yet
 
-- Within a single turn, images that `generate_image` produced are still sent back at full size, and the Claude adapter re-sends them on every tool round (up to 4 images × 10 rounds).
-- Requests are still marshalled with roughly 10× amplification, so the current turn's own full-size attachments remain the dominant cost.
+- Requests are still marshalled with roughly 10× amplification, so the current turn's own full-size attachments (user uploads, MCP screenshots) remain the dominant cost.
+  Removing it means keeping image bytes out of the SDK marshal entirely: marshal the request with a small placeholder per image, then stream the body with the base64 spliced in.
+  openai-go's `option.WithRequestBody` accepts an `io.Reader`, but it does not retry a plain reader, so retries would need a re-readable body.
+- A turn still holds each generated image's base64 (`FileContent`) until the reply is saved, and the SDK decodes up to 4 Images API responses in parallel.
 - Nothing back-fills thumbnails for old attachments that lack one; those fall back to the original (bounded by the cap).
 - The unused `file_attachments.file_content` column is still in the schema and still loaded by `WithFileAttachments()`.

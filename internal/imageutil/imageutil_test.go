@@ -2,6 +2,7 @@ package imageutil
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/color"
 	"image/draw"
@@ -9,7 +10,10 @@ import (
 	"os"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
+	"go.uber.org/zap"
 )
 
 func TestNormalizeForUploadScalesOpaqueToJPEG(t *testing.T) {
@@ -101,4 +105,34 @@ func TestScaledDimensions(t *testing.T) {
 			require.Equal(t, tt.expectedH, height)
 		})
 	}
+}
+
+type recordingStore struct{ files map[string][]byte }
+
+func (s *recordingStore) UploadFile(_ context.Context, key string, content []byte, _ string) error {
+	s.files[key] = content
+	return nil
+}
+func (s *recordingStore) DownloadFile(context.Context, string) ([]byte, error) { return nil, nil }
+func (s *recordingStore) DeleteFile(context.Context, string) error             { return nil }
+
+// A thumbnail the caller already made is stored as is; without one, it is generated.
+func TestUploadBytesToGalleryPathUsesTheGivenThumbnail(t *testing.T) {
+	t.Parallel()
+
+	var pic bytes.Buffer
+	require.NoError(t, png.Encode(&pic, image.NewNRGBA(image.Rect(0, 0, 512, 512))))
+	userID, attID := uuid.New(), uuid.New()
+	thumbKey := storage.FileKeyForImageThumbnail(userID, attID)
+
+	store := &recordingStore{files: map[string][]byte{}}
+	UploadBytesToGalleryPath(t.Context(), store, zap.NewNop(), userID, attID, "a.png", "image/png", pic.Bytes(), []byte("premade"))
+	require.Equal(t, []byte("premade"), store.files[thumbKey])
+	require.Equal(t, pic.Bytes(), store.files[storage.FileKeyForImage(userID, attID, "a.png")])
+
+	store = &recordingStore{files: map[string][]byte{}}
+	UploadBytesToGalleryPath(t.Context(), store, zap.NewNop(), userID, attID, "a.png", "image/png", pic.Bytes(), nil)
+	_, format, err := image.Decode(bytes.NewReader(store.files[thumbKey]))
+	require.NoError(t, err)
+	require.Equal(t, "jpeg", format)
 }

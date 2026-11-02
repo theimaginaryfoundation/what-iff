@@ -41,6 +41,10 @@ type FileAttachment struct {
 	// FileContent is ephemeral base64 image data used only while forwarding a tool result
 	// into a model vision request. Persisted attachment bytes live exclusively in S3.
 	FileContent string `json:"-"`
+	// Thumbnail is an ephemeral JPEG thumbnail a tool made of an image it produced (generate_image).
+	// When set, the rest of the turn shows the model this instead of the full image, and saving the
+	// reply stores it as the image's thumbnail rather than decoding the image again (what-iff#419).
+	Thumbnail []byte `json:"-"`
 	// ContextOnly marks an existing file a tool fetched for the model to look at (find_context's
 	// fetch mode) rather than something the reply produced. The reply shows it, so the person sees
 	// what the model saw, but as a reference row sharing the original's stored object
