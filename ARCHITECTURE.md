@@ -624,11 +624,12 @@ var supportedTypes = []string{
 Uploads are handled in `internal/handlers/handlerutils` (`ProcessUpload`, then `StoreChatAttachment` or the equivalent in the personality and gallery handlers):
 
 1. Detect the file type from the name and reject unsupported ones.
-2. Buffer the upload to a temp file (30 MB cap) and normalize images (re-encoded as PNG, at most 2048 px on the long side).
+2. Buffer the upload to a temp file (30 MB cap) and normalize images (re-encoded as JPEG, or PNG when the image has transparency, at most 2048 px on the long side).
 3. Create the `FileAttachment` record and archive the temp file to the object store (S3, or a local directory when `S3_FILE_BUCKET` is unset), plus a thumbnail for images. The object store is the only copy of the file; nothing is uploaded to a model provider.
 4. Chunk and embed text files for `find_context` (pgvector).
 
 At inference time an image attachment's bytes are read back from the object store and sent inline in the message (a base64 block for Claude, a data URL for OpenAI and the Chat Completions vendors).
+The current turn's images go at full size. Prior turns replay only the 5 most recent images, as their thumbnails (ADR 0x038): every turn re-sends its history, and the provider SDKs' JSON encoding needs roughly ten times the request's image bytes in memory.
 
 ### AI-Generated File Handling
 

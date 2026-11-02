@@ -190,7 +190,11 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   On failure or unknown key, **no** portrait is selected (no default first slot).
   **`generation_expression_reasoning`** is persisted when set; continuity echoes it.
   Minimal standalone prompt when context is nil.
-- **User images:** Chat turns call **`loadImageBytesForVision`** before building `ModelContext` so **`UserMessageImage.RawBytes`** can be set (current turn and, for vision models, history); every renderer then sends the bytes inline.
+- **User images:** Chat turns call **`loadImageBytesForVision`** before building `ModelContext` so **`UserMessageImage.RawBytes`** can be set for the current turn (full size); every renderer then sends the bytes inline.
+  For vision models, history turns replay images too, but only the newest **`maxHistoryImages`** (5) across history and carry-over (**`selectHistoryImages`**), and as their stored thumbnails, falling back to the original when none exists (`history_images.go`, [ADR 0x038](../../docs/adr/0x038-bounded-history-images.md)).
+  Each replayed image is re-encoded into every request, and the SDKs' JSON marshal holds about ten times the image bytes, so full-size history images could OOM a small host (what-iff#419).
+  Within a turn, `generate_image` attaches each image's thumbnail (`FileAttachment.Thumbnail`); `toolResultImagesFromAttachments` shows the model that, and the save stores it as the gallery thumbnail.
+  Tool images without one (MCP screenshots, `find_context` fetches) still go at full size.
   Uploads are no longer mirrored to OpenAI's Files API, so there is no `file_id` path.
   Details in `provider/_PACKAGE_SUMMARY.md`.
 - **Claude checkpoint context isolation:** `runCheckpointClaude` (`message.go`) runs scratchpad → memory on a **clone** of inference context because `updateScratchpadClaude` / `extractMemoriesWithScratchpadDeltaClaude` **mutate** the context they receive (scratchpad-update / memory-extraction prompt turns).

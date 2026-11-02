@@ -40,7 +40,7 @@ func UploadImageToGalleryPath(
 		return
 	}
 
-	imageutil.UploadBytesToGalleryPath(ctx, fileStore, logger, userID, attachmentID, filename, contentType, data)
+	imageutil.UploadBytesToGalleryPath(ctx, fileStore, logger, userID, attachmentID, filename, contentType, data, nil)
 }
 
 // UploadThumbnailFromPath reads the file at tempFilePath, generates a JPEG thumbnail,
@@ -90,5 +90,5 @@ func UploadImageBytesToGalleryPath(
 	filename, contentType string,
 	data []byte,
 ) {
-	imageutil.UploadBytesToGalleryPath(ctx, fileStore, logger, userID, attachmentID, filename, contentType, data)
+	imageutil.UploadBytesToGalleryPath(ctx, fileStore, logger, userID, attachmentID, filename, contentType, data, nil)
 }

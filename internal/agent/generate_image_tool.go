@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
@@ -349,6 +351,7 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 			Name:        name,
 			FileType:    fileType,
 			FileContent: images[i].Base64,
+			Thumbnail:   a.generatedImageThumbnail(images[i].Base64),
 			Folder:      folder,
 			// ChatMessageID intentionally omitted: it will be set when the assistant message is persisted.
 		})
@@ -386,6 +389,22 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 		return "", nil, err
 	}
 	return out, attachments, nil
+}
+
+// generatedImageThumbnail returns the gallery thumbnail of a generated image, made once here so
+// the model is shown it for the rest of the turn and the save stores it (see
+// models.FileAttachment.Thumbnail). It returns nil when the image cannot be decoded, which leaves
+// both to their full-size fallbacks.
+func (a *Agent) generatedImageThumbnail(b64 string) []byte {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(b64))
+	if err == nil {
+		var thumb []byte
+		if thumb, err = imageutil.GenerateThumbnail(raw, imageutil.DefaultThumbnailMaxPx); err == nil {
+			return thumb
+		}
+	}
+	a.logger.Warn("generate_image: could not make a thumbnail of a generated image", zap.Error(err))
+	return nil
 }
 
 // imageSafetyViolationFor reports whether err is the generator's vendor refusing

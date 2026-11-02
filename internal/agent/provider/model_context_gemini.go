@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -89,7 +88,7 @@ func geminiUserMessageParts(text string, images []UserMessageImage) []openai.Cha
 		if strings.TrimSpace(mt) == "" {
 			mt = "image/jpeg"
 		}
-		url := fmt.Sprintf("data:%s;base64,%s", mt, base64.StdEncoding.EncodeToString(im.RawBytes))
+		url := imageDataURL(mt, im.RawBytes)
 		parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
 			URL: url,
 		}))

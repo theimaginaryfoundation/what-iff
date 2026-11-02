@@ -2648,7 +2648,7 @@ func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID,
 		var s3Key string
 		if strings.HasPrefix(fileType, models.ImageMIMEPrefix) {
 			// Keep generated images on the canonical gallery path (full-size + thumb).
-			imageutil.UploadBytesToGalleryPath(ctx, a.fileStore, a.logger, userID, created.ID, name, fileType, rawBytes)
+			imageutil.UploadBytesToGalleryPath(ctx, a.fileStore, a.logger, userID, created.ID, name, fileType, rawBytes, a0.Thumbnail)
 			s3Key = storage.FileKeyForImage(userID, created.ID, name)
 		} else {
 			chatIDRef := agentMessage.ChatID
