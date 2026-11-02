@@ -17,6 +17,9 @@
   A non-destructive migration keeps the columns but drops their foreign keys, so a value left behind would point at a deleted mode or bring back a removed link on the next boot.
   `cmd/api-server` runs it between a non-destructive `Schema.Create` and the destructive pass, so `DESTRUCTIVE_MIGRATION=true` cannot drop the columns before they are copied.
   Idempotent: a no-op once the columns are cleared or dropped; `cmd/api-server` calls it on every start that migrates.
+- **`PrebuildIndexes`** (`concurrent_indexes.go`): just before the ent migration, builds with `CREATE INDEX CONCURRENTLY` every plain index the generated schema (`ent/migrate.Tables`) declares on an existing table but the database lacks, under ent's own name and columns, so the migration finds it present instead of building it with a write-blocking `CREATE INDEX`.
+  New tables, columns the migration adds, annotated (partial, typed, op-class) indexes and over-long names are left to the migration; a failed build is logged and left to it too.
+  An invalid index left by an interrupted build is dropped and rebuilt; PostgreSQL only.
 - **`BackfillFileOrigins`** (`file_origins.go`): marks rows the legacy `file_attachments.agent_authored` flag set with `origin = 'agent'` (the enum that replaced the flag, ADR 0x035); idempotent and a no-op once the column is dropped.
 - **`BackfillRitualSlugs`** (`ritual_slugs.go`): gives rituals created before the `slug` column a slug derived from their name, unique per owner (`skills.Slugify` + `skills.UniqueSlug`), so the partial unique index can hold; also called on every migrating start and finds work once.
 
@@ -46,6 +49,8 @@
 ## Testing
 
 - *(Typically integration-tested via app startup; add focused tests if connection logic grows.)*
+- `concurrent_indexes_test.go` — the DDL and what is left to the migration, that the memory list indexes lead with the owner column, and the non-PostgreSQL no-op.
+- `foreign_keys_test.go` — every foreign key into `mcp_servers` cascades on delete, so a server with OAuth sessions can be deleted.
 - `poolmetrics_test.go` — pool gauges against an in-memory sqlite `*sql.DB`.
 - `seed_test.go` — `EnsureSeedData` over sqlmock: with catalog seeding off it issues no catalog query, and with it on the catalog step runs.
 - `ritual_links_test.go` — the link backfill against in-memory sqlite with foreign keys on, shaped like a non-destructive Postgres migration: moves once and clears the columns, skips links to deleted modes and jobs, keeps a removed link removed across restarts, and is a no-op without the legacy columns.
