@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -162,4 +163,59 @@ func TestHandleEphemeralPromptSync_DetachesFromCallerCancellation(t *testing.T) 
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
+}
+
+// A scheduled run's ticket is stoppable like a user turn's job (ADR 0x039): the thread's Stop
+// finds it among the in-process running jobs and cancels the run's context; once the reply is
+// saved (release) a late Stop no longer reaches it.
+func TestStoppableTurnTicket(t *testing.T) {
+	t.Parallel()
+	a := newCancelTestAgent()
+	userID := uuid.New()
+
+	t.Run("no ticket", func(t *testing.T) {
+		parent := context.Background()
+		ctx, release, stop := a.stoppableTurnTicket(parent, userID, nil)
+		require.Equal(t, parent, ctx)
+		release()
+		stop()
+		require.Empty(t, a.runningJobCancels)
+	})
+
+	t.Run("stop reaches the run", func(t *testing.T) {
+		ticket := &models.Job{ID: uuid.New(), UserID: userID}
+		ctx, release, stop := a.stoppableTurnTicket(context.Background(), userID, ticket)
+		defer stop()
+		defer release()
+		require.True(t, a.hasRunningJob(ticket.ID))
+		require.NoError(t, a.cancelRunningJob(userID, ticket.ID))
+		require.ErrorIs(t, ctx.Err(), context.Canceled)
+	})
+
+	t.Run("released after the reply", func(t *testing.T) {
+		ticket := &models.Job{ID: uuid.New(), UserID: userID}
+		ctx, release, stop := a.stoppableTurnTicket(context.Background(), userID, ticket)
+		release()
+		release() // the turn's deferred cleanup releases again
+		require.False(t, a.hasRunningJob(ticket.ID))
+		require.NoError(t, a.cancelRunningJob(userID, ticket.ID))
+		require.NoError(t, ctx.Err(), "post-processing keeps running")
+		stop()
+		require.ErrorIs(t, ctx.Err(), context.Canceled)
+	})
+}
+
+func TestStoppedTurnError(t *testing.T) {
+	t.Parallel()
+	live := context.Background()
+	stopped, cancel := context.WithCancel(context.Background())
+	cancel()
+	providerErr := errors.New("provider call failed")
+
+	require.NoError(t, stoppedTurnError(stopped, nil))
+	require.Equal(t, providerErr, stoppedTurnError(live, providerErr), "a live run's failure stays a failure")
+	got := stoppedTurnError(stopped, providerErr)
+	require.ErrorIs(t, got, context.Canceled, "a stopped run reports the stop")
+	require.ErrorIs(t, got, providerErr)
+	require.Equal(t, context.Canceled, stoppedTurnError(stopped, context.Canceled))
 }

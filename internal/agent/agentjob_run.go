@@ -273,9 +273,20 @@ func (a *Agent) handleEphemeralPrompt(
 	if err != nil {
 		return nil, err
 	}
-	defer func() { endTurn(retErr) }()
-	// The job an Advanced run keeps its draft on (ADR 0x026): the tracking job, or a scheduled
-	// run's queue ticket.
+	// The thread's Stop reaches a scheduled run through its ticket (ADR 0x039).
+	// A scheduled run releases the Stop and ends its ticket early, once its reply is saved (below);
+	// releaseStop and endTurn are idempotent, so this cleanup covers every other exit. stopRun only
+	// runs here, as the turn returns: the post-processing below is synchronous and already done.
+	ctx, releaseStop, stopRun := a.stoppableTurnTicket(ctx, userID, ticket)
+	defer func() {
+		retErr = stoppedTurnError(ctx, retErr)
+		releaseStop()
+		stopRun()
+		endTurn(retErr)
+	}()
+	// The job the turn streams its draft, reasoning and tool timeline on, and an Advanced run
+	// keeps its draft on (ADR 0x026): the tracking job, or a scheduled run's queue ticket, so the
+	// thread shows a scheduled run live like a reply to the user (ADR 0x039).
 	draftJob := trackingJob
 	if draftJob == nil {
 		draftJob = ticket
@@ -358,7 +369,7 @@ func (a *Agent) handleEphemeralPrompt(
 		return nil, fmt.Errorf("failed to build model context: %w", err)
 	}
 
-	agentMessage, resp, err := a.generateAssistantForMessage(ctx, userID, trackingJob, ephemeralUserMessage, chatCtx, modelContext)
+	agentMessage, resp, err := a.generateAssistantForMessage(ctx, userID, draftJob, ephemeralUserMessage, chatCtx, modelContext)
 	if err != nil {
 		a.finalizeEphemeralAdvancedDraft(ctx, userID, draftJob, chatID, err)
 		return nil, err
@@ -382,14 +393,15 @@ func (a *Agent) handleEphemeralPrompt(
 	// The reply and the chat's response chain are saved, so a turn queued behind this one may start;
 	// the expression pick and checkpoint below overlap it. A tracked job opens the gate through its
 	// own status (advanceJobInferenceComplete). A scheduled run has no job row, so its queue ticket
-	// is ended here.
+	// is ended here, pointing at the reply (and with its draft cleared: the reply took the run's
+	// draft tool calls) so a client following the ticket fetches the reply as it does a user turn's.
 	if trackingJob == nil {
 		if ticket != nil && a.ds != nil {
-			// The reply took the run's draft tool calls; drop the rest of the draft from the ticket.
-			if err := a.ds.ClearJobDraftDeltas(ctx, userID, ticket.ID); err != nil {
-				a.logger.Warn("failed to clear the turn ticket's draft", zap.Error(err))
+			if err := a.advanceJobInferenceComplete(ctx, ticket, agentMessage.ID); err != nil {
+				a.logger.Warn("failed to record the reply on the turn ticket", zap.String("job_id", ticket.ID.String()), zap.Error(err))
 			}
 		}
+		releaseStop()
 		endTurn(nil)
 	}
 	if err := a.advanceJobInferenceComplete(ctx, trackingJob, agentMessage.ID); err != nil {
@@ -445,6 +457,39 @@ func (a *Agent) handleEphemeralPrompt(
 	}
 
 	return agentMessage, nil
+}
+
+// stoppableTurnTicket makes a scheduled run's queue ticket stoppable like a user turn's job: the
+// thread's Stop (CancelJob) cancels it directly when it runs in this process, and a Stop handled by
+// another instance reaches it through the ticket's status (watchChatJobCancel). It returns the
+// run's context; release, which may be called more than once, ends both paths once the reply is
+// saved, so a late Stop no longer cuts the run's post-processing short; stop cancels the context
+// once the turn is over (and so ends the watch too, if release was never reached). A turn with no
+// ticket (a tracked job, which its own worker registers, or no turn gate) gets ctx back with
+// no-op functions.
+func (a *Agent) stoppableTurnTicket(ctx context.Context, userID uuid.UUID, ticket *models.Job) (_ context.Context, release, stop func()) {
+	if ticket == nil {
+		return ctx, func() {}, func() {}
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	watchCtx, endWatch := context.WithCancel(runCtx)
+	a.registerRunningJobCancel(ticket.ID, userID, cancel)
+	go a.watchChatJobCancel(watchCtx, userID, ticket.ID, cancel)
+	release = func() {
+		a.unregisterRunningJobCancel(ticket.ID)
+		endWatch()
+	}
+	return runCtx, release, cancel
+}
+
+// stoppedTurnError reports a turn whose context was cancelled as cancelled. A Stop that lands
+// mid-call can surface as the provider's or datastore's error instead of context.Canceled, and
+// the ticket and the scheduler must still record a stop, not a failure.
+func stoppedTurnError(ctx context.Context, err error) error {
+	if err == nil || errors.Is(err, context.Canceled) || !errors.Is(ctx.Err(), context.Canceled) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", context.Canceled, err)
 }
 
 // finalizeEphemeralAdvancedDraft saves a failed or stopped agent-job Advanced run (ADR 0x026) as a

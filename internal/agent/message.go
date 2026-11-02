@@ -430,6 +430,9 @@ func (a *Agent) registerRunningJobCancel(jobID, userID uuid.UUID, cancel context
 		return
 	}
 	a.runningJobCancelsMu.Lock()
+	if a.runningJobCancels == nil { // an Agent built without New (tests)
+		a.runningJobCancels = make(map[uuid.UUID]runningJobCancel)
+	}
 	a.runningJobCancels[jobID] = runningJobCancel{userID: userID, cancel: cancel}
 	a.runningJobCancelsMu.Unlock()
 }

@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -103,5 +104,19 @@ func TestDeriveStatusAndErrorText_MissingKeyIsStatedPlainly(t *testing.T) {
 	_, errText := deriveStatusAndErrorText(&job, runErr, "")
 	if errText != "No OpenAI API key is set." {
 		t.Fatalf("expected the missing key stated plainly, got %q", errText)
+	}
+}
+
+// A run stopped from its thread records that it was stopped, not the cancellation error.
+func TestDeriveStatusAndErrorText_StoppedRun(t *testing.T) {
+	job := models.AgentJob{ScheduleType: models.AgentJobScheduleTypeCron, Status: models.AgentJobStatusActive}
+	runErr := fmt.Errorf("%w: OpenAI API call failed", context.Canceled)
+
+	status, errText := deriveStatusAndErrorText(&job, runErr, "")
+	if status != nil {
+		t.Fatalf("expected a recurring job's status unchanged, got %v", *status)
+	}
+	if errText != StoppedRunText {
+		t.Fatalf("expected the stop recorded plainly, got %q", errText)
 	}
 }

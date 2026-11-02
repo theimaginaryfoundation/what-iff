@@ -27,11 +27,14 @@
   A user pause clears `last_error`, so paused + marker is how the web app (`scheduleFailureReason` in `job-status.helpers.ts`) shows "Paused: schedule error" with the reason instead of a plain pause.
 - **Run failure text:** `last_error` and the assistant message posted on a failed run use `providerkeys.FailureText`, so a missing provider key reads "No OpenAI API key is set." rather than the transport error.
   There is no separate status value or column; keep the marker and the helper in sync.
+- **Stopped runs:** the thread's Stop cancels a scheduled run's turn (ADR 0x039).
+  The run returns an error wrapping `context.Canceled`, which `runStopped` tells apart: `last_error` reads `StoppedRunText` and no failure message is posted to the thread.
+  A stopped one-off job still ends `failed`, and the run counts as `failed` in the metrics.
 - **MVP note:** `Config.EnableAgentJobsScheduler` gates whether the scheduler runs at all.
 
 ## Testing
 
-- `manager_test.go`, `job_test.go` — scheduling and execution behavior with fakes/mocks.
+- `manager_test.go`, `job_test.go` — scheduling and execution behavior with fakes/mocks; `job_test.go` also covers the last error a stopped run records.
 - `metrics_test.go` — run outcomes (overlap, inactive, load failure, chat resolve failure, congestion skip and defer) and lateness rules, via `telemetrytest.UseGlobal` (not parallel).
 
 ## Related documentation

@@ -95,9 +95,23 @@ func (m *Manager) resolveAgentJobChat(ctx context.Context, userID, agentJobID uu
 // keep the two in sync.
 const ScheduleErrorMarker = "failed to compute next_run_at:"
 
+// StoppedRunText is the last error a run stopped from its thread records.
+const StoppedRunText = "Stopped from its thread before it finished."
+
+// runStopped reports whether a run ended because it was stopped (the thread's Stop cancels a
+// scheduled run's turn, ADR 0x039) rather than because it failed. The agent reports a run as
+// cancelled only when its own context was cancelled (agent.stoppedTurnError), so an error that
+// carries context.Canceled is a stop even when the provider's error that surfaced is wrapped too.
+func runStopped(runErr error) bool {
+	return errors.Is(runErr, context.Canceled)
+}
+
 func deriveStatusAndErrorText(job *models.AgentJob, runErr error, scheduleErrText string) (*models.AgentJobStatus, string) {
 	errText := ""
-	if runErr != nil {
+	switch {
+	case runStopped(runErr):
+		errText = StoppedRunText
+	case runErr != nil:
 		errText = providerkeys.FailureText(runErr)
 	}
 
@@ -317,7 +331,9 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 	recordRunDuration(ctx, runOutcome, time.Since(runStart))
 	statusUpdate, errText := deriveStatusAndErrorText(job, runErr, scheduleErrText)
 
-	if runErr != nil {
+	// A run stopped from its thread (ADR 0x039) was the user's choice; the thread already shows
+	// what it got to, and "failed: context canceled" would only mislead.
+	if runErr != nil && !runStopped(runErr) {
 		// Ensure at least one assistant message exists in the job chat.
 		_, _ = m.ds.CreateChatMessage(execCtx, userID, models.ChatMessage{
 			ChatID:  *chatID,

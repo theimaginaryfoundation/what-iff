@@ -1036,20 +1036,41 @@ func (d *Datastore) FindLatestActiveChatMessageJob(ctx context.Context, userID, 
 	return toJobModel(j), nil
 }
 
-// activeChatJobScanLimit bounds how many of a user's in-flight chat_message jobs
-// FindLatestActiveChatJob inspects; a user rarely has more than a handful at once.
-const activeChatJobScanLimit = 50
-
-// FindLatestActiveChatJob returns the newest non-terminal chat_message job whose user turn
-// belongs to chatID, if any. Unlike FindLatestActiveChatMessageJob it needs no message id, so a
-// client returning to a thread can find a running turn without first deciding which user
-// message is "unanswered". The job's Reference is the user message id.
-func (d *Datastore) FindLatestActiveChatJob(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
-	jobs, err := d.activeChatJobsForChat(ctx, userID, chatID)
+// FindActiveTurnJobForChat returns the turn job (chat_message or agent_job_run, see turnJobTypes)
+// a client showing chatID should follow, or nil when none is in flight. That is the oldest turn
+// still before its reply (pending or processing): the one generating now, since the turn gate
+// runs a chat's turns in job order, with any later ones queued behind it. When every live turn
+// has replied, it is the newest one still in its post-inference phases. Unlike
+// FindLatestActiveChatMessageJob it needs no message id, so a client returning to a thread, or
+// watching one, finds a running turn whoever started it: the user, a scheduled job (keyed by the
+// chat id), a webhook. A chat_message job's Reference is the user message id.
+func (d *Datastore) FindActiveTurnJobForChat(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
+	// Every non-terminal turn job of the user, oldest first, as the turn gate orders them. The
+	// status filter keeps the read on the status index; turnJobsInChat then keeps this chat's,
+	// preserving the order, so the first pending or processing one is the turn generating now.
+	candidates, err := d.dbClient.Job.Query().
+		Where(
+			job.StatusIn(job.StatusPending, job.StatusProcessing, job.StatusInferenceComplete, job.StatusExpressionComplete, job.StatusCompactionComplete),
+			job.JobTypeIn(turnJobTypes...),
+			ownedByUser(userID),
+		).
+		Order(job.ByCreatedAt(), job.ByID()).
+		Limit(turnJobScanLimit).
+		WithOwner().
+		All(ctx)
+	if err != nil || len(candidates) == 0 {
+		return nil, err
+	}
+	jobs, err := d.turnJobsInChat(ctx, userID, chatID, candidates)
 	if err != nil || len(jobs) == 0 {
 		return nil, err
 	}
-	return toJobModel(jobs[0]), nil
+	for _, j := range jobs {
+		if j.Status == job.StatusPending || j.Status == job.StatusProcessing {
+			return toJobModel(j), nil
+		}
+	}
+	return toJobModel(jobs[len(jobs)-1]), nil
 }
 
 // ListActiveChatJobIDsForChat returns the ids of every non-terminal turn job in chatID (chat_message
@@ -1078,57 +1099,6 @@ func (d *Datastore) ListActiveChatJobIDsForChat(ctx context.Context, userID, cha
 		ids = append(ids, j.ID)
 	}
 	return ids, nil
-}
-
-// activeChatJobsForChat returns the user's non-terminal chat_message jobs whose user turn is in
-// chatID, newest first. The job's Reference is the user message id.
-func (d *Datastore) activeChatJobsForChat(ctx context.Context, userID, chatID uuid.UUID) ([]*ent.Job, error) {
-	jobs, err := d.dbClient.Job.Query().
-		Where(
-			job.HasOwnerWith(user.ID(userID)),
-			job.JobTypeEQ("chat_message"),
-			job.StatusNotIn(job.StatusComplete, job.StatusCancelled, job.StatusFailed),
-		).
-		Order(job.ByCreatedAt(sql.OrderDesc())).
-		Limit(activeChatJobScanLimit).
-		WithOwner().
-		All(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if len(jobs) == 0 {
-		return nil, nil
-	}
-
-	refs := make([]uuid.UUID, 0, len(jobs))
-	for _, j := range jobs {
-		if id, err := uuid.Parse(j.Reference); err == nil {
-			refs = append(refs, id)
-		}
-	}
-	if len(refs) == 0 {
-		return nil, nil
-	}
-	inChat, err := d.dbClient.ChatMessage.Query().
-		Where(
-			entchatmessage.IDIn(refs...),
-			entchatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))),
-		).
-		IDs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	inChatSet := make(map[string]struct{}, len(inChat))
-	for _, id := range inChat {
-		inChatSet[id.String()] = struct{}{}
-	}
-	out := make([]*ent.Job, 0, len(inChat))
-	for _, j := range jobs {
-		if _, ok := inChatSet[j.Reference]; ok {
-			out = append(out, j)
-		}
-	}
-	return out, nil
 }
 
 // Turn jobs are the jobs that run a chat turn: chat_message (Reference = the user message id) and

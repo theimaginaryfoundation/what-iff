@@ -1234,8 +1234,13 @@ func createJobTestUserMessage(t *testing.T, ds *Datastore, chatID uuid.UUID) uui
 
 func createActiveChatMessageJob(t *testing.T, ds *Datastore, userID uuid.UUID, reference string, status models.JobStatus) *models.Job {
 	t.Helper()
+	return createActiveTurnJob(t, ds, userID, "chat_message", reference, status)
+}
+
+func createActiveTurnJob(t *testing.T, ds *Datastore, userID uuid.UUID, jobType, reference string, status models.JobStatus) *models.Job {
+	t.Helper()
 	jobModel := baseJobModel()
-	jobModel.JobType = "chat_message"
+	jobModel.JobType = jobType
 	jobModel.Reference = reference
 	jobModel.Status = status
 	created, err := ds.CreateJob(context.Background(), userID, jobModel)
@@ -1244,7 +1249,7 @@ func createActiveChatMessageJob(t *testing.T, ds *Datastore, userID uuid.UUID, r
 	return created
 }
 
-func TestFindLatestActiveChatJob(t *testing.T) {
+func TestFindActiveTurnJobForChat(t *testing.T) {
 	ds, cleanup := newFinalizeChatJobTestDatastore(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -1257,32 +1262,53 @@ func TestFindLatestActiveChatJob(t *testing.T) {
 	turnA2 := createJobTestUserMessage(t, ds, chatA)
 	turnB := createJobTestUserMessage(t, ds, chatB)
 
-	got, err := ds.FindLatestActiveChatJob(ctx, userID, chatA)
+	got, err := ds.FindActiveTurnJobForChat(ctx, userID, chatA)
 	require.NoError(t, err)
 	require.Nil(t, got, "no jobs yet")
 
 	createActiveChatMessageJob(t, ds, userID, turnA1.String(), models.JobStatusComplete)
-	older := createActiveChatMessageJob(t, ds, userID, turnA1.String(), models.JobStatusProcessing)
-	newest := createActiveChatMessageJob(t, ds, userID, turnA2.String(), models.JobStatusPending)
-	// A newer running turn in another thread, and a job whose reference is not a message id,
-	// must not be returned for chatA.
+	replied := createActiveChatMessageJob(t, ds, userID, turnA1.String(), models.JobStatusExpressionComplete)
+	// A running turn in another thread, and a job whose reference is not a message id, must not
+	// be returned for chatA.
 	otherThread := createActiveChatMessageJob(t, ds, userID, turnB.String(), models.JobStatusProcessing)
 	createActiveChatMessageJob(t, ds, userID, "not-a-uuid", models.JobStatusProcessing)
-	require.NotEqual(t, older.ID, newest.ID)
 
-	got, err = ds.FindLatestActiveChatJob(ctx, userID, chatA)
+	// Only a turn in its post-inference phases: that one.
+	got, err = ds.FindActiveTurnJobForChat(ctx, userID, chatA)
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	require.Equal(t, newest.ID, got.ID)
+	require.Equal(t, replied.ID, got.ID)
+
+	// Of several turns in post-inference phases, whatever their phase, the newest.
+	newerReplied := createActiveChatMessageJob(t, ds, userID, turnA1.String(), models.JobStatusInferenceComplete)
+	got, err = ds.FindActiveTurnJobForChat(ctx, userID, chatA)
+	require.NoError(t, err)
+	require.Equal(t, newerReplied.ID, got.ID)
+
+	// A scheduled run (keyed by the chat) starts, and a user turn queues behind it: the run is the
+	// one generating, so it is returned ahead of both the newer queued turn and the replied one.
+	scheduled := createActiveTurnJob(t, ds, userID, "agent_job_run", chatA.String(), models.JobStatusProcessing)
+	queued := createActiveChatMessageJob(t, ds, userID, turnA2.String(), models.JobStatusPending)
+	got, err = ds.FindActiveTurnJobForChat(ctx, userID, chatA)
+	require.NoError(t, err)
+	require.Equal(t, scheduled.ID, got.ID)
+	require.Equal(t, "agent_job_run", got.JobType)
+
+	// Once the run has replied, the queued user turn is next.
+	_, err = ds.UpdateJobStatus(ctx, userID, scheduled.ID, models.JobStatusComplete, "")
+	require.NoError(t, err)
+	got, err = ds.FindActiveTurnJobForChat(ctx, userID, chatA)
+	require.NoError(t, err)
+	require.Equal(t, queued.ID, got.ID)
 	require.Equal(t, turnA2.String(), got.Reference)
 
-	got, err = ds.FindLatestActiveChatJob(ctx, userID, chatB)
+	got, err = ds.FindActiveTurnJobForChat(ctx, userID, chatB)
 	require.NoError(t, err)
 	require.Equal(t, otherThread.ID, got.ID)
 
 	// Another user never sees these jobs, even for the same chat id.
 	stranger := createJobTestUser(t, ds)
-	got, err = ds.FindLatestActiveChatJob(ctx, stranger, chatA)
+	got, err = ds.FindActiveTurnJobForChat(ctx, stranger, chatA)
 	require.NoError(t, err)
 	require.Nil(t, got)
 }
@@ -1334,7 +1360,7 @@ func TestStopHelpers_ClearEveryActiveChatJobInThread(t *testing.T) {
 	st, err := ds.JobStatus(ctx, userID, done.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.JobStatusComplete, st)
-	got, err := ds.FindLatestActiveChatJob(ctx, userID, chatA)
+	got, err := ds.FindActiveTurnJobForChat(ctx, userID, chatA)
 	require.NoError(t, err)
 	require.Nil(t, got)
 

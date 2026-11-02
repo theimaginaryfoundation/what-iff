@@ -154,12 +154,17 @@ type ChatMessageResponse struct {
 	Type  string    `json:"type"`
 }
 
-// ActiveChatMessageJobResponse is returned when a non-terminal chat_message job exists for a user turn.
+// ActiveChatMessageJobResponse is returned when a non-terminal turn job exists for a user turn
+// or, from the thread-level lookup, for a chat.
 type ActiveChatMessageJobResponse struct {
 	JobID  uuid.UUID `json:"job_id"`
 	Status JobStatus `json:"status"`
+	// JobType is the kind of turn: chat_message (a user's message) or agent_job_run (a scheduled
+	// job or webhook run). Set by the thread-level lookup (GET /chat/{chatId}/active-job).
+	JobType string `json:"job_type,omitempty"`
 	// MessageID is the user turn the job answers; set by the thread-level lookup
-	// (GET /chat/{chatId}/active-job), where the caller does not already know it.
+	// (GET /chat/{chatId}/active-job), where the caller does not already know it. Absent for a
+	// run with no saved user message (a scheduled job's prompt is never saved).
 	MessageID *uuid.UUID `json:"message_id,omitempty"`
 }
 

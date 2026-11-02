@@ -10838,8 +10838,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Active job for a chat
-         * @description Returns the newest non-terminal chat_message job for any user turn in this chat, if any, with the user message it answers. Lets a client returning to a thread resume a running turn without first deciding which user message is unanswered.
+         * Active turn job for a chat
+         * @description Returns the turn job a client showing this chat should follow, if any: a user's turn (chat_message) or a scheduled job's or webhook's run (agent_job_run). That is the oldest turn still before its reply (the one generating now; later turns queue behind it), or, once every live turn has replied, the newest still in its post-inference phases. Lets a client returning to or watching a thread resume a running turn without first deciding which user message is unanswered. Poll the job (GET /job/{id}) for its live draft and tool timeline. See ADR 0x039.
          */
         get: {
             parameters: {
@@ -14660,8 +14660,13 @@ export interface components {
             /** @enum {string} */
             status?: "pending" | "processing" | "inference_complete" | "expression_complete" | "compaction_complete" | "complete" | "cancelled" | "failed";
             /**
+             * @description The kind of turn. chat_message answers a user's message; agent_job_run is a scheduled job's or webhook's run. Set by GET /chat/{chatId}/active-job.
+             * @enum {string}
+             */
+            job_type?: "chat_message" | "agent_job_run";
+            /**
              * Format: uuid
-             * @description The user turn this job answers. Set by GET /chat/{chatId}/active-job.
+             * @description The user turn this job answers. Set by GET /chat/{chatId}/active-job; absent for a run that answers no saved message (a scheduled job's prompt is never saved).
              */
             message_id?: string;
         };
