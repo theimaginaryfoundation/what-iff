@@ -42,6 +42,7 @@ The current turn's attachments are still sent at full size.
 ### 2. At most 5 history images per request
 
 `selectHistoryImages` keeps the newest `maxHistoryImages` (5) image attachments across history, newest first, and then carry-over.
+Within one message the newest attachments win (by `CreatedAt`, then by later position), so a reply that generated more images than the cap keeps its last ones; a live run showed that taking a message's first images hid the very images the next question was about.
 Older images are left out silently, the way a model without vision already sees history.
 Past a handful of images, continuity adds little and every extra image is re-sent on every turn.
 
@@ -87,6 +88,14 @@ It is a soft target: memory that is actually live still gets the task killed, wh
 - Images beyond the newest 5 are invisible to the model, though still in the gallery and `find_context`.
 - New uploads are stored as `.jpg` / `image/jpeg` unless they are transparent; clients already handle both types.
 - Fewer image tokens are sent per turn, so cost and latency also fall for image-heavy threads.
+
+## Validation
+
+Local stack, GPT-5.6 Luna, real `gpt-image` calls at low quality:
+- One turn generated 10 images (2.1–3.1 MB PNGs; their thumbnails are 13–22 KB) over three `generate_image` calls. The API container's memory went from 87 MiB to a peak of 195 MiB and settled at 153 MiB.
+- Follow-up turns replayed 5 history thumbnails and peaked at 84–105 MiB.
+- Asked about a detail visible only in a history image (a bowl's colour and pattern), the model answered correctly from the 256 px thumbnail.
+  The same request sent directly to the API used 163 input tokens with the thumbnail against 1,315 with the original.
 
 ## Not done yet
 

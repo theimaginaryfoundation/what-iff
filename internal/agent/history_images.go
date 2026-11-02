@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -21,20 +22,20 @@ type historyImageSet map[uuid.UUID]struct{}
 
 // selectHistoryImages picks the attachment IDs of the most recent maxImages images across the
 // replayed turns: history (chronological, post-checkpoint) is newest, then carry-over (the
-// pre-checkpoint turns kept for continuity). Older images are left out of the request.
+// pre-checkpoint turns kept for continuity). Within a message the newest attachments come first,
+// so a reply that generated more images than the cap keeps its last ones, the ones the
+// conversation is most likely about. Older images are left out of the request.
 func selectHistoryImages(carryOver [][2]*models.ChatMessage, history []*models.ChatMessage, maxImages int) historyImageSet {
 	selected := historyImageSet{}
 	take := func(msg *models.ChatMessage) {
 		if msg == nil {
 			return
 		}
-		for _, att := range msg.Attachments {
+		for _, att := range newestImagesFirst(msg.Attachments) {
 			if len(selected) >= maxImages {
 				return
 			}
-			if att != nil && strings.HasPrefix(att.FileType, models.ImageMIMEPrefix) {
-				selected[att.ID] = struct{}{}
-			}
+			selected[att.ID] = struct{}{}
 		}
 	}
 	for i := len(history) - 1; i >= 0 && len(selected) < maxImages; i-- {
@@ -45,6 +46,22 @@ func selectHistoryImages(carryOver [][2]*models.ChatMessage, history []*models.C
 		take(carryOver[i][0])
 	}
 	return selected
+}
+
+// newestImagesFirst returns the image attachments in atts, newest first: by CreatedAt, then by
+// later position (attachments load in insertion order, and a tool's images share a timestamp
+// closely enough that position is the better tie-break).
+func newestImagesFirst(atts []*models.FileAttachment) []*models.FileAttachment {
+	var images []*models.FileAttachment
+	for i := len(atts) - 1; i >= 0; i-- {
+		if att := atts[i]; att != nil && strings.HasPrefix(att.FileType, models.ImageMIMEPrefix) {
+			images = append(images, att)
+		}
+	}
+	slices.SortStableFunc(images, func(a, b *models.FileAttachment) int {
+		return b.CreatedAt.Compare(a.CreatedAt)
+	})
+	return images
 }
 
 // historyImagesForMessage collects vision payloads for the image attachments on a prior message

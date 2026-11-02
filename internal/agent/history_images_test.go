@@ -127,10 +127,10 @@ func TestSelectHistoryImages_KeepsTheMostRecent(t *testing.T) {
 
 	got := selectHistoryImages(carryOver, history, 5)
 	require.Len(t, got, 5)
-	for _, id := range append(append(newestIDs, middleIDs...), oldestIDs[0]) {
+	for _, id := range append(append(newestIDs, middleIDs...), oldestIDs[1]) {
 		require.Contains(t, got, id)
 	}
-	require.NotContains(t, got, oldestIDs[1])
+	require.NotContains(t, got, oldestIDs[0], "within a message the later image is newer")
 
 	got = selectHistoryImages(carryOver, history, 7)
 	require.Contains(t, got, carryReplyIDs[0])
@@ -195,4 +195,26 @@ func TestBuildHistoryContext_CapsHistoryImages(t *testing.T) {
 	modelCtx, _, _, err = b.buildHistoryContext(t.Context(), userID, chat, nil, false)
 	require.NoError(t, err)
 	require.Empty(t, countImages(modelCtx))
+}
+
+// One reply that generated more images than the cap keeps its newest ones: by CreatedAt, then by
+// position. This is the shape of a turn that called generate_image several times (what-iff#419).
+func TestSelectHistoryImages_OneMessageKeepsItsNewestImages(t *testing.T) {
+	t.Parallel()
+
+	msg, ids := imageMessage(10)
+	got := selectHistoryImages(nil, []*models.ChatMessage{msg}, 5)
+	require.Len(t, got, 5)
+	for _, id := range ids[5:] {
+		require.Contains(t, got, id)
+	}
+
+	// Timestamps win over position when they differ.
+	base := time.Now()
+	for i, att := range msg.Attachments[1:] {
+		att.CreatedAt = base.Add(-time.Duration(i) * time.Minute) // the first image is the newest
+	}
+	got = selectHistoryImages(nil, []*models.ChatMessage{msg}, 2)
+	require.Contains(t, got, ids[0])
+	require.Contains(t, got, ids[1])
 }
