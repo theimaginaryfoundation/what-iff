@@ -12384,7 +12384,11 @@ components:
           description: Whether the application has the privileged Message Content intent on
         status:
           type: string
-          enum: [active, invalid_token, disabled]
+          enum: [active, invalid_token, intent_disabled, disabled]
+          description: >-
+            invalid_token means Discord rejected the token; intent_disabled means the Gateway refused
+            the Message Content intent (switched off in the Developer Portal). Both stop the bot
+            connecting until a new token or a refresh, and last_error says what to fix.
         last_error:
           type: string
         invite_url:

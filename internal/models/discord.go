@@ -14,7 +14,10 @@ type DiscordBotStatus string
 const (
 	DiscordBotActive       DiscordBotStatus = "active"
 	DiscordBotInvalidToken DiscordBotStatus = "invalid_token"
-	DiscordBotDisabled     DiscordBotStatus = "disabled"
+	// DiscordBotIntentDisabled is a bot whose Gateway connection asks for the Message
+	// Content intent after the owner switched it off in the Developer Portal.
+	DiscordBotIntentDisabled DiscordBotStatus = "intent_disabled"
+	DiscordBotDisabled       DiscordBotStatus = "disabled"
 )
 
 // DiscordBot is a user's own Discord bot, attached to one of their personas. The

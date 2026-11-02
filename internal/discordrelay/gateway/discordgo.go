@@ -2,9 +2,11 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/gorilla/websocket"
 	"github.com/theimaginaryfoundation/what-iff/internal/discordrelay"
 	"go.uber.org/zap"
 )
@@ -46,10 +48,32 @@ func DiscordgoDialer(logger *zap.Logger) Dialer {
 			on.ChannelRenamed(c.ID, c.Name)
 		})
 		if err := session.Open(); err != nil {
-			return nil, fmt.Errorf("discord gateway open: %w", err)
+			return nil, classifyClose(fmt.Errorf("discord gateway open: %w", err))
 		}
 		return session, nil
 	}
+}
+
+// Gateway close codes that retrying cannot fix: only the owner can.
+const (
+	closeAuthenticationFailed = 4004
+	closeDisallowedIntents    = 4014
+)
+
+// classifyClose marks a Gateway close Discord will repeat on every retry with the
+// relay's sentinel errors, so the supervisor can record it on the bot.
+func classifyClose(err error) error {
+	var ce *websocket.CloseError
+	if !errors.As(err, &ce) {
+		return err
+	}
+	switch ce.Code {
+	case closeAuthenticationFailed:
+		return fmt.Errorf("%w: %w", discordrelay.ErrInvalidToken, err)
+	case closeDisallowedIntents:
+		return fmt.Errorf("%w: %w", discordrelay.ErrDisallowedIntents, err)
+	}
+	return err
 }
 
 // ToInbound converts a discordgo message. s may be nil (no thread lookup).

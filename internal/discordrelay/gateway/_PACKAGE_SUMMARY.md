@@ -8,6 +8,9 @@ Holds one Discord Gateway (websocket) connection per active bot, on exactly one 
 
 - **`Supervisor.Run`:** the Discord face of `relaykit.Supervisor` (shared with the Buzz and Slack gateways): while it holds the leader lock, reconciles the open connections with `BotSource.ActiveBots` about every 30 s (open new bots, reopen on a new token or intents, close removed ones); followers retry the lock about every 15 s.
   On shutdown or a lost lock it closes every connection and releases the lock.
+- **Refused connections:** a Gateway close Discord repeats on every retry is recorded on the bot through `Supervisor.Status` (`SetDiscordBotStatus`).
+  Close 4004 (authentication failed) marks it `invalid_token` and 4014 (disallowed intents: Message Content switched off in the Developer Portal) marks it `intent_disabled`, each with the reason the owner is shown.
+  Either takes the bot off the active list, so it is not redialled every reconcile; other dial errors leave it active for the next one.
 - **`DiscordgoDialer`:** opens a discordgo session with the guild and guild-message intents (plus Message Content when the application has it) and converts each `MESSAGE_CREATE` with `ToInbound`, resolving a Discord thread to its parent channel and carrying the bound channel's current name from the state cache.
   A renamed channel (`CHANNEL_UPDATE`, not threads) goes to `Sink.ChannelRenamed` (ADR 0x031).
 - **`Handlers`:** a connection's callbacks (`Message`, `ChannelRenamed`), which the `Dialer` receives.
@@ -16,14 +19,18 @@ Holds one Discord Gateway (websocket) connection per active bot, on exactly one 
 ## Dependencies
 
 - **Inbound:** `internal/discordplugin`.
-- **Outbound:** `internal/discordrelay` (`InboundMessage`), `internal/relaykit` (supervisor, lockers), `github.com/bwmarrin/discordgo`, `zap`.
+- **Outbound:** `internal/discordrelay` (`InboundMessage`, the refusal sentinels and reasons), `internal/models` (bot statuses), `internal/relaykit` (supervisor, lockers), `github.com/bwmarrin/discordgo`, `zap`.
 
 ## Non-obvious decisions
 
 - **Nothing here depends on running in the API server.**
   `Run` takes a locker, a bot source and a sink, so the gateway can move to its own process without changes.
 - **Handover overlap is harmless** because inbound messages are deduplicated on the Discord message id in storage.
+- **A token revoked mid-session is not caught here.**
+  discordgo reconnects a dropped session itself (`ShouldReconnectOnError`, needed for Discord's routine reconnect requests) and does not report why its retries fail.
+  The bot is marked on its next dial (a restart or a leader change), or when a reply gets a 401.
 
 ## Testing
 
 - `supervisor_test.go` uses fake lockers, sources and dialers to cover leading, reconciling, reconnecting on a changed fingerprint, stepping down, events reaching the sink, and `ToInbound` (including the channel name from a state cache).
+- `refusal_test.go` covers classifying the Gateway close codes and recording refused bots while leaving transient failures alone.

@@ -13,11 +13,13 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/discordrelay"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
 	"go.uber.org/zap"
 )
@@ -43,6 +45,12 @@ func (b Bot) fingerprint() string {
 // BotSource lists the bots that should be connected right now.
 type BotSource interface {
 	ActiveBots(ctx context.Context) ([]Bot, error)
+}
+
+// StatusStore records a bot Discord refused to connect, so the owner sees why and the
+// bot leaves the active list instead of being redialled every reconcile.
+type StatusStore interface {
+	SetDiscordBotStatus(ctx context.Context, id uuid.UUID, status models.DiscordBotStatus, lastError string) error
 }
 
 // Sink receives what a bot sees: messages, and renames of channels. It is called on the
@@ -79,6 +87,9 @@ type Supervisor struct {
 	Sink   Sink
 	Dial   Dialer
 	Logger *zap.Logger
+	// Status, when set, records a connection Discord refused for good (a rejected token,
+	// a refused intent). Without it such a bot is redialled every reconcile.
+	Status StatusStore
 
 	// ReconcileEvery is how often the leader re-reads the bot list and checks its
 	// lock. RetryEvery is how often a follower tries to take the lock. Both get
@@ -107,12 +118,16 @@ func (s *Supervisor) inner() *relaykit.Supervisor[Bot] {
 				return b.fingerprint()
 			},
 			Dial: func(ctx context.Context, bot Bot) (relaykit.Conn, error) {
-				return s.Dial(ctx, bot, Handlers{
+				conn, err := s.Dial(ctx, bot, Handlers{
 					Message: func(msg discordrelay.InboundMessage) { s.Sink.HandleInbound(ctx, bot, msg) },
 					ChannelRenamed: func(channelID, name string) {
 						s.Sink.ChannelRenamed(ctx, bot, channelID, name)
 					},
 				})
+				if err != nil {
+					s.recordRefusal(ctx, bot, err)
+				}
+				return conn, err
 			},
 			Logger:         s.Logger,
 			ReconcileEvery: s.ReconcileEvery,
@@ -120,6 +135,27 @@ func (s *Supervisor) inner() *relaykit.Supervisor[Bot] {
 		}
 	})
 	return s.sup
+}
+
+// recordRefusal marks a bot Discord will keep refusing. Other dial errors (network, a
+// Discord outage) leave it active for the next reconcile to retry.
+func (s *Supervisor) recordRefusal(ctx context.Context, bot Bot, err error) {
+	if s.Status == nil {
+		return
+	}
+	var status models.DiscordBotStatus
+	var reason string
+	switch {
+	case errors.Is(err, discordrelay.ErrInvalidToken):
+		status, reason = models.DiscordBotInvalidToken, discordrelay.InvalidTokenReason
+	case errors.Is(err, discordrelay.ErrDisallowedIntents):
+		status, reason = models.DiscordBotIntentDisabled, discordrelay.DisallowedIntentsReason
+	default:
+		return
+	}
+	if serr := s.Status.SetDiscordBotStatus(context.WithoutCancel(ctx), bot.ID, status, reason); serr != nil {
+		s.Logger.Warn("discord gateway: record refused connection", zap.String("id", bot.ID.String()), zap.Error(serr))
+	}
 }
 
 // Run blocks until ctx is cancelled, leading whenever it can. On return every
