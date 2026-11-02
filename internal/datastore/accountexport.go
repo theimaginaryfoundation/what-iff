@@ -153,7 +153,7 @@ func (d *Datastore) exportConversationInput(ctx context.Context, c *ent.Chat) (e
 			msgs = append(msgs, exporter.MessageInput{
 				Origin: models.MessageOrigin(m.Origin),
 				Text:   m.Message,
-				SentAt: m.SentAt,
+				SentAt: models.JSONSafeTime(m.SentAt),
 			})
 		}
 		last := batch[len(batch)-1]

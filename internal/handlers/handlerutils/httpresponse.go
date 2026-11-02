@@ -44,6 +44,15 @@ const (
 func RespondWithJSON(w http.ResponseWriter, logger *zap.Logger, statusCode int, payload interface{}) {
 	response, err := json.Marshal(payload)
 	if err != nil {
+		// A stored time outside the years 0-9999 (bad import or relay data) must not take down
+		// every response that includes it. Clamp it on a copy and send the rest.
+		if safe, clamped := withJSONSafeTimes(payload); clamped {
+			if response, err = json.Marshal(safe); err == nil {
+				logger.Warn("clamped out-of-range times in a json response", zap.Int("status", statusCode))
+			}
+		}
+	}
+	if err != nil {
 		logger.Error("failed to marshal json response", zap.Error(err))
 		// The encoder is not broken — one caller-supplied value was unmarshalable
 		// (a channel, a func, a cycle). So the envelope can still be sent; it just

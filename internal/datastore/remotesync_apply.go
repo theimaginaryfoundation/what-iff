@@ -170,10 +170,9 @@ func (d *Datastore) applyRemoteSyncThread(ctx context.Context, tx *ent.Tx, userI
 // It is an imported thread (source remote_sync, no summary), so it is summarized lazily the
 // first time it is used here, and its import hash lets a later account import skip it.
 func (d *Datastore) createRemoteMirror(ctx context.Context, tx *ent.Tx, userID, syncID uuid.UUID, thread models.RemoteSyncThread, batch []models.RemoteSyncMessage) (*models.RemoteSyncApplyResult, error) {
-	created := thread.CreatedAt
-	if created.IsZero() {
-		created = time.Now()
-	}
+	// Remote data is untrusted; a zero or implausible creation time becomes now.
+	now := time.Now()
+	created := models.PlausibleTimeOr(thread.CreatedAt, now, now)
 	create := tx.Chat.Create().
 		SetName(models.NormalizeImportedTitle(thread.Name, "Synced thread")).
 		SetOwnerID(userID).
@@ -463,7 +462,11 @@ func copyMessagesInto(ctx context.Context, tx *ent.Tx, linkID, chatID uuid.UUID,
 }
 
 // insertRemoteMessages appends remote messages to a thread and links each one.
+//
+// The local sent_at of a message whose remote time is implausible becomes now. The link keeps the
+// remote time as sent, since sync compares it with the remote side.
 func insertRemoteMessages(ctx context.Context, tx *ent.Tx, linkID, chatID uuid.UUID, batch []models.RemoteSyncMessage) (int, error) {
+	now := time.Now()
 	for start := 0; start < len(batch); start += remoteSyncInsertChunk {
 		part := batch[start:min(start+remoteSyncInsertChunk, len(batch))]
 		ids := make([]uuid.UUID, len(part))
@@ -472,7 +475,7 @@ func insertRemoteMessages(ctx context.Context, tx *ent.Tx, linkID, chatID uuid.U
 			m := part[i]
 			c.SetID(ids[i]).SetChatID(chatID).SetMessage(m.Message).
 				SetOrigin(chatmessage.Origin(m.Origin)).SetReadStatus(chatmessage.ReadStatusRead).
-				SetSentAt(m.SentAt.UTC()).
+				SetSentAt(models.PlausibleTimeOr(m.SentAt, now, now).UTC()).
 				SetGenerationModel(m.GenerationModel).SetGenerationPersonality(m.GenerationPersonality)
 		}).Exec(ctx)
 		if err != nil {
@@ -575,10 +578,12 @@ func bumpLastMessageTime(ctx context.Context, tx *ent.Tx, c *ent.Chat, batch []m
 	if len(batch) == 0 {
 		return nil
 	}
-	latest := batch[len(batch)-1].SentAt
+	// The same plausible times insertRemoteMessages stored, so last_message_time matches them.
+	now := time.Now()
+	var latest time.Time
 	for _, m := range batch {
-		if m.SentAt.After(latest) {
-			latest = m.SentAt
+		if t := models.PlausibleTimeOr(m.SentAt, now, now); t.After(latest) {
+			latest = t
 		}
 	}
 	if c.LastMessageTime != nil && !latest.After(*c.LastMessageTime) {

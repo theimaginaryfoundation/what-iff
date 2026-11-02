@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3/responses"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
 // GenerateResponse is a provider-agnostic result from a single chat generation call.
@@ -54,13 +56,16 @@ func (r *reasoningLog) String() string {
 }
 
 // CreatedTime is when the response was generated: CreatedAt, or now when the provider left it
-// unset. The chat's last_message_time is written from it, and a zero there stamped threads
-// 1970-01-01 and sank them below every other thread in the list (#367).
+// unset or sent something implausible. The chat's last_message_time is written from it, and a zero
+// there stamped threads 1970-01-01 and sank them below every other thread in the list (#367). A
+// provider can be any OpenAI-compatible endpoint, so a value in milliseconds (the year 50000) is
+// replaced the same way.
 func (r *GenerateResponse) CreatedTime() time.Time {
+	now := time.Now()
 	if r.CreatedAt <= 0 {
-		return time.Now()
+		return now
 	}
-	return time.Unix(r.CreatedAt, 0)
+	return models.PlausibleTimeOr(time.Unix(r.CreatedAt, 0), now, now)
 }
 
 // OpenAIToGenerateResponse converts an OpenAI Responses API response into a GenerateResponse.

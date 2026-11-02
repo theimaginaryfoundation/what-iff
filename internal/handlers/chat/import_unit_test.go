@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,26 @@ func TestFloatToTime_NsecNeverNegative(t *testing.T) {
 func TestFloatToTime_UTC(t *testing.T) {
 	got := floatToTime(0)
 	require.Equal(t, time.UTC, got.Location())
+}
+
+func TestFloatToTime_OutOfRangeIsZero(t *testing.T) {
+	// The file is untrusted. A value too large for int64 seconds would otherwise give whatever the
+	// float conversion happens to produce; the zero time is replaced when the chat is stored.
+	for _, ts := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), 1e300, -1e300} {
+		require.True(t, floatToTime(ts).IsZero(), "ts=%v", ts)
+	}
+}
+
+func TestPrepareConversations_ImplausibleCreateTimeTitlesWithNow(t *testing.T) {
+	ms := float64(fixedNow.UnixMilli()) // milliseconds where seconds belong: the year 50000+
+	raw := []migration.SimplifiedConversation{{
+		ConversationID: "c1",
+		CreateTime:     &ms,
+		Messages:       []migration.SimplifiedMessage{{Role: "user", Text: "hi"}},
+	}}
+	convs, _ := prepareConversations(raw, fixedNow)
+	require.Len(t, convs, 1)
+	require.Equal(t, "Imported chat "+fixedNow.Format("2006-01-02 15:04"), convs[0].Title)
 }
 
 // --- models.TruncateImportTitle ---

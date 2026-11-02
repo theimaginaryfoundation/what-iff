@@ -42,6 +42,10 @@
   It cannot call `RespondWithError`, which calls it back, so it marshals the envelope directly.
   That is why nothing in the codebase needs `http.Error` any more — a failed marshal reflects one unmarshalable caller value, not a broken encoder, so the envelope can still be sent.
   `TestHTTPErrorIsNeverUsed` enforces this with an empty allow list.
+- **A time JSON cannot encode does not fail the response (`jsonsafe.go`).**
+  `time.Time` refuses years outside 0-9999, and one bad stored timestamp (an import read in milliseconds, say) used to turn every response that included it into a 500.
+  When the first marshal fails, `RespondWithJSON` clamps such times with `models.JSONSafeTime` on a copy of the payload and retries once, logging a warning.
+  The walk runs only on that failure path, never on a normal response, and never modifies the caller's value (ADR 0x037).
 - **The `err` argument to the error helpers is logged, never serialized.**
   It routinely carries driver and constraint text; the response body says only what the handler chose to say via `message`.
   Anything a client should see goes in `message` or `details` deliberately (ADR 0x020).

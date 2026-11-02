@@ -10,6 +10,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/ent"
@@ -147,6 +148,13 @@ func (d *Datastore) AdminImportAccountBackup(ctx context.Context, targetUserID u
 	return result, nil
 }
 
+// backupTime is t when it is plausible (models.PlausibleTime) and now otherwise. A backup file is
+// untrusted input like any other import.
+func backupTime(t time.Time) time.Time {
+	now := time.Now()
+	return models.PlausibleTimeOr(t, now, now)
+}
+
 func (d *Datastore) importBackupMoods(ctx context.Context, targetUserID uuid.UUID, zr *zip.Reader, sections map[string]models.AccountBackupSectionResult) error {
 	records, invalid, err := readBackupJSONL[models.AccountBackupMood](zr, "moods.jsonl")
 	if err != nil {
@@ -174,8 +182,8 @@ func (d *Datastore) importBackupMoods(ctx context.Context, targetUserID uuid.UUI
 			SetPromptSnippet(rec.PromptSnippet).
 			SetRecommendedModel(rec.RecommendedModel).
 			SetOwnerID(targetUserID).
-			SetCreatedAt(rec.CreatedAt).
-			SetUpdatedAt(rec.UpdatedAt).
+			SetCreatedAt(backupTime(rec.CreatedAt)).
+			SetUpdatedAt(backupTime(rec.UpdatedAt)).
 			SetNillableReasoningEffort(entEffort[mood.ReasoningEffort](rec.ReasoningEffort)).
 			SetNillableAgentLoop(entLoop[mood.AgentLoop](rec.AgentLoop))
 		if _, err := create.Save(ctx); err != nil {
@@ -229,8 +237,8 @@ func (d *Datastore) importBackupPersonalities(ctx context.Context, targetUserID 
 			SetNillableReasoningEffort(entEffort[personality.ReasoningEffort](rec.ReasoningEffort)).
 			SetNillableAgentLoop(entLoop[personality.AgentLoop](rec.AgentLoop)).
 			SetUserID(targetUserID).
-			SetCreatedAt(rec.CreatedAt).
-			SetUpdatedAt(rec.UpdatedAt).
+			SetCreatedAt(backupTime(rec.CreatedAt)).
+			SetUpdatedAt(backupTime(rec.UpdatedAt)).
 			Save(ctx)
 		if err != nil {
 			if ent.IsConstraintError(err) {
@@ -312,8 +320,8 @@ func (d *Datastore) importBackupRituals(ctx context.Context, targetUserID uuid.U
 			SetDescription(desc).
 			SetContent(content).
 			SetHotkeys(rec.Hotkeys).
-			SetCreatedAt(rec.CreatedAt).
-			SetUpdatedAt(rec.UpdatedAt)
+			SetCreatedAt(backupTime(rec.CreatedAt)).
+			SetUpdatedAt(backupTime(rec.UpdatedAt))
 		if rec.PersonalityID != nil {
 			if ok, err := d.personalityBelongsToUser(ctx, targetUserID, *rec.PersonalityID); err != nil {
 				return err
@@ -388,11 +396,11 @@ func (d *Datastore) importBackupChats(ctx context.Context, targetUserID uuid.UUI
 			SetIsAutoMood(rec.IsAutoMood).
 			SetContextScope(entchat.ContextScope(rec.ContextScope.OrDefault())).
 			SetResponseID("").
-			SetCreatedAt(rec.CreatedAt).
-			SetUpdatedAt(rec.UpdatedAt).
+			SetCreatedAt(backupTime(rec.CreatedAt)).
+			SetUpdatedAt(backupTime(rec.UpdatedAt)).
 			SetNillableReasoningEffort(entEffort[entchat.ReasoningEffort](rec.ReasoningEffort)).
 			SetNillableAgentLoop(entLoop[entchat.AgentLoop](rec.AgentLoop))
-		if rec.LastMessageTime != nil {
+		if rec.LastMessageTime != nil && models.PlausibleTime(*rec.LastMessageTime, time.Now()) {
 			create.SetLastMessageTime(*rec.LastMessageTime)
 		}
 		if rec.LastCheckpointAt != nil {
@@ -462,7 +470,7 @@ func (d *Datastore) importBackupChatMessages(ctx context.Context, targetUserID u
 			SetReadStatus(chatmessage.ReadStatus(rec.ReadStatus)).
 			SetResponseID("").
 			SetChatID(rec.ChatID).
-			SetSentAt(rec.SentAt).
+			SetSentAt(backupTime(rec.SentAt)).
 			SetTokens(rec.Tokens)
 		if rec.AgentRun != nil {
 			create.SetAgentRun(rec.AgentRun)
@@ -569,8 +577,8 @@ func (d *Datastore) importBackupToolCalls(ctx context.Context, targetUserID uuid
 			SetID(rec.ID).
 			SetToolName(rec.ToolName).
 			SetChatMessageID(rec.ChatMessageID).
-			SetCreatedAt(rec.CreatedAt).
-			SetUpdatedAt(rec.UpdatedAt)
+			SetCreatedAt(backupTime(rec.CreatedAt)).
+			SetUpdatedAt(backupTime(rec.UpdatedAt))
 		if rec.ToolInput != "" {
 			create.SetToolInput(rec.ToolInput)
 		}
@@ -627,8 +635,8 @@ func (d *Datastore) importBackupAgentJobs(ctx context.Context, targetUserID uuid
 			SetTimezone(rec.Timezone).
 			SetStatus(agentjob.Status(rec.Status)).
 			SetRunCount(rec.RunCount).
-			SetCreatedAt(rec.CreatedAt).
-			SetUpdatedAt(rec.UpdatedAt)
+			SetCreatedAt(backupTime(rec.CreatedAt)).
+			SetUpdatedAt(backupTime(rec.UpdatedAt))
 		if rec.Title != nil {
 			create.SetNillableTitle(rec.Title)
 		}

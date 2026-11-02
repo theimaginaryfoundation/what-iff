@@ -43,12 +43,12 @@ func toChatModel(e *ent.Chat) *models.Chat {
 		ID:              e.ID,
 		UserID:          userID,
 		Name:            e.Name,
-		LastMessageTime: e.LastMessageTime,
+		LastMessageTime: models.JSONSafeTimePtr(e.LastMessageTime),
 		IsAutoMood:      e.IsAutoMood,
 		Archived:        &arch,
 		IsFavorite:      &fav,
-		CreatedAt:       e.CreatedAt,
-		UpdatedAt:       e.UpdatedAt,
+		CreatedAt:       models.JSONSafeTime(e.CreatedAt),
+		UpdatedAt:       models.JSONSafeTime(e.UpdatedAt),
 	}
 	if e.Source != "" {
 		s := e.Source
@@ -292,7 +292,7 @@ func (d *Datastore) CreateChat(ctx context.Context, userID uuid.UUID, chat model
 		create.SetDisabledTools(disabledTools)
 	}
 
-	if chat.LastMessageTime != nil {
+	if chat.LastMessageTime != nil && models.PlausibleTime(*chat.LastMessageTime, time.Now()) {
 		create.SetLastMessageTime(*chat.LastMessageTime)
 	}
 
@@ -433,12 +433,13 @@ func (d *Datastore) ClearChatResponseID(ctx context.Context, userID, chatID uuid
 // Turns run on the chat they loaded when they started. Saving that whole copy back through
 // UpdateChat rewrote every user-editable field (model, personality, pinned mode, disabled tools,
 // tags, favorite, archived) to its turn-start value, so a change made while the reply was
-// generating silently reverted when the turn saved (#347). A nil lastMessageTime leaves it alone.
+// generating silently reverted when the turn saved (#347). A nil or implausible lastMessageTime
+// (models.PlausibleTime) leaves it alone.
 func (d *Datastore) UpdateChatContinuity(ctx context.Context, userID, chatID uuid.UUID, responseID string, lastMessageTime *time.Time) error {
 	update := d.dbClient.Chat.Update().
 		Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))).
 		SetResponseID(responseID)
-	if lastMessageTime != nil {
+	if lastMessageTime != nil && models.PlausibleTime(*lastMessageTime, time.Now()) {
 		update.SetLastMessageTime(*lastMessageTime)
 	}
 	n, err := update.Save(ctx)

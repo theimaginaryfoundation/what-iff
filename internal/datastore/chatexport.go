@@ -81,9 +81,9 @@ func (d *Datastore) ExportChat(ctx context.Context, userID, chatID uuid.UUID, w 
 	chatExport := models.ChatExport{
 		ID:              entChat.ID,
 		Name:            entChat.Name,
-		LastMessageTime: entChat.LastMessageTime,
-		CreatedAt:       entChat.CreatedAt,
-		UpdatedAt:       entChat.UpdatedAt,
+		LastMessageTime: models.JSONSafeTimePtr(entChat.LastMessageTime),
+		CreatedAt:       models.JSONSafeTime(entChat.CreatedAt),
+		UpdatedAt:       models.JSONSafeTime(entChat.UpdatedAt),
 	}
 
 	if entChat.Edges.Model != nil {
@@ -166,7 +166,7 @@ func (d *Datastore) ExportChat(ctx context.Context, userID, chatID uuid.UUID, w 
 			// Reuse the message export struct, updating its fields
 			messageExport.Message = entMessage.Message
 			messageExport.Origin = models.MessageOrigin(entMessage.Origin)
-			messageExport.SentAt = entMessage.SentAt
+			messageExport.SentAt = models.JSONSafeTime(entMessage.SentAt)
 			messageExport.Attachments = nil // Reset to nil to avoid including previous message's data
 			messageExport.Rituals = nil     // Reset to nil to avoid including previous message's data
 			messageExport.ToolCalls = nil   // Reset to nil to avoid including previous message's data

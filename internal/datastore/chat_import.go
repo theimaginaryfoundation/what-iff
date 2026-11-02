@@ -99,6 +99,37 @@ func (d *Datastore) importOneConversation(ctx context.Context, userID uuid.UUID,
 	}
 }
 
+// plausibleImportedTimes replaces the timestamps an import file got wrong (see models.PlausibleTime)
+// before anything is derived from them. It has to run before normalizeImportedMessageTimes, which
+// only ever moves times forward: one message dated in the year 50000 would otherwise drag every
+// later message in the transcript there too. A bad chat time falls back to the first good message
+// time, or now. A bad message time falls back to the time before it, so the transcript keeps its
+// order and normalizeImportedMessageTimes then spaces the ties apart. A bad checkpoint time is
+// dropped.
+func plausibleImportedTimes(conv models.ImportConversation, now time.Time) models.ImportConversation {
+	fallback := now
+	for _, msg := range conv.Messages {
+		if models.PlausibleTime(msg.SentAt, now) {
+			fallback = msg.SentAt
+			break
+		}
+	}
+	conv.CreatedAt = models.PlausibleTimeOr(conv.CreatedAt, fallback, now)
+	if conv.LastCheckpointAt != nil && !models.PlausibleTime(*conv.LastCheckpointAt, now) {
+		conv.LastCheckpointAt = nil
+	}
+
+	messages := make([]models.ChatMessage, len(conv.Messages))
+	previous := conv.CreatedAt
+	for i, msg := range conv.Messages {
+		msg.SentAt = models.PlausibleTimeOr(msg.SentAt, previous, now)
+		previous = msg.SentAt
+		messages[i] = msg
+	}
+	conv.Messages = messages
+	return conv
+}
+
 // normalizeImportedMessageTimes preserves archive transcript order under the datastore's
 // (sent_at, id) retrieval key. Every persisted imported message after the first must be at least one
 // datastore-supported precision step later than the previous normalized message. Source timestamps
@@ -168,6 +199,7 @@ func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx,
 
 	// Normalize imported timestamps before both metadata calculation and persistence so the archive's
 	// transcript sequence remains the authoritative ordering even when source timestamps tie/regress.
+	conv = plausibleImportedTimes(conv, time.Now())
 	messages := normalizeImportedMessageTimes(conv.Messages)
 
 	lastMsgTime := conv.CreatedAt

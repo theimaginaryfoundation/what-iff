@@ -77,8 +77,9 @@ func TestGenerateResponse_CreatedTime(t *testing.T) {
 	t.Parallel()
 	require.Equal(t, time.Unix(1700000000, 0), (&GenerateResponse{CreatedAt: 1700000000}).CreatedTime())
 
-	// A provider that leaves CreatedAt unset must not date the turn 1970-01-01 (#367).
-	for _, createdAt := range []int64{0, -1} {
+	// A provider that leaves CreatedAt unset must not date the turn 1970-01-01 (#367), and one that
+	// sends milliseconds (any OpenAI-compatible endpoint can) must not date it in the year 50000.
+	for _, createdAt := range []int64{0, -1, 1, time.Now().UnixMilli()} {
 		before := time.Now()
 		got := (&GenerateResponse{CreatedAt: createdAt}).CreatedTime()
 		require.False(t, got.Before(before), "CreatedAt=%d gave %v", createdAt, got)

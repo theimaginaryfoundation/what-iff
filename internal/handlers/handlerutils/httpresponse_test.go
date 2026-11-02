@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 
@@ -250,4 +251,53 @@ func TestRespondWithErrorDetails_CarriesDetails(t *testing.T) {
 	require.Equal(t, models.ErrCodeBuzzTermsRequired, body.Code)
 	require.Equal(t, "Accept the terms first", body.Message)
 	require.Equal(t, "v1", body.Details.Policy.Version)
+}
+
+// One stored time JSON cannot encode (an import read in milliseconds) used to turn every response
+// that included it into a 500. It is clamped on a copy instead, and the rest is sent.
+func TestRespondWithJSONClampsTimesJSONCannotEncode(t *testing.T) {
+	type row struct {
+		Name   string     `json:"name"`
+		SentAt time.Time  `json:"sent_at"`
+		LastAt *time.Time `json:"last_at"`
+		hidden time.Time
+	}
+	bad := time.Date(56000, 3, 1, 0, 0, 0, 0, time.UTC)
+	good := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	broken := &row{Name: "broken", SentAt: bad, LastAt: &bad, hidden: bad}
+	payload := map[string]any{
+		"results": []any{row{Name: "fine", SentAt: good}, broken},
+		"total":   2,
+	}
+
+	rec := httptest.NewRecorder()
+	RespondWithJSON(rec, zap.NewNop(), http.StatusOK, payload)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var body struct {
+		Results []struct {
+			Name   string     `json:"name"`
+			SentAt time.Time  `json:"sent_at"`
+			LastAt *time.Time `json:"last_at"`
+		} `json:"results"`
+		Total int `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, 2, body.Total)
+	require.Len(t, body.Results, 2)
+	require.True(t, good.Equal(body.Results[0].SentAt))
+	require.Equal(t, 9999, body.Results[1].SentAt.Year())
+	require.Equal(t, 9999, body.Results[1].LastAt.Year())
+
+	// The caller's payload may be shared (a cache, say), so it is never modified.
+	require.Equal(t, 56000, broken.SentAt.Year())
+	require.Equal(t, 56000, broken.LastAt.Year())
+	require.Equal(t, 56000, broken.hidden.Year())
+}
+
+// A marshal failure with no bad time behind it still gets the 500 envelope.
+func TestRespondWithJSONStillFailsOnOtherUnmarshalableValues(t *testing.T) {
+	rec := httptest.NewRecorder()
+	RespondWithJSON(rec, zap.NewNop(), http.StatusOK, map[string]any{"ch": make(chan int)})
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }

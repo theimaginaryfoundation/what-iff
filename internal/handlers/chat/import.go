@@ -392,7 +392,7 @@ func prepareConversations(raw []migration.SimplifiedConversation, now time.Time)
 	for _, r := range raw {
 		ts := now
 		if r.CreateTime != nil {
-			ts = floatToTime(*r.CreateTime)
+			ts = models.PlausibleTimeOr(floatToTime(*r.CreateTime), now, now)
 		}
 		title := models.NormalizeImportedTitle(r.Title, "Imported chat "+ts.Format("2006-01-02 15:04"))
 
@@ -457,11 +457,22 @@ func prepareConversations(raw []migration.SimplifiedConversation, now time.Time)
 	return convs, errs
 }
 
+// maxImportUnixSeconds bounds the create_time values floatToTime converts. It is the end of the
+// year 9999, well inside int64, so the conversion is always defined.
+const maxImportUnixSeconds = 253402300799
+
 // floatToTime converts a Unix float64 timestamp (as used in ChatGPT exports) to a UTC time,
 // preserving sub-second precision. math.Modf avoids float subtraction rounding that can produce
 // negative nanoseconds. nsec is clamped to [0, 1e9); values at the boundary are biased inward
 // by at most one nanosecond — an acceptable trade-off for correctness.
+//
+// The file is untrusted: a value too large for int64 seconds (or NaN) returns the zero time
+// rather than whatever the float conversion happens to produce. The datastore replaces it, and
+// any other implausible time, when the conversation is stored (plausibleImportedTimes).
 func floatToTime(ts float64) time.Time {
+	if math.IsNaN(ts) || math.Abs(ts) > maxImportUnixSeconds {
+		return time.Time{}
+	}
 	sec, frac := math.Modf(ts)
 	nsec := int64(frac * 1e9)
 	if nsec < 0 {

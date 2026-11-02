@@ -61,7 +61,7 @@ func toChatMessageModel(e *ent.ChatMessage) *models.ChatMessage {
 		ReadStatus:            models.MessageReadStatus(e.ReadStatus),
 		GenerationModel:       e.GenerationModel,
 		GenerationPersonality: e.GenerationPersonality,
-		SentAt:                e.SentAt,
+		SentAt:                models.JSONSafeTime(e.SentAt),
 		Tokens:                e.Tokens,
 		Bookmarked:            e.Bookmarked,
 	}
@@ -338,7 +338,9 @@ func (d *Datastore) CreateChatMessage(ctx context.Context, userID uuid.UUID, cha
 	}
 
 	if !chatMessage.SentAt.IsZero() {
-		create.SetSentAt(chatMessage.SentAt)
+		// Callers pass relay and platform timestamps through here; an implausible one becomes now.
+		now := time.Now()
+		create.SetSentAt(models.PlausibleTimeOr(chatMessage.SentAt, now, now))
 	}
 
 	if len(chatMessage.Attachments) > 0 {
