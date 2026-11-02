@@ -9,6 +9,7 @@
 - Initialize global or scoped OTel providers per process configuration.
 - **`Telemetry` type** (`telemetry.go`) — holds logger/meter/tracer handles consumed by `internal/agent` (required for `messageContextBuilder` when non-nil logger is mandatory).
 - **`files.go`** — bounded operation, stage, item-kind and outcome constants for the file metrics, plus helpers (`RecordFileSize`, `TimeFileStage`, `RecordFileItems`, `RecordFileUpload`) used by uploads, imports and exports.
+  It also holds the image read variants and sources and the thumbnail backfill outcomes, with `RecordImageResolve` and `RecordThumbnailBackfill`.
 - **`httptransport.go`** — `HTTPTransport` / `InstrumentHTTPClient` wrap an `http.RoundTripper` to record `http.client.request.duration` per attempt (so SDK retries are separate samples) with `dependency` from the request host (built-in vendor hosts plus `WithDependencyHost` overrides, else `other`), a bounded method, `http.status_class` and `error.type`.
   A RoundTripper returns at response headers, so streamed LLM responses record time to headers; whole-call LLM time comes from the gen_ai metrics.
 
