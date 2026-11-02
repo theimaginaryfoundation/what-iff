@@ -105,24 +105,38 @@ func (d *Datastore) importOneConversation(ctx context.Context, userID uuid.UUID,
 // that already satisfy that invariant are preserved exactly; equal, regressing, fallback, or
 // sub-precision values are advanced to previousNormalized + importedMessageOrderStep. The comparison
 // deliberately uses the prior normalized value so corrections remain monotonic across a sequence.
-func normalizeImportedMessageTimes(messages []models.ChatMessage) []models.ChatMessage {
-	if len(messages) < 2 {
+//
+// A timestamp JSON can't encode (see importedTimeInRange) is treated as missing: the first message
+// takes fallback, and a later one is advanced like a regressing value.
+func normalizeImportedMessageTimes(messages []models.ChatMessage, fallback time.Time) []models.ChatMessage {
+	if len(messages) == 0 {
 		return messages
 	}
 
 	normalized := append([]models.ChatMessage(nil), messages...)
-	previous := normalized[0].SentAt.UTC()
-	normalized[0].SentAt = previous
-	for i := 1; i < len(normalized); i++ {
+	var previous time.Time
+	for i := range normalized {
 		candidate := normalized[i].SentAt.UTC()
-		minimumNext := previous.Add(importedMessageOrderStep)
-		if candidate.Before(minimumNext) {
-			candidate = minimumNext
+		switch {
+		case i == 0:
+			if !importedTimeInRange(candidate) {
+				candidate = fallback.UTC()
+			}
+		case !importedTimeInRange(candidate) || candidate.Before(previous.Add(importedMessageOrderStep)):
+			candidate = previous.Add(importedMessageOrderStep)
 		}
 		normalized[i].SentAt = candidate
 		previous = candidate
 	}
 	return normalized
+}
+
+// importedTimeInRange reports whether an archive timestamp can be served back. encoding/json rejects
+// years outside [0, 9999], so one such message time fails every response that includes it (the admin
+// user list's last-message column among them).
+func importedTimeInRange(t time.Time) bool {
+	year := t.Year()
+	return year >= 0 && year <= 9999
 }
 
 // persistImportedConversation runs dedup, create, bulk messages, and commit inside an open tx.
@@ -168,7 +182,10 @@ func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx,
 
 	// Normalize imported timestamps before both metadata calculation and persistence so the archive's
 	// transcript sequence remains the authoritative ordering even when source timestamps tie/regress.
-	messages := normalizeImportedMessageTimes(conv.Messages)
+	if !importedTimeInRange(conv.CreatedAt) {
+		conv.CreatedAt = time.Now().UTC()
+	}
+	messages := normalizeImportedMessageTimes(conv.Messages, conv.CreatedAt)
 
 	lastMsgTime := conv.CreatedAt
 	for _, msg := range messages {
