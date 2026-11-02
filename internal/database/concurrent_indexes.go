@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"entgo.io/ent/dialect/sql/schema"
 	"go.uber.org/zap"
@@ -16,6 +17,9 @@ import (
 // so the migration would never find an index under the name it asked for.
 const postgresMaxIdentifier = 63
 
+// dropFailedBuildTimeout bounds dropping a failed build's leftover index.
+const dropFailedBuildTimeout = time.Minute
+
 // PrebuildIndexes builds, with CREATE INDEX CONCURRENTLY, every plain index the schema declares on
 // a table that already exists but that the database lacks. It runs just before the ent migration,
 // which would otherwise build them with a plain CREATE INDEX: that blocks writes to the table for
@@ -26,8 +30,9 @@ const postgresMaxIdentifier = 63
 // It is best effort. Anything it does not handle is left to the migration, unchanged from before:
 // tables that don't exist yet (a fresh database; their indexes are built on empty tables), indexes
 // on columns this migration adds, indexes with annotations (partial, typed or op-class indexes),
-// and names over PostgreSQL's identifier limit. A failed build is logged and also left to the
-// migration. An invalid index, left by a build that was interrupted, is dropped and rebuilt. It
+// and names over PostgreSQL's identifier limit. A failed build is logged, its invalid leftover
+// dropped, and the index left to the migration; if that leftover can't be dropped for a unique
+// index, it returns an error rather than boot without the constraint. An invalid index, left by a build that was interrupted, is dropped and rebuilt. It
 // returns the number of indexes it built, and does nothing outside PostgreSQL.
 func PrebuildIndexes(ctx context.Context, db *sql.DB, logger *zap.Logger) (int, error) {
 	if databaseType() != "postgres" {
@@ -70,12 +75,30 @@ func PrebuildIndexes(ctx context.Context, db *sql.DB, logger *zap.Logger) (int, 
 			logger.Info("building index concurrently ahead of the migration", zap.String("table", table.Name), zap.String("index", idx.Name))
 			if _, err := db.ExecContext(ctx, ddl); err != nil {
 				logger.Warn("concurrent index build failed; leaving it to the migration", zap.String("index", idx.Name), zap.Error(err))
+				if derr := dropFailedBuild(ctx, db, idx.Name); derr != nil {
+					if idx.Unique {
+						return built, fmt.Errorf("drop invalid unique index %s after a failed build: %w", idx.Name, derr)
+					}
+					logger.Warn("could not drop the failed build's invalid index; the next boot rebuilds it", zap.String("index", idx.Name), zap.Error(derr))
+				}
 				continue
 			}
 			built++
 		}
 	}
 	return built, nil
+}
+
+// dropFailedBuild removes the invalid index a failed CREATE INDEX CONCURRENTLY leaves behind, so
+// leaving the index to the migration holds: ent's inspection does not check pg_index.indisvalid,
+// so it would count the leftover as present and skip it. For a unique index that would boot with
+// uniqueness unenforced where a plain CREATE UNIQUE INDEX used to fail the boot. It runs even when
+// ctx was what ended the build, with its own timeout.
+func dropFailedBuild(ctx context.Context, db *sql.DB, name string) error {
+	dropCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dropFailedBuildTimeout)
+	defer cancel()
+	_, err := db.ExecContext(dropCtx, fmt.Sprintf(`DROP INDEX CONCURRENTLY IF EXISTS %q`, name))
+	return err
 }
 
 // concurrentIndexDDL returns the CREATE INDEX CONCURRENTLY statement for idx, or false when the
