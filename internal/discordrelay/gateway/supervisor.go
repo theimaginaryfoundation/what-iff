@@ -137,6 +137,9 @@ func (s *Supervisor) inner() *relaykit.Supervisor[Bot] {
 	return s.sup
 }
 
+// recordRefusalTimeout bounds recording a refused bot's status.
+const recordRefusalTimeout = 5 * time.Second
+
 // recordRefusal marks a bot Discord will keep refusing. Other dial errors (network, a
 // Discord outage) leave it active for the next reconcile to retry.
 func (s *Supervisor) recordRefusal(ctx context.Context, bot Bot, err error) {
@@ -153,7 +156,11 @@ func (s *Supervisor) recordRefusal(ctx context.Context, bot Bot, err error) {
 	default:
 		return
 	}
-	if serr := s.Status.SetDiscordBotStatus(context.WithoutCancel(ctx), bot.ID, status, reason); serr != nil {
+	// Recorded even when the reconcile is being cancelled (a lost lock, shutdown): otherwise the
+	// next leader dials the bot again. The timeout keeps a stuck store from holding the reconcile.
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordRefusalTimeout)
+	defer cancel()
+	if serr := s.Status.SetDiscordBotStatus(recordCtx, bot.ID, status, reason); serr != nil {
 		s.Logger.Warn("discord gateway: record refused connection", zap.String("id", bot.ID.String()), zap.Error(serr))
 	}
 }

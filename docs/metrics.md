@@ -205,6 +205,7 @@ The operation and stage sets are defined in
   (`imageutil.BackfillThumbnail`, `imageutil.CopyThumbnail`).
   `dropped` means the per-process pool was full; the next read offers the image again.
   `skipped` means the image failed within the last hour and is not retried yet.
+  At most 10,000 recent failures are remembered per process: past that, a new failure is not recorded and that image is retried on its next read (the pool still bounds the work).
 
 ### App
 

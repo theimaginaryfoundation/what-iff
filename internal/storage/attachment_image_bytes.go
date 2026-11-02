@@ -25,6 +25,16 @@ func ResolveAttachmentImageBytes(ctx context.Context, logger *zap.Logger, store 
 // telemetry.ImageSourceThumbnail got the full image instead; callers can hand those bytes to
 // imageutil.BackfillThumbnail so the next read is a single small fetch. Every read is counted on
 // telemetry.ImageResolves.
+//
+// Keys are tried in order and the first non-empty object wins:
+//   - thumbnail requests: the thumbnail key, then att.S3Key, then the canonical
+//     FileKeyForImage key (skipped when it equals att.S3Key), then the chat image key;
+//   - full requests: the canonical key, then att.S3Key (skipped when it equals the canonical
+//     key), then the chat image key.
+//
+// The chat image key is tried only for an attachment that belongs to a chat. The skips only
+// avoid downloading the same object twice. Nothing found reports
+// telemetry.ImageSourceNone.
 func ResolveAttachmentImage(ctx context.Context, logger *zap.Logger, store FileStore, userID uuid.UUID, att *models.FileAttachment, wantThumb bool) ([]byte, string, string) {
 	if att == nil {
 		return nil, "", telemetry.ImageSourceNone

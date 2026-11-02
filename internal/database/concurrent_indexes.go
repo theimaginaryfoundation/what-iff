@@ -33,6 +33,9 @@ func PrebuildIndexes(ctx context.Context, db *sql.DB, logger *zap.Logger) (int, 
 	if databaseType() != "postgres" {
 		return 0, nil
 	}
+	if db == nil {
+		return 0, fmt.Errorf("prebuild indexes: no database handle")
+	}
 	if logger == nil {
 		logger = zap.NewNop()
 	}

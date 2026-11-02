@@ -71,3 +71,10 @@ func TestPrebuildIndexesSkipsOtherDatabases(t *testing.T) {
 		t.Fatalf("PrebuildIndexes() = %d, %v; want 0, nil", n, err)
 	}
 }
+
+func TestPrebuildIndexesRejectsANilHandle(t *testing.T) {
+	t.Setenv("DB_TYPE", "postgres")
+	if _, err := PrebuildIndexes(context.Background(), nil, nil); err == nil {
+		t.Fatal("PrebuildIndexes(nil db) on PostgreSQL should return an error, not panic")
+	}
+}

@@ -107,7 +107,8 @@ func (d *Datastore) importOneConversation(ctx context.Context, userID uuid.UUID,
 // deliberately uses the prior normalized value so corrections remain monotonic across a sequence.
 //
 // A timestamp JSON can't encode (see importedTimeInRange) is treated as missing: the first message
-// takes fallback, and a later one is advanced like a regressing value.
+// takes fallback, and a later one is advanced like a regressing value. The result is a copy that
+// never aliases messages, except that an empty input is returned as is (and fallback is unused).
 func normalizeImportedMessageTimes(messages []models.ChatMessage, fallback time.Time) []models.ChatMessage {
 	if len(messages) == 0 {
 		return messages

@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
@@ -156,5 +157,26 @@ func TestCopyThumbnailWithoutSourceThumbnailLeavesBackfillOpen(t *testing.T) {
 
 	if !store.has(storage.FileKeyForImageThumbnail(userID, dst)) {
 		t.Fatal("the read-path backfill should still write the copy's thumbnail")
+	}
+}
+
+func TestFailedSetIsCapped(t *testing.T) {
+	f := &failedSet{max: 2}
+	now := time.Now()
+	old, a, b, c := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+
+	f.add(old, now.Add(-2*thumbnailBackfillRetryAfter))
+	f.add(a, now)
+	f.add(b, now) // full: the expired entry is swept to make room
+	if f.size() != 2 || !f.recent(a, now) || !f.recent(b, now) {
+		t.Fatalf("want a and b remembered after sweeping the expired entry, size=%d", f.size())
+	}
+	f.add(c, now) // full of live entries: c is not remembered
+	if f.size() != 2 || f.recent(c, now) {
+		t.Fatalf("a full set must not grow, size=%d", f.size())
+	}
+	f.add(a, now.Add(time.Minute)) // refreshing a remembered id still works when full
+	if !f.recent(a, now.Add(time.Minute)) {
+		t.Fatal("a remembered id should be refreshable when the set is full")
 	}
 }
