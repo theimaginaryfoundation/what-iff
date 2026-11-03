@@ -356,11 +356,11 @@ describe('MessageBubbleComponent', () => {
         fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), pending_label: 'Job running' });
         fixture.componentRef.setInput('displayContent', 'Checking the forecast');
         fixture.detectChanges();
-        expect(fixture.nativeElement.querySelector('.bubble__job-chip')?.textContent).toContain('Job running');
+        expect(fixture.nativeElement.querySelector('.bubble__job-name')?.textContent).toContain('Job running');
 
         fixture.componentRef.setInput('message', { ...message('Assistant'), pending_label: 'Job running' });
         fixture.detectChanges();
-        expect(fixture.nativeElement.querySelector('.bubble__job-chip')).toBeNull();
+        expect(fixture.nativeElement.querySelector('.bubble__job')).toBeNull();
     });
 
     describe('job chip (ADR 0x040)', () => {
@@ -375,36 +375,36 @@ describe('MessageBubbleComponent', () => {
             created_at: '2026-11-03T13:00:00Z',
             updated_at: '2026-11-03T13:00:00Z',
         });
-        const chip = () => fixture.nativeElement.querySelector('.bubble__job-chip') as HTMLElement | null;
+        const root = () => fixture.nativeElement as HTMLElement;
+        const chip = () => root().querySelector('.bubble__job') as HTMLDetailsElement | null;
 
-        it('links a running job turn to its job, naming it', () => {
+        it('names a running job and holds its prompt and link, collapsed', () => {
             fixture.componentRef.setInput('message', {
                 ...pendingAssistantMessage(),
                 pending_label: 'Job running',
-                pending_job_run: { agentJobId: JOB_ID, title: 'Weekly meal planning' },
+                pending_job_run: { agentJobId: JOB_ID, title: 'Weekly meal planning', prompt: 'Plan.' },
             });
             fixture.componentRef.setInput('displayContent', '');
             fixture.detectChanges();
 
-            expect(chip()?.tagName).toBe('A');
-            expect(chip()?.getAttribute('href')).toBe(`/agent-jobs/${JOB_ID}`);
-            expect(chip()?.textContent).toContain('Job running');
-            expect(chip()?.getAttribute('aria-label')).toBe('Running for the job “Weekly meal planning”. Open the job.');
+            expect(chip()?.classList).toContain('bubble__job--live');
+            expect(chip()?.open).toBe(false);
+            expect(root().querySelector('.bubble__job-name')?.textContent).toBe('Job running · Weekly meal planning');
+            expect(root().querySelector('.bubble__job-prompt')?.textContent).toBe('Plan.');
+            expect(root().querySelector('.bubble__job-open')?.getAttribute('href')).toBe(`/agent-jobs/${JOB_ID}`);
         });
 
-        it('keeps just the clock on a saved job reply, linked to the job', () => {
+        it('names the job on a saved job reply, with its prompt and link', () => {
             fixture.componentRef.setInput('message', {
                 ...message('Assistant'),
                 tool_calls: [runJobCall({ agent_job_id: JOB_ID, title: 'Weekly meal planning' })],
             });
             fixture.detectChanges();
 
-            expect(chip()?.tagName).toBe('A');
-            expect(chip()?.classList).not.toContain('bubble__job-chip--live');
-            expect(chip()?.textContent?.trim()).toBe('');
-            expect(chip()?.querySelector('ui-clock-icon')).not.toBeNull();
-            expect(chip()?.getAttribute('href')).toBe(`/agent-jobs/${JOB_ID}`);
-            expect(chip()?.getAttribute('aria-label')).toBe('Reply from the job “Weekly meal planning”. Open the job.');
+            expect(chip()?.classList).not.toContain('bubble__job--live');
+            expect(root().querySelector('.bubble__job-name')?.textContent).toBe('Weekly meal planning');
+            expect(root().querySelector('.bubble__job-prompt')?.textContent).toBe('Plan this week\'s meals.');
+            expect(root().querySelector('.bubble__job-open')?.getAttribute('href')).toBe(`/agent-jobs/${JOB_ID}`);
         });
 
         it('opens the job in-app', () => {
@@ -412,7 +412,7 @@ describe('MessageBubbleComponent', () => {
             fixture.componentRef.setInput('message', { ...message('Assistant'), tool_calls: [runJobCall({ agent_job_id: JOB_ID, title: 'T' })] });
             fixture.detectChanges();
 
-            chip()?.click();
+            (root().querySelector('.bubble__job-open') as HTMLAnchorElement).click();
 
             expect(navigate).toHaveBeenCalledWith(`/agent-jobs/${JOB_ID}`);
         });
@@ -421,8 +421,8 @@ describe('MessageBubbleComponent', () => {
             fixture.componentRef.setInput('message', { ...message('Assistant'), tool_calls: [runJobCall({ title: '' })] });
             fixture.detectChanges();
 
-            expect(chip()?.tagName).toBe('SPAN');
-            expect(chip()?.getAttribute('aria-label')).toBe('Reply from a scheduled job');
+            expect(root().querySelector('.bubble__job-name')?.textContent).toBe('Scheduled job');
+            expect(root().querySelector('.bubble__job-open')).toBeNull();
         });
 
         it('leaves other replies unmarked', () => {

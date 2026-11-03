@@ -4,7 +4,7 @@ import { ToolCall, ToolCallView } from '../../../core/models/toolcall.model';
 
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../chat.constants';
 import { toolCallsOutsideAgentRun } from './agent-run.helpers';
-import { JobRunRef } from './job-run.helpers';
+import { JOB_RUN_TOOL_NAME, JobRunRef, isJobRunToolCall } from './job-run.helpers';
 
 export type GroupedItem =
   | MessageGroupItem
@@ -74,12 +74,14 @@ export function groupMessages(messages: readonly ChatMessage[]): GroupedItem[] {
       continue;
     }
 
-    // An Advanced reply's step tool calls show in its working notes, not here (ADR 0x026).
-    const toolCalls = toolCallsOutsideAgentRun(message);
+    // An Advanced reply's step tool calls show in its working notes, not here (ADR 0x026), and a
+    // job's run_job call shows as the reply's job chip (ADR 0x040).
+    const outside = toolCallsOutsideAgentRun(message);
+    const toolCalls = outside.filter(call => !isJobRunToolCall(call));
     if (toolCalls.length) {
       groups.push({ kind: 'tool-call-group', message, toolCalls });
       currentGroup = null;
-      if (!hasRenderableMessageBody(message) && toolCalls.length === message.tool_calls?.length) {
+      if (!hasRenderableMessageBody(message) && outside.length === toolCalls.length && toolCalls.length === message.tool_calls?.length) {
         continue;
       }
     }
@@ -231,12 +233,14 @@ export function appendLiveToolCallGroup(
   liveCalls: readonly ChatTurnToolCall[],
   advanced: ChatTurnAdvancedProgress | null = null,
 ): GroupedItem[] {
-  if (liveCalls.length === 0 && !advanced) return [...groups];
+  // A job's run_job row shows as the pending reply's job chip instead (ADR 0x040).
+  const shownCalls = liveCalls.filter(call => call.name !== JOB_RUN_TOOL_NAME);
+  if (shownCalls.length === 0 && !advanced) return [...groups];
   const seen = new Map<string, number>();
   const item: ToolCallGroupItem = {
     kind: 'tool-call-group',
     message: pendingMessage,
-    toolCalls: liveCalls.map(call => {
+    toolCalls: shownCalls.map(call => {
       // View id scheme: live-<step>-<round>-<tool call id>-<occurrence>.
       // - Not the list position: an Advanced turn keeps only its newest calls (60), so older ones
       //   drop off the front and positions shift on every poll.

@@ -46,24 +46,26 @@ A turn with no source (a webhook background run, the onboarding welcome) gets no
 Because the saved call names the job, no schema change is needed.
 The ticket still does not know its agent job, and does not need to.
 
-### 4. A job chip marks job turns, and links to the job
+### 4. A job chip shows the job, its prompt and a link, collapsed
 
-A reply with a `run_job` call carries a small clock chip above it.
-While the run is live, the chip reads "Job running", as before.
-Once saved, it is the clock alone: "Job ran" would add little, and the chip has to stay quiet on every job reply in a long thread.
-The job's name is in the chip's tooltip and accessible name ("Reply from the job “Weekly meal planning”. Open the job.").
-The chip links to the job's page, and so does an "Open job" link on the expanded `run_job` card, which shows the prompt in place of the raw input JSON.
+A reply with a `run_job` call carries a chip at its top, styled like an attached thread's chip: a clock and the job's title.
+While the run is live, it reads "Job running · <title>".
+It is collapsed by default; opened, it shows the prompt the job ran and an "Open job" link to the job's page.
+So a job's turn is marked, its prompt is one click away, and none of it reads as a user turn.
+
+The `run_job` call is left out of the reply's tool-call list, live and saved, so it shows in one place only.
+The data stays a tool call: only the presentation is a chip.
 
 ## Alternatives considered
 
 - **Saving the prompt as a user message.** It would show the prompt, but put it back into the thread's history and the model's context, which is what the ephemeral prompt avoids. It would also read as if the user had said it.
 - **A `source_agent_job_id` column on chat messages.** It would mark job replies directly, but the `run_job` call already carries the job, and the chip needs the prompt's call anyway. One record of where a reply came from is enough.
-- **The job's name on the chip itself.** Clearer at a glance, but long titles crowd every job reply. The tooltip and the `run_job` card name it without adding to each reply.
+- **`run_job` as a row in the tool-call list, with an icon-only clock chip.** This was the first version: the prompt sat with the turn's other tool calls and the chip named the job only on hover. A job's prompt is not something the model did, though, and the list collapses it out of sight behind "N tool calls". A chip on the reply, like an attachment, puts it with the reply and names the job at a glance.
 - **A `run_job` call for webhook background runs too.** A webhook has no page to link to, and its message is the external system's, so it is left out for now.
 
 ## Consequences
 
-- Every scheduled run's reply gains one saved tool call, and its turn's live timeline gains one row.
+- Every scheduled run's reply gains one saved tool call, and its turn's live timeline gains one row, which the web client shows as the chip rather than as a tool row.
 - A job run's memory load now shows live in its timeline, as on a user's turn, since the run now has a progress recorder from the start.
 - Replies saved before this change have no `run_job` call, so they show no chip. Nothing is backfilled.
 - Renaming a job does not rename the chip's tooltip on earlier replies: the call records the title at the time of the run. The link still goes to the job.

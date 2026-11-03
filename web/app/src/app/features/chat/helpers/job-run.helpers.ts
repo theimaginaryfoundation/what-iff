@@ -8,15 +8,19 @@ import { parseToolPayload } from './tool-call-format.helpers';
 
 export const JOB_RUN_TOOL_NAME = 'run_job';
 
-/** The job a turn ran for. `agentJobId` is null when the call names none. */
+/** The job a turn ran for, and its prompt. `agentJobId` is null when the call names none. */
 export interface JobRunRef {
   agentJobId: string | null;
   title: string;
+  prompt: string;
 }
 
 /** The job named by the first run_job call among `calls` (saved or live shape), or null. */
 export function jobRunRef(
-  calls: readonly { tool_name?: string; name?: string; tool_input?: string; input?: string }[] | null | undefined,
+  calls:
+    | readonly { tool_name?: string; name?: string; tool_input?: string; input?: string; tool_output?: string; output?: string }[]
+    | null
+    | undefined,
 ): JobRunRef | null {
   const call = calls?.find(c => (c.tool_name ?? c.name) === JOB_RUN_TOOL_NAME);
   if (!call) return null;
@@ -24,7 +28,7 @@ export function jobRunRef(
   const record = typeof input === 'object' && input !== null && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
   const id = typeof record['agent_job_id'] === 'string' ? record['agent_job_id'].trim() : '';
   const title = typeof record['title'] === 'string' ? record['title'].trim() : '';
-  return { agentJobId: id || null, title };
+  return { agentJobId: id || null, title, prompt: (call.tool_output ?? call.output ?? '').trim() };
 }
 
 /** Whether a tool call is a job's run_job call. */
@@ -35,9 +39,4 @@ export function isJobRunToolCall(call: { tool_name?: string }): boolean {
 /** The job page for a ref, or null when it names no job. */
 export function jobRunHref(ref: JobRunRef): string | null {
   return ref.agentJobId ? `/agent-jobs/${encodeURIComponent(ref.agentJobId)}` : null;
-}
-
-/** "the job “Weekly meal planning”", or "a scheduled job" when it has no title. */
-export function jobRunName(ref: JobRunRef): string {
-  return ref.title ? `the job “${ref.title}”` : 'a scheduled job';
 }

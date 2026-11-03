@@ -11,22 +11,21 @@ import { BrainIconComponent, ChevRightIconComponent, ClockIconComponent, StarIco
 import { MessageContentComponent } from '../message-content/message-content.component';
 import { AgentRunNotesComponent } from '../agent-run-notes/agent-run-notes.component';
 import { AgentRunView, agentRunView } from '../../helpers/agent-run.helpers';
-import { JobRunRef, jobRunHref, jobRunName, jobRunRef } from '../../helpers/job-run.helpers';
+import { JobRunRef, jobRunHref, jobRunRef } from '../../helpers/job-run.helpers';
 
 interface JobChip {
   href: string | null;
-  /** Text beside the clock: the live "Job running"; null once the turn is saved. */
-  label: string | null;
+  /** "Job running · <title>" while the run is live, then the job's title. */
+  label: string;
   live: boolean;
-  /** Which job, for the tooltip and screen readers. */
-  description: string;
+  /** The prompt the job ran, shown when the chip is opened. */
+  prompt: string;
 }
 
 function jobChip(ref: JobRunRef | null, liveLabel: string | null): JobChip {
-  const href = ref ? jobRunHref(ref) : null;
-  const name = ref ? jobRunName(ref) : 'a scheduled job';
-  const description = (liveLabel ? `Running for ${name}` : `Reply from ${name}`) + (href ? '. Open the job.' : '');
-  return { href, label: liveLabel, live: !!liveLabel, description };
+  const title = ref?.title ?? '';
+  const label = liveLabel ? [liveLabel, title].filter(Boolean).join(' · ') : title || 'Scheduled job';
+  return { href: ref ? jobRunHref(ref) : null, label, live: !!liveLabel, prompt: ref?.prompt ?? '' };
 }
 
 @Component({
@@ -42,36 +41,23 @@ function jobChip(ref: JobRunRef | null, liveLabel: string | null): JobChip {
       [attr.aria-label]="ariaLabel()"
     >
       @if (jobChip(); as chip) {
-        <!-- A job's turn (ADR 0x039, 0x040): "Job running" while it runs, then just the clock. It
-             links to the job when the turn names it; the tooltip says which job. -->
-        @if (chip.href) {
-          <a
-            class="bubble__job-chip"
-            [class.bubble__job-chip--live]="chip.live"
-            [href]="chip.href"
-            [uiTooltip]="chip.description"
-            [attr.aria-label]="chip.description"
-            (click)="openJob($event, chip.href)"
-          >
+        <!-- A job's turn (ADR 0x039, 0x040): a chip naming the job, like an attached thread's, that
+             opens to the prompt the job ran (never saved as a message) and a link to the job. -->
+        <details class="bubble__job" [class.bubble__job--live]="chip.live">
+          <summary class="bubble__job-chip" uiTooltip="Show what the job asked">
             <ui-clock-icon [size]="12" />
-            @if (chip.label) {
-              <span>{{ chip.label }}</span>
+            <span class="bubble__job-name">{{ chip.label }}</span>
+            <ui-chev-right-icon class="bubble__job-chevron" [size]="10" />
+          </summary>
+          <div class="bubble__job-panel">
+            @if (chip.prompt) {
+              <div class="bubble__job-prompt">{{ chip.prompt }}</div>
             }
-          </a>
-        } @else {
-          <span
-            class="bubble__job-chip"
-            [class.bubble__job-chip--live]="chip.live"
-            [uiTooltip]="chip.description"
-            [attr.aria-label]="chip.description"
-            role="note"
-          >
-            <ui-clock-icon [size]="12" />
-            @if (chip.label) {
-              <span>{{ chip.label }}</span>
+            @if (chip.href) {
+              <a class="bubble__job-open" [href]="chip.href" (click)="openJob($event, chip.href)">Open job</a>
             }
-          </span>
-        }
+          </div>
+        </details>
       }
       @if (agentRun(); as run) {
         <!-- A saved Advanced reply (ADR 0x026): its per-step working notes, plan and stop reason,
@@ -480,32 +466,83 @@ function jobChip(ref: JobRunRef | null, liveLabel: string | null): JobChip {
       opacity: 1;
     }
 
+    .bubble__job {
+      margin-bottom: 0.375rem;
+      max-width: 100%;
+      min-width: 0;
+    }
+
     .bubble__job-chip {
       align-items: center;
+      background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
       border-radius: 999px;
-      color: var(--color-text-muted);
-      display: flex;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      display: inline-flex;
       font-size: 0.6875rem;
       font-weight: 600;
       gap: 0.25rem;
-      letter-spacing: 0.01em;
-      margin-bottom: 0.375rem;
-      padding: 0.125rem 0.375rem;
-      text-decoration: none;
-      transition: background-color 120ms ease, color 120ms ease;
-      width: fit-content;
+      list-style: none;
+      max-width: 100%;
+      padding: 0.0625rem 0.5rem;
+      transition: border-color 120ms ease, color 120ms ease;
+      user-select: none;
     }
 
-    .bubble__job-chip--live {
-      background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+    .bubble__job-chip::-webkit-details-marker { display: none; }
+
+    .bubble__job-chip:hover,
+    .bubble__job-chip:focus-visible,
+    .bubble__job--live .bubble__job-chip {
+      border-color: var(--color-accent);
       color: var(--color-accent);
-      padding-inline: 0.5rem;
     }
 
-    a.bubble__job-chip:hover,
-    a.bubble__job-chip:focus-visible {
-      background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+    .bubble__job-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .bubble__job-chevron {
+      display: inline-flex;
+      flex-shrink: 0;
+      transition: transform 150ms ease;
+    }
+
+    .bubble__job[open] .bubble__job-chevron {
+      transform: rotate(90deg);
+    }
+
+    .bubble__job-panel {
+      border-left: 2px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border-base));
+      display: grid;
+      gap: 0.375rem;
+      margin: 0.375rem 0 0.25rem 0.5rem;
+      padding: 0.125rem 0 0.125rem 0.625rem;
+    }
+
+    .bubble__job-prompt {
+      color: var(--color-text-secondary);
+      font-size: 0.75rem;
+      line-height: 1.55;
+      max-height: 16rem;
+      overflow-wrap: anywhere;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    .bubble__job-open {
       color: var(--color-accent);
+      font-size: 0.6875rem;
+      justify-self: start;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .bubble__job-chevron { transition: none; }
     }
 
     .bubble__pending-status {
@@ -626,7 +663,7 @@ export class MessageBubbleComponent {
   }
 
   readonly isPendingPlaceholder = computed(() => this.message().id === CHAT_PENDING_ASSISTANT_MESSAGE_ID);
-  /** The job chip on a job's turn: the live label while it runs, then the clock alone. */
+  /** The job chip on a job's turn: "Job running" and the job while it runs, then the job. */
   readonly jobChip = computed<JobChip | null>(() => {
     const message = this.message();
     if (message.origin !== 'Assistant') return null;

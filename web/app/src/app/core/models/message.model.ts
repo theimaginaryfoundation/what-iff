@@ -100,7 +100,7 @@ export interface ChatMessage {
    * Client-only, on the pending-reply placeholder: the job a running job turn is for, read from its
    * live run_job row (ADR 0x040). A saved reply carries it in its run_job tool call instead.
    */
-  pending_job_run?: { agentJobId: string | null; title: string };
+  pending_job_run?: { agentJobId: string | null; title: string; prompt: string };
   /** Reasoning/thinking the model reported for this assistant turn (GLM, MiMo). Display-only. */
   model_reasoning?: string | null;
   /** Advanced turns only (ADR 0x026): the run's notes, plan and end reason. Replaces model_reasoning there. */
