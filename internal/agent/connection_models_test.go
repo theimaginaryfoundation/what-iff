@@ -8,16 +8,17 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
-	"time"
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
+	"entgo.io/ent/dialect/sql/schema"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
+	"github.com/theimaginaryfoundation/what-iff/ent/migrate"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
@@ -45,71 +46,26 @@ func newConnectionFixture(t *testing.T) *connectionFixture {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite3", "file:"+uuid.NewString()+"?mode=memory&_fk=1")
 	require.NoError(t, err)
-	for _, stmt := range []string{
-		`CREATE TABLE users (
-			id uuid PRIMARY KEY,
-			created_at datetime NOT NULL,
-			updated_at datetime NOT NULL,
-			username text NOT NULL UNIQUE,
-			email text NOT NULL UNIQUE,
-			password_hash text NOT NULL,
-			first_name text,
-			last_name text,
-			timezone text NOT NULL DEFAULT 'America/New_York',
-			status text NOT NULL DEFAULT 'active',
-			enable_experimental_models bool NOT NULL DEFAULT false,
-			last_login datetime,
-			last_seen datetime,
-			terms_accepted_at datetime,
-			refresh_token_id text
-		)`,
-		`CREATE TABLE provider_connections (
-			id uuid PRIMARY KEY,
-			created_at datetime NOT NULL,
-			updated_at datetime NOT NULL,
-			user_id uuid NULL REFERENCES users(id) ON DELETE CASCADE,
-			preset text NOT NULL,
-			flavor text NOT NULL DEFAULT '',
-			name text NOT NULL,
-			base_url text NOT NULL DEFAULT '',
-			key text NOT NULL DEFAULT '',
-			hint text NOT NULL DEFAULT '',
-			source text NOT NULL DEFAULT '',
-			builtin text NULL
-		)`,
-		`CREATE TABLE models (
-			id uuid PRIMARY KEY,
-			name text NOT NULL,
-			display_name text NOT NULL,
-			description text NOT NULL,
-			provider text NOT NULL DEFAULT 'openai',
-			tool_support bool NOT NULL DEFAULT false,
-			reasoning_support_override text NULL,
-			vision_support bool NULL,
-			base_credits_per_slab integer NOT NULL DEFAULT 1,
-			subscription_tier text NOT NULL DEFAULT 'high',
-			deleted bool NOT NULL DEFAULT false,
-			is_default bool NOT NULL DEFAULT false,
-			connection_id uuid NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
-			UNIQUE (connection_id, name)
-		)`,
-	} {
-		_, err := db.Exec(stmt)
-		require.NoError(t, err)
-	}
+	// The tables from the ent schema, so they match any build's (a build may add
+	// columns to users), keeping only the foreign keys among these three.
+	migrator, err := schema.NewMigrate(entsql.OpenDB(dialect.SQLite, db))
+	require.NoError(t, err)
+	// The migrator writes to the shared table definitions, and these tests run
+	// in parallel: one fixture creates its tables at a time.
+	schemaMu.Lock()
+	err = migrator.Create(ctx, schemaTables(migrate.UsersTable, migrate.ProviderConnectionsTable, migrate.ModelsTable)...)
+	schemaMu.Unlock()
+	require.NoError(t, err)
 	client := ent.NewClient(ent.Driver(entsql.OpenDB(dialect.SQLite, db)))
 	t.Cleanup(func() { _ = client.Close(); _ = db.Close() })
 	ds, err := datastore.NewDatastore(client, db, zap.NewNop(), "12345678901234567890123456789012", nil)
 	require.NoError(t, err)
 
 	f := &connectionFixture{ent: client, db: db, owners: map[uuid.UUID]uuid.UUID{}, endpoints: map[uuid.UUID]ConnectionEndpoint{}}
-	now := time.Now().UTC()
 	account := func(name string) uuid.UUID {
-		id := uuid.New()
-		_, err := db.Exec(`INSERT INTO users (id, created_at, updated_at, username, email, password_hash) VALUES (?, ?, ?, ?, ?, ?)`,
-			id, now, now, name, name+"@example.com", "hash")
+		u, err := client.User.Create().SetUsername(name).SetEmail(name + "@example.com").SetPasswordHash("hash").Save(ctx)
 		require.NoError(t, err)
-		return id
+		return u.ID
 	}
 	model := func(owner uuid.UUID, name string) *ent.Model {
 		conn, err := client.ProviderConnection.Create().SetUserID(owner).SetPreset("ollama").SetName("Ollama").Save(ctx)
@@ -331,4 +287,27 @@ func TestSubagentCapabilitiesFor_DatastoreErrorsAreNotMissingModels(t *testing.T
 	_, err = f.a.subagentCapabilitiesFor(context.Background(), f.alice, f.aliceModel.ID, f.aliceModel.Name)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrConnectionUnavailable)
+}
+
+// schemaMu serializes creating fixture tables from the shared ent schema.
+var schemaMu sync.Mutex
+
+// schemaTables copies tables from the ent schema with only the foreign keys
+// that reach the other tables given, so they can be created on their own.
+func schemaTables(tables ...*schema.Table) []*schema.Table {
+	in := make(map[string]bool, len(tables))
+	for _, t := range tables {
+		in[t.Name] = true
+	}
+	out := make([]*schema.Table, 0, len(tables))
+	for _, t := range tables {
+		c := &schema.Table{Name: t.Name, Columns: t.Columns, PrimaryKey: t.PrimaryKey, Indexes: t.Indexes}
+		for _, fk := range t.ForeignKeys {
+			if in[fk.RefTable.Name] {
+				c.ForeignKeys = append(c.ForeignKeys, fk)
+			}
+		}
+		out = append(out, c)
+	}
+	return out
 }
