@@ -41,15 +41,15 @@
 - **Admin provisioning (ADR 0x018):** `CreateOrPromoteAdmin` (`seed.go`) is the single create/promote/password-reset helper with an explicit `AdminProvisionResult`, called only by `cmd/create-superuser` (interactive, TTY-required, local-DB-only).
   The former `SUPERADMIN_*` boot path (`ensureSuperAdmin`) was **removed** after a security review flagged it — no environment variable can mint an admin in a running deployment.
   CI test users use the public register endpoint.
-- **No seeded catalog (ADR 0x027):** `SeedModelCatalog()` reports whether the install's catalog is the seeded one (true by default, as on a self-hosted install) rather than one its operator curates.
-  A build whose operator curates the catalog replaces the function in an `init()`; boot then leaves that catalog alone, and `EnsureSeedData` fails fast unless `DEFAULT_MODEL_NAME` names an active catalog model.
+- **No seeded catalog (ADR 0x027):** three separate steps, each where it applies, so seeding and converting can't be confused.
+  `SeedModelCatalog()` reports whether boot seeds the catalog (`SeedCatalog`, from `models.AvailableModels`) on a real backend; it is false, and a build that wants a seeded catalog there, such as a development database, replaces it in an `init()`.
   It is a function because it is asked after configuration has loaded; a package `init()` runs before that.
-  On a seeded install, boot no longer seeds: each account enables its models on its connections.
-  `ConvertSeededModels` (`convert_seeded.go`, run by `cmd/api-server` after the stored-key conversion, under the `vendor` backend) moves an existing install's seeded models onto the accounts that use them, as a default, in a chat, in an agent job or as a favourite: each is enabled on the account's built-in connection for its provider and those uses point at it.
+  `RequireCatalogDefault` fails fast unless `DEFAULT_MODEL_NAME` names an active catalog model; `cmd/api-server` asks it only where the deployment supplies the keys, and so curates the catalog.
+  `ConvertSeededModels` (`convert_seeded.go`, run by `cmd/api-server` after the stored-key conversion, under the `vendor` backend, and only where accounts bring their own keys, `providerkeys.AccountsSupplyKeys()`) moves an existing install's seeded models onto the accounts that use them, as a default, in a chat, in an agent job or as a favourite: each is enabled on the account's built-in connection for its provider and those uses point at it.
   An account with no connection for the provider keeps nothing (its default and chat models are cleared, the favourite dropped, and a job naming the model fails because it no longer exists), and the seeded rows are removed; models the deployment added itself stay.
   An account left with enabled models but no default gets one of its converted models as its default.
   It runs once per install, in one transaction, and records that it ran in the `markers` table (`seeded_catalog_converted`), so a catalog model an operator adds later under a seeded name is never taken for a seeded one; on Postgres an advisory lock makes two instances starting at once convert one after the other.
-  The mock and local test backends seed instead (`SeedTestCatalog`): their end-to-end suites and visual baselines start from the seeded models.
+  The mock and local test backends always seed (`SeedCatalog`): their end-to-end suites and visual baselines start from the seeded models.
   Role seeding runs either way.
 - **No default model needed:** `CreateOrPromoteAdmin` gives the admin the catalog's default model when there is one, and none otherwise, like any new account.
 
@@ -59,7 +59,7 @@
 - `concurrent_indexes_test.go` — the DDL and what is left to the migration, that the memory list indexes lead with the owner column, and the non-PostgreSQL no-op.
 - `foreign_keys_test.go` — every foreign key into `mcp_servers` cascades on delete, so a server with OAuth sessions can be deleted.
 - `poolmetrics_test.go` — pool gauges against an in-memory sqlite `*sql.DB`.
-- `seed_test.go` — `EnsureSeedData` over sqlmock: a curated catalog is never written and must hold its default model; a seeded install reads no model rows at all.
+- `seed_test.go` — over sqlmock: `EnsureSeedData` reads no model rows at all, `RequireCatalogDefault` fails without the default, and catalog seeding is off by default.
 - `convert_seeded_test.go` — over in-memory SQLite (tables from the ent schema, without foreign keys): an account with the provider's connection gets the model there (an existing one reused and enabled again) with its uses repointed, favourites included; one without has its default and chat cleared and its job left on the removed model (mutation-checked); an account whose default went is given one of its converted models; seeded rows removed, the deployment's own kept; a second run does nothing, even for a catalog model added later under a seeded name, and an install with nothing seeded is marked too.
 - `ritual_links_test.go` — the link backfill against in-memory sqlite with foreign keys on, shaped like a non-destructive Postgres migration: moves once and clears the columns, skips links to deleted modes and jobs, keeps a removed link removed across restarts, and is a no-op without the legacy columns.
 - `file_origins_test.go` — the origin backfill: flagged rows marked once, nothing without the legacy column.

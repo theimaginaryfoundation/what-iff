@@ -25,6 +25,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/database"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/logging"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/server"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
@@ -232,15 +233,24 @@ func init() {
 			zap.Error(err))
 	}
 
-	// A self-hosted install's seeded models move onto its accounts' connections
-	// (ADR 0x027). The test backends keep the seeded catalog their suites expect.
-	if database.SeedModelCatalog() {
-		if config.LLMBackend == "vendor" {
-			if _, err := database.ConvertSeededModels(context.Background(), client, logger); err != nil {
-				logger.Fatal("Failed to convert seeded models onto accounts' connections", zap.Error(err))
-			}
-		} else if err := database.SeedTestCatalog(context.Background(), client, logger); err != nil {
-			logger.Fatal("Failed to seed the test model catalog", zap.Error(err))
+	// Where accounts bring their own keys, an older install's seeded models move
+	// onto their connections, once (ADR 0x027). A deployment that supplies the
+	// keys keeps its catalog as it is.
+	if config.LLMBackend == "vendor" && providerkeys.AccountsSupplyKeys() {
+		if _, err := database.ConvertSeededModels(context.Background(), client, logger); err != nil {
+			logger.Fatal("Failed to convert seeded models onto accounts' connections", zap.Error(err))
+		}
+	}
+	// The test backends always seed the catalog their suites expect; a real
+	// backend only when the build asks.
+	if config.LLMBackend != "vendor" || database.SeedModelCatalog() {
+		if err := database.SeedCatalog(context.Background(), client, logger); err != nil {
+			logger.Fatal("Failed to seed the model catalog", zap.Error(err))
+		}
+	}
+	if !providerkeys.AccountsSupplyKeys() {
+		if err := database.RequireCatalogDefault(context.Background(), client); err != nil {
+			logger.Fatal("The model catalog has no default model", zap.Error(err))
 		}
 	}
 
