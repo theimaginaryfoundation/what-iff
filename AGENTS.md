@@ -39,6 +39,7 @@
   - JS/TS/JSON/YAML: 2-space indent; Prettier configured in the web app.
 - Keep handlers thin; business logic in services/datastore. Avoid editing files under `ent/` manually.
 - API changes must update `openapi.yaml` and related docs.
+- Frontend UI: read [`web/app/docs/ui-style-standards.md`](web/app/docs/ui-style-standards.md) before adding or changing screens in `web/app`. Use the `shared/ui` primitives and theme tokens, not browser defaults or one-off Tailwind: `ui-checkbox` for every checkbox (never a bare `<input type="checkbox">`), and `ui-data-table` + `ui-bulk-action-bar` for tables with selection.
 
 ### Structure & reuse
 Large files and near-duplicate code are a recurring review finding here. They build up one reasonable-looking addition at a time. Check for them as part of the change, not afterwards:
