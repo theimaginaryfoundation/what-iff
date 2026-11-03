@@ -74,6 +74,15 @@ export interface AgentRun {
   end_reason?: AgentRunEndReason;
 }
 
+/** The agent job a scheduled run is for (ADR 0x040). */
+export interface JobRun {
+  agent_job_id: string;
+  /** The job's title when it ran; absent for an untitled job. */
+  title?: string;
+  /** The job's prompt as it ran. It is never saved as a message. */
+  prompt?: string;
+}
+
 export interface ChatMessage {
   id: string;
   chat_id: string;
@@ -97,10 +106,10 @@ export interface ChatMessage {
   /** Client-only, on the pending-reply placeholder: whose turn it is when not the user's (a job's run). */
   pending_label?: string;
   /**
-   * Client-only, on the pending-reply placeholder: the job a running job turn is for, read from its
-   * live run_job row (ADR 0x040). A saved reply carries it in its run_job tool call instead.
+   * The agent job a scheduled run's reply was written for, with the prompt it ran (ADR 0x040). On
+   * the pending-reply placeholder, the client sets it from the run's ticket.
    */
-  pending_job_run?: { agentJobId: string | null; title: string; prompt: string };
+  job_run?: JobRun | null;
   /** Reasoning/thinking the model reported for this assistant turn (GLM, MiMo). Display-only. */
   model_reasoning?: string | null;
   /** Advanced turns only (ADR 0x026): the run's notes, plan and end reason. Replaces model_reasoning there. */

@@ -495,6 +495,9 @@ func (d *Datastore) importBackupChatMessages(ctx context.Context, targetUserID u
 		if rec.AgentRun != nil {
 			create.SetAgentRun(rec.AgentRun)
 		}
+		if rec.JobRun != nil {
+			create.SetJobRun(rec.JobRun)
+		}
 		if rec.GenerationModel != "" {
 			create.SetGenerationModel(rec.GenerationModel)
 		}

@@ -43,6 +43,7 @@ func toJobModel(e *ent.Job) *models.Job {
 		DraftDeltas:    append([]string(nil), e.DraftDeltas...),
 		DraftReasoning: append([]string(nil), e.DraftReasoning...),
 		Progress:       e.Progress,
+		JobRun:         e.JobRun,
 		CreatedAt:      e.CreatedAt,
 		UpdatedAt:      e.UpdatedAt,
 	}
@@ -86,6 +87,10 @@ func (d *Datastore) CreateJob(ctx context.Context, userID uuid.UUID, jobModel mo
 
 	if jobModel.Progress != "" {
 		jobCreate.SetProgress(jobModel.Progress)
+	}
+
+	if jobModel.JobRun != nil {
+		jobCreate.SetJobRun(jobModel.JobRun)
 	}
 
 	entJob, err := jobCreate.Save(ctx)
@@ -673,7 +678,7 @@ func (d *Datastore) finalizeChatJobWithPartial(
 	if entJob.DraftAgentRun != nil {
 		// An Advanced run (ADR 0x026) keeps everything it wrote in its structured draft.
 		resultID, err = d.consumeDraftAgentRunToMessageTx(ctx, tx, chatID, jobID, entJob.DraftAgentRun, terminalStatus,
-			generationModel, generationPersonality, generationMoodID)
+			generationModel, generationPersonality, generationMoodID, entJob.JobRun)
 	} else {
 		resultID, err = d.consumeDraftDeltasToMessageTx(
 			ctx, tx, chatID, partialText, partialReasoning, generationModel, generationPersonality, generationMoodID,
@@ -735,7 +740,7 @@ func (d *Datastore) finalizeTerminalPartialIdempotentTx(ctx context.Context, tx 
 	resultID := entJob.ResultID
 	if resultID == nil && entJob.DraftAgentRun != nil {
 		id, err := d.consumeDraftAgentRunToMessageTx(ctx, tx, chatID, entJob.ID, entJob.DraftAgentRun, entJob.Status,
-			generationModel, generationPersonality, generationMoodID)
+			generationModel, generationPersonality, generationMoodID, entJob.JobRun)
 		if err != nil {
 			return nil, err
 		}

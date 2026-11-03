@@ -333,16 +333,20 @@ describe('ChatSessionService — returning to a thread with a running turn', () 
             await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS);
             runLookup();
 
-            expect(service.jobRun()).toEqual({ afterMessageId: 'asst-1' });
+            expect(service.jobRun()).toEqual({ afterMessageId: 'asst-1', job: null });
             expect(service.jobRunActive()).toBe(true);
             expect(service.composerBusy()).toBe(true);
             await vi.advanceTimersByTimeAsync(0);
+            const job = { agent_job_id: 'agent-job-1', title: 'Morning brief', prompt: 'Brief me.' };
             runSnapshot({
                 status: 'processing',
                 draft_deltas: ['Good ', 'morning'],
                 progress: JSON.stringify({ tool_calls: [{ id: 'c1', name: 'web_search', status: 'running', round: 0, started_at: 't0' }] }),
+                job_run: job,
             });
             expect(service.pendingAssistantDraftText()).toBe('Good morning');
+            // The ticket names the job it runs for (ADR 0x040).
+            expect(service.jobRun()).toEqual({ afterMessageId: 'asst-1', job });
             expect(service.liveToolCalls().map(c => c.name)).toEqual(['web_search']);
 
             // The earlier reply is still the newest message: it must not end the run's draft.
@@ -373,7 +377,7 @@ describe('ChatSessionService — returning to a thread with a running turn', () 
             service.setActive('chat-B');
             flushList('chat-B', [userMsg('user-1', 'chat-B', '2026-09-23T10:00:00Z')]);
             runLookup();
-            expect(service.jobRun()).toEqual({ afterMessageId: 'user-1' });
+            expect(service.jobRun()).toEqual({ afterMessageId: 'user-1', job: null });
             await vi.advanceTimersByTimeAsync(0);
             runSnapshot({ status: 'processing', draft_deltas: ['On it'] });
             expect(service.pendingAssistantDraftText()).toBe('On it');

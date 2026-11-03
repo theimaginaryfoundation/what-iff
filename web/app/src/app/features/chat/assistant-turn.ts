@@ -5,7 +5,7 @@ import { take } from 'rxjs/operators';
 import { ChatStreamingService } from '../../core/services/chat-streaming.service';
 import { JobService } from '../../core/services/job.service';
 import { MessageService } from '../../core/services/message.service';
-import { ChatMessage } from '../../core/models/message.model';
+import { ChatMessage, JobRun } from '../../core/models/message.model';
 import {
   CHAT_TURN_WAITING_STATES,
   ChatTurnAdvancedProgress,
@@ -51,6 +51,8 @@ export interface AssistantTurnDeps {
  */
 export interface FollowedJobRun {
   afterMessageId: string | null;
+  /** The agent job the run is for, from its ticket (ADR 0x040); null until a poll names it. */
+  job: JobRun | null;
 }
 
 /**
@@ -342,7 +344,7 @@ export class AssistantTurn {
         this.startPolling(jobId, threadId);
         if (this._activeChatJobId() !== jobId) return;
         // An empty thread has no anchor (null): then any assistant message is the run's reply.
-        this._jobRun.set({ afterMessageId: messages[messages.length - 1]?.id ?? null });
+        this._jobRun.set({ afterMessageId: messages[messages.length - 1]?.id ?? null, job: null });
       }),
     );
   }
@@ -416,6 +418,10 @@ export class AssistantTurn {
       // second; a long Advanced run's payload (up to 60 calls and a plan) is not re-parsed when it
       // is the same string as last time.
       const progressKey = `${job.id}\u0000${job.progress ?? ''}`;
+      const run = this._jobRun();
+      if (run && job.job_run && job.job_run.agent_job_id !== run.job?.agent_job_id) {
+        this._jobRun.set({ ...run, job: job.job_run });
+      }
       if (progressKey !== this.appliedProgressKey) {
         this.appliedProgressKey = progressKey;
         const toolCalls = parseChatTurnToolCalls(job.progress);

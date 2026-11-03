@@ -17,61 +17,63 @@ A scheduled run's prompt is an ephemeral user message: it is never saved, so it 
 That is deliberate, for several reasons: the prompt repeats on every run, it would read as something the user said, and it would crowd the context of later turns.
 But it left a reply in the thread answering a question nobody could see.
 
-The live "Job running" label also could not say which job was running, because the run's queue ticket does not know its agent job.
+Nothing recorded the link either.
+A reply does not reference the job that produced it, and the run's queue ticket (an `agent_job_run` job keyed by the chat) does not know its agent job, so the live "Job running" label could not say which job was running.
 
 ## Decision
 
-### 1. The reply records its job in a saved `run_job` entry
+### 1. A typed `job_run` record on the reply
 
-A scheduled run's reply carries one extra saved tool-call entry, `run_job`, as the record of where it came from.
-Its input names the job (`agent_job_id`, `title`) and its output is the job's prompt.
-It is not a real tool: the model never calls it or sees it, and the web client never shows it as a tool row (§4).
+An assistant message gets a `job_run` column: a `modeltypes.JobRun` (`agent_job_id`, `title`, `prompt`) stored as JSON, as `agent_run` already is for Advanced runs (ADR 0x026).
+A scheduled run's reply records the job it ran for, and the prompt and title as they were when it ran.
+It is NULL on every other message.
 
-It is in the run's live progress from the first write (the ticket's progress), so the chip can name the job from the moment the run starts.
-It is saved with the reply, first among its tool calls (`leadToolCallsForChatContext`).
-Storing it as a tool-call entry needs no schema change, and reuses how a reply's tool calls are already saved, loaded and sent to the client.
+It is display-only, like `model_reasoning`: the context builder never reads it, so the prompt still never reaches the model on later turns, and the reasons for keeping it out of the thread's history still hold.
 
-### 2. The prompt still stays out of the thread's history
+It is a snapshot rather than a foreign key.
+The prompt has to be stored anyway, since the job's prompt may change after the run, and a reply should show what it actually answered.
+With the title and the job's id beside it, the reply is self-contained: it needs no join to render, and it still names its job after the job is deleted.
 
-`toolContextPolicyFor` never carries a `run_job` entry into a later turn's context.
-The prompt is in the thread for the user to read, and nowhere the model reads it, so the reasons for keeping it out of history still hold.
+### 2. The same record on the run's queue ticket
+
+A scheduled run's queue ticket gets the same `job_run` column, set when the ticket is created (`beginEphemeralChatTurn`).
+The client following a run polls the ticket (`GET /job/{id}`), so it can name the job and show its prompt from the moment the run starts.
+The tool timeline and other progress stay in `progress`, which several writers replace whole, so the record does not ride there.
+
+A stopped Advanced run's partial reply, saved from the ticket's draft, takes the record from the ticket.
 
 ### 3. The job reaches the agent on the run's context
 
-The scheduler puts the job's id and title on the run's context (`models.WithJobRunSource`), as it already does for the job's turn settings (ADR 0x026).
+The scheduler puts the `JobRun` on the run's context (`models.WithJobRun`), as it already does for the job's turn settings (ADR 0x026).
 Several interfaces sit between the scheduler and the agent, and only scheduled runs have a job, so a context value is less disruptive than a new parameter on every entry point.
 The sync entry points' detached context copies it (`detachedUserContext`).
-A turn with no source (a webhook background run, the onboarding welcome) gets no `run_job` call.
-
-Because the saved call names the job, no schema change is needed.
-The ticket still does not know its agent job, and does not need to.
+The ticket and the reply both read it from the context (`models.JobRunFromContext`), so a turn with none (a webhook background run, the onboarding welcome) records none.
 
 ### 4. A job chip shows the job, its prompt and a link, collapsed
 
-A reply with a `run_job` call carries a chip at its top, styled like an attached thread's chip: a clock and the job's title.
+A reply with a `job_run` carries a chip at its top, styled like an attached thread's chip: a clock and the job's title.
 While the run is live, it reads "Job running · <title>".
 It is collapsed by default; opened, it shows the prompt the job ran and an "Open job" link to the job's page.
 So a job's turn is marked, its prompt is one click away, and none of it reads as a user turn.
 
-The `run_job` call is left out of the reply's tool-call list, live and saved, so it shows in one place only.
-The data stays a tool call: only the presentation is a chip.
-
 ## Alternatives considered
 
 - **Saving the prompt as a user message.** It would show the prompt, but put it back into the thread's history and the model's context, which is what the ephemeral prompt avoids. It would also read as if the user had said it.
-- **A `source_agent_job_id` column on chat messages.** It would mark job replies directly, but the `run_job` call already carries the job, and the chip needs the prompt's call anyway. One record of where a reply came from is enough.
-- **`run_job` as a row in the tool-call list, with an icon-only clock chip.** This was the first version: the prompt sat with the turn's other tool calls and the chip named the job only on hover. A job's prompt is not something the model did, though, and the list collapses it out of sight behind "N tool calls". A chip on the reply, like an attachment, puts it with the reply and names the job at a glance.
-- **A `run_job` call for webhook background runs too.** A webhook has no page to link to, and its message is the external system's, so it is left out for now.
+- **A display-only `run_job` tool call.** The first version stored the job and prompt as a pseudo tool call on the reply, like "Load Memory", and needed no schema change. But it is not a tool call: every reader of tool calls (the tool list, the context policy, metrics, exports) had to learn to skip it or treat it specially, and the live row had to be threaded into the progress payload by hand. A typed field says what it is.
+- **A foreign key to the agent job.** It would keep the link exact and show a renamed job's new title, but it loses everything once the job is deleted, still needs the prompt stored beside it, and needs a join to render each reply. The snapshot covers the display need with one column.
+- **The job's prompt as a row in the tool-call list, with an icon-only clock chip.** A job's prompt is not something the model did, and the list collapses it out of sight behind "N tool calls". A chip on the reply, like an attachment, puts it with the reply and names the job at a glance.
+- **Recording webhook background runs too.** A webhook has no page to link to, and its message is the external system's, so it is left out for now.
 
 ## Consequences
 
-- Every scheduled run's reply gains one saved tool call, and its turn's live timeline gains one row, which the web client shows as the chip rather than as a tool row.
-- A job run's memory load now shows live in its timeline, as on a user's turn, since the run now has a progress recorder from the start.
-- Replies saved before this change have no `run_job` call, so they show no chip. Nothing is backfilled.
-- Renaming a job does not rename the chip's tooltip on earlier replies: the call records the title at the time of the run. The link still goes to the job.
-- A deleted job's chip still links to its page, which then reports the job missing.
+- `chat_messages` and `jobs` each gain a nullable `job_run` jsonb column (auto-migrated).
+- The API returns `job_run` on chat messages and on jobs (`JobRun` in `openapi.yaml`), and account backups import it.
+- A job run's memory load now shows live on its ticket, as on a user's turn.
+- Replies saved before this change have no `job_run`, so they show no chip. Nothing is backfilled.
+- Renaming a job does not rename the chip on earlier replies: the record keeps the title at the time of the run. The link still goes to the job.
+- A deleted job's chip still names it and shows its prompt; its link then reports the job missing.
 
 ## Not done yet
 
-- Webhook background runs get no `run_job` call.
-- A stopped Advanced run saved as a partial reply from its draft (ADR 0x026) does not get the `run_job` call, since that save does not go through the reply's tool-call assembly.
+- Webhook background runs record no `job_run`.
+- Nothing queries replies by job (for example "every reply this job wrote"); the JSON column would need an index for that.

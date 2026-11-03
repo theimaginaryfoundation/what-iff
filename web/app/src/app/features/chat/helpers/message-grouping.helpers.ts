@@ -1,10 +1,9 @@
-import { ChatMessage } from '../../../core/models/message.model';
+import { ChatMessage, JobRun } from '../../../core/models/message.model';
 import { ChatTurnAdvancedProgress, ChatTurnToolCall } from '../../../core/models/job.model';
 import { ToolCall, ToolCallView } from '../../../core/models/toolcall.model';
 
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../chat.constants';
 import { toolCallsOutsideAgentRun } from './agent-run.helpers';
-import { JOB_RUN_TOOL_NAME, JobRunRef, isJobRunToolCall } from './job-run.helpers';
 
 export type GroupedItem =
   | MessageGroupItem
@@ -74,14 +73,12 @@ export function groupMessages(messages: readonly ChatMessage[]): GroupedItem[] {
       continue;
     }
 
-    // An Advanced reply's step tool calls show in its working notes, not here (ADR 0x026), and a
-    // job's run_job call shows as the reply's job chip (ADR 0x040).
-    const outside = toolCallsOutsideAgentRun(message);
-    const toolCalls = outside.filter(call => !isJobRunToolCall(call));
+    // An Advanced reply's step tool calls show in its working notes, not here (ADR 0x026).
+    const toolCalls = toolCallsOutsideAgentRun(message);
     if (toolCalls.length) {
       groups.push({ kind: 'tool-call-group', message, toolCalls });
       currentGroup = null;
-      if (!hasRenderableMessageBody(message) && outside.length === toolCalls.length && toolCalls.length === message.tool_calls?.length) {
+      if (!hasRenderableMessageBody(message) && toolCalls.length === message.tool_calls?.length) {
         continue;
       }
     }
@@ -150,8 +147,8 @@ export function pendingAssistantPlaceholderMessage(opts: {
   pendingStatus?: string;
   /** Marks whose turn this is when it is not a reply to the user (a job's run, ADR 0x039). */
   pendingLabel?: string;
-  /** The job a running job turn is for, when its live run_job row names one (ADR 0x040). */
-  pendingJobRun?: JobRunRef | null;
+  /** The agent job a running job turn is for, from its ticket (ADR 0x040). */
+  jobRun?: JobRun | null;
   generationPersonality: string;
   thinkingImageUrl: string | null;
 }): ChatMessage {
@@ -162,7 +159,7 @@ export function pendingAssistantPlaceholderMessage(opts: {
     model_reasoning: opts.draftReasoning || undefined,
     pending_status: opts.pendingStatus,
     pending_label: opts.pendingLabel,
-    pending_job_run: opts.pendingJobRun ?? undefined,
+    job_run: opts.jobRun ?? undefined,
     origin: 'Assistant',
     sent_at: CHAT_PENDING_ASSISTANT_PLACEHOLDER_SENT_AT,
     generation_personality: opts.generationPersonality,
@@ -233,14 +230,12 @@ export function appendLiveToolCallGroup(
   liveCalls: readonly ChatTurnToolCall[],
   advanced: ChatTurnAdvancedProgress | null = null,
 ): GroupedItem[] {
-  // A job's run_job row shows as the pending reply's job chip instead (ADR 0x040).
-  const shownCalls = liveCalls.filter(call => call.name !== JOB_RUN_TOOL_NAME);
-  if (shownCalls.length === 0 && !advanced) return [...groups];
+  if (liveCalls.length === 0 && !advanced) return [...groups];
   const seen = new Map<string, number>();
   const item: ToolCallGroupItem = {
     kind: 'tool-call-group',
     message: pendingMessage,
-    toolCalls: shownCalls.map(call => {
+    toolCalls: liveCalls.map(call => {
       // View id scheme: live-<step>-<round>-<tool call id>-<occurrence>.
       // - Not the list position: an Advanced turn keeps only its newest calls (60), so older ones
       //   drop off the front and positions shift on every poll.

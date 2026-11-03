@@ -35,9 +35,6 @@ type memoryLoadProgress struct {
 	jobID  uuid.UUID
 	now    func() time.Time
 
-	// lead are rows shown above the memory-load row for the whole turn: a scheduled job's run_job
-	// row (ADR 0x040).
-	lead []models.ChatTurnToolCall
 	// entry is the memory-load row, nil until retrieval starts and again if it found nothing.
 	entry *models.ChatTurnToolCall
 	// written is set once the row reached the job, so an empty result knows to clear it.
@@ -57,15 +54,6 @@ func (a *Agent) newMemoryLoadProgress(job *models.Job) *memoryLoadProgress {
 	return &memoryLoadProgress{ds: a.ds, logger: logger, userID: job.UserID, jobID: job.ID, now: time.Now}
 }
 
-// Lead shows rows above the memory-load row from now on, starting now.
-func (p *memoryLoadProgress) Lead(ctx context.Context, rows ...models.ChatTurnToolCall) {
-	if p == nil || len(rows) == 0 {
-		return
-	}
-	p.lead = append(p.lead, rows...)
-	p.written = p.write(ctx) || p.written
-}
-
 // Started shows the memory-load row as running. Call it only when retrieval really runs.
 func (p *memoryLoadProgress) Started(ctx context.Context) {
 	if p == nil {
@@ -77,7 +65,7 @@ func (p *memoryLoadProgress) Started(ctx context.Context) {
 		Status:    models.ChatTurnToolRunning,
 		StartedAt: p.now().UTC(),
 	}
-	p.written = p.write(ctx) || p.written
+	p.written = p.write(ctx)
 }
 
 // Finished completes the row with what retrieval returned: the memories, an error, or (when it
@@ -105,17 +93,13 @@ func (p *memoryLoadProgress) Finished(ctx context.Context, memories []string, fa
 	p.write(ctx)
 }
 
-// Entries are the lead rows and the memory-load row to start the turn's tool recorder with, so
-// its snapshots keep them instead of replacing them. Nil when there are none.
+// Entries is the memory-load row to start the turn's tool recorder with, so its snapshots keep
+// the row instead of replacing it. Nil when retrieval showed nothing.
 func (p *memoryLoadProgress) Entries() []models.ChatTurnToolCall {
-	if p == nil || (len(p.lead) == 0 && p.entry == nil) {
+	if p == nil || p.entry == nil {
 		return nil
 	}
-	out := append([]models.ChatTurnToolCall(nil), p.lead...)
-	if p.entry != nil {
-		out = append(out, *p.entry)
-	}
-	return out
+	return []models.ChatTurnToolCall{*p.entry}
 }
 
 func (p *memoryLoadProgress) write(ctx context.Context) bool {

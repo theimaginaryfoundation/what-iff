@@ -79,6 +79,8 @@ type AccountBackupChatMessage struct {
 	Tokens                int64         `json:"tokens,omitempty"`
 	// AgentRun is an Advanced reply's run record (ADR 0x026).
 	AgentRun *AgentRun `json:"agent_run,omitempty"`
+	// JobRun is the agent job a scheduled run's reply was written for (ADR 0x040).
+	JobRun *JobRun `json:"job_run,omitempty"`
 }
 
 type AccountBackupChatMessageContextItem struct {

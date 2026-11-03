@@ -159,6 +159,9 @@ func toChatMessageModel(e *ent.ChatMessage) *models.ChatMessage {
 	if e.AgentRun != nil {
 		chatMessage.AgentRun = e.AgentRun
 	}
+	if e.JobRun != nil {
+		chatMessage.JobRun = e.JobRun
+	}
 	if e.ContextBreakdown != nil && len(e.ContextBreakdown.Segments) > 0 {
 		chatMessage.ContextBreakdown = e.ContextBreakdown
 	}
@@ -330,6 +333,9 @@ func (d *Datastore) CreateChatMessage(ctx context.Context, userID uuid.UUID, cha
 	}
 	if chatMessage.AgentRun != nil {
 		create.SetAgentRun(chatMessage.AgentRun)
+	}
+	if chatMessage.JobRun != nil {
+		create.SetJobRun(chatMessage.JobRun)
 	}
 	if chatMessage.ModelReasoning != nil {
 		if r := strings.TrimSpace(*chatMessage.ModelReasoning); r != "" {

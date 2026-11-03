@@ -2,7 +2,7 @@
 import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, computed, inject, input, output, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 
-import { ChatMessage } from '../../../../core/models/message.model';
+import { ChatMessage, JobRun } from '../../../../core/models/message.model';
 import { ToolCall } from '../../../../core/models/toolcall.model';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../../chat.constants';
 import { parseThreadReferenceBlock } from '../../helpers/thread-reference.helpers';
@@ -11,9 +11,9 @@ import { BrainIconComponent, ChevRightIconComponent, ClockIconComponent, StarIco
 import { MessageContentComponent } from '../message-content/message-content.component';
 import { AgentRunNotesComponent } from '../agent-run-notes/agent-run-notes.component';
 import { AgentRunView, agentRunView } from '../../helpers/agent-run.helpers';
-import { JobRunRef, jobRunHref, jobRunRef } from '../../helpers/job-run.helpers';
 
 interface JobChip {
+  /** The job's page; null until a running job turn's ticket names its job. */
   href: string | null;
   /** "Job running · <title>" while the run is live, then the job's title. */
   label: string;
@@ -22,10 +22,15 @@ interface JobChip {
   prompt: string;
 }
 
-function jobChip(ref: JobRunRef | null, liveLabel: string | null): JobChip {
-  const title = ref?.title ?? '';
+function jobChip(run: JobRun, liveLabel: string | null): JobChip {
+  const title = run.title?.trim() ?? '';
   const label = liveLabel ? [liveLabel, title].filter(Boolean).join(' · ') : title || 'Scheduled job';
-  return { href: ref ? jobRunHref(ref) : null, label, live: !!liveLabel, prompt: ref?.prompt ?? '' };
+  return {
+    href: `/agent-jobs/${encodeURIComponent(run.agent_job_id)}`,
+    label,
+    live: !!liveLabel,
+    prompt: run.prompt?.trim() ?? '',
+  };
 }
 
 @Component({
@@ -663,15 +668,17 @@ export class MessageBubbleComponent {
   }
 
   readonly isPendingPlaceholder = computed(() => this.message().id === CHAT_PENDING_ASSISTANT_MESSAGE_ID);
-  /** The job chip on a job's turn: "Job running" and the job while it runs, then the job. */
+  /** The job chip on a job's turn (ADR 0x040): "Job running" and the job while it runs, then the job. */
   readonly jobChip = computed<JobChip | null>(() => {
     const message = this.message();
-    if (message.origin !== 'Assistant') return null;
-    if (this.isPendingPlaceholder()) {
-      return message.pending_label ? jobChip(message.pending_job_run ?? null, message.pending_label) : null;
+    const run = message.job_run;
+    if (message.origin !== 'Assistant' || !run?.agent_job_id) {
+      // A running job turn's ticket may not have been read yet: say a job is running, unlinked.
+      return this.isPendingPlaceholder() && message.pending_label
+        ? { href: null, label: message.pending_label, live: true, prompt: '' }
+        : null;
     }
-    const ref = jobRunRef(message.tool_calls);
-    return ref ? jobChip(ref, null) : null;
+    return jobChip(run, this.isPendingPlaceholder() ? message.pending_label ?? null : null);
   });
   readonly showPendingDots = computed(
     () => this.isPendingPlaceholder() && !this.displayContent().trim(),

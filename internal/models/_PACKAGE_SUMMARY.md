@@ -63,7 +63,7 @@
   `ReasoningSupportFor(provider, name)` derives a model's effort support from code (none/optional/toggle/always), so admin-added models are covered; an admin's `Model.ReasoningSupportOverride` wins over it (`ReasoningSupportWithOverride`); `EffectiveReasoningEffort` maps a selection onto it.
   `NativeReasoningEffort` is the level a model reasons at when nothing is sent (from the same tables; off where the docs state none), and `ReasoningEffortAboveNative` keeps an effort only above it, for metering.
   `WithJobTurnSettings` / `CopyJobTurnSettings` carry an agent job's values on the run's context.
-  `WithJobRunSource` / `CopyJobRunSource` (`job_run_source.go`) carry which agent job a run is for, so its reply can name the job (ADR 0x040).
+  `WithJobRun` / `JobRunFromContext` / `CopyJobRun` (`job_run.go`) carry the agent job a scheduled run is for (`JobRun`, an alias of `modeltypes.JobRun`), which its ticket and reply record as `job_run` (ADR 0x040).
   `Chat.SetReasoningEffort` / `SetAgentLoop` mark explicit changes on `UpdateChat`, like `SetContextScope`.
   `ChatTurnProgress` carries an Advanced run's `Step` and `Plan` (`PlanItem`).
   `agent_run.go` aliases the saved run types from `modeltypes` (`AgentRun`, versioned, with per-step ordered `AgentRunEvent`s; `AgentRunEnd`; `AgentRunDraft`), which `ChatMessage.AgentRun` and the job's draft use.

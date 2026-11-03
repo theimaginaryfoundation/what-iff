@@ -116,6 +116,7 @@ func (d *Datastore) consumeDraftAgentRunToMessageTx(
 	terminalStatus job.Status,
 	generationModel, generationPersonality string,
 	generationMoodID *uuid.UUID,
+	jobRun *modeltypes.JobRun,
 ) (*uuid.UUID, error) {
 	if draft == nil {
 		return nil, nil
@@ -155,6 +156,10 @@ func (d *Datastore) consumeDraftAgentRunToMessageTx(
 		SetReadStatus(entchatmessage.ReadStatusUnread).
 		SetChatID(chatID).
 		SetAgentRun(&run)
+	if jobRun != nil {
+		// A scheduled run's partial reply still records its job (ADR 0x040).
+		createMsg.SetJobRun(jobRun)
+	}
 	if generationModel != "" {
 		createMsg.SetGenerationModel(generationModel)
 	}

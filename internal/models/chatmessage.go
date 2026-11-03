@@ -95,6 +95,9 @@ type ChatMessage struct {
 	// AgentRun is the structured record of an Advanced-loop turn (steps, plan, end reason; ADR
 	// 0x026). Nil on Standard turns, which keep their reasoning in ModelReasoning.
 	AgentRun *modeltypes.AgentRun `json:"agent_run,omitempty"`
+	// JobRun is the agent job a scheduled run's reply was written for, with the prompt it ran (ADR
+	// 0x040). Display only, like ModelReasoning; nil on every other message.
+	JobRun *modeltypes.JobRun `json:"job_run,omitempty"`
 	// LastErrorMessage is set when async generation failed for this user turn; cleared on successful delivery.
 	LastErrorMessage *string `json:"last_error_message,omitempty"`
 	// LastErrorCode is a stable code for LastErrorMessage when it has one (for

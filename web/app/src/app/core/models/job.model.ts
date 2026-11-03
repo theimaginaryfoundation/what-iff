@@ -1,3 +1,5 @@
+import { JobRun } from './message.model';
+
 export type JobStatus =
   | 'pending'
   | 'processing'
@@ -26,6 +28,8 @@ export interface Job {
    * For `chat_import` this decodes to {@link ChatImportProgress}.
    */
   progress?: string;
+  /** On a scheduled run's queue ticket, the agent job it runs for and its prompt (ADR 0x040). */
+  job_run?: JobRun | null;
   /**
    * Incremental assistant text chunks emitted while inference is still in progress.
    */

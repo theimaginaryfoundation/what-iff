@@ -365,40 +365,33 @@ describe('MessageBubbleComponent', () => {
 
     describe('job chip (ADR 0x040)', () => {
         const JOB_ID = '33333333-3333-4333-8333-333333333333';
-        const runJobCall = (input: object) => ({
-            id: 'tc-1',
-            chat_message_id: 'm-1',
-            tool_name: 'run_job',
-            tool_input: JSON.stringify(input),
-            tool_output: 'Plan this week\'s meals.',
-            tool_error: '',
-            created_at: '2026-11-03T13:00:00Z',
-            updated_at: '2026-11-03T13:00:00Z',
-        });
+        const run = { agent_job_id: JOB_ID, title: 'Weekly meal planning', prompt: 'Plan this week\'s meals.' };
         const root = () => fixture.nativeElement as HTMLElement;
         const chip = () => root().querySelector('.bubble__job') as HTMLDetailsElement | null;
 
         it('names a running job and holds its prompt and link, collapsed', () => {
-            fixture.componentRef.setInput('message', {
-                ...pendingAssistantMessage(),
-                pending_label: 'Job running',
-                pending_job_run: { agentJobId: JOB_ID, title: 'Weekly meal planning', prompt: 'Plan.' },
-            });
+            fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), pending_label: 'Job running', job_run: run });
             fixture.componentRef.setInput('displayContent', '');
             fixture.detectChanges();
 
             expect(chip()?.classList).toContain('bubble__job--live');
             expect(chip()?.open).toBe(false);
             expect(root().querySelector('.bubble__job-name')?.textContent).toBe('Job running · Weekly meal planning');
-            expect(root().querySelector('.bubble__job-prompt')?.textContent).toBe('Plan.');
+            expect(root().querySelector('.bubble__job-prompt')?.textContent).toBe('Plan this week\'s meals.');
             expect(root().querySelector('.bubble__job-open')?.getAttribute('href')).toBe(`/agent-jobs/${JOB_ID}`);
         });
 
+        it('says a job is running before its ticket names the job', () => {
+            fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), pending_label: 'Job running' });
+            fixture.componentRef.setInput('displayContent', '');
+            fixture.detectChanges();
+
+            expect(root().querySelector('.bubble__job-name')?.textContent).toBe('Job running');
+            expect(root().querySelector('.bubble__job-open')).toBeNull();
+        });
+
         it('names the job on a saved job reply, with its prompt and link', () => {
-            fixture.componentRef.setInput('message', {
-                ...message('Assistant'),
-                tool_calls: [runJobCall({ agent_job_id: JOB_ID, title: 'Weekly meal planning' })],
-            });
+            fixture.componentRef.setInput('message', { ...message('Assistant'), job_run: run });
             fixture.detectChanges();
 
             expect(chip()?.classList).not.toContain('bubble__job--live');
@@ -409,7 +402,7 @@ describe('MessageBubbleComponent', () => {
 
         it('opens the job in-app', () => {
             const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
-            fixture.componentRef.setInput('message', { ...message('Assistant'), tool_calls: [runJobCall({ agent_job_id: JOB_ID, title: 'T' })] });
+            fixture.componentRef.setInput('message', { ...message('Assistant'), job_run: run });
             fixture.detectChanges();
 
             (root().querySelector('.bubble__job-open') as HTMLAnchorElement).click();
@@ -417,19 +410,20 @@ describe('MessageBubbleComponent', () => {
             expect(navigate).toHaveBeenCalledWith(`/agent-jobs/${JOB_ID}`);
         });
 
-        it('still marks a job reply that names no job, without a link', () => {
-            fixture.componentRef.setInput('message', { ...message('Assistant'), tool_calls: [runJobCall({ title: '' })] });
+        it('calls an untitled job a scheduled job', () => {
+            fixture.componentRef.setInput('message', { ...message('Assistant'), job_run: { agent_job_id: JOB_ID } });
             fixture.detectChanges();
 
             expect(root().querySelector('.bubble__job-name')?.textContent).toBe('Scheduled job');
-            expect(root().querySelector('.bubble__job-open')).toBeNull();
+            expect(root().querySelector('.bubble__job-prompt')).toBeNull();
         });
 
-        it('leaves other replies unmarked', () => {
-            fixture.componentRef.setInput('message', {
-                ...message('Assistant'),
-                tool_calls: [{ ...runJobCall({}), tool_name: 'find_context' }],
-            });
+        it('leaves other replies and user messages unmarked', () => {
+            fixture.componentRef.setInput('message', message('Assistant'));
+            fixture.detectChanges();
+            expect(chip()).toBeNull();
+
+            fixture.componentRef.setInput('message', { ...message('User'), job_run: run });
             fixture.detectChanges();
             expect(chip()).toBeNull();
         });

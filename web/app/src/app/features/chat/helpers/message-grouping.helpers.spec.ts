@@ -141,20 +141,6 @@ describe('groupMessages', () => {
         expect(mixed.map(g => g.kind)).toEqual(['tool-call-group', 'message-group']);
         expect(mixed[0].kind === 'tool-call-group' && mixed[0].toolCalls.map(c => c.id)).toEqual(['tool-2']);
     });
-
-    it("leaves a job's run_job call out of the tool calls: the reply's job chip shows it (ADR 0x040)", () => {
-        const call = (id: string, tool_name: string) => ({
-            id, chat_message_id: '1', tool_name, tool_input: '{}', tool_output: '', tool_error: '',
-            created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z',
-        });
-        const withTools = groupMessages([message('1', 'Assistant', { message: 'Hi', tool_calls: [call('j', 'run_job'), call('s', 'search')] })]);
-        expect(withTools.map(g => g.kind)).toEqual(['tool-call-group', 'message-group']);
-        expect(withTools[0].kind === 'tool-call-group' && withTools[0].toolCalls.map(c => c.id)).toEqual(['s']);
-
-        // Only the run_job call, and no text: the reply still shows, for its chip.
-        const onlyJob = groupMessages([message('1', 'Assistant', { message: '', tool_calls: [call('j', 'run_job')] })]);
-        expect(onlyJob.map(g => g.kind)).toEqual(['message-group']);
-    });
 });
 
 describe('needsPendingAssistantPlaceholder', () => {
@@ -226,16 +212,17 @@ describe('appendPendingAssistantGroup', () => {
         expect(queued.pending_status).toBe('Waiting for the previous reply…');
         expect(pending.pending_status).toBeUndefined();
 
+        const run = { agent_job_id: 'job-1', title: 'Weekly meal planning', prompt: 'Plan.' };
         const jobRun = pendingAssistantPlaceholderMessage({
             chatId: 'chat-1',
             draftText: '',
             pendingLabel: 'Job running',
-            pendingJobRun: { agentJobId: 'job-1', title: 'Weekly meal planning', prompt: 'Plan.' },
+            jobRun: run,
             generationPersonality: 'Kai',
             thinkingImageUrl: null,
         });
-        expect(jobRun.pending_job_run).toEqual({ agentJobId: 'job-1', title: 'Weekly meal planning', prompt: 'Plan.' });
-        expect(pending.pending_job_run).toBeUndefined();
+        expect(jobRun.job_run).toEqual(run);
+        expect(pending.job_run).toBeUndefined();
 
         const extended = appendPendingAssistantGroup([], pending);
         expect(extended.length).toBe(1);
@@ -253,13 +240,6 @@ describe('appendLiveToolCallGroup', () => {
 
     it('adds nothing while the turn has made no tool calls', () => {
         expect(appendLiveToolCallGroup([], pending, [])).toEqual([]);
-    });
-
-    it("leaves a job's run_job row out of the live group (ADR 0x040)", () => {
-        const runJob = { id: 'job-run', name: 'run_job', input: '{}', status: 'complete' as const, output: 'p', round: 0, started_at: 't0' };
-        expect(appendLiveToolCallGroup([], pending, [runJob])).toEqual([]);
-        const groups = appendLiveToolCallGroup([], pending, [runJob, { id: 'c1', name: 'search', status: 'running', round: 0, started_at: 't1' }]);
-        expect(groups[0].kind === 'tool-call-group' && groups[0].toolCalls.map(c => c.tool_name)).toEqual(['search']);
     });
 
     it('maps the timeline to a live tool-call group, splitting output by status', () => {

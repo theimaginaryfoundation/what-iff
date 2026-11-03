@@ -113,6 +113,7 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			generation_expression_reasoning text,
 			model_reasoning text,
 			agent_run json,
+			job_run json,
 			last_error_message text,
 			last_error_code text,
 			checkpoint_completed_at datetime,
@@ -276,6 +277,7 @@ func accountBackupJSONL[T any](t *testing.T, records ...T) string {
 }
 
 func TestAdminImportAccountBackup_HappyPath(t *testing.T) {
+	backupJobRunID := uuid.New()
 	ds, cleanup := newAccountBackupTestDatastore(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -322,6 +324,7 @@ func TestAdminImportAccountBackup_HappyPath(t *testing.T) {
 			ID: chatMessageID, ChatID: chatID, Message: "hello", Origin: models.MessageOriginUser,
 			ReadStatus: "read", SentAt: now,
 			AgentRun: &models.AgentRun{Version: models.AgentRunVersion, EndReason: models.AgentRunEndDone},
+			JobRun:   &models.JobRun{AgentJobID: backupJobRunID, Title: "Weekly meal planning", Prompt: "Plan."},
 		}),
 		"chat_message_context_items.jsonl": accountBackupJSONL(t, models.AccountBackupChatMessageContextItem{
 			ID: contextItemID, ChatMessageID: chatMessageID, Type: "note", Content: "ctx",
@@ -389,6 +392,8 @@ func TestAdminImportAccountBackup_HappyPath(t *testing.T) {
 	m := ds.dbClient.ChatMessage.GetX(ctx, chatMessageID)
 	require.NotNil(t, m.AgentRun)
 	require.Equal(t, models.AgentRunVersion, m.AgentRun.Version)
+	require.NotNil(t, m.JobRun, "a scheduled reply keeps its job (ADR 0x040)")
+	require.Equal(t, models.JobRun{AgentJobID: backupJobRunID, Title: "Weekly meal planning", Prompt: "Plan."}, *m.JobRun)
 	require.Equal(t, 2, ds.dbClient.ToolCall.GetX(ctx, toolCallID).Step)
 
 	linked, err := ds.dbClient.Personality.Query().

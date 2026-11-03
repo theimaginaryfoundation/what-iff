@@ -917,9 +917,6 @@ type chatContext struct {
 	// memoryProgress is the memory-load row already shown in that timeline; the tool recorder
 	// starts from it so its snapshots keep the row. Nil when retrieval showed nothing.
 	memoryProgress *memoryLoadProgress
-	// jobRunCall is the display-only run_job call a scheduled job's turn opens with (ADR 0x040),
-	// nil on other turns.
-	jobRunCall *models.ToolCall
 	// mcpServers caches the connectors in scope for this turn (thread-attached plus the active
 	// skills' connectors) for the list/load/unload tools and dynamic mcp__ tool dispatch.
 	mcpServers []*models.MCPServer
@@ -1298,7 +1295,7 @@ func (a *Agent) finishGeneration(ctx context.Context, userID uuid.UUID, chatMess
 	if opts.mergeToolCalls != nil {
 		toolCalls = opts.mergeToolCalls(toolCalls)
 	}
-	toolCalls = append(leadToolCallsForChatContext(chatCtx), toolCalls...)
+	toolCalls = append(memoryToolCallsForChatContext(chatCtx), toolCalls...)
 	a.recordToolCalls(ctx, toolCalls)
 
 	// Checked after tool-call metrics and the web-search count: the work in this turn
@@ -1630,7 +1627,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	}
 	chatCtx.webSearchCount = a.turnWebSearchCount(adapter, toolCalls)
 
-	toolCalls = append(leadToolCallsForChatContext(chatCtx), toolCalls...)
+	toolCalls = append(memoryToolCallsForChatContext(chatCtx), toolCalls...)
 	a.recordToolCalls(ctx, toolCalls)
 
 	// See runGeneration: guard after metrics so a failed turn still counts its work.
@@ -2576,13 +2573,15 @@ func isTruncationStopReason(stopReason string) bool {
 // result.Reasoning).
 func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID, result *provider.GenerateResponse, toolCalls []*models.ToolCall, generatedAttachments []*models.FileAttachment, generationModel string, generationPersonality string, generationMoodID *uuid.UUID, agentRun *models.AgentRun) (*models.ChatMessage, error) {
 	agentMessage, err := a.ds.CreateChatMessage(ctx, userID, models.ChatMessage{
-		ChatID:                chatID,
-		Message:               result.Text,
-		Origin:                models.MessageOriginAssistant,
-		ResponseID:            &result.ID,
-		Tokens:                result.OutputTokens,
-		ModelReasoning:        nonEmptyStringPtr(result.Reasoning),
-		AgentRun:              agentRun,
+		ChatID:         chatID,
+		Message:        result.Text,
+		Origin:         models.MessageOriginAssistant,
+		ResponseID:     &result.ID,
+		Tokens:         result.OutputTokens,
+		ModelReasoning: nonEmptyStringPtr(result.Reasoning),
+		AgentRun:       agentRun,
+		// A scheduled run's reply records its job (ADR 0x040); nil on every other turn.
+		JobRun:                models.JobRunFromContext(ctx),
 		GenerationModel:       generationModel,
 		GenerationPersonality: generationPersonality,
 		GenerationMoodID:      generationMoodID,

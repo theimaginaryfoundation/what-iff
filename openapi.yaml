@@ -9885,6 +9885,13 @@ components:
             array on each poll rather than appending by cursor.
           items:
             type: string
+        job_run:
+          allOf:
+            - $ref: '#/components/schemas/JobRun'
+          nullable: true
+          description: >-
+            On a scheduled run's queue ticket (`agent_job_run` keyed by the chat), the agent job it
+            runs for and its prompt (ADR 0x040). Absent on every other job.
         progress:
           type: string
           description: |
@@ -10634,6 +10641,13 @@ components:
             The Advanced run (ADR 0x026) that produced this assistant message: its working notes per
             step, its plan and why it ended. The message text is the run's final reply. Absent on
             Standard turns.
+        job_run:
+          allOf:
+            - $ref: '#/components/schemas/JobRun'
+          nullable: true
+          description: >-
+            The agent job a scheduled run's reply was written for, with the prompt it ran (ADR 0x040).
+            Display-only; never replayed to the model. Absent on every other message.
         last_error_message:
           type: string
           nullable: true
@@ -10697,6 +10711,22 @@ components:
           description: Image payloads carried by this kind (token estimates do not account for images).
       required: [kind, segments, tokens, cacheable]
 
+    JobRun:
+      type: object
+      description: >-
+        The agent job a scheduled run is for (ADR 0x040), recorded on its reply and, while it runs,
+        on its queue ticket.
+      required: [agent_job_id]
+      properties:
+        agent_job_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          description: The job's title when it ran; absent for an untitled job.
+        prompt:
+          type: string
+          description: The job's prompt as it ran. It is never saved as a message.
     AgentRun:
       type: object
       description: >-
@@ -11506,10 +11536,6 @@ components:
           format: uuid
         tool_name:
           type: string
-          description: >-
-            The tool called. Two display-only pseudo calls are not real tools: `Load Memory` (the turn's automatic memory load)
-            and `run_job` (ADR 0x040), which opens a scheduled job's reply. A `run_job` call's `tool_input` is
-            `{"agent_job_id": "<uuid>", "title": "<job title>"}` and its `tool_output` is the job's prompt.
         tool_input:
           type: string
         tool_output:

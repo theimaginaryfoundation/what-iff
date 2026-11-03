@@ -405,6 +405,8 @@ func (a *Agent) beginEphemeralChatTurn(ctx context.Context, userID, chatID uuid.
 		Reference:   chatID.String(),
 		Status:      models.JobStatusPending,
 		DraftDeltas: []string{},
+		// The job the run is for, so a client following the ticket can name it (ADR 0x040).
+		JobRun: models.JobRunFromContext(ctx),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to queue turn: %w", err)

@@ -14091,6 +14091,8 @@ export interface components {
             draft_deltas?: string[];
             /** @description Incremental model reasoning chunks emitted while inference is in progress (z.ai GLM, Xiaomi MiMo, and OpenAI/Anthropic when a reasoning effort is selected). On an Advanced turn it carries everything the model writes before its final reply, with step headers, and the final reply streams here too until it is saved as the message (whose agent_run then holds the notes by step). Display-only. Unlike draft_deltas this can be reset (emptied and re-sent) when a truncated call is retried, so clients should render the whole array on each poll rather than appending by cursor. */
             draft_reasoning?: string[];
+            /** @description On a scheduled run's queue ticket (`agent_job_run` keyed by the chat), the agent job it runs for and its prompt (ADR 0x040). Absent on every other job. */
+            job_run?: components["schemas"]["JobRun"] | null;
             /**
              * @description Optional JSON-encoded progress payload for long-running jobs. Opaque to clients except per
              *     job_type. For `chat_import` it is `{phase, source, total, imported, skipped}`; for
@@ -14525,6 +14527,8 @@ export interface components {
             model_reasoning?: string | null;
             /** @description The Advanced run (ADR 0x026) that produced this assistant message: its working notes per step, its plan and why it ended. The message text is the run's final reply. Absent on Standard turns. */
             agent_run?: components["schemas"]["AgentRun"] | null;
+            /** @description The agent job a scheduled run's reply was written for, with the prompt it ran (ADR 0x040). Display-only; never replayed to the model. Absent on every other message. */
+            job_run?: components["schemas"]["JobRun"] | null;
             /** @description User-visible async generation failure for this user turn; cleared after a successful reply */
             last_error_message?: string | null;
             /** @description Stable code for last_error_message when it has one (a specific ErrorCode such as `provider_not_configured`); set and cleared with it. */
@@ -14551,6 +14555,15 @@ export interface components {
             cacheable: boolean;
             /** @description Image payloads carried by this kind (token estimates do not account for images). */
             images?: number;
+        };
+        /** @description The agent job a scheduled run is for (ADR 0x040), recorded on its reply and, while it runs, on its queue ticket. */
+        JobRun: {
+            /** Format: uuid */
+            agent_job_id: string;
+            /** @description The job's title when it ran; absent for an untitled job. */
+            title?: string;
+            /** @description The job's prompt as it ran. It is never saved as a message. */
+            prompt?: string;
         };
         /** @description A saved Advanced run (ADR 0x026). Readers branch on version and must skip event kinds and render other enum-like values they do not know, rather than reject the message. */
         AgentRun: {
@@ -15077,7 +15090,6 @@ export interface components {
             step?: number;
             /** Format: uuid */
             id: string;
-            /** @description The tool called. Two display-only pseudo calls are not real tools: `Load Memory` (the turn's automatic memory load) and `run_job` (ADR 0x040), which opens a scheduled job's reply. A `run_job` call's `tool_input` is `{"agent_job_id": "<uuid>", "title": "<job title>"}` and its `tool_output` is the job's prompt. */
             tool_name: string;
             tool_input: string;
             tool_output: string;
