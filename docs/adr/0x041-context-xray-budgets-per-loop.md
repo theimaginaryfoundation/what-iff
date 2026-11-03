@@ -1,4 +1,4 @@
-# ADR 0xNNN: Context X-ray budgets follow the loop that ran
+# ADR 0x041: Context X-ray budgets follow the loop that ran
 
 - **Status:** Proposed
 - **Date:** 2026-11-03
