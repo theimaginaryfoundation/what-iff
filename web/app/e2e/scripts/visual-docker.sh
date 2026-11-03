@@ -134,7 +134,10 @@ if curl -fsS -o /dev/null --max-time 3 "${backend_health}" 2>/dev/null; then
   echo "  or not in mock mode — stop it and re-run so this script can start a fresh one."
 else
   echo "No backend on :8080 — building and starting the compose 'api' service (db + api) in mock mode…"
-  ENV=development LLM_BACKEND=mock \
+  # REMOTE_SYNC_ENABLED=false: compose turns remote sync on for self-hosted installs,
+  # but the API CI renders baselines against does not, and remote sync adds links and a
+  # tab to several screens. Left on, a regeneration bakes them into baselines CI fails.
+  ENV=development LLM_BACKEND=mock REMOTE_SYNC_ENABLED=false \
     docker compose -f "${repo_root}/docker-compose.yml" up -d --build api
   echo "Waiting for backend readiness on :8080 (up to ~180s)…"
   if ! wait_for_http "${backend_health}" 90; then

@@ -3500,7 +3500,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The account already has a connection to that built-in provider; `code` is `provider_connection_exists` */
+                /** @description The account already has a connection to that built-in provider (`code` is `provider_connection_exists`), or one with that name, ignoring case (`code` is `connection_name_taken`). Without a name, a connection named after its preset takes the next free number instead ("Ollama 2"). */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -3596,7 +3596,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Remove a provider connection */
+        /**
+         * Remove a provider connection
+         * @description Its models go with it: a chat on one falls back to the default model, and a job on one fails with a clear error. Refused while one of them is the account's default model.
+         */
         delete: {
             parameters: {
                 query?: never;
@@ -3627,6 +3630,15 @@ export interface paths {
                 };
                 /** @description No such connection on this account */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description One of its models is the account's default; `code` is `default_model_in_use` */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -3712,6 +3724,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Another of the account's connections has that name, ignoring case; `code` is `connection_name_taken` */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Listing with the new key or address failed, as for adding one */
                 422: {
                     headers: {
@@ -3745,8 +3766,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the models a connection's provider offers
-         * @description Asks the provider now, with the connection's stored key; nothing is cached.
+         * List the models a connection's provider offers, and which are enabled
+         * @description Asks the provider now, with the connection's stored key; nothing is cached. Each model says whether the account enabled it, and its tool and image support: the account's confirmed values for an enabled model, otherwise what the provider reports (or what is known about its API), absent when unknown. An enabled model the provider no longer lists still appears, so it can be turned off.
          */
         get: {
             parameters: {
@@ -3760,13 +3781,13 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Models, sorted by id */
+                /** @description Models, sorted by id, then any enabled ones the provider no longer lists */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ListedModel"][];
+                        "application/json": components["schemas"]["ConnectionModel"][];
                     };
                 };
                 /** @description Unauthorized */
@@ -3807,7 +3828,82 @@ export interface paths {
                 };
             };
         };
-        put?: never;
+        /**
+         * Enable or disable a connection's models
+         * @description Enabled models are offered in the account's model picker. Disabling one keeps its row, so a chat or job naming it fails clearly, and enabling it again brings it back. Changes nothing about where requests go, so it needs no password.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The connection */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SetConnectionModelsRequest"];
+                };
+            };
+            responses: {
+                /** @description The connection's enabled models */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConnectionModel"][];
+                    };
+                };
+                /** @description No models given, or a model id that is empty or over 200 characters */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such connection on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Disabling the account's default model (`code` is `default_model_in_use`), or a model named like another of the connection's, ignoring case, or like the deployment's own model of that provider (`code` is `model_name_taken`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -9251,7 +9347,7 @@ export interface paths {
         put?: never;
         /**
          * Create chat
-         * @description Creates a new chat session. Optional `personality_id` and `model_id` let callers start a thread with a specific persona/model in one round trip; both must be owned by the authenticated user (model must be active). When omitted, the user's default preferences are used.
+         * @description Creates a new chat session. Optional `personality_id` and `model_id` let callers start a thread with a specific persona/model in one round trip; both must be owned by the authenticated user (model must be active). When omitted, the user's default preferences are used. An account with no default model gets a chat with no model, whose turns use the account's default once it has one; until then a turn fails with `no_model_selected`.
          */
         post: {
             parameters: {
@@ -13861,7 +13957,10 @@ export interface components {
             user_id: string;
             /**
              * Format: uuid
-             * @description ID of the user's preferred default AI model
+             * @description ID of the user's default model for new chats. Returned as the nil UUID
+             *     (00000000-0000-0000-0000-000000000000) when the account has none, as on an install
+             *     without a model catalog before the account enables a model; the first model it
+             *     enables then becomes its default.
              */
             default_model_id: string;
             /**
@@ -14020,10 +14119,10 @@ export interface components {
             /** @description Description of the model's capabilities */
             description: string;
             /**
-             * @description Provider backend used for this model
+             * @description Provider backend used for this model: a built-in provider, or for a model from a provider connection, the preset the connection was made from.
              * @enum {string}
              */
-            provider: "openai" | "anthropic" | "zai" | "google" | "mistral" | "deepseek" | "qwen" | "xiaomi";
+            provider: "openai" | "anthropic" | "zai" | "google" | "mistral" | "deepseek" | "qwen" | "xiaomi" | "openrouter" | "ollama" | "lmstudio" | "custom";
             /** @description Whether the model supports tool/function calling */
             tool_support: boolean;
             /** @description Whether the model accepts image input. Images are stripped from the context sent to models without it. */
@@ -14042,6 +14141,13 @@ export interface components {
             deleted: boolean;
             /** @description Whether this is the application-wide default model (at most one active model) */
             is_default: boolean;
+            /**
+             * Format: uuid
+             * @description The provider connection serving the model (ADR 0x027). Absent for the deployment's own catalog; present only on the account's own models.
+             */
+            connection_id?: string;
+            /** @description That connection's name, as the account named it (e.g. "Desk Ollama"), in the account's model list; absent where connection_id is. */
+            connection_name?: string;
         };
         /**
          * @example pending
@@ -14732,6 +14838,27 @@ export interface components {
             id: string;
             /** @description The provider's own name for it, when it gives one. */
             display_name?: string;
+            /** @description Whether it takes tools, as the provider reports; absent when unknown. */
+            tool_support?: boolean;
+            /** @description Whether it takes images, as the provider reports; absent when unknown. */
+            vision_support?: boolean;
+        };
+        /** @description One of a connection's models as the account sees it. */
+        ConnectionModel: components["schemas"]["ListedModel"] & {
+            enabled: boolean;
+            /** @description The name the listing offers the model under, which a name the account clears goes back to. `display_name` is the account's own name for it, kept while the model is off too. */
+            default_name?: string;
+        };
+        SetConnectionModelsRequest: {
+            models: {
+                id: string;
+                enabled: boolean;
+                display_name?: string;
+                /** @description Left out, an enabled model keeps its value, and a new one starts off. */
+                tool_support?: boolean;
+                /** @description Left out, an enabled model keeps its value, and a new one starts off. */
+                vision_support?: boolean;
+            }[];
         };
         ProviderConnected: {
             connection: components["schemas"]["ProviderConnection"];
@@ -16477,7 +16604,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "connection_name_taken" | "model_name_taken" | "no_model_selected";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**

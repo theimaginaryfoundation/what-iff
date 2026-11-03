@@ -211,7 +211,11 @@ func (d *Datastore) CreateUser(ctx context.Context, userReq models.UserRegisterR
 		return nil, nil, err
 	}
 
+	// No catalog means no default yet: the account gets one when it enables a model.
 	defaultModel, err := resolveDefaultModelTx(ctx, tx)
+	if ent.IsNotFound(err) {
+		defaultModel, err = nil, nil
+	}
 	if err != nil {
 		d.logger.Error(i18n.T1("user.default_model_failed", "Model", getDefaultModelName()), zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {
@@ -221,11 +225,13 @@ func (d *Datastore) CreateUser(ctx context.Context, userReq models.UserRegisterR
 	}
 
 	// Create user preferences
-	_, err = tx.UserPreference.Create().
+	prefsCreate := tx.UserPreference.Create().
 		SetUserID(u.ID).
-		SetModelID(defaultModel.ID).
-		SetTheme(defaultTheme).
-		Save(ctx)
+		SetTheme(defaultTheme)
+	if defaultModel != nil {
+		prefsCreate.SetModelID(defaultModel.ID)
+	}
+	_, err = prefsCreate.Save(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T1("create.failed", "Entity", "user preferences"), zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {

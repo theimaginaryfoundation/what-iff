@@ -1,26 +1,46 @@
 <ui-modal [open]="open()" [dismissible]="false" size="md" labelledBy="provider-key-prompt-title">
   <div modal-header class="key-prompt__header">
     <p class="key-prompt__eyebrow">Welcome to WhatIff</p>
-    <h2 id="provider-key-prompt-title" class="key-prompt__title">Add your OpenAI key to get started</h2>
+    <h2 id="provider-key-prompt-title" class="key-prompt__title">
+      {{ step() === 0 ? 'Add your OpenAI key to get started' : "Choose the models you'll chat with" }}
+    </h2>
   </div>
-  <section class="key-prompt" data-testid="provider-key-prompt">
-    <p class="key-prompt__lead">
-      WhatIff runs on your own AI provider account, so it needs a key before it can chat, remember or create
-      anything.
-    </p>
+  <section class="key-prompt" data-testid="provider-key-prompt" [attr.data-step]="step() === 0 ? 'key' : 'models'">
+    @if (step() === 0) {
+      <p class="key-prompt__lead">
+        WhatIff runs on your own AI provider account, so it needs a key before it can chat, remember or create
+        anything.
+      </p>
+    } @else {
+      <p class="key-prompt__lead">
+        Your key is connected. Now pick which of its models show up in your model picker; the first one you choose
+        becomes your default.
+      </p>
+    }
 
     <ol class="key-prompt__steps">
-      @for (step of steps; track step.title; let i = $index) {
-        <li class="key-prompt__step" [class.key-prompt__step--current]="i === 0">
-          <span class="key-prompt__step-title">{{ step.title }}</span>
-          <span class="key-prompt__step-body">{{ step.body }}</span>
+      @for (s of steps; track s.title; let i = $index) {
+        <li class="key-prompt__step" [class.key-prompt__step--current]="i === step()" [class.key-prompt__step--done]="i < step()">
+          <span class="key-prompt__step-title">
+            @if (i < step()) {
+              <span aria-hidden="true">✓ </span><span class="sr-only">Done: </span>
+            }
+            {{ s.title }}
+          </span>
+          <span class="key-prompt__step-body">{{ s.body }}</span>
         </li>
       }
     </ol>
 
-    <p class="key-prompt__hint">You'll confirm with your WhatIff password. The key is stored encrypted.</p>
+    @if (step() === 0) {
+      <p class="key-prompt__hint">You'll confirm with your WhatIff password. The key is stored encrypted.</p>
+    }
   </section>
   <div modal-footer class="key-prompt__actions">
-    <button type="button" class="key-prompt__primary" (click)="addKey()">Add your OpenAI key</button>
+    @if (step() === 0) {
+      <button type="button" class="key-prompt__primary" (click)="addKey()">Add your OpenAI key</button>
+    } @else {
+      <button type="button" class="key-prompt__primary" (click)="chooseModels()">Choose models</button>
+    }
   </div>
 </ui-modal>
