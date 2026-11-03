@@ -4,7 +4,7 @@
 - **Date:** 2026-11-03
 - **Deciders:** What Iff maintainers
 - **Issue:** [what-iff#427](https://github.com/theimaginaryfoundation/what-iff/issues/427)
-- **PR:** TBD
+- **PR:** [what-iff#437](https://github.com/theimaginaryfoundation/what-iff/pull/437)
 
 ## Context
 
