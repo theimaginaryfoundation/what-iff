@@ -167,7 +167,7 @@ func prepareConnectorCalls(ctx context.Context, client *Client, server *models.M
 		result, err := client.CallToolByFullNameWithSessionStateDetailed(callCtx, servers, toolNames[step.Tool], args, sessions)
 		report.Receipts = append(report.Receipts, connectorReceipt{
 			Phase: phase, Tool: step.Tool, InputHash: connectorDigest(args),
-			OutputHash: connectorDigest([]byte(result.Output)), IsError: result.IsError, RequestError: err != nil,
+			OutputHash: connectorDigest(append([]byte(result.Output), result.StructuredContent...)), IsError: result.IsError, RequestError: err != nil,
 		})
 		if err != nil {
 			return result, connectorRequestFailure(phase, err)
@@ -224,7 +224,8 @@ func cleanupConnectorScenario(ctx context.Context, scenario connectorScenario, v
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(missing.Output, scenario.MissingError) {
+	// A server may put a summary in the text and the error only in its structured content.
+	if !strings.Contains(missing.Output, scenario.MissingError) && !strings.Contains(string(missing.StructuredContent), scenario.MissingError) {
 		return fmt.Errorf("verify_deleted: error does not confirm the document is missing")
 	}
 	return nil

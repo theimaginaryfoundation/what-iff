@@ -33,7 +33,7 @@ func testConnectorScenario() connectorScenario {
 }
 
 func TestConnectorRoundTrip(t *testing.T) {
-	for _, mode := range []string{"JSON", "SSE", "legacy_text", "plain_ack"} {
+	for _, mode := range []string{"JSON", "SSE", "legacy_text", "plain_ack", "summary_text"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel() // Each subtest owns its connector, document and session state.
 			server := newConnectorScenarioServer(t, mode, mode == "SSE", nil)
@@ -191,15 +191,18 @@ func newConnectorScenarioServer(t *testing.T, fault string, sse bool, cancel con
 				}
 				payload["deleted"] = true
 			}
-			result = map[string]any{"isError": isError, "structuredContent": payload, "content": []map[string]any{{"type": "text", "text": "connector reply"}}}
+			encoded, err := json.Marshal(payload)
+			if err != nil {
+				t.Errorf("encode result: %v", err)
+				return
+			}
+			// As the spec asks, the text block repeats the structured content.
+			result = map[string]any{"isError": isError, "structuredContent": payload, "content": []map[string]any{{"type": "text", "text": string(encoded)}}}
 			if fault == "legacy_text" {
-				encoded, err := json.Marshal(payload)
-				if err != nil {
-					t.Errorf("encode legacy result: %v", err)
-					return
-				}
 				delete(result, "structuredContent")
-				result["content"] = []map[string]any{{"type": "text", "text": string(encoded)}}
+			}
+			if fault == "summary_text" {
+				result["content"] = []map[string]any{{"type": "text", "text": "connector reply"}}
 			}
 			if (fault == "non_json_legacy" && req.Params.Name == "read") ||
 				(fault == "plain_ack" && (req.Params.Name == "update" || req.Params.Name == "delete")) {
