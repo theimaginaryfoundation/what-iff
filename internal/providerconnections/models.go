@@ -252,9 +252,14 @@ func (s *Store) SetModels(ctx context.Context, userID uuid.UUID, conn *ent.Provi
 func distinctModelNames(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConnection, enabled []*ent.Model) error {
 	seen := make(map[string]bool, len(enabled))
 	for _, m := range enabled {
-		key := strings.ToLower(m.DisplayName)
+		// A model saved without a name is shown by its id.
+		name := strings.TrimSpace(m.DisplayName)
+		if name == "" {
+			name = m.Name
+		}
+		key := strings.ToLower(name)
 		if seen[key] {
-			return &ModelNameTakenError{Name: m.DisplayName}
+			return &ModelNameTakenError{Name: name}
 		}
 		seen[key] = true
 	}
@@ -273,7 +278,7 @@ func distinctModelNames(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConne
 		return fmt.Errorf("read the deployment's models: %w", err)
 	}
 	for _, name := range catalog {
-		if seen[strings.ToLower(name)] {
+		if name = strings.TrimSpace(name); name != "" && seen[strings.ToLower(name)] {
 			return &ModelNameTakenError{Name: name, Catalog: true}
 		}
 	}
