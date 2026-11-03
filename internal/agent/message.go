@@ -2244,6 +2244,12 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	if err != nil {
 		return nil, err
 	}
+	// A connection model's provider is its connection's preset, as on the
+	// sub-agent path, never one guessed from its name: a Custom model named
+	// "claude-…" is not Anthropic's.
+	if connection != nil {
+		resolved.provider = connection.Preset
+	}
 	// A connection model's tool support is what its provider reported or the
 	// account confirmed; offering tools to a model without it only fails the turn.
 	if connection != nil && !resolved.row.ToolSupport {
@@ -2961,8 +2967,10 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	// PreviousResponseID. Anthropic, z.ai (GLM) and Gemini chats all rebuild
 	// context from the DB via the "Claude" checkpoint path, whose summarizer runs
 	// on GPT and whose scratchpad/memory archival runs on the Anthropic provider
-	// (a no-op that logs when ANTHROPIC_API_KEY is unset).
-	if models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model) || models.UsesOpenAIChatCompletionsAPI(chatCtx.modelProvider, chatCtx.model) {
+	// (a no-op that logs when ANTHROPIC_API_KEY is unset). A connection model
+	// rebuilds from the DB too: no connection returns an OpenAI response id to
+	// chain off.
+	if checkpointRebuildsFromDB(chatCtx) {
 		a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
 	} else {
 		a.runCheckpointOpenAI(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
@@ -2972,6 +2980,15 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 			zap.String("chat_id", chatMessage.ChatID.String()),
 			zap.Duration("budget", checkpointTimeout))
 	}
+}
+
+// checkpointRebuildsFromDB reports whether a chat's checkpoint rebuilds its
+// context from the DB (the "Claude" path) rather than chaining off an OpenAI
+// Responses id: every chat but one on OpenAI's own Responses API.
+func checkpointRebuildsFromDB(chatCtx *chatContext) bool {
+	return chatCtx.connection != nil ||
+		models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model) ||
+		models.UsesOpenAIChatCompletionsAPI(chatCtx.modelProvider, chatCtx.model)
 }
 
 // runCheckpointOpenAI performs the scratchpad → memory → summary checkpoint sequence for
