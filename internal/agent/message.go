@@ -2351,6 +2351,12 @@ func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat
 	if a.ds != nil && parentChat.ModelID != uuid.Nil {
 		if m, err := a.ds.GetModel(ctx, parentChat.ModelID); err == nil {
 			dbModel = m
+		} else if !errors.Is(err, datastore.ErrModelNotFound) {
+			a.logger.Warn("chat model_id lookup failed; falling back to model_name or default",
+				zap.String("chat_id", parentChat.ID.String()),
+				zap.String("model_id", parentChat.ModelID.String()),
+				zap.Error(err),
+			)
 		} else if disabled, derr := a.ds.GetDisabledConnectionModel(ctx, parentChat.ModelID); derr == nil {
 			// A connection model the account turned off: the turn fails clearly
 			// (connectionFor) instead of being sent somewhere by its name.
