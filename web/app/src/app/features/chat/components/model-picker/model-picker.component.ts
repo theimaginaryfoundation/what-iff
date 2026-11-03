@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectionStrategy, Component, ElementRef, HostListener, computed, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, input, output, signal } from '@angular/core';
 
 import { Model } from '../../../../core/models/model.model';
 import {
@@ -16,6 +16,7 @@ import {
   sortedProviders,
 } from '../../helpers/model-picker.helpers';
 import { ModelFavoritesService } from '../../services/model-favorites.service';
+import { listenForOutsideClick } from '../../../../shared/ui/helpers/outside-click.helpers';
 import { EyeOffIconComponent } from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
@@ -544,6 +545,10 @@ export class ModelPickerComponent {
     return this.sortedModels().filter(model => modelProvider(model) === provider).length;
   }
 
+  constructor() {
+    listenForOutsideClick(() => this.close());
+  }
+
   toggle(): void {
     if (this.disabled()) return;
     if (this.open()) {
@@ -586,15 +591,6 @@ export class ModelPickerComponent {
   choose(model: Model): void {
     this.selected.emit(model);
     this.close();
-  }
-
-  @HostListener('document:click', ['$event'])
-  onDocumentClick(event: Event): void {
-    const target = event.target;
-    if (!(target instanceof Node)) return;
-    if (!this.host.nativeElement.contains(target)) {
-      this.close();
-    }
   }
 
   private close(): void {
