@@ -51,8 +51,10 @@
   --system-bg: rgba(140, 135, 255, 0.06);
   --system-text: #8C87FF;
 
-  // Conversation bubbles
-  --user-bubble: #8C87FF;
+  // Conversation bubbles. --user-bubble is the user bubble's own token (only
+  // message-bubble reads it), lighter than --accent so the #111827 --user-text
+  // reaches 7.7:1 (AAA) on it; --accent itself is unchanged (#346).
+  --user-bubble: #A5A1FF;
   --user-text: #111827;
   --ai-bubble: #E5E7EB;
   --ai-text: #111827;
