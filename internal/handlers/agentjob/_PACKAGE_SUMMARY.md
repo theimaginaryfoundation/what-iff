@@ -17,7 +17,7 @@ HTTP API for **agent jobs** — async/scheduled assistant work: CRUD, prompt/tit
 ## Non-obvious decisions
 
 - Schedule strings and timezones interact with `internal/agentjobs/schedule` — keep error messages aligned with UI.
-- **Run now** (`run.go`): 202 when accepted; 429 `job_run_limit_reached` when the scheduler's `*RunLimitError` says the user is over the job run window (`details`: `limit`, `window_seconds`, `retry_at` when known, plus `Retry-After`); 503 "AgentJob scheduler is not enabled" without a runner, and "AgentJob scheduler is not active" only for `ErrSchedulerNotActive` ([ADR 0x041](../../../docs/adr/0x041-manual-job-runs-on-any-instance.md)).
+- **Run now** (`run.go`): 202 when accepted; 429 `job_run_limit_reached` when the scheduler's `*RunLimitError` says the user is over the job run window (`details`: `limit`, `window_seconds`, `retry_at` when known, plus `Retry-After`); 503 "AgentJob scheduler is not enabled" without a runner, and "AgentJob scheduler is not active" only for `ErrSchedulerNotActive` ([ADR 0x042](../../../docs/adr/0x042-manual-job-runs-on-any-instance.md)).
 
 ## Testing
 

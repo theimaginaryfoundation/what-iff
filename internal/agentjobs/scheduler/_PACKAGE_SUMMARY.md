@@ -27,7 +27,7 @@
   A user pause clears `last_error`, so paused + marker is how the web app (`scheduleFailureReason` in `job-status.helpers.ts`) shows "Paused: schedule error" with the reason instead of a plain pause.
 - **Run failure text:** `last_error` and the assistant message posted on a failed run use `providerkeys.FailureText`, so a missing provider key reads "No OpenAI API key is set." rather than the transport error.
   There is no separate status value or column; keep the marker and the helper in sync.
-- **Manual runs (`run_now.go`, [ADR 0x041](../../../docs/adr/0x041-manual-job-runs-on-any-instance.md)):** `RunAgentJobNow` works on every instance while the manager is running (`running`, set by `Start` or for the whole of `Run`, leader or follower).
+- **Manual runs (`run_now.go`, [ADR 0x042](../../../docs/adr/0x042-manual-job-runs-on-any-instance.md)):** `RunAgentJobNow` works on every instance while the manager is running (`running`, set by `Start` or for the whole of `Run`, leader or follower).
   It does not need the quartz scheduler, which only the leader has; the per-chat turn gate orders it against scheduled runs.
   `ErrSchedulerNotActive` means the manager is not running on this instance (not started, start failed, or stopped).
   The per-user window is checked before the run is accepted: over it, a `*RunLimitError` (`errors.Is` `ErrRunLimitReached`) carries the limit, the window and, when the datastore can list execution times, `RetryAt`.

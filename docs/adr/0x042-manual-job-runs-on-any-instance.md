@@ -1,4 +1,4 @@
-# ADR 0x041: Manual job runs on any instance, with the run limit checked up front
+# ADR 0x042: Manual job runs on any instance, with the run limit checked up front
 
 - **Status:** Accepted
 - **Date:** 2026-11-03
