@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"slices"
 
+	"entgo.io/ent/dialect"
+	"entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/ent/agentjob"
 	"github.com/theimaginaryfoundation/what-iff/ent/chat"
+	"github.com/theimaginaryfoundation/what-iff/ent/marker"
 	"github.com/theimaginaryfoundation/what-iff/ent/model"
 	"github.com/theimaginaryfoundation/what-iff/ent/providerconnection"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
@@ -31,16 +34,37 @@ import (
 // model fails because the model no longer exists. Retired seeded models are
 // removed the same way, without being converted.
 //
-// It runs at startup in one transaction and is safe to run again, or on two
-// instances at once: a model already on the connection is reused, and once the
-// seeded rows are gone there is nothing left to do. It reports how many
-// seeded rows it removed.
+// An account left with enabled models but no default, because its default
+// went, gets one of its converted models as its default.
+//
+// It runs once per install, in one transaction, and records that it ran (the
+// seededCatalogConverted marker): a catalog model an operator adds later with a
+// seeded model's name is never taken for a seeded one. On Postgres it holds an
+// advisory lock, so two instances starting at once convert one after the
+// other, and the second finds the marker. It reports how many seeded rows it
+// removed.
 func ConvertSeededModels(ctx context.Context, client *ent.Client, logger *zap.Logger) (int, error) {
 	tx, err := client.Tx(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("begin converting seeded models: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	done, postgres, err := converted(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if postgres {
+		if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", seededCatalogConverted); err != nil {
+			return 0, fmt.Errorf("lock the seeded model conversion: %w", err)
+		}
+		if done, _, err = converted(ctx, tx); err != nil {
+			return 0, err
+		}
+	}
+	if done {
+		return 0, nil
+	}
 
 	seeded, err := tx.Model.Query().
 		Where(model.ConnectionIDIsNil(), model.NameIn(seededNames()...)).
@@ -49,6 +73,12 @@ func ConvertSeededModels(ctx context.Context, client *ent.Client, logger *zap.Lo
 		return 0, fmt.Errorf("read seeded models: %w", err)
 	}
 	if len(seeded) == 0 {
+		if err := markConverted(ctx, tx); err != nil {
+			return 0, err
+		}
+		if err := tx.Commit(); err != nil {
+			return 0, fmt.Errorf("commit the seeded model conversion: %w", err)
+		}
 		return 0, nil
 	}
 	c := seedConversion{tx: tx, converted: map[uuid.UUID]map[uuid.UUID]uuid.UUID{}}
@@ -66,11 +96,79 @@ func ConvertSeededModels(ctx context.Context, client *ent.Client, logger *zap.Lo
 	if _, err := tx.Model.Delete().Where(model.IDIn(modelIDs(seeded)...)).Exec(ctx); err != nil {
 		return 0, fmt.Errorf("remove seeded models: %w", err)
 	}
+	if err := c.giveDefaults(ctx); err != nil {
+		return 0, err
+	}
+	if err := markConverted(ctx, tx); err != nil {
+		return 0, err
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit converted models: %w", err)
 	}
 	logger.Info("converted seeded models onto accounts' connections", zap.Int("seeded_models", len(seeded)))
 	return len(seeded), nil
+}
+
+// seededCatalogConverted is the marker recording that the conversion ran.
+const seededCatalogConverted = "seeded_catalog_converted"
+
+// converted reports whether the conversion has already run, and whether the
+// database is Postgres, which only the marker query can tell from here.
+func converted(ctx context.Context, tx *ent.Tx) (done, postgres bool, err error) {
+	done, err = tx.Marker.Query().
+		Where(marker.ID(seededCatalogConverted)).
+		Modify(func(s *sql.Selector) { postgres = s.Dialect() == dialect.Postgres }).
+		Exist(ctx)
+	if err != nil {
+		return false, false, fmt.Errorf("read the seeded model conversion marker: %w", err)
+	}
+	return done, postgres, nil
+}
+
+func markConverted(ctx context.Context, tx *ent.Tx) error {
+	if err := tx.Marker.Create().SetID(seededCatalogConverted).Exec(ctx); err != nil {
+		return fmt.Errorf("record the seeded model conversion: %w", err)
+	}
+	return nil
+}
+
+// giveDefaults makes one of an account's converted models its default, for each
+// converted account left without one.
+func (c *seedConversion) giveDefaults(ctx context.Context) error {
+	var users []uuid.UUID
+	for _, byUser := range c.converted {
+		for userID := range byUser {
+			if !slices.Contains(users, userID) {
+				users = append(users, userID)
+			}
+		}
+	}
+	if len(users) == 0 {
+		return nil
+	}
+	without, err := c.tx.UserPreference.Query().
+		Where(userpreference.HasUserWith(user.IDIn(users...)), userpreference.DefaultModelIsNil()).
+		WithUser().
+		All(ctx)
+	if err != nil {
+		return fmt.Errorf("read accounts without a default model: %w", err)
+	}
+	for _, prefs := range without {
+		first, err := c.tx.Model.Query().
+			Where(model.Deleted(false), model.HasConnectionWith(providerconnection.UserID(prefs.Edges.User.ID))).
+			Order(ent.Asc(model.FieldDisplayName), ent.Asc(model.FieldName)).
+			First(ctx)
+		if ent.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read user %s's models: %w", prefs.Edges.User.ID, err)
+		}
+		if err := c.tx.UserPreference.UpdateOne(prefs).SetDefaultModel(first.ID).Exec(ctx); err != nil {
+			return fmt.Errorf("give user %s a default model: %w", prefs.Edges.User.ID, err)
+		}
+	}
+	return nil
 }
 
 // seedConversion holds one conversion's transaction and, per seeded model,

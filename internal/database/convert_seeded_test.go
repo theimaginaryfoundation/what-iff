@@ -32,7 +32,7 @@ func newConversionClient(t *testing.T) *ent.Client {
 	require.NoError(t, err)
 	var tables []*schema.Table
 	for _, table := range []*schema.Table{migrate.UsersTable, migrate.ProviderConnectionsTable, migrate.ModelsTable,
-		migrate.UserPreferencesTable, migrate.ChatsTable, migrate.AgentJobsTable} {
+		migrate.UserPreferencesTable, migrate.ChatsTable, migrate.AgentJobsTable, migrate.MarkersTable} {
 		tables = append(tables, &schema.Table{Name: table.Name, Columns: table.Columns, PrimaryKey: table.PrimaryKey, Indexes: table.Indexes})
 	}
 	require.NoError(t, m.Create(context.Background(), tables...))
@@ -143,15 +143,38 @@ func TestConvertSeededModels(t *testing.T) {
 	require.Equal(t, on(aliceOpenAI, "gpt-5.1-nano").ID, *chatModel(aliceFormerChat), "a model no longer seeded converts like the rest")
 
 	// Bob: what he has a connection for moves; the rest is cleared, and his job
-	// keeps naming a model that no longer exists, so it fails clearly.
-	require.Nil(t, prefs(bob).DefaultModel, "no OpenAI connection: no default")
+	// keeps naming a model that no longer exists, so it fails clearly. His
+	// default was on OpenAI, which he has no key for, so one of his converted
+	// models becomes his default instead of leaving him with none.
+	require.Equal(t, bobClaude.ID, *prefs(bob).DefaultModel, "no OpenAI connection: his converted model is the default")
 	require.Empty(t, prefs(bob).FavoriteModelIds)
 	require.Nil(t, chatModel(bobGPTChat), "the chat falls back to the account's default")
 	require.Equal(t, bobClaude.ID, *chatModel(bobClaudeChat))
 	require.Equal(t, gpt.ID, *jobModel(bobGPTJob))
 
-	// Running again finds nothing to do.
+	// Running again does nothing, even for a catalog model an operator adds
+	// later with a seeded model's name: the conversion ran once, and is marked.
+	operators, err := client.Model.Create().SetName("gpt-5.1").SetDisplayName("GPT-5.1").SetDescription("").Save(ctx)
+	require.NoError(t, err)
 	n, err = ConvertSeededModels(ctx, client, zap.NewNop())
 	require.NoError(t, err)
 	require.Zero(t, n)
+	require.NotZero(t, client.Model.Query().Where(model.ID(operators.ID)).CountX(ctx), "the operator's model stays")
+}
+
+// An install with nothing seeded is marked too, so a seeded name added to its
+// catalog later is never converted.
+func TestConvertSeededModels_MarksAnInstallWithNothingSeeded(t *testing.T) {
+	ctx := context.Background()
+	client := newConversionClient(t)
+	n, err := ConvertSeededModels(ctx, client, zap.NewNop())
+	require.NoError(t, err)
+	require.Zero(t, n)
+
+	added, err := client.Model.Create().SetName("gpt-5.1").SetDisplayName("GPT-5.1").SetDescription("").Save(ctx)
+	require.NoError(t, err)
+	n, err = ConvertSeededModels(ctx, client, zap.NewNop())
+	require.NoError(t, err)
+	require.Zero(t, n)
+	require.NotZero(t, client.Model.Query().Where(model.ID(added.ID)).CountX(ctx))
 }
