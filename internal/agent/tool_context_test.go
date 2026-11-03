@@ -36,6 +36,9 @@ func TestToolContextPolicyFor(t *testing.T) {
 		{"mcp messages short TTL + stale", "mcp__slack__list_messages", true, mcpMessagesTTLTurns, true},
 		{"mcp file read longer TTL", "mcp__github__read_file", true, mcpFileReadTTLTurns, false},
 		{"mcp live metrics dropped", "mcp__datadog__get_metrics", false, 0, false},
+		{"post_to_discord ack persists (replayed in the past tense)", discordPostToolName, true, noTTL, false},
+		{"post_to_slack ack persists (replayed in the past tense)", slackPostToolName, true, noTTL, false},
+		{"post_to_buzz ack persists (replayed in the past tense)", buzzPostToolName, true, noTTL, false},
 		{"unknown tool persists forever", "some_future_tool", true, noTTL, false},
 	}
 
@@ -225,4 +228,54 @@ func TestFormatPersistedToolResult_WebSearchKeepsPortableCitations(t *testing.T)
 	require.Contains(t, got, "https://example.com/scores")
 	require.NotContains(t, got, "encrypted by Anthropic")
 	require.NotContains(t, got, "enc_")
+}
+
+// A relay post result replayed on a later turn must not read as applying to that turn's reply
+// (#389). Rows stored before the rewording carry the old live-sounding text, so both the old and
+// the current wording are replaced.
+func TestSelectPersistedToolResults_RelayPostIsReplayedInThePastTense(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		tool, platform, stored string
+	}{
+		{discordPostToolName, "Discord", "Your reply will be posted to #general when you finish it. Write it now, as it should appear there."},
+		{discordPostToolName, "Discord", relayPostResult(discordPostToolName, "#general")},
+		{slackPostToolName, "Slack", "Your reply will be posted to #general on Slack when you finish it. Write it now, as it should appear there."},
+		{slackPostToolName, "Slack", relayPostResult(slackPostToolName, "#general on Slack")},
+		{buzzPostToolName, "Buzz", relayPostResult(buzzPostToolName, "#general on Buzz")},
+	} {
+		got := selectPersistedToolResults([]*models.ChatMessage{
+			assistantWithTools(&models.ToolCall{ToolName: tc.tool, ToolInput: `{"channel":"#general"}`, ToolOutput: tc.stored}),
+			assistantWithTools(),
+		})
+		require.Len(t, got, 1, tc.tool)
+		require.Equal(t, "[Earlier tool result — "+tc.tool+" (2 turns ago)]\n"+
+			"That call marked the reply of its own turn for posting to #general on "+tc.platform+". "+
+			"It does not apply to this turn: the reply you are writing now is not posted by it. "+
+			"Call "+tc.tool+" again if this reply should be posted too.", got[0])
+		require.NotContains(t, got[0], "Write it now")
+		require.NotContains(t, got[0], "will be posted")
+	}
+}
+
+func TestSelectPersistedToolResults_RelayPostReplayWithoutChannel(t *testing.T) {
+	t.Parallel()
+
+	got := selectPersistedToolResults([]*models.ChatMessage{
+		assistantWithTools(&models.ToolCall{ToolName: discordPostToolName, ToolInput: "not json", ToolOutput: "Your reply will be posted to #general when you finish it."}),
+	})
+	require.Len(t, got, 1)
+	require.Contains(t, got[0], "for posting to Discord.")
+	require.NotContains(t, got[0], "will be posted")
+}
+
+// A failed relay post (output empty, error set) is still not replayed at all.
+func TestSelectPersistedToolResults_FailedRelayPostIsNotReplayed(t *testing.T) {
+	t.Parallel()
+
+	got := selectPersistedToolResults([]*models.ChatMessage{
+		assistantWithTools(&models.ToolCall{ToolName: discordPostToolName, ToolInput: `{"channel":"#nope"}`, ToolError: "unknown channel"}),
+	})
+	require.Empty(t, got)
 }

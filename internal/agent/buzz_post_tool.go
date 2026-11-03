@@ -247,5 +247,5 @@ func buzzPost(ctx context.Context, store buzzToolStore, chat *models.Chat, input
 	if err := store.SetBuzzPendingPost(ctx, chat.UserID, b.ID, chat.ID, models.BuzzPostFromTool); err != nil {
 		return "", fmt.Errorf("could not schedule the post: %w", err)
 	}
-	return fmt.Sprintf("Your reply will be posted to %s on Buzz when you finish it. Write it now, as it should appear there.", ls[match[0]]), nil
+	return relayPostResult(buzzPostToolName, ls[match[0]]+" on Buzz"), nil
 }

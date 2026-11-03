@@ -80,6 +80,10 @@ func formatPersistedToolResult(tc *models.ToolCall, age int) (string, bool) {
 		return "", false
 	}
 
+	if replay, ok := relayPostReplay(tc); ok {
+		output = replay
+	}
+
 	if tc.ToolName == tools.ToolNameWebSearch {
 		output = sanitizePersistedWebSearchOutput(output)
 		if isPersistedWebSearchUseless(output) {
