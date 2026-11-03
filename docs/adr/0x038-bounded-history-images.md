@@ -4,7 +4,7 @@
 - **Date:** 2026-11-02
 - **Deciders:** What Iff maintainers
 - **Issue:** [what-iff#419](https://github.com/theimaginaryfoundation/what-iff/issues/419)
-- **PR:** [what-iff#420](https://github.com/theimaginaryfoundation/what-iff/pull/420); companion what-iff-private#233 (`GOMEMLIMIT`)
+- **PR:** [what-iff#420](https://github.com/theimaginaryfoundation/what-iff/pull/420)
 
 ## Context
 
