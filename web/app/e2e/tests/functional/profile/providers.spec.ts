@@ -50,7 +50,7 @@ test.describe('first run without a provider', () => {
       await prompt.addKeyButton.click();
       await expect(providers.section).toBeVisible();
       await providers.connectOpenAIButton.click();
-      await expect(providers.form.getByLabel('Provider', { exact: true })).toHaveCount(0);
+      await expect(providers.form.getByLabel('Provider', { exact: true })).toHaveValue('openai');
       await expect(providers.form.getByLabel('Address', { exact: true })).toHaveValue(/api\.openai\.com/);
     });
 
