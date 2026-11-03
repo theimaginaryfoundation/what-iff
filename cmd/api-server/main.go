@@ -15,6 +15,7 @@ import (
 
 	"entgo.io/ent/dialect/sql/schema"
 	"github.com/theimaginaryfoundation/what-iff/ent"
+	"github.com/theimaginaryfoundation/what-iff/internal/accountkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/auth"
 
 	// No billing meter is linked in the open-source build: metering.New stays nil
@@ -186,21 +187,44 @@ func init() {
 	if autoMigrate {
 		// Run Ent schema migration.
 		// The historical role backfill migration is intentionally disabled because it was one-time only.
-		migrationOptions := []schema.MigrateOption{}
-		if destructiveMigration {
-			migrationOptions = append(migrationOptions, schema.WithDropColumn(true), schema.WithDropIndex(true))
-			logger.Warn("Running destructive database migration options (drop column/index) because DESTRUCTIVE_MIGRATION=true")
-		}
-
-		if err := client.Schema.Create(context.Background(), migrationOptions...); err != nil {
+		if err := client.Schema.Create(context.Background()); err != nil {
 			logger.Fatal("Failed to run database migrations", zap.Error(err))
 		}
-		logger.Debug("Database migrations applied", zap.Bool("destructive_migration", destructiveMigration))
+		logger.Debug("Database migrations applied")
+
+		// Mode and job skill links moved from FK columns on rituals to join tables (ADR 0x035
+		// §11). Move what the old columns still hold before a destructive pass can drop them.
+		if _, err := database.BackfillRitualLinks(context.Background(), sqlDB, logger); err != nil {
+			logger.Fatal("Failed to copy skill links into their join tables", zap.Error(err))
+		}
+		// Skills created before the slug column get one derived from their name (ADR 0x035 §1).
+		if _, err := database.BackfillRitualSlugs(context.Background(), client, logger); err != nil {
+			logger.Fatal("Failed to derive slugs for existing skills", zap.Error(err))
+		}
+		// file_attachments.agent_authored became the origin column; carry the flag over.
+		if _, err := database.BackfillFileOrigins(context.Background(), sqlDB, logger); err != nil {
+			logger.Fatal("Failed to carry agent_authored into file origins", zap.Error(err))
+		}
+
+		if destructiveMigration {
+			logger.Warn("Running destructive database migration options (drop column/index) because DESTRUCTIVE_MIGRATION=true")
+			if err := client.Schema.Create(context.Background(), schema.WithDropColumn(true), schema.WithDropIndex(true)); err != nil {
+				logger.Fatal("Failed to run destructive database migrations", zap.Error(err))
+			}
+		}
 	}
 
 	// Ensure seed data exists before serving requests
 	if err := database.EnsureSeedData(context.Background(), client, logger); err != nil {
 		logger.Fatal("Failed to seed database", zap.Error(err))
+	}
+
+	// Keys stored before provider connections existed become connections (ADR 0x027).
+	if _, err := accountkeys.ConvertStoredKeys(context.Background(), client, logger); err != nil {
+		// Usually the provider_connections table is missing: this build's schema
+		// has not been applied.
+		logger.Fatal("Failed to convert stored provider keys; if the provider_connections table does not exist, run the migrations (AUTO_MIGRATE=true)",
+			zap.Error(err))
 	}
 
 	// Create and configure server

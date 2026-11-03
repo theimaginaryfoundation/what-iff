@@ -69,7 +69,7 @@ func TestParseAnthropicArchive_HappyPath(t *testing.T) {
 	c := convs[0]
 	require.Equal(t, "Greeting", c.Title)
 	require.Equal(t, models.ChatSourceAnthropic, c.Source)
-	require.Equal(t, conversationHash("conv-1"), c.ImportHash)
+	require.Equal(t, models.ConversationImportHash("conv-1"), c.ImportHash)
 	require.Len(t, c.Messages, 2)
 	require.Equal(t, models.MessageOriginUser, c.Messages[0].Origin)
 	require.Equal(t, "Hello", c.Messages[0].Message)

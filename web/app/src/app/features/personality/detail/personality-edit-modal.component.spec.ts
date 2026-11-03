@@ -213,6 +213,22 @@ describe('PersonalityEditModalComponent', () => {
         expect(component.dismissed.emit).toHaveBeenCalled();
     });
 
+    it('sends only the turn settings that changed, so an unrecognised stored value is kept', () => {
+        fixture.componentRef.setInput('personality', { ...personality, id: 'p-unknown', reasoning_effort: 'xhigh' as never, agent_loop: null });
+        fixture.detectChanges();
+        component.setDraftField('name', 'Vera II');
+        component.save();
+        const renamed = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
+        expect('reasoning_effort' in renamed).toBe(false);
+        expect('agent_loop' in renamed).toBe(false);
+
+        component.setDraftField('agent_loop', 'advanced');
+        component.save();
+        const changed = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
+        expect(changed.agent_loop).toBe('advanced');
+        expect('reasoning_effort' in changed).toBe(false);
+    });
+
     it('routes view memories action to memories list', () => {
         component.viewMemories();
         expect(router.navigate).toHaveBeenCalledWith(['/memories'], {

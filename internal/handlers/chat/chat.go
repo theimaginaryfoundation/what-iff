@@ -39,6 +39,10 @@ type chatUpdateRequest struct {
 	// ContextScope, when set, changes the chat's context scope. Omit to keep it. Only "account" is
 	// accepted on an existing chat: a chat is sandboxed when it is created, never later.
 	ContextScope *string `json:"context_scope,omitempty"`
+	// ReasoningEffort / AgentLoop change the thread's turn settings (ADR 0x026). Omit to keep;
+	// "" clears back to "not set".
+	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
+	AgentLoop       *string `json:"agent_loop,omitempty"`
 }
 
 type chatPatchRequest struct {
@@ -62,6 +66,10 @@ type chatPatchRequest struct {
 	// chat (leaving the sandbox takes effect on the next turn): a chat is sandboxed when it is
 	// created, never later.
 	ContextScope *string `json:"context_scope,omitempty"`
+	// ReasoningEffort / AgentLoop change the thread's turn settings (ADR 0x026). Omit to keep;
+	// "" clears back to "not set".
+	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
+	AgentLoop       *string `json:"agent_loop,omitempty"`
 }
 
 type markChatReadResponse struct {
@@ -106,6 +114,11 @@ func (h *Handler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		}
 		req.ContextScope = scope
 	}
+	if err := req.TurnSettingValues.Validate(); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+		return
+	}
+	req.TurnSettingValues = req.TurnSettingValues.Normalized()
 	// disabled_tools is not part of the create API (set it with PATCH); the datastore honours it
 	// only for threads the server creates itself, and gives a new sandbox its own defaults.
 	req.DisabledTools = nil
@@ -551,6 +564,9 @@ func (h *Handler) UpdateChat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !h.applyTurnSettingChanges(w, &updated, req.ReasoningEffort, req.AgentLoop) {
+		return
+	}
 
 	// Update chat
 	chat, err := h.ds.UpdateChat(r.Context(), userID, updated)
@@ -609,7 +625,7 @@ func (h *Handler) PatchChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Must include at least one field to patch.
-	if req.Name == nil && req.LastMessageTime == nil && req.ModelID == nil && req.PersonalityID == nil && req.DisabledTools == nil && req.Tags == nil && req.IsFavorite == nil && req.ActiveMoodID == nil && req.IsAutoMood == nil && !req.ClearActiveMood && req.Archived == nil && req.ContextScope == nil {
+	if req.Name == nil && req.LastMessageTime == nil && req.ModelID == nil && req.PersonalityID == nil && req.DisabledTools == nil && req.Tags == nil && req.IsFavorite == nil && req.ActiveMoodID == nil && req.IsAutoMood == nil && !req.ClearActiveMood && req.Archived == nil && req.ContextScope == nil && req.ReasoningEffort == nil && req.AgentLoop == nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "No fields to update", nil)
 		return
 	}
@@ -694,6 +710,9 @@ func (h *Handler) PatchChat(w http.ResponseWriter, r *http.Request) {
 		if !h.applyContextScopeChange(w, existing, &updated, *req.ContextScope) {
 			return
 		}
+	}
+	if !h.applyTurnSettingChanges(w, &updated, req.ReasoningEffort, req.AgentLoop) {
+		return
 	}
 
 	chat, err := h.ds.UpdateChat(r.Context(), userID, updated)
@@ -990,5 +1009,30 @@ func (h *Handler) applyContextScopeChange(w http.ResponseWriter, existing *model
 	}
 	updated.ContextScope = scope
 	updated.SetContextScope = true
+	return true
+}
+
+// applyTurnSettingChanges applies reasoning_effort / agent_loop sent on PUT or PATCH (ADR 0x026)
+// and marks each as an explicit change. Nil leaves a setting alone; "" clears it. When it returns
+// false the response has been written.
+func (h *Handler) applyTurnSettingChanges(w http.ResponseWriter, updated *models.Chat, effort, loop *string) bool {
+	if effort != nil {
+		value, _, ok := models.ParseReasoningEffortUpdate(effort)
+		if !ok {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "reasoning_effort must be one of off, low, medium, high (or empty to clear)", nil)
+			return false
+		}
+		updated.ReasoningEffort = value
+		updated.SetReasoningEffort = true
+	}
+	if loop != nil {
+		value, _, ok := models.ParseAgentLoopUpdate(loop)
+		if !ok {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "agent_loop must be standard or advanced (or empty to clear)", nil)
+			return false
+		}
+		updated.AgentLoop = value
+		updated.SetAgentLoop = true
+	}
 	return true
 }

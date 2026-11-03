@@ -15,7 +15,7 @@ type UserPreference struct {
 
 // Fields of the UserPreference.
 func (UserPreference) Fields() []ent.Field {
-	return []ent.Field{
+	return append([]ent.Field{
 		field.UUID("id", uuid.UUID{}).
 			Default(uuid.New).
 			Immutable(),
@@ -45,7 +45,7 @@ func (UserPreference) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("Vendor the generate_image tool and image ritual call; unset means OpenAI. Values match models.ModelProvider."),
-	}
+	}, turnSettingFields("account default")...)
 }
 
 // Edges of the UserPreference.

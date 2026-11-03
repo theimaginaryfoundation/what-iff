@@ -5,6 +5,8 @@ export interface ToolCall {
   tool_input: string;
   tool_output: string;
   tool_error: string;
+  /** Advanced-loop step (1-based) the call ran in; absent on Standard turns. */
+  step?: number;
   created_at: string;
   updated_at: string;
 }

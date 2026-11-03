@@ -1,5 +1,9 @@
 import { test, expect, uniqueId } from '../../fixtures';
+import { ProviderKeyPrompt, ProvidersTab } from '../../poms';
 import { AUTH_REDIRECT_TIMEOUT, LLM_REPLY_TIMEOUT } from '../../timeouts';
+
+/** A made-up OpenAI key; the mock backend never sends it anywhere. */
+const JOURNEY_OPENAI = 'sk-e2e-journey-not-a-real-key';
 
 /**
  * Journey: a brand-new account from the registration form through to a
@@ -16,7 +20,7 @@ import { AUTH_REDIRECT_TIMEOUT, LLM_REPLY_TIMEOUT } from '../../timeouts';
  * any persistent backend.
  */
 test(
-  'new user: register → create personality → chat → fill in profile',
+  'new user: register → add a key → create personality → chat → fill in profile',
   { tag: ['@journey', '@needs-cognito-admin'] },
   async ({ chatPage, page, personalitiesPage, personalityDetailPage, profileSettingsModal, registerPage }) => {
     const unique = uniqueId();
@@ -38,7 +42,20 @@ test(
       });
     });
 
-    await test.step('dismiss the first-run announcement', async () => {
+    // The self-hosted build takes provider keys from accounts, so a new one is
+    // asked for its OpenAI key before anything else works.
+    await test.step('add an OpenAI key', async () => {
+      const prompt = new ProviderKeyPrompt(page);
+      const providers = new ProvidersTab(page);
+      await expect(prompt.root).toBeVisible();
+      await prompt.addKeyButton.click();
+      await providers.connectOpenAIButton.click();
+      await providers.fill({ key: JOURNEY_OPENAI, password });
+      await providers.submit();
+      await providers.done();
+      await expect(providers.row('openai')).toContainText('••••');
+      await providers.nextStepButton.click();
+      await expect(prompt.root).toBeHidden();
     });
 
     await test.step('create a personality manually', async () => {

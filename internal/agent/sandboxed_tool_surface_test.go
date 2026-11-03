@@ -23,6 +23,11 @@ var sandboxedToolSurface = map[string]struct {
 	agenttools.UpdateScratchpadToolSpec.Name:  {false, "writes the personality-wide scratchpad shared with the owner's other chats"},
 	agenttools.MoveFilesToolSpec.Name:         {false, "sorts the owner's account-wide gallery images into folders"},
 	agenttools.CreateAgentJobToolSpec.Name:    {false, "schedules a job in a new ordinary chat and can attach the owner's skills and their MCP servers"},
+	agenttools.UpdateAgentJobToolSpec.Name:    {false, "changes the owner's jobs, which run outside the sandbox and can attach skills and MCP servers"},
+	agenttools.AgentFileReadToolSpec.Name:     {false, "reads the owner's account-wide files"},
+	agenttools.AgentFileWriteToolSpec.Name:    {false, "writes files into the owner's account-wide file area"},
+	agenttools.EntityGetToolSpec.Name:         {false, "reads the owner's entity wiki, shared by their conversations"},
+	agenttools.EntityWriteToolSpec.Name:       {false, "writes the owner's entity wiki, shared by their conversations"},
 	agenttools.CreateMemoryToolSpec.Name:      {true, "always writes a Chat-scoped memory in a sandbox"},
 	agenttools.ListToolSpec.Name:              {true, "jobs, skills and personalities are refused; conversations is just this one; only this conversation's own files"},
 	agenttools.ListMoodsToolSpec.Name:         {true, "this chat's own personality moods"},
@@ -31,10 +36,14 @@ var sandboxedToolSurface = map[string]struct {
 	agenttools.GenerateImageToolSpec.Name:     {true, "default off; no account data read"},
 	agenttools.LoadToolsToolSpec.Name:         {true, "only connectors attached to this chat, and built-in tools the sandbox offers"},
 	agenttools.UnloadToolsToolSpec.Name:       {true, "only connectors attached to this chat"},
+	agenttools.LoadSkillToolSpec.Name:         {false, "skills are the owner's account data (their text and linked connectors); a sandbox sees none"},
+	agenttools.UnloadSkillToolSpec.Name:       {false, "nothing to unload where no skill can be loaded"},
 	agenttools.WebSearchFunctionToolSpec.Name: {true, "default off; no account data read (offered only when a backend is configured)"},
 	agenttools.FetchPageToolSpec.Name:         {true, "default off; no account data read (offered only when a backend is configured)"},
 	agenttools.RecallToolSpec.Name:            {true, "only this conversation's memories and summary"},
 	discordPostToolName:                       {true, "a sandboxed chat may only post to its own bound channel (discordChannelsFor); other channels are refused"},
+	buzzPostToolName:                          {true, "a sandboxed chat may only post to its own bound Buzz channel (buzzChannelsFor); other channels are refused"},
+	slackPostToolName:                         {true, "a sandboxed chat may only post to its own bound Slack channel (slackChannelsFor); other channels are refused"},
 }
 
 // conditionalSandboxedTools are classified tools that are only offered when some deployment
@@ -43,7 +52,11 @@ var sandboxedToolSurface = map[string]struct {
 var conditionalSandboxedTools = map[string]struct{}{
 	agenttools.WebSearchFunctionToolSpec.Name: {},
 	agenttools.FetchPageToolSpec.Name:         {},
+	agenttools.LoadSkillToolSpec.Name:         {}, // only when the chat has skills in scope
+	agenttools.UnloadSkillToolSpec.Name:       {},
 	discordPostToolName:                       {}, // only where the persona's bot has a connected channel
+	buzzPostToolName:                          {}, // only where the persona has a bound Buzz channel
+	slackPostToolName:                         {}, // only where the persona's Slack app has a bound channel
 }
 
 func sortedNames(set map[string]struct{}) []string {
@@ -56,6 +69,8 @@ func sortedNames(set map[string]struct{}) []string {
 }
 
 func TestSandboxedChatToolSurface_EveryCatalogToolIsClassified(t *testing.T) {
+	allowBuzz(t, true) // post_to_buzz and post_to_slack are only in the catalog with their relay on
+	allowSlack(t, true)
 	catalog := map[string]struct{}{}
 	for _, spec := range agenttools.ExecutableFunctionToolSpecs() {
 		catalog[spec.Name] = struct{}{}

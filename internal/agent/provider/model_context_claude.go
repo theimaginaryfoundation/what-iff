@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -49,7 +48,7 @@ func claudeUserMessageBlocksWithCaptionFirst(seg ModelContextSegment, markCache 
 		if strings.TrimSpace(mt) == "" {
 			mt = "image/jpeg"
 		}
-		enc := base64.StdEncoding.EncodeToString(im.RawBytes)
+		enc := encodeImageBase64(im.RawBytes)
 		blocks = append(blocks, anthropic.NewImageBlockBase64(mt, enc))
 	}
 	return blocks
@@ -116,7 +115,7 @@ func renderClaudeContext(ctx *ModelContext) ([]anthropic.TextBlockParam, []anthr
 			}
 			blocks := make([]anthropic.ContentBlockParamUnion, 0, len(seg.UserImages)+1)
 			for _, im := range seg.UserImages {
-				enc := base64.StdEncoding.EncodeToString(im.RawBytes)
+				enc := encodeImageBase64(im.RawBytes)
 				mt := im.MediaType
 				if strings.TrimSpace(mt) == "" {
 					mt = "image/jpeg"
@@ -133,7 +132,7 @@ func renderClaudeContext(ctx *ModelContext) ([]anthropic.TextBlockParam, []anthr
 			messages = append(messages, anthropic.NewUserMessage(blocks...))
 		case SegmentKindDeveloperContext:
 			messages = append(messages, anthropic.NewUserMessage(textBlockUnionWithOptionalCache(seg.Content, mark)))
-		case SegmentKindMood:
+		case SegmentKindMood, SegmentKindSkills, SegmentKindSkillsIndex:
 			messages = append(messages, anthropic.NewUserMessage(textBlockUnionWithOptionalCache(seg.Content, mark)))
 		case SegmentKindToolResult:
 			messages = append(messages, anthropic.NewUserMessage(textBlockUnionWithOptionalCache(seg.Content, mark)))
@@ -155,7 +154,7 @@ func claudeImageBlocksFromUserImages(images []UserMessageImage, leadingText stri
 		if strings.TrimSpace(mt) == "" {
 			mt = "image/jpeg"
 		}
-		imageBlocks = append(imageBlocks, anthropic.NewImageBlockBase64(mt, base64.StdEncoding.EncodeToString(im.RawBytes)))
+		imageBlocks = append(imageBlocks, anthropic.NewImageBlockBase64(mt, encodeImageBase64(im.RawBytes)))
 	}
 	if len(imageBlocks) == 0 {
 		return nil

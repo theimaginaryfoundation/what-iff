@@ -55,6 +55,7 @@ func toUserPreferencesModel(e *ent.UserPreference) *models.UserPreferences {
 	if e.ImageGenerationProvider != nil {
 		prefs.ImageGenerationProvider = e.ImageGenerationProvider.String()
 	}
+	prefs.TurnSettingValues = turnSettingsFromEnt(e.ReasoningEffort, e.AgentLoop)
 
 	return &prefs
 }
@@ -209,6 +210,20 @@ func (d *Datastore) UpdateUserPreferences(ctx context.Context, userID uuid.UUID,
 		if !keepUnset {
 			update.SetImageGenerationProvider(p)
 		}
+	}
+
+	// Turn settings (ADR 0x026): an omitted field is left alone, "" clears it.
+	if err := prefs.TurnSettingValues.Validate(); err != nil {
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return nil, fmt.Errorf("%w: %v", ErrInvalidRequestBody, err)
+	}
+	if prefs.ReasoningEffort != nil {
+		setReasoningEffort[userpreference.ReasoningEffort, userpreference.AgentLoop](update, prefs.ReasoningEffort)
+	}
+	if prefs.AgentLoop != nil {
+		setAgentLoop[userpreference.ReasoningEffort, userpreference.AgentLoop](update, prefs.AgentLoop)
 	}
 
 	_, err = update.Save(ctx)

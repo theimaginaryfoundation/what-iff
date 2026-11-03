@@ -39,6 +39,18 @@ type GeminiAdapter struct {
 	// No locking: the adapter is owned by one agent-loop goroutine for the turn
 	// (see the type doc), so this field is written and read by that goroutine only.
 	lastThoughtSignatures map[int64]string
+	// finalText is the last final reply, which ContinueWith records before the next user turn.
+	finalText *string
+	usageLog
+}
+
+// ContinueWith implements Continuer.
+func (a *GeminiAdapter) ContinueWith(text string) {
+	if a.finalText != nil {
+		a.params.Messages = append(a.params.Messages, openai.AssistantMessage(*a.finalText))
+		a.finalText = nil
+	}
+	a.params.Messages = append(a.params.Messages, openai.UserMessage(text))
 }
 
 // NewGeminiAdapter constructs a GeminiAdapter from pre-built params. functionTools
@@ -82,6 +94,7 @@ func (a *GeminiAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse,
 		)
 		return nil, nil, WrapProviderCallError(models.SafetyViolationProviderGoogle, "Gemini API call failed", err)
 	}
+	a.addUsage(chatCompletionUsage(resp))
 	if len(resp.Choices) == 0 {
 		return nil, nil, fmt.Errorf("Gemini API returned no choices")
 	}
@@ -89,7 +102,9 @@ func (a *GeminiAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse,
 	toolUses := normalizeGeminiToolUses(extractChatCompletionToolUses(resp))
 	if len(toolUses) == 0 {
 		a.lastRequested = nil
-		return a.toGenerateResponse(resp), nil, nil
+		out := a.toGenerateResponse(resp)
+		a.finalText = &out.Text
+		return out, nil, nil
 	}
 
 	a.lastRequested = toolUses
@@ -157,7 +172,10 @@ func (a *GeminiAdapter) ForceFinalResponse(ctx context.Context) (*GenerateRespon
 		)
 		return nil, WrapProviderCallError(models.SafetyViolationProviderGoogle, "Gemini final-response call failed", err)
 	}
-	return a.toGenerateResponse(resp), nil
+	a.addUsage(chatCompletionUsage(resp))
+	out := a.toGenerateResponse(resp)
+	a.finalText = &out.Text
+	return out, nil
 }
 
 // toGenerateResponse converts a final response, stripping a leading echo of the

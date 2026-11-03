@@ -142,6 +142,10 @@ func toChatMessageModel(e *ent.ChatMessage) *models.ChatMessage {
 		msg := strings.TrimSpace(*e.LastErrorMessage)
 		if msg != "" {
 			chatMessage.LastErrorMessage = &msg
+			if e.LastErrorCode != nil && *e.LastErrorCode != "" {
+				code := *e.LastErrorCode
+				chatMessage.LastErrorCode = &code
+			}
 		}
 	}
 
@@ -152,6 +156,9 @@ func toChatMessageModel(e *ent.ChatMessage) *models.ChatMessage {
 
 	// context_breakdown is a typed jsonb column; ent unmarshals it for us. Only surface
 	// snapshots that actually carry segments (defends against an empty/legacy row).
+	if e.AgentRun != nil {
+		chatMessage.AgentRun = e.AgentRun
+	}
 	if e.ContextBreakdown != nil && len(e.ContextBreakdown.Segments) > 0 {
 		chatMessage.ContextBreakdown = e.ContextBreakdown
 	}
@@ -186,8 +193,10 @@ func trimChatMessageLastError(s string) string {
 	return string(r[:maxRunes])
 }
 
-// SetChatMessageLastError sets or clears the user-visible generation error on a chat message (user-owned).
-func (d *Datastore) SetChatMessageLastError(ctx context.Context, userID, messageID uuid.UUID, msg *string) error {
+// SetChatMessageLastError sets or clears the user-visible generation error on a chat message
+// (user-owned), with code, a stable code for it when it has one. Clearing the message clears
+// the code.
+func (d *Datastore) SetChatMessageLastError(ctx context.Context, userID, messageID uuid.UUID, msg *string, code string) error {
 	upd := d.dbClient.ChatMessage.Update().
 		Where(
 			chatmessage.ID(messageID),
@@ -197,15 +206,20 @@ func (d *Datastore) SetChatMessageLastError(ctx context.Context, userID, message
 				),
 			),
 		)
-	if msg == nil {
+	t := ""
+	if msg != nil {
+		t = trimChatMessageLastError(*msg)
+	}
+	switch {
+	case t == "":
 		upd.ClearLastErrorMessage()
-	} else {
-		t := trimChatMessageLastError(*msg)
-		if t == "" {
-			upd.ClearLastErrorMessage()
-		} else {
-			upd.SetLastErrorMessage(t)
-		}
+		upd.ClearLastErrorCode()
+	case code == "":
+		upd.SetLastErrorMessage(t)
+		upd.ClearLastErrorCode()
+	default:
+		upd.SetLastErrorMessage(t)
+		upd.SetLastErrorCode(code)
 	}
 	affected, err := upd.Save(ctx)
 	if err != nil {
@@ -313,6 +327,9 @@ func (d *Datastore) CreateChatMessage(ctx context.Context, userID uuid.UUID, cha
 	}
 	if chatMessage.GenerationMoodID != nil && *chatMessage.GenerationMoodID != uuid.Nil {
 		create.SetGenerationMoodID(*chatMessage.GenerationMoodID)
+	}
+	if chatMessage.AgentRun != nil {
+		create.SetAgentRun(chatMessage.AgentRun)
 	}
 	if chatMessage.ModelReasoning != nil {
 		if r := strings.TrimSpace(*chatMessage.ModelReasoning); r != "" {

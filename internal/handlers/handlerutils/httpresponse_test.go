@@ -229,3 +229,25 @@ func TestRespondWithJSON_UnmarshalablePayloadStillYieldsAnEnvelope(t *testing.T)
 	require.NotContains(t, rec.Body.String(), "chan",
 		"the marshalling failure must not describe the caller's payload to a client")
 }
+
+func TestRespondWithErrorDetails_CarriesDetails(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	RespondWithErrorDetails(rec, zap.NewNop(), http.StatusConflict,
+		models.ErrCodeBuzzTermsRequired, "Accept the terms first", map[string]any{"policy": map[string]any{"version": "v1"}}, nil)
+
+	require.Equal(t, http.StatusConflict, rec.Code)
+	var body struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Details struct {
+			Policy struct {
+				Version string `json:"version"`
+			} `json:"policy"`
+		} `json:"details"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, models.ErrCodeBuzzTermsRequired, body.Code)
+	require.Equal(t, "Accept the terms first", body.Message)
+	require.Equal(t, "v1", body.Details.Policy.Version)
+}

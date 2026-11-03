@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Observable, of } from 'rxjs';
+import { Observable, catchError, combineLatest, map, of } from 'rxjs';
 
 /** Same tones as the agent-job status pill, so both read alike in the Jobs tab. */
 export type ThreadAutomationTone = 'success' | 'warning' | 'danger' | 'neutral';
@@ -39,5 +39,23 @@ export abstract class ThreadAutomationSource {
 export class NoThreadAutomations extends ThreadAutomationSource {
   list(): Observable<ThreadAutomation[]> {
     return of([]);
+  }
+}
+
+/**
+ * Several sources as one, so a build can list automations from more than one feature (see
+ * extensions/thread-automations.providers.ts). A source that fails contributes none rather than
+ * hiding the others.
+ */
+export class CombinedThreadAutomations extends ThreadAutomationSource {
+  constructor(private readonly sources: readonly ThreadAutomationSource[]) {
+    super();
+  }
+
+  list(): Observable<ThreadAutomation[]> {
+    if (this.sources.length === 0) return of([]);
+    return combineLatest(this.sources.map(s => s.list().pipe(catchError(() => of([] as ThreadAutomation[]))))).pipe(
+      map(lists => lists.flat()),
+    );
   }
 }

@@ -22,10 +22,12 @@ export type PersonalityCardAction = 'open' | 'edit' | 'delete' | 'set-default';
  * Cards are wrapped in `persona-accent-scope` so the cover, badges, and
  * borders pick up the deterministic per-personality accent.
  */
+import { EntityMarketplaceOutletComponent } from '../../../extensions/entity-marketplace-outlet.component';
+
 @Component({
   selector: 'app-personality-card',
   standalone: true,
-  imports: [PersonaAccentScopeComponent, PersonaCoverComponent, TooltipDirective],
+  imports: [PersonaAccentScopeComponent, PersonaCoverComponent, TooltipDirective, EntityMarketplaceOutletComponent],
   template: `
     <persona-accent-scope [personality]="personality()">
       <article
@@ -55,6 +57,7 @@ export type PersonalityCardAction = 'open' | 'edit' | 'delete' | 'set-default';
             </span>
 
             <div class="flex items-center gap-1.5">
+              <app-entity-marketplace-outlet kind="personality" [entityId]="personality().id" />
               @if (vm().isDefault) {
                 <span
                   class="inline-flex items-center rounded-md bg-[var(--persona-accent)]/85 px-2 py-1 text-[0.625rem] font-semibold uppercase tracking-wide text-white"

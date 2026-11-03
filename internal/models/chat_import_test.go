@@ -82,3 +82,11 @@ func TestNormalizeImportedTitle_FitsTheColumnAndKeepsValidUTF8(t *testing.T) {
 		})
 	}
 }
+
+func TestConversationImportHash(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, ConversationImportHash("conv-abc"), ConversationImportHash("conv-abc"))
+	require.NotEqual(t, ConversationImportHash("conv-a"), ConversationImportHash("conv-b"))
+	// The documented key: hex sha256 of the id exactly as given.
+	require.Equal(t, "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881", ConversationImportHash("x"))
+}

@@ -62,9 +62,14 @@
     <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
       <div class="space-y-4">
         <section class="rounded-2xl border border-border-base bg-surface-card p-4">
-          <h1 class="text-xl font-semibold text-text-primary">
-            {{ isCreateMode() ? 'Create job' : (currentJob.title || 'Untitled job') }}
-          </h1>
+          <div class="flex flex-wrap items-center gap-2">
+            <h1 class="text-xl font-semibold text-text-primary">
+              {{ isCreateMode() ? 'Create job' : (currentJob.title || 'Untitled job') }}
+            </h1>
+            @if (!isCreateMode()) {
+              <app-entity-marketplace-outlet kind="job" [entityId]="currentJob.id" />
+            }
+          </div>
           @if (!isCreateMode()) {
             <p class="mt-1 text-sm text-text-secondary">
               Status: <span tabindex="0" [uiTooltip]="statusDescription(currentJob)">{{ statusLabel(currentJob) }}</span>

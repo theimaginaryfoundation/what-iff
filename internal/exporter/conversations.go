@@ -36,6 +36,9 @@ type ConversationInput struct {
 	IsAutoMood                 bool
 	// ContextScope is the chat's context scope ("account" or "sandbox"); empty reads as account.
 	ContextScope string
+	// ReasoningEffort / AgentLoop are the thread's turn settings (ADR 0x026); empty is not set.
+	ReasoningEffort string
+	AgentLoop       string
 }
 
 // MessageInput is one user/assistant message. Non-chat roles (system/tool) are filtered upstream.
@@ -62,6 +65,9 @@ type exportConversation struct {
 	// Omitted for an ordinary (account-scoped) chat, so exports from before scopes existed and
 	// ordinary chats look the same.
 	WhatiffContextScope string `json:"whatiff_context_scope,omitempty"`
+	// Omitted when not set, so exports of threads without turn settings look as before.
+	WhatiffReasoningEffort string `json:"whatiff_reasoning_effort,omitempty"`
+	WhatiffAgentLoop       string `json:"whatiff_agent_loop,omitempty"`
 }
 
 type exportChatMessage struct {
@@ -112,6 +118,8 @@ type ParsedConversation struct {
 	WhatiffIsFavorite               bool
 	WhatiffIsAutoMood               bool
 	WhatiffContextScope             string
+	WhatiffReasoningEffort          string
+	WhatiffAgentLoop                string
 }
 
 // ParsedMessage is one decoded message; Sender is "human" or "assistant".
@@ -147,6 +155,8 @@ func ParseConversations(data []byte) ([]ParsedConversation, error) {
 			WhatiffIsFavorite:               c.WhatiffIsFavorite,
 			WhatiffIsAutoMood:               c.WhatiffIsAutoMood,
 			WhatiffContextScope:             c.WhatiffContextScope,
+			WhatiffReasoningEffort:          c.WhatiffReasoningEffort,
+			WhatiffAgentLoop:                c.WhatiffAgentLoop,
 		})
 	}
 	return out, nil
@@ -269,6 +279,8 @@ func projectConversation(c ConversationInput) (exportConversation, bool) {
 		WhatiffIsFavorite:               c.IsFavorite,
 		WhatiffIsAutoMood:               c.IsAutoMood,
 		WhatiffContextScope:             exportedContextScope(c.ContextScope),
+		WhatiffReasoningEffort:          c.ReasoningEffort,
+		WhatiffAgentLoop:                c.AgentLoop,
 	}, true
 }
 

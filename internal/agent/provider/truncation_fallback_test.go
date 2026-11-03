@@ -51,6 +51,7 @@ func TestClaudeAdapter_TruncationFallbackRetriesOnce(t *testing.T) {
 	// The discarded truncated attempt contributes neither reasoning nor a raw message.
 	require.Equal(t, "short thought", resp.Reasoning)
 	require.Len(t, a.AllRawMessages(), 1)
+	require.Len(t, a.CallUsage(), 2, "the discarded call was billed, so it is metered")
 
 	require.NotContains(t, string(requestBody(0)), `"output_config"`)
 	require.Contains(t, string(requestBody(1)), `"output_config":{"effort":"low"}`)
@@ -125,6 +126,7 @@ func TestXiaomiAdapter_TruncationRetriesWithThinkingDisabled(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "answer without thinking", resp.Text)
 	require.Empty(t, resp.Reasoning, "the discarded truncated attempt's reasoning is dropped")
+	require.Len(t, a.CallUsage(), 2, "the discarded call was billed, so it is metered")
 
 	thinking := func(i int) any {
 		var body map[string]any

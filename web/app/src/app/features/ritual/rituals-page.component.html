@@ -1,14 +1,56 @@
 <section class="skills-page mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 md:p-6">
   <header class="skills-page__header">
-    <h1 class="skills-page__title">
-      Skills
-      <ui-help-hint label="What is a skill?" heading="Skills" guide="advanced">
-        A skill is a saved prompt. Calling it with '/' adds its content to your message and turns on its MCP servers for
-        that turn. Global skills work in every thread; personality skills only in that personality's threads.
-      </ui-help-hint>
-    </h1>
-    <p>Reusable prompt templates. Type / in chat to call a skill.</p>
+    <div>
+      <h1 class="skills-page__title">
+        Skills
+        <ui-help-hint label="What is a skill?" heading="Skills" guide="advanced">
+          A skill is a saved prompt. Calling it with '/' adds its content to your message and turns on its MCP servers for
+          that turn. Global skills work in every thread; personality skills only in that personality's threads.
+        </ui-help-hint>
+      </h1>
+      <p>Reusable prompt templates. Type / in chat to call a skill.</p>
+    </div>
+    <div class="skills-page__header-actions">
+      <button
+        type="button"
+        class="skills-page__import-btn"
+        uiTooltip="Import a SKILL.md or an Agent Skills zip"
+        [disabled]="importing()"
+        (click)="bundleInput.click()">
+        <ui-upload-icon [size]="12" />
+        {{ importing() ? 'Importing…' : 'Import skill' }}
+      </button>
+      <input
+        #bundleInput
+        class="sr-only"
+        type="file"
+        accept=".zip,.md,application/zip,text/markdown"
+        aria-label="Agent Skills bundle (zip) or SKILL.md"
+        (change)="onBundleFileChosen($event)" />
+      <app-marketplace-browse-link kind="skill" />
+    </div>
   </header>
+
+  @if (importNotice(); as notice) {
+    <aside
+      class="skills-page__notice"
+      [class.skills-page__notice--danger]="notice.kind === 'danger'"
+      [attr.role]="notice.kind === 'danger' ? 'alert' : 'status'">
+      <div class="skills-page__notice-body">
+        <strong>{{ notice.title }}</strong>
+        @if (notice.lines.length > 0) {
+          <ul>
+            @for (line of notice.lines; track $index) {
+              <li>{{ line }}</li>
+            }
+          </ul>
+        }
+      </div>
+      <button type="button" class="skills-page__icon-btn" aria-label="Dismiss" (click)="dismissImportNotice()">
+        <ui-x-icon [size]="12" />
+      </button>
+    </aside>
+  }
 
   <section class="skills-page__controls">
     <div class="skills-page__search-wrap">
@@ -66,7 +108,10 @@
             </div>
 
             <div class="skills-page__card-copy">
-              <span class="skills-page__card-title">{{ row.name }}</span>
+              <span class="skills-page__card-title">
+                {{ row.name }}
+                <app-entity-marketplace-outlet class="skills-page__card-badge" kind="skill" [entityId]="row.id" />
+              </span>
               <div class="skills-page__card-description">{{ row.description }}</div>
               <div class="skills-page__card-meta">
                 <div>Created <span>{{ row.createdAt | date:'MMM d h:mm a' | uppercase }}</span></div>
@@ -90,6 +135,14 @@
                 uiTooltip="Edit skill"
                 (click)="onOpen(row.id)">
                 <ui-edit-icon [size]="13" />
+              </button>
+              <button
+                type="button"
+                class="skills-page__icon-btn"
+                [attr.aria-label]="'Export ' + row.name"
+                uiTooltip="Export as SKILL.md bundle"
+                (click)="exportRitual(row)">
+                <ui-download-icon [size]="13" />
               </button>
               <button
                 type="button"
@@ -134,18 +187,23 @@
         <h2 id="skill-editor-title" class="skills-editor-modal__title">
           {{ creating() ? 'Create Skill' : 'Edit Skill' }}
         </h2>
+        @if (editingRitual(); as editing) {
+          <app-entity-marketplace-outlet kind="skill" [entityId]="editing.id" />
+        }
       </div>
       <div class="skills-editor-modal__body">
         <app-ritual-form
           [ritual]="editingRitual()"
           [personalities]="personalities()"
           [mcpServers]="mcpServers()"
+          [tools]="tools()"
           [saving]="editorSaving()"
           [deleting]="false"
           [creating]="creating()"
           [error]="editorError()"
           (cancel)="closeEditor()"
-          (save)="onSaveFromEditor($event)" />
+          (save)="onSaveFromEditor($event)"
+          (imported)="onImportedIntoEditor($event)" />
       </div>
     </div>
   </div>

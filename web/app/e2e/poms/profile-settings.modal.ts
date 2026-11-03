@@ -119,6 +119,12 @@ export class ProfileSettingsModal {
     await this.page.getByRole('button', { name: 'Update Password' }).click();
   }
 
+  /** Dismisses the modal with its own close button, leaving the session alone. */
+  async close(): Promise<void> {
+    await this.page.getByRole('dialog').filter({ has: this.heading }).getByRole('button', { name: 'Close' }).click();
+    await this.heading.waitFor({ state: 'hidden' });
+  }
+
   /** Closes the modal and ends the session; callers assert on the redirect. */
   async logout(): Promise<void> {
     await this.logoutButton.click();

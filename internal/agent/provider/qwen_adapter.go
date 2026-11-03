@@ -1,8 +1,6 @@
 package provider
 
 import (
-	"context"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -21,15 +19,12 @@ type QwenProvider struct {
 	tel    *telemetry.Telemetry
 }
 
-// QwenAdapter implements AgentAdapter for Qwen's OpenAI-compatible Chat
-// Completions API. When a text-delta handler is set the turn streams token
-// deltas; otherwise it falls back to a single non-streaming request. The full
-// assistant text is always available via GenerateResponse.
+// QwenAdapter implements AgentAdapter for Qwen's OpenAI-compatible Chat Completions API. When a
+// text-delta handler is set the turn streams token deltas; otherwise it falls back to a single
+// non-streaming request. It captures the model's reasoning_content and echoes it back on the
+// assistant turns it belongs to (reasoningChatAdapter).
 type QwenAdapter struct {
-	provider         *QwenProvider
-	params           openai.ChatCompletionNewParams
-	tools            scopedToolList[openai.ChatCompletionToolUnionParam]
-	textDeltaHandler func(delta string)
+	reasoningChatAdapter
 }
 
 func NewQwenProvider(apiKey, baseURL string, tel *telemetry.Telemetry, httpClient *http.Client) *QwenProvider {
@@ -47,80 +42,7 @@ func NewQwenProvider(apiKey, baseURL string, tel *telemetry.Telemetry, httpClien
 	return &QwenProvider{client: &client, tel: tel}
 }
 
-func (p *QwenProvider) Call(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
-	return chatCompletionsNew(ctx, p.tel, telemetry.DependencyQwen, p.client, params)
-}
-
-// CallStreaming streams a Chat Completions request, forwarding text deltas to onTextDelta.
-func (p *QwenProvider) CallStreaming(ctx context.Context, params openai.ChatCompletionNewParams, onTextDelta func(delta string)) (*openai.ChatCompletion, error) {
-	resp, err := chatCompletionsStream(ctx, p.tel, telemetry.DependencyQwen, p.client, params, chatCompletionStreamHooks{onTextDelta: onTextDelta})
-	if err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
 func NewQwenAdapter(provider *QwenProvider, params openai.ChatCompletionNewParams, functionTools []openai.ChatCompletionToolUnionParam, disabledTools map[string]bool) *QwenAdapter {
-	tools := chatCompletionScopedTools(&params, functionTools, disabledTools)
-	return &QwenAdapter{provider: provider, params: params, tools: tools}
-}
-
-func (a *QwenAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse, error) {
-	resp, err := a.call(ctx)
-	if err != nil {
-		return nil, nil, WrapSafetyViolationError(models.SafetyViolationProviderQwen, fmt.Errorf("Qwen API call failed: %w", err))
-	}
-	if len(resp.Choices) == 0 {
-		return nil, nil, fmt.Errorf("Qwen API returned no choices")
-	}
-	toolUses := extractChatCompletionToolUses(resp)
-	if len(toolUses) == 0 {
-		return a.toGenerateResponse(resp), nil, nil
-	}
-	a.params.Messages = append(a.params.Messages, chatCompletionAssistantReplay(resp.Choices[0].Message, ""))
-	return nil, toolUses, nil
-}
-
-func (a *QwenAdapter) AppendToolResults(results []ToolResult) {
-	for _, r := range results {
-		a.params.Messages = append(a.params.Messages, openai.ToolMessage(toolResultOutput(r), r.ID))
-	}
-}
-
-func (a *QwenAdapter) ForceFinalResponse(ctx context.Context) (*GenerateResponse, error) {
-	a.params.Tools = nil
-	a.params.Messages = append(a.params.Messages, openai.UserMessage("Please provide your best final response based on the information gathered so far without additional tool calls."))
-	resp, err := a.call(ctx)
-	if err != nil {
-		return nil, WrapSafetyViolationError(models.SafetyViolationProviderQwen, fmt.Errorf("Qwen final-response call failed: %w", err))
-	}
-	return a.toGenerateResponse(resp), nil
-}
-
-// call streams when a text-delta handler is set, else issues a non-streaming request.
-func (a *QwenAdapter) call(ctx context.Context) (*openai.ChatCompletion, error) {
-	if a.textDeltaHandler != nil {
-		return a.provider.CallStreaming(ctx, a.params, a.textDeltaHandler)
-	}
-	return a.provider.Call(ctx, a.params)
-}
-
-func (a *QwenAdapter) WebSearchCompletedCount() int { return 0 }
-
-// SetTextDeltaHandler stores the handler; when set, the Qwen path streams token deltas.
-func (a *QwenAdapter) SetTextDeltaHandler(handler func(delta string)) { a.textDeltaHandler = handler }
-
-func (a *QwenAdapter) toGenerateResponse(resp *openai.ChatCompletion) *GenerateResponse {
-	inputTokens, outputTokens := chatCompletionTokenUsage(resp)
-	return &GenerateResponse{
-		ID:           resp.ID,
-		Text:         ExtractChatCompletionText(resp),
-		InputTokens:  inputTokens,
-		OutputTokens: outputTokens,
-	}
-}
-
-// ScopeTools implements ToolScoper.
-func (a *QwenAdapter) ScopeTools(hidden func(name string) bool) {
-	a.params.Tools = a.tools.scope(hidden)
+	send := chatCompletionsWithReasoning(provider.tel, telemetry.DependencyQwen, provider.client)
+	return &QwenAdapter{newReasoningChatAdapter("Qwen", models.SafetyViolationProviderQwen, send, params, functionTools, disabledTools)}
 }

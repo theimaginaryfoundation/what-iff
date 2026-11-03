@@ -35,6 +35,19 @@ describe('PersonalityWelcomeComponent', () => {
     expect(emitted).toEqual(['generate', 'create', 'import']);
   });
 
+  it('offers remote sync only when the server runs it', () => {
+    expect(host.querySelector('[data-testid="welcome-remote-sync"]')).toBeNull();
+
+    fixture.componentRef.setInput('remoteSyncAvailable', true);
+    fixture.detectChanges();
+    const offer = host.querySelector('[data-testid="welcome-remote-sync"]') as HTMLElement;
+    expect(offer.textContent).toContain('whatiff.chat');
+    let opened = false;
+    fixture.componentInstance.openRemoteSync.subscribe(() => (opened = true));
+    (offer.querySelector('button') as HTMLButtonElement).click();
+    expect(opened).toBe(true);
+  });
+
   it('links to the getting started guide in a new tab', () => {
     const link = host.querySelector('.welcome__guide') as HTMLAnchorElement;
     expect(link.href).toBe('https://whatiff.chat/guides/getting-started.html');

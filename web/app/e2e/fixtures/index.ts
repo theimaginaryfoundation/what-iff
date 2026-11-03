@@ -44,7 +44,7 @@ import {
   type Ritual,
   type WebhookToken,
 } from '../sdk/client';
-import { deleteUser, newTestUserDetails, registerUser, type TestUser } from './api';
+import { deleteUser, giveProviderKey, newTestUserDetails, registerUser, type TestUser } from './api';
 import { signInAsStaticAccount, staticTestAccountConfigured } from './static-account';
 import { seedName, shortId, uniqueId } from './unique';
 
@@ -56,12 +56,17 @@ export type { TestUser };
  * the fixture provides. Returns the user and its access token (from
  * registration) so the caller can clean it up itself.
  */
-export async function authenticateAsNewUser(): Promise<{
+export async function authenticateAsNewUser(options: { providerKey?: boolean } = {}): Promise<{
   user: TestUser;
   accessToken: string;
 }> {
   const user = newTestUserDetails();
   const accessToken = await registerUser(user);
+  // An account that brings its own keys starts past key setup, unless the test
+  // is about key setup itself.
+  if (options.providerKey ?? true) {
+    await giveProviderKey(accessToken, user.password);
+  }
   return { user, accessToken };
 }
 

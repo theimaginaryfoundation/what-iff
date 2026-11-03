@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"regexp"
@@ -61,6 +62,11 @@ func (h *Handler) CreatePersonality(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
 		return
 	}
+	if err := req.TurnSettingValues.Validate(); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+		return
+	}
+	req.TurnSettingValues = req.TurnSettingValues.Normalized()
 
 	// Create personality
 	personality, err := h.ds.CreatePersonality(r.Context(), userID, req)
@@ -278,12 +284,17 @@ func (h *Handler) UpdatePersonality(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse request body
+	// Parse request body (kept to tell an omitted turn setting from a cleared one)
 	var req models.Personality
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err == nil {
+		err = json.Unmarshal(body, &req)
+	}
+	if err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid request body", err)
 		return
 	}
+	effortSent, loopSent := models.TurnSettingKeys(body)
 
 	// Validate required fields
 	if req.Name == "" {
@@ -304,9 +315,20 @@ func (h *Handler) UpdatePersonality(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
 		return
 	}
+	if err := req.TurnSettingValues.Validate(); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+		return
+	}
+	req.TurnSettingValues = req.TurnSettingValues.Normalized()
 
 	// Set the ID from URL parameter
 	req.ID = personalityID
+	if !effortSent || !loopSent {
+		// PUT replaces the personality, but a setting the client did not send is kept.
+		if stored, gerr := h.ds.GetPersonality(r.Context(), userID, personalityID); gerr == nil && stored != nil {
+			req.TurnSettingValues = models.KeepOmittedTurnSettings(req.TurnSettingValues, stored.TurnSettingValues, effortSent, loopSent)
+		}
+	}
 
 	// Update personality
 	personality, err := h.ds.UpdatePersonality(r.Context(), userID, req)

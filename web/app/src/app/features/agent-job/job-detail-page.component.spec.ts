@@ -5,7 +5,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { NEVER, of, throwError } from 'rxjs';
 
 import { AgentJob } from '../../core/models/agent-job.model';
-import { Ritual } from '../../core/models/ritual.model';
+import { Ritual, RITUAL_SKILL_FIELD_DEFAULTS } from '../../core/models/ritual.model';
 import { AgentJobService } from '../../core/services/agent-job.service';
 import { AuthService } from '../../core/services/auth.service';
 import { ChatService } from '../../core/services/chat.service';
@@ -50,6 +50,7 @@ describe('JobDetailPageComponent', () => {
     };
 
     const ritual: Ritual = {
+        ...RITUAL_SKILL_FIELD_DEFAULTS,
         id: 'ritual-1',
         name: 'Daily brief',
         description: 'Prepare a brief',
@@ -213,6 +214,23 @@ describe('JobDetailPageComponent', () => {
         expect(host.textContent).not.toContain('Run now');
         expect(host.querySelector('app-job-form')).not.toBeNull();
         expect(host.querySelector('app-job-run-history')).toBeNull();
+    });
+
+    it('sends turn settings on create only when the form sets them', () => {
+        route.snapshot.paramMap.get.mockReturnValue('new');
+        agentJobService.createAgentJob.mockReturnValue(of(job));
+        fixture.detectChanges();
+        const base = { prompt: 'Summarize', schedule_input: 'every day at 9am', timezone: 'UTC' };
+
+        fixture.componentInstance.save({ ...base, reasoning_effort: 'high', agent_loop: 'advanced' });
+        expect(agentJobService.createAgentJob).toHaveBeenLastCalledWith(
+            expect.objectContaining({ reasoning_effort: 'high', agent_loop: 'advanced' }),
+        );
+
+        fixture.componentInstance.save({ ...base, reasoning_effort: '', agent_loop: '' });
+        const request = agentJobService.createAgentJob.mock.lastCall![0];
+        expect(request).not.toHaveProperty('reasoning_effort');
+        expect(request).not.toHaveProperty('agent_loop');
     });
 
     describe('create-mode timezone default', () => {

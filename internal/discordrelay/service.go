@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
+	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
 	"github.com/theimaginaryfoundation/what-iff/internal/replyhook"
 	"go.uber.org/zap"
 )
@@ -31,6 +31,10 @@ type Store interface {
 	WithdrawDiscordBindingAcknowledgement(ctx context.Context, id uuid.UUID) error
 	SetDiscordBotStatus(ctx context.Context, id uuid.UUID, status models.DiscordBotStatus, lastError string) error
 	TouchDiscordBinding(ctx context.Context, id uuid.UUID) error
+	// LastInboundDiscordLink is the binding's newest inbound message since a time, for the
+	// loop guard; RenameDiscordChannel records a channel's current name on the bot's bindings.
+	LastInboundDiscordLink(ctx context.Context, bindingID uuid.UUID, since time.Time) (*models.DiscordMessageLink, error)
+	RenameDiscordChannel(ctx context.Context, botID uuid.UUID, channelID, name string) error
 	GetChatMessage(ctx context.Context, userID, id uuid.UUID) (*models.ChatMessage, error)
 	GetJob(ctx context.Context, userID, id uuid.UUID) (*models.Job, error)
 	// GetChat reads the bound thread, for the sandbox check on every tag.
@@ -63,11 +67,10 @@ const UnrestrictedWarning = "Paused: this thread is no longer sandboxed, so Disc
 const busyNoticeEvery = time.Minute
 
 // RelayThreadOpenWithoutAcknowledgement reports whether a thread may be driven from
-// Discord without the owner's acknowledgement: only a sandboxed one. Anything else
-// can read the owner's account (their name, memories, other conversations, files,
-// scratchpad) on behalf of whoever may tag the bot.
+// Discord without the owner's acknowledgement: only a sandboxed one
+// (relaykit.RelayThreadOpenWithoutAcknowledgement).
 func RelayThreadOpenWithoutAcknowledgement(chat *models.Chat) bool {
-	return chat.IsSandboxed()
+	return relaykit.RelayThreadOpenWithoutAcknowledgement(chat)
 }
 
 // Service is the relay: it turns tags into turns in the relay thread and posts
@@ -92,30 +95,23 @@ type Service struct {
 	PollEvery time.Duration
 	// TurnTimeout bounds how long one inbound turn holds its thread's queue.
 	TurnTimeout time.Duration
-	// QueueDepth bounds the tags waiting behind a running turn, per thread.
-	QueueDepth int
+	// Policy paces turns: how many tags may wait as the next batch, and the agent-to-agent
+	// loop guard (relaykit.Policy; zero fields take the defaults).
+	Policy relaykit.Policy
 	// PostRetries is how many times a failed post is retried (transient errors only).
 	PostRetries int
 	// RetryBackoff is the wait before the first retry; it doubles each time.
 	RetryBackoff time.Duration
 
-	once    sync.Once
-	mu      sync.Mutex
-	queues  map[uuid.UUID]chan inboundWork // per relay thread
-	waiting map[uuid.UUID]chan struct{}    // saved user message id -> reply posted
-	// early records replies that finished before their waiter was registered.
-	early map[uuid.UUID]time.Time
-	// orphans holds replies that finished before their inbound link was attached to
-	// the user message (the turn starter returns after the turn starts), keyed by that
-	// message; runInbound posts them once the link is attached.
-	orphans map[uuid.UUID]orphanReply
-	// lastBusy throttles NoticeBusy per binding.
-	lastBusy map[uuid.UUID]time.Time
-}
-
-type orphanReply struct {
-	ev replyhook.Event
-	at time.Time
+	once sync.Once
+	// turns runs one inbound turn at a time per relay thread, batching the tags that wait.
+	turns relaykit.TurnQueue[inboundWork]
+	// guard bounds exchanges with other bots.
+	guard *relaykit.LoopGuard
+	// replies matches finished replies with the inbound turns waiting for them.
+	replies relaykit.Replies
+	// busy throttles NoticeBusy per binding.
+	busy relaykit.Throttle
 }
 
 type inboundWork struct {
@@ -139,9 +135,6 @@ func (s *Service) setDefaults() {
 	if s.TurnTimeout <= 0 {
 		s.TurnTimeout = 10 * time.Minute
 	}
-	if s.QueueDepth <= 0 {
-		s.QueueDepth = 5
-	}
 	if s.PostRetries < 0 {
 		s.PostRetries = 0
 	} else if s.PostRetries == 0 {
@@ -150,11 +143,17 @@ func (s *Service) setDefaults() {
 	if s.RetryBackoff <= 0 {
 		s.RetryBackoff = 2 * time.Second
 	}
+	s.turns.Max = s.Policy.BatchMax
+	s.turns.Place = func(w inboundWork) string { return w.target.Binding.ID.String() + "/" + w.msg.ChannelID }
+	s.turns.Run = s.runInbound
+	s.guard = s.Policy.Guard()
+	s.replies.TTL = s.TurnTimeout
+	s.busy.Every = busyNoticeEvery
 }
 
 // HandleInbound is called for every message a connected bot sees. It returns at
-// once; accepted tags are queued behind any turn already running in the relay
-// thread, one turn at a time.
+// once; an accepted tag starts a turn, or, while one runs in the relay thread, waits
+// with the other tags of its place to be answered together (relaykit.TurnQueue).
 func (s *Service) HandleInbound(ctx context.Context, botID uuid.UUID, botUserID string, msg InboundMessage) {
 	s.defaults()
 	if _, ok := Triggered(msg, botUserID); !ok {
@@ -166,7 +165,11 @@ func (s *Service) HandleInbound(ctx context.Context, botID uuid.UUID, botUserID 
 		return
 	}
 	b := target.Binding
+	s.refreshChannelName(ctx, *target, msg)
 	if !b.InboundEnabled || b.Status != models.DiscordBindingActive {
+		return
+	}
+	if msg.AuthorIsBot && !b.AnswerAgents {
 		return
 	}
 	if !Allowed(msg.AuthorID, b.AllowUserIDs, b.DenyUserIDs) {
@@ -175,293 +178,90 @@ func (s *Service) HandleInbound(ctx context.Context, botID uuid.UUID, botUserID 
 	if !s.threadOpen(ctx, *target) {
 		return
 	}
+	if msg.AuthorIsBot && s.guard.Closed(b.ID, s.lastInbound(ctx, b.ID)) {
+		// Past the loop guard's cap: dropped now, so it takes no place from people in the queue.
+		s.Logger.Info("discord relay: loop guard: too many bot turns in a row; dropping tag",
+			zap.String("binding_id", b.ID.String()), zap.String("discord_message_id", msg.ID))
+		return
+	}
 
 	if s.enqueue(ctx, b.ChatID, inboundWork{target: *target, msg: msg}) {
 		return
 	}
 	s.Logger.Warn("discord relay: queue full; dropping tag",
 		zap.String("binding_id", b.ID.String()), zap.String("discord_message_id", msg.ID))
-	if s.busyNoticeDue(b.ID) {
+	// Never to a bot: a notice it answers would feed the flood.
+	if !msg.AuthorIsBot && s.busyNoticeDue(b.ID) {
 		go s.notice(ctx, target.Bot.Token, msg.ChannelID, msg.ID, NoticeBusy)
+	}
+}
+
+// refreshChannelName records the bound channel's current name when a message carries one that
+// differs from the binding's (the channel was renamed in Discord). Renames are also caught as
+// they happen (ChannelRenamed); this catches those missed while no gateway was connected.
+func (s *Service) refreshChannelName(ctx context.Context, t models.DiscordBindingTarget, msg InboundMessage) {
+	name := strings.TrimPrefix(msg.BindingChannelName, "#")
+	if name == "" || name == t.Binding.ChannelName {
+		return
+	}
+	s.ChannelRenamed(ctx, t.Bot.ID, t.Binding.ChannelID, name)
+}
+
+// ChannelRenamed records a Discord channel's new name on the bot's bindings of it, so the app
+// and the relayed speaker labels show it. The gateway calls it on CHANNEL_UPDATE.
+func (s *Service) ChannelRenamed(ctx context.Context, botID uuid.UUID, channelID, name string) {
+	s.defaults()
+	if err := s.Store.RenameDiscordChannel(ctx, botID, channelID, name); err != nil {
+		s.Logger.Warn("discord relay: record channel rename", zap.String("discord_channel_id", channelID), zap.Error(err))
 	}
 }
 
 // busyNoticeDue reports whether the binding may post NoticeBusy now, and records it.
 func (s *Service) busyNoticeDue(bindingID uuid.UUID) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.lastBusy == nil {
-		s.lastBusy = map[uuid.UUID]time.Time{}
-	}
-	if at, ok := s.lastBusy[bindingID]; ok && time.Since(at) < busyNoticeEvery {
-		return false
-	}
-	s.lastBusy[bindingID] = time.Now()
-	return true
+	return s.busy.Due(bindingID)
 }
 
-// threadOpen is the relay's fail-closed check that the bound thread may be driven
-// from Discord: it must be sandboxed
-// (RelayThreadOpenWithoutAcknowledgement), or the owner must have acknowledged the
-// binding. The chat's CURRENT sandbox flag is read every time, since it can be switched
-// off in the app after binding. Any doubt (thread missing, lookup failing) means closed.
-// When it closes on an unacknowledged thread, the reason is recorded on the binding
-// so the app can show it; nothing is posted to Discord.
+// threadOpen is the relay's fail-closed check that the bound thread may be driven from
+// Discord (relaykit.ThreadOpen): sandboxed, or acknowledged by the owner, read fresh on every
+// tag. When it closes, the reason is recorded on the binding so the app can show it; nothing
+// is posted to Discord.
 func (s *Service) threadOpen(ctx context.Context, t models.DiscordBindingTarget) bool {
 	b := t.Binding
 	chat, err := s.Store.GetChat(ctx, t.Bot.OwnerID, b.ChatID)
-	if err != nil || chat == nil {
-		s.Logger.Warn("discord relay: cannot read the bound thread; dropping tag",
-			zap.String("binding_id", b.ID.String()), zap.Error(err))
-		if errors.Is(err, datastore.ErrChatNotFound) && b.Status != models.DiscordBindingBroken {
-			// The owner deleted the relay thread: say so on the binding instead of showing
-			// "Connected" while every tag vanishes. Repointing the binding (or reactivate) clears it.
-			_ = s.Store.SetDiscordBindingStatus(ctx, b.ID, models.DiscordBindingBroken, ThreadDeletedError)
-		}
-		return false
-	}
-	if RelayThreadOpenWithoutAcknowledgement(chat) {
-		s.clearUnrestrictedWarning(ctx, b)
-		if b.AllowUnrestricted {
-			// The acknowledgement only means something while the thread is not sandboxed.
-			// Withdraw it now, so switching the sandbox off later pauses the binding
-			// instead of silently re-opening it.
+	open := relaykit.ThreadOpen(relaykit.Gate{
+		Chat: chat, ChatErr: err,
+		Acknowledged: b.AllowUnrestricted, Broken: b.Status == models.DiscordBindingBroken, LastError: b.LastError,
+		Warning: UnrestrictedWarning, DeletedError: ThreadDeletedError,
+		MarkBroken: func(reason string) {
+			_ = s.Store.SetDiscordBindingStatus(ctx, b.ID, models.DiscordBindingBroken, reason)
+		},
+		SetLastError: func(msg string) { _ = s.Store.SetDiscordBindingStatus(ctx, b.ID, b.Status, msg) },
+		Withdraw: func() {
 			if err := s.Store.WithdrawDiscordBindingAcknowledgement(ctx, b.ID); err != nil {
 				s.Logger.Warn("discord relay: could not withdraw a stale acknowledgement",
 					zap.String("binding_id", b.ID.String()), zap.Error(err))
 			}
-		}
-		return true
-	}
-	if b.AllowUnrestricted {
-		s.clearUnrestrictedWarning(ctx, b)
-		return true
-	}
-	s.Logger.Warn("discord relay: bound thread is not sandboxed and the binding is not acknowledged; dropping tag",
-		zap.String("binding_id", b.ID.String()), zap.String("chat_id", b.ChatID.String()))
-	if b.LastError == nil || *b.LastError != UnrestrictedWarning {
-		_ = s.Store.SetDiscordBindingStatus(ctx, b.ID, b.Status, UnrestrictedWarning)
-	}
-	return false
-}
-
-func (s *Service) clearUnrestrictedWarning(ctx context.Context, b models.DiscordBinding) {
-	if b.LastError != nil && *b.LastError == UnrestrictedWarning {
-		_ = s.Store.SetDiscordBindingStatus(ctx, b.ID, b.Status, "")
-	}
-}
-
-// enqueue adds w to the thread's queue, starting its worker on first use, and
-// reports false when the queue is full. The send happens under the lock the worker
-// takes before it retires an idle queue, so a tag can never land in a queue whose
-// worker has just exited. The worker exits once the queue has been idle, so idle
-// threads hold nothing.
-func (s *Service) enqueue(ctx context.Context, chatID uuid.UUID, w inboundWork) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.queues == nil {
-		s.queues = map[uuid.UUID]chan inboundWork{}
-	}
-	q, ok := s.queues[chatID]
-	if !ok {
-		q = make(chan inboundWork, s.QueueDepth)
-		s.queues[chatID] = q
-		go s.work(ctx, chatID, q)
-	}
-	select {
-	case q <- w:
-		return true
-	default:
-		return false
-	}
-}
-
-const workerIdle = time.Minute
-
-func (s *Service) work(ctx context.Context, chatID uuid.UUID, q chan inboundWork) {
-	idle := time.NewTimer(workerIdle)
-	defer idle.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case w := <-q:
-			s.runInbound(ctx, w)
-			if !idle.Stop() {
-				select {
-				case <-idle.C:
-				default:
-				}
-			}
-			idle.Reset(workerIdle)
-		case <-idle.C:
-			s.mu.Lock()
-			if len(q) == 0 {
-				delete(s.queues, chatID)
-				s.mu.Unlock()
-				return
-			}
-			s.mu.Unlock()
-			idle.Reset(workerIdle)
-		}
-	}
-}
-
-// runInbound turns one tag into a turn and waits for its reply to be posted (or
-// the turn to fail), keeping the typing indicator up meanwhile.
-func (s *Service) runInbound(ctx context.Context, w inboundWork) {
-	msg := w.msg
-	log := s.Logger.With(zap.String("binding_id", w.target.Binding.ID.String()), zap.String("discord_message_id", msg.ID))
-
-	// The tag may have waited behind a running turn for minutes; re-check against the
-	// binding and thread as they are now, and act on that state from here on. A binding
-	// repointed to another thread meanwhile drops the tag: it was accepted for this one.
-	fresh, err := s.Store.GetDiscordBindingTarget(ctx, w.target.Binding.ID)
-	if err != nil || fresh == nil || fresh.Binding.ChatID != w.target.Binding.ChatID ||
-		!fresh.Binding.InboundEnabled || fresh.Binding.Status != models.DiscordBindingActive ||
-		!Allowed(msg.AuthorID, fresh.Binding.AllowUserIDs, fresh.Binding.DenyUserIDs) ||
-		!s.threadOpen(ctx, *fresh) {
-		log.Info("discord relay: binding or thread no longer open; dropping queued tag")
-		return
-	}
-	b, bot := fresh.Binding, fresh.Bot
-
-	link, created, err := s.Store.RecordInboundDiscordMessage(ctx, models.DiscordInbound{
-		BindingID:        b.ID,
-		DiscordMessageID: msg.ID,
-		DiscordChannelID: msg.ChannelID,
-		AuthorID:         msg.AuthorID,
-		AuthorName:       msg.AuthorName,
-	})
-	if err != nil {
-		log.Error("discord relay: record inbound", zap.Error(err))
-		return
-	}
-	if !created {
-		return // already answered (a redelivered event)
-	}
-
-	attachments, notes := s.ingestInbound(ctx, bot.OwnerID, b.ChatID, msg)
-	prompt := PromptText(msg, bot.BotUserID, b.ChannelName)
-	if len(notes) > 0 {
-		prompt += "\n" + strings.Join(notes, "\n")
-	}
-	done := make(chan struct{})
-	resp, err := s.Turns.StartUserTurn(ctx, plugins.UserTurn{
-		// No timezone: the turn's timestamps use the server default, so the owner's
-		// local time zone is not shown to whoever tagged the bot.
-		UserID: bot.OwnerID,
-		// Metered as a Discord turn (metering.TurnSource), apart from the owner's own chats.
-		Source: TurnSource,
-		Message: models.ChatMessage{
-			ChatID:      b.ChatID,
-			Message:     prompt,
-			Attachments: attachments,
 		},
 	})
-	if err != nil {
-		log.Warn("discord relay: start turn", zap.Error(err))
-		_ = s.Store.DeleteDiscordLink(ctx, link.ID)
-		s.notice(ctx, bot.Token, msg.ChannelID, msg.ID, NoticeFailed)
-		return
+	if !open {
+		s.Logger.Warn("discord relay: bound thread is missing, or not sandboxed and not acknowledged; dropping tag",
+			zap.String("binding_id", b.ID.String()), zap.String("chat_id", b.ChatID.String()), zap.Error(err))
 	}
-	s.setWaiter(resp.ID, done)
-	defer s.clearWaiter(resp.ID)
-	if err := s.Store.AttachDiscordLinkMessage(ctx, link.ID, resp.ID); err != nil {
-		log.Error("discord relay: attach inbound message", zap.Error(err))
-	}
-	_ = s.Store.TouchDiscordBinding(ctx, b.ID)
-	// A reply that finished before the link was attached found no link; post it now.
-	if ev, ok := s.takeOrphan(resp.ID); ok {
-		s.OnReply(ctx, ev)
-	}
-
-	jobID, _ := uuid.Parse(resp.JobID)
-	s.waitForReply(ctx, bot, msg, jobID, done)
+	return open
 }
 
-func (s *Service) waitForReply(ctx context.Context, bot models.DiscordBotCredentials, msg InboundMessage, jobID uuid.UUID, done <-chan struct{}) {
-	_ = s.Discord.Typing(ctx, bot.Token, msg.ChannelID)
-	typing := time.NewTicker(s.TypingEvery)
-	defer typing.Stop()
-	poll := time.NewTicker(s.PollEvery)
-	defer poll.Stop()
-	deadline := time.NewTimer(s.TurnTimeout)
-	defer deadline.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-done:
-			return
-		case <-deadline.C:
-			s.Logger.Warn("discord relay: turn timed out", zap.String("job_id", jobID.String()))
-			return
-		case <-typing.C:
-			_ = s.Discord.Typing(ctx, bot.Token, msg.ChannelID)
-		case <-poll.C:
-			if jobID == uuid.Nil {
-				continue
-			}
-			job, err := s.Store.GetJob(ctx, bot.OwnerID, jobID)
-			if err != nil || job == nil {
-				continue
-			}
-			if job.Status == models.JobStatusFailed || job.Status == models.JobStatusCancelled {
-				s.notice(ctx, bot.Token, msg.ChannelID, msg.ID, NoticeFailed)
-				return
-			}
-			if job.Status == models.JobStatusComplete {
-				// The reply hook posts it; the thread's next tag need not wait for that.
-				return
-			}
-		}
-	}
+// enqueue adds w to the thread's queue (relaykit.TurnQueue) and reports false when it is full.
+func (s *Service) enqueue(ctx context.Context, chatID uuid.UUID, w inboundWork) bool {
+	return s.turns.Enqueue(ctx, chatID, w)
 }
 
-// setWaiter registers ch to be closed when the reply to user message id is
-// posted. If that already happened (a reply can finish before the turn starter
-// returns), ch is closed at once.
-func (s *Service) setWaiter(id uuid.UUID, ch chan struct{}) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for k, at := range s.early {
-		if time.Since(at) > s.TurnTimeout {
-			delete(s.early, k)
-		}
-	}
-	if _, ok := s.early[id]; ok {
-		delete(s.early, id)
-		close(ch)
-		return
-	}
-	if s.waiting == nil {
-		s.waiting = map[uuid.UUID]chan struct{}{}
-	}
-	s.waiting[id] = ch
-}
+// setWaiter registers ch to be closed when the reply to user message id is posted
+// (relaykit.Replies). If that already happened, ch is closed at once.
+func (s *Service) setWaiter(id uuid.UUID, ch chan struct{}) { s.replies.Wait(id, ch) }
 
-func (s *Service) clearWaiter(id uuid.UUID) {
-	s.mu.Lock()
-	delete(s.waiting, id)
-	s.mu.Unlock()
-}
+func (s *Service) clearWaiter(id uuid.UUID) { s.replies.Forget(id) }
 
-func (s *Service) release(id uuid.UUID) {
-	s.mu.Lock()
-	ch, ok := s.waiting[id]
-	delete(s.waiting, id)
-	if !ok {
-		if s.early == nil {
-			s.early = map[uuid.UUID]time.Time{}
-		}
-		s.early[id] = time.Now()
-	}
-	s.mu.Unlock()
-	if ok {
-		close(ch)
-	}
-}
+func (s *Service) release(id uuid.UUID) { s.replies.Release(id) }
 
 // OnReply is the reply hook: it posts a finished reply to Discord when the turn
 // came from Discord (back to where it came from) or when a post was requested
@@ -609,31 +409,14 @@ func (s *Service) postInboundReply(ctx context.Context, inbound *models.DiscordM
 // keepOrphan remembers a reply whose trigger has no inbound link yet, when a relay
 // turn is running in its thread (so ordinary chats' replies are never kept).
 func (s *Service) keepOrphan(ev replyhook.Event) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, active := s.queues[ev.ChatID]; !active || ev.TriggerMessageID == nil {
-		return
+	if s.turns.Active(ev.ChatID) {
+		s.replies.KeepOrphan(ev)
 	}
-	if s.orphans == nil {
-		s.orphans = map[uuid.UUID]orphanReply{}
-	}
-	for k, o := range s.orphans {
-		if time.Since(o.at) > s.TurnTimeout {
-			delete(s.orphans, k)
-		}
-	}
-	s.orphans[*ev.TriggerMessageID] = orphanReply{ev: ev, at: time.Now()}
 }
 
 // takeOrphan returns and forgets the reply kept for a user message, if any.
 func (s *Service) takeOrphan(messageID uuid.UUID) (replyhook.Event, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	o, ok := s.orphans[messageID]
-	if ok {
-		delete(s.orphans, messageID)
-	}
-	return o.ev, ok
+	return s.replies.TakeOrphan(messageID)
 }
 
 // notice posts a short reply to the triggering message; failures are ignored.
@@ -643,13 +426,4 @@ func (s *Service) notice(ctx context.Context, token, channelID, replyTo, text st
 	}
 }
 
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
-	}
-}
+func sleepCtx(ctx context.Context, d time.Duration) bool { return relaykit.SleepCtx(ctx, d) }

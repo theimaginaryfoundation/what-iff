@@ -9,6 +9,7 @@ import {
   UsersIconComponent,
   WrenchIconComponent,
 } from '../../shared/ui/icons/icons';
+import { extraConfigNavItems } from '../../extensions/nav-items';
 
 /**
  * Sidebar nav modes. Mirrors Concept D's left-sidebar `navMode` state. Mode is
@@ -59,10 +60,11 @@ const CONFIG_BASE_ITEMS: ReadonlyArray<NavItem> = [
 ];
 
 /**
- * Slot for Phase 13 (Tools) and Phase 14 (Features Toggles) to register their
- * own config-mode entries without forking this module. Stays empty in Phase 03.
+ * Extra config-mode entries contributed by the build (see
+ * `extensions/nav-items.ts`, a swap-point file). Empty in the open-source build;
+ * a private build appends its own sections here without forking this module.
  */
-export const extraConfigItems: ReadonlyArray<NavItem> = [];
+export const extraConfigItems: ReadonlyArray<NavItem> = extraConfigNavItems;
 
 /**
  * App-mode primary nav: chat / personalities / gallery.
@@ -92,7 +94,13 @@ export function isConfigPath(url: string): boolean {
   const path = stripQueryAndHash(url);
   const segments = path.split('/').filter(Boolean);
   if (segments.length === 0) return false;
-  return CONFIG_TOP_SEGMENTS.has(segments[0]);
+  if (CONFIG_TOP_SEGMENTS.has(segments[0])) return true;
+  // Build-contributed config pages (extensions/nav-items.ts) are config too.
+  return extraConfigItems.some(item => topSegment(item.route) === segments[0]);
+}
+
+function topSegment(route: string): string | undefined {
+  return route.split('/').filter(Boolean)[0];
 }
 
 const CONFIG_TOP_SEGMENTS: ReadonlySet<string> = new Set([

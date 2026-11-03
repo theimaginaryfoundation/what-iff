@@ -15,6 +15,8 @@ describe('ModeEditModalComponent', () => {
             description: 'desc',
             promptSnippet: 'inject this mode prompt',
             recommendedModel: 'model-1',
+            reasoningEffort: '',
+            agentLoop: '',
             attachedSkills: [{ id: 'r1', label: 'Memory Search' }],
             attachedMCPServers: [{ id: 'mcp-1', label: 'Stripe MCP' }],
             ...overrides,

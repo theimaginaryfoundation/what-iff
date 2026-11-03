@@ -10,6 +10,7 @@
       </h1>
       <p>Modes set prompt behavior, attached skills (and their MCP servers), and an optional default model.</p>
     </div>
+    <app-marketplace-browse-link kind="mode" />
   </header>
   <app-mode-grid
     [cards]="vm.modeCards()"
@@ -46,6 +47,8 @@
   (descriptionChange)="vm.setFormDescription($event)"
   (promptSnippetChange)="vm.setFormPromptSnippet($event)"
   (recommendedModelChange)="vm.setFormRecommendedModel($event)"
+  (reasoningEffortChange)="vm.setFormReasoningEffort($event)"
+  (agentLoopChange)="vm.setFormAgentLoop($event)"
   (skillQueryChange)="vm.setSkillSearchQuery($event)"
   (openSkillDropdown)="vm.openSkillDropdown()"
   (closeSkillDropdown)="vm.closeSkillDropdown()"

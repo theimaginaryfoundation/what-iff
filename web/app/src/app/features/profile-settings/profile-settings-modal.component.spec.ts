@@ -1,4 +1,4 @@
-import { signal } from '@angular/core';
+import { Signal, WritableSignal, computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { Router } from '@angular/router';
@@ -13,6 +13,8 @@ import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { ThemeService } from '../../core/services/theme.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
+import { ProviderKeysService } from '../../core/services/provider-keys.service';
+import { ProviderAccess } from '../../core/models/provider-key.model';
 
 describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
   let preferencesService: {
@@ -24,6 +26,7 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
   };
   let router: { navigate: ReturnType<typeof vi.fn> };
   let authService: {
+    currentUser: ReturnType<typeof signal<Record<string, unknown>>>;
     getUserProfile: ReturnType<typeof vi.fn>;
     updateProfile: ReturnType<typeof vi.fn>;
     updatePassword: ReturnType<typeof vi.fn>;
@@ -31,6 +34,13 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
   };
   let user: Record<string, unknown>;
   let logger: { error: ReturnType<typeof vi.fn> };
+  let providerAccess: WritableSignal<ProviderAccess | null>;
+  let providerKeys: {
+    access: WritableSignal<ProviderAccess | null>;
+    accountsSupplyKeys: Signal<boolean>;
+    refreshAccess: ReturnType<typeof vi.fn>;
+    list: ReturnType<typeof vi.fn>;
+  };
   /** Swapped per test before the component is created; the provider factory reads it lazily. */
   let externalAuth: ExternalAuthProvider;
 
@@ -65,6 +75,7 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     externalAuth = new NoopExternalAuthProvider();
     logger = { error: vi.fn() };
     authService = {
+      currentUser: signal(user),
       getUserProfile: vi.fn().mockReturnValue(of(user)),
       updateProfile: vi.fn().mockReturnValue(of(user)),
       updatePassword: vi.fn().mockReturnValue(of({ message: 'ok' }) as any),
@@ -103,6 +114,13 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
       ),
     };
     router = { navigate: vi.fn().mockName('Router.navigate') };
+    providerAccess = signal<ProviderAccess | null>({ keys_from: 'deployment', providers: ['openai'], custom_addresses: true });
+    providerKeys = {
+      access: providerAccess,
+      accountsSupplyKeys: computed(() => providerAccess()?.keys_from === 'account'),
+      refreshAccess: vi.fn().mockReturnValue(of(null)),
+      list: vi.fn().mockReturnValue(of([])),
+    };
 
     await TestBed.configureTestingModule({
       imports: [ProfileSettingsModalComponent],
@@ -117,15 +135,16 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
         { provide: Router, useValue: router },
         { provide: ExternalAuthProvider, useFactory: () => externalAuth },
         { provide: LoggerService, useValue: logger },
+        { provide: ProviderKeysService, useValue: providerKeys },
       ],
     }).compileComponents();
   });
 
-  it('creates and exposes only the profile tab', () => {
+  it('exposes only the profile tab when the deployment supplies keys', () => {
     const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
     const component = fixture.componentInstance;
     expect(component).toBeTruthy();
-    expect(component.tabs.map(t => t.id)).toEqual(['profile']);
+    expect(component.tabs().map(t => t.id)).toEqual(['profile']);
   });
 
   it('hides the tab bar while there is only a single tab', async () => {
@@ -133,6 +152,29 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     await openAndWaitForProfile(fixture);
 
     expect(fixture.nativeElement.querySelector('.profile-settings__tabs')).toBeNull();
+  });
+
+  it('adds a Providers tab when accounts bring their own keys', async () => {
+    providerAccess.set({ keys_from: 'account', providers: [], custom_addresses: true });
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    await openAndWaitForProfile(fixture);
+
+    expect(fixture.componentInstance.tabs().map(t => t.id)).toEqual(['profile', 'providers']);
+    const tabs = fixture.nativeElement.querySelectorAll('.profile-settings__tab') as NodeListOf<HTMLButtonElement>;
+    expect([...tabs].map(t => t.textContent?.trim())).toEqual(['Profile', 'Providers']);
+    expect(providerKeys.refreshAccess).toHaveBeenCalled();
+  });
+
+  it('shows the providers on the Providers tab', async () => {
+    providerAccess.set({ keys_from: 'account', providers: [], custom_addresses: true });
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    fixture.componentInstance.modal.open('providers');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('app-providers-section')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.profile-settings__identity-card')).toBeNull();
   });
 
   it('renders default model and default personality settings', async () => {
@@ -240,6 +282,26 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     expect(preferencesService.updateUserPreferences).toHaveBeenLastCalledWith(
       expect.objectContaining({ default_model_id: 'model-2', theme: 'light', favorite_model_ids: ['model-2'] }),
     );
+  });
+
+  it('saves the default reasoning effort and agent loop, sending an empty string to clear', async () => {
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    const component = fixture.componentInstance;
+    await openAndWaitForProfile(fixture);
+
+    await component.onDefaultReasoningEffortChange('high');
+    expect(preferencesService.updateUserPreferences).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reasoning_effort: 'high', default_model_id: 'model-1' }),
+    );
+
+    await component.onDefaultAgentLoopChange('advanced');
+    expect(preferencesService.updateUserPreferences).toHaveBeenLastCalledWith(expect.objectContaining({ agent_loop: 'advanced' }));
+
+    await component.onDefaultReasoningEffortChange('');
+    expect(preferencesService.updateUserPreferences).toHaveBeenLastCalledWith(expect.objectContaining({ reasoning_effort: '' }));
+
+    await component.onDefaultAgentLoopChange('bogus');
+    expect(preferencesService.updateUserPreferences).toHaveBeenLastCalledWith(expect.objectContaining({ agent_loop: '' }));
   });
 
   it('clears the default personality by omitting it from the serialized update', async () => {

@@ -49,7 +49,8 @@ func (a *Agent) dispatchToolUse(ctx context.Context, chatCtx *chatContext, use p
 		}
 		return "", nil, fmt.Errorf("unknown tool: %s", use.Name)
 	}
-	return handler(ctx, use.Input)
+	// Tools a build contributes see the turn's chat context too (turnChatContextFrom).
+	return handler(withTurnChatContext(ctx, chatCtx), use.Input)
 }
 
 type toolHandler func(context.Context, []byte) (string, []*models.FileAttachment, error)
@@ -65,13 +66,44 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			return out, nil, err
 		},
 		tools.ListToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
-			out, err := a.listTool.ListInMCPScope(ctx, chatCtx.chat, input, func(ctx context.Context) ([]*models.MCPServer, error) {
-				return a.mcpServersInScope(ctx, chatCtx)
+			out, err := a.listTool.ListWithScope(ctx, chatCtx.chat, input, tools.ListScope{
+				MCPServers: func(ctx context.Context) ([]*models.MCPServer, error) {
+					return a.mcpServersInScope(ctx, chatCtx)
+				},
+				LoadedSkillIDs: chatCtx.loadedSkillIDs(),
 			})
+			return out, nil, err
+		},
+		tools.LoadSkillToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.loadSkillTool(ctx, chatCtx, input)
+			return out, nil, err
+		},
+		tools.UnloadSkillToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.unloadSkillTool(ctx, chatCtx, input)
 			return out, nil, err
 		},
 		tools.MoveFilesToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			out, err := a.moveFilesTool.Move(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.EntityWriteToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.entityTool.Write(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.EntityGetToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.entityTool.Get(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.AgentFileWriteToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.agentFileTool.Write(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.AgentFileReadToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.agentFileTool.Read(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.UpdatePlanToolSpec.Name: func(_ context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := updatePlanTool(chatCtx, input)
 			return out, nil, err
 		},
 		tools.ListMoodsToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
@@ -88,6 +120,10 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 		},
 		tools.CreateAgentJobToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			out, err := a.createAgentJobTool(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.UpdateAgentJobToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.updateAgentJobTool(ctx, chatCtx.chat, input)
 			return out, nil, err
 		},
 		tools.LoadToolsToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {

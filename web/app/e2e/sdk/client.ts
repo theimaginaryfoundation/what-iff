@@ -124,6 +124,32 @@ export async function deleteUser(client: ApiClient): Promise<void> {
   }
 }
 
+/** Where the account's provider keys come from, and which providers it has a key for. */
+export async function getProviderAccess(client: ApiClient): Promise<{ keys_from: 'deployment' | 'account'; providers: string[] }> {
+  const { data, error, response } = await client.GET('/provider-access', {});
+  if (error || !data) {
+    throw new ApiError(`provider access failed: ${response.status}`, response.status);
+  }
+  return data;
+}
+
+/** Stores the account's key for a provider; currentPassword confirms the change. */
+export async function setProviderKey(
+  client: ApiClient,
+  provider: 'openai' | 'anthropic' | 'zai' | 'google' | 'mistral' | 'deepseek' | 'qwen' | 'xiaomi',
+  key: string,
+  currentPassword: string,
+): Promise<void> {
+  const { error, response } = await client.PUT('/provider-keys/{provider}', {
+    params: { path: { provider } },
+    body: { key, current_password: currentPassword },
+  });
+  if (error) {
+    // Status only: the request body held a key and a password.
+    throw new ApiError(`set provider key failed: ${response.status}`, response.status);
+  }
+}
+
 /** Thrown by `fail`; carries the HTTP status so callers can branch on it (e.g. treat 404 as already-gone). */
 export class ApiError extends Error {
   constructor(

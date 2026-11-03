@@ -9,36 +9,48 @@ import { ExternalAuthProvider } from '../../core/auth/external-auth.provider';
 import { Model } from '../../core/models/model.model';
 import { Personality } from '../../core/models/personality.model';
 import {
+  AGENT_LOOP_DESCRIPTIONS,
+  AGENT_LOOP_LABELS,
+  REASONING_EFFORT_DESCRIPTION,
+  REASONING_EFFORT_OPTIONS,
+  parseAgentLoop,
+  parseReasoningEffort,
+} from '../../core/models/turn-settings.model';
+import {
   IMAGE_GENERATION_PROVIDER_LABELS,
   ImageGenerationProvider,
   UpdatePasswordRequest,
   UpdateUserRequest,
   UserPreferences,
+  UserPreferencesUpdateRequest,
   UserResponse,
 } from '../../core/models/user.model';
 import { AuthService } from '../../core/services/auth.service';
 import { LoggerService } from '../../core/services/logger.service';
 import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
+import { ProviderKeysService } from '../../core/services/provider-keys.service';
 import { ThemeMode, ThemeService } from '../../core/services/theme.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
 import { TIMEZONE_MAX_LENGTH, detectBrowserTimezone, listTimezones, timezoneValidator } from '../../core/utils/timezone.helpers';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
-import { UserIconComponent } from '../../shared/ui/icons/icons';
+import { ShieldIconComponent, UserIconComponent } from '../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { ProfileSettingsModalService, ProfileSettingsTab } from './profile-settings-modal.service';
+import { ProvidersSectionComponent } from './providers/providers-section.component';
 
 /** Profile & Settings modal: account identity, appearance, defaults, and password. */
 @Component({
   selector: 'app-profile-settings-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ReactiveFormsModule, UserIconComponent, TooltipDirective],
+  imports: [CommonModule, ModalComponent, ReactiveFormsModule, UserIconComponent, ShieldIconComponent, TooltipDirective, ProvidersSectionComponent],
   templateUrl: './profile-settings-modal.component.html',
   styleUrl: './profile-settings-modal.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ProfileSettingsModalComponent {
   readonly modal = inject(ProfileSettingsModalService);
+  private readonly providerKeys = inject(ProviderKeysService);
   private readonly authService = inject(AuthService);
   private readonly externalAuth = inject(ExternalAuthProvider);
   private readonly fb = inject(FormBuilder);
@@ -49,7 +61,11 @@ export class ProfileSettingsModalComponent {
   private readonly router = inject(Router);
   private readonly logger = inject(LoggerService);
 
-  readonly tabs: Array<{ id: ProfileSettingsTab; label: string; icon: 'profile' }> = [{ id: 'profile', label: 'Profile', icon: 'profile' }];
+  /** The Providers tab appears only where accounts bring their own provider keys. */
+  readonly tabs = computed<Array<{ id: ProfileSettingsTab; label: string; icon: 'profile' | 'providers' }>>(() => [
+    { id: 'profile', label: 'Profile', icon: 'profile' },
+    ...(this.providerKeys.accountsSupplyKeys() ? [{ id: 'providers' as const, label: 'Providers', icon: 'providers' as const }] : []),
+  ]);
 
   readonly profileForm = this.fb.group({
     email: ['', [Validators.required, Validators.email, Validators.maxLength(255)]],
@@ -65,6 +81,11 @@ export class ProfileSettingsModalComponent {
     },
     { validators: this.passwordMatchValidator },
   );
+
+  readonly reasoningEffortOptions = REASONING_EFFORT_OPTIONS;
+  readonly reasoningEffortDescription = REASONING_EFFORT_DESCRIPTION;
+  readonly agentLoopLabels = AGENT_LOOP_LABELS;
+  readonly agentLoopDescriptions = AGENT_LOOP_DESCRIPTIONS;
 
   readonly currentUser = signal<UserResponse | null>(null);
   readonly preferences = signal<UserPreferences | null>(null);
@@ -137,6 +158,7 @@ export class ProfileSettingsModalComponent {
         if (!this.hasLoadedForOpen) {
           this.hasLoadedForOpen = true;
           void this.loadProfile();
+          this.providerKeys.refreshAccess().subscribe();
         }
       } else {
         this.hasLoadedForOpen = false;
@@ -182,6 +204,15 @@ export class ProfileSettingsModalComponent {
 
   async onDefaultPersonalityChange(personalityId: string): Promise<void> {
     await this.savePreferences({ default_personality_id: personalityId || undefined }, 'Default personality updated.');
+  }
+
+  /** `''` (Model default) clears the account default; the PUT preserves a field only when absent or null. */
+  async onDefaultReasoningEffortChange(value: string): Promise<void> {
+    await this.savePreferences({ reasoning_effort: parseReasoningEffort(value) ?? '' }, 'Default reasoning effort updated.');
+  }
+
+  async onDefaultAgentLoopChange(value: string): Promise<void> {
+    await this.savePreferences({ agent_loop: parseAgentLoop(value) ?? '' }, 'Default agent loop updated.');
   }
 
   async saveProfile(): Promise<void> {
@@ -303,7 +334,9 @@ export class ProfileSettingsModalComponent {
   }
 
   private async savePreferences(
-    patch: Partial<Pick<UserPreferences, 'default_model_id' | 'default_personality_id' | 'image_generation_provider'>>,
+    patch: Partial<
+      Pick<UserPreferencesUpdateRequest, 'default_model_id' | 'default_personality_id' | 'image_generation_provider' | 'reasoning_effort' | 'agent_loop'>
+    >,
     successMessage: string,
   ): Promise<void> {
     if (!this.preferences()) return;
@@ -314,7 +347,7 @@ export class ProfileSettingsModalComponent {
       // when the modal opened: the theme toggle above and the model picker's favorites write
       // preferences through their own read-modify-write, and a stale copy would undo them.
       const current = await firstValueFrom(this.preferencesService.getUserPreferences());
-      const updatedPreferences = { ...current, ...patch };
+      const updatedPreferences: UserPreferencesUpdateRequest = { ...current, ...patch };
       if ('default_personality_id' in patch && patch.default_personality_id === undefined) {
         delete updatedPreferences.default_personality_id;
       }

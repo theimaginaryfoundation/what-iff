@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, BehaviorSubject } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
-import { UserPreferences } from '../models/user.model';
+import { UserPreferences, UserPreferencesUpdateRequest } from '../models/user.model';
 
 @Injectable({
   providedIn: 'root'
@@ -23,7 +23,7 @@ export class UserPreferencesService {
     );
   }
 
-  updateUserPreferences(preferences: UserPreferences): Observable<UserPreferences> {
+  updateUserPreferences(preferences: UserPreferencesUpdateRequest): Observable<UserPreferences> {
     return this.http.put<UserPreferences>(this.apiUrl, preferences).pipe(
       tap(updatedPreferences => {
         this.preferencesSubject.next(updatedPreferences);

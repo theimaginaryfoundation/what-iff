@@ -9,12 +9,15 @@ import { IntegrationsWebhooksTabComponent } from './integrations-webhooks-tab.co
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 
+import { MarketplaceBrowseLinkComponent } from '../../extensions/marketplace-browse-link.component';
+
 @Component({
   selector: 'app-integrations',
   standalone: true,
   imports: [
     CommonModule,
     NgComponentOutlet,
+    MarketplaceBrowseLinkComponent,
     IntegrationsConnectorsTabComponent,
     IntegrationsWebhooksTabComponent,
     HelpHintComponent,

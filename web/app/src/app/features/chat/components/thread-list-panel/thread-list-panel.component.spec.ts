@@ -5,7 +5,7 @@ import { provideHttpClient, withXhr } from '@angular/common/http';
 import { Router, provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 
-import { Chat } from '../../../../core/models/chat.model';
+import { Chat, PatchChatRequest } from '../../../../core/models/chat.model';
 import { AgentJob } from '../../../../core/models/agent-job.model';
 import { AgentJobService } from '../../../../core/services/agent-job.service';
 import { ChatService } from '../../../../core/services/chat.service';
@@ -70,7 +70,7 @@ describe('ThreadListPanelComponent', () => {
         ];
         chatService.listChats.mockReturnValue(of({ results: seedChats, page: 1, total_count: 2 }));
         chatService.listAllChats.mockReturnValue(of({ chats: seedChats, truncated: false }));
-        chatService.patchChat.mockImplementation((id: string, patch: Partial<Chat>) => of(makeChat({ id, ...patch })));
+        chatService.patchChat.mockImplementation((id: string, patch: PatchChatRequest) => of(makeChat({ id, ...(patch as Partial<Chat>) })));
         chatService.deleteChat.mockReturnValue(of(void 0));
 
         await TestBed.configureTestingModule({

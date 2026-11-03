@@ -25,7 +25,7 @@ type ToolConfig struct {
 // sandboxedChatDisabledTools are the function tools a sandboxed chat is never offered, whatever
 // the user's disabled_tools say: the catalog entries whose SandboxPolicy is SandboxNever
 // (update_scratchpad writes the personality-wide scratchpad shared across the owner's chats;
-// create_agent_job schedules a job that runs in a new chat that is not sandboxed; move_files sorts
+// create_agent_job and update_agent_job manage jobs that run in chats that are not sandboxed; move_files sorts
 // the owner's account-wide gallery). The handlers refuse as well (defence in depth), and dispatch
 // enforces the offered set. Tools with SandboxDefaultOff are not here: they start in a new
 // sandbox's disabled_tools instead (models.SandboxDefaultDisabledTools), where the owner can turn
@@ -170,11 +170,21 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 		chatMessage = nil
 	}
 
+	// Skills the agent loaded in the chat bring their connectors into scope too (ADR 0x035);
+	// loadedSkillIDs is nil for a sandboxed chat. load_skill is offered only when the index lists
+	// a skill, and unload_skill only when the agent has a skill loaded.
+	ritualIDs := append(mergedRitualIDsForTools(chatMessage, toolRitualMood(chatCtx)), chatCtx.loadedSkillIDs()...)
+	if !chatCtx.skillLoadOffered() {
+		disabledTools[agenttools.LoadSkillToolSpec.Name] = true
+	}
+	if !chatCtx.skillUnloadOffered() {
+		disabledTools[agenttools.UnloadSkillToolSpec.Name] = true
+	}
 	policy := turnToolPolicy{
 		toolsEnabled:  chatCtx.chat.ToolsEnabled,
 		disabledTools: disabledTools,
 		showMoodTools: a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
-		ritualIDs:     mergedRitualIDsForTools(chatMessage, toolRitualMood(chatCtx)),
+		ritualIDs:     ritualIDs,
 	}
 	if !policy.toolsEnabled {
 		return policy

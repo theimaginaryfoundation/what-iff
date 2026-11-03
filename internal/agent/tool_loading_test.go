@@ -43,6 +43,7 @@ func TestCatalogMarksHeavyBuiltinsLoadable(t *testing.T) {
 		agenttools.GenerateImageToolSpec.Name,
 		agenttools.RunSubagentToolSpec.Name,
 		agenttools.CreateAgentJobToolSpec.Name,
+		agenttools.UpdateAgentJobToolSpec.Name,
 	} {
 		require.Contains(t, loadable, name)
 		require.NotEmpty(t, loadable[name], "%s needs a summary for the developer context", name)

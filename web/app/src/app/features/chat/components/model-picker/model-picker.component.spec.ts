@@ -224,6 +224,26 @@ describe('ModelPickerComponent', () => {
         expect(fixture.nativeElement.querySelector('.model-picker__back')?.textContent).toContain('Tier 1');
     });
 
+    function tabLabels(): string[] {
+        fixture.nativeElement.querySelector('.model-picker__trigger').click();
+        fixture.detectChanges();
+        return [...fixture.nativeElement.querySelectorAll('.model-picker__tab')].map((n: Element) => n.textContent?.trim() ?? '');
+    }
+
+    it('offers the Tier tab and tier badges when the models carry tiers', () => {
+        expect(tabLabels()).toContain('Tier');
+        expect(fixture.nativeElement.querySelectorAll('.model-picker__tier').length).toBeGreaterThan(0);
+    });
+
+    // The API omits tiers where the deployment does not bill by them.
+    it('has no Tier tab or tier badges when no model carries a tier', () => {
+        fixture.componentRef.setInput('models', models.map(({ subscription_tier: _tier, ...rest }) => rest));
+        fixture.detectChanges();
+
+        expect(tabLabels()).not.toContain('Tier');
+        expect(fixture.nativeElement.querySelectorAll('.model-picker__tier').length).toBe(0);
+    });
+
     it('drills to the selected model tier when opening the tier tab', () => {
         fixture.nativeElement.querySelector('.model-picker__trigger').click();
         fixture.detectChanges();

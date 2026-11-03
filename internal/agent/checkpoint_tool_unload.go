@@ -26,7 +26,19 @@ func (a *Agent) unloadToolsUnusedInSegment(ctx context.Context, userID, chatID u
 			zap.String("chat_id", chatID.String()), zap.Error(err))
 		return
 	}
-	unloaded, err := a.ds.RetainChatLoadedTools(ctx, userID, chatID, used)
+	// Loaded skills follow the same rule (ADR 0x035 §4); the skill step runs first so a skill's
+	// allowed_tools are judged by the segment's calls, not by what this sweep removes. The skills
+	// that stay loaded keep their allowed_tools loaded, used or not.
+	keep := used
+	if keptTools := a.unloadSkillsUnusedInSegment(ctx, userID, chatID, segmentStart, used); len(keptTools) > 0 {
+		keep = make(map[string]struct{}, len(used)+len(keptTools))
+		for _, set := range []map[string]struct{}{used, keptTools} {
+			for name := range set {
+				keep[name] = struct{}{}
+			}
+		}
+	}
+	unloaded, err := a.ds.RetainChatLoadedTools(ctx, userID, chatID, keep)
 	if err != nil {
 		a.logger.Warn("checkpoint: failed to unload unused tools",
 			zap.String("chat_id", chatID.String()), zap.Error(err))

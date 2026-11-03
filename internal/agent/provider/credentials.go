@@ -6,6 +6,9 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 )
 
 // Default endpoints for the two providers whose base URL is not configurable,
@@ -39,6 +42,9 @@ const (
 // operator points a provider at a proxy or a regional endpoint, and the rule
 // would silently stop applying.
 type CredentialRule struct {
+	// Provider names the provider in the error returned when Resolve has no
+	// credential.
+	Provider models.ModelProvider
 	// BaseURL is the provider's configured endpoint. Its host selects the rule;
 	// its path matters only when PathScoped is set.
 	BaseURL string
@@ -49,8 +55,9 @@ type CredentialRule struct {
 	PathScoped bool
 	Style      CredentialStyle
 	// Resolve returns the credential to use for this request, or "" when the
-	// caller has none. It is the only source of credentials for the rule's
-	// host: whatever the request already carried is dropped.
+	// caller has none, in which case the request is not sent. It is the only
+	// source of credentials for the rule's host: whatever the request already
+	// carried is dropped.
 	Resolve func(context.Context) string
 }
 
@@ -151,8 +158,13 @@ func (t *credentialTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	req.Header.Del("x-api-key")
 	req.Header.Del("x-goog-api-key")
 	if key == "" {
-		// Sent without a credential: the provider's own 401 says so.
-		return base.RoundTrip(req)
+		// Not sent: the provider's 401 would say only that the key is wrong.
+		// The typed error says which provider has no key. RoundTrip owns the
+		// body even when it does not send (net/http contract).
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return nil, &providerkeys.NotConfiguredError{Provider: rule.Provider}
 	}
 	switch rule.Style {
 	case AnthropicAPIKey:
@@ -170,8 +182,10 @@ func (t *credentialTransport) RoundTrip(req *http.Request) (*http.Response, erro
 //
 // On a provider's host the resolver's answer always wins: any Authorization
 // or x-api-key already on the request, whether set by the SDK from the
-// environment or by the caller, is dropped, and an empty answer sends no
-// credential at all. Requests to other hosts are left untouched.
+// environment or by the caller, is dropped. An empty answer sends nothing: the
+// request fails with *providerkeys.NotConfiguredError. The SDKs retry any
+// transport error, so that error arrives after their retries (about a second).
+// Requests to other hosts are left untouched.
 //
 // base may be nil. When base has its own transport it is preserved — under a
 // non-vendor backend that is the deny-network transport, and dropping it would

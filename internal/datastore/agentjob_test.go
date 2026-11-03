@@ -1003,6 +1003,36 @@ func TestAddAgentJobRitual_HappyPath(t *testing.T) {
 	require.Equal(t, ritualID, got.Rituals[0].ID)
 }
 
+// A skill attached to a second job stays on the first (ADR 0x035 §11; the edge used to be a
+// FK column on rituals).
+func TestAddAgentJobRitual_SharesRitualAcrossJobs(t *testing.T) {
+	ds, cleanup := newAgentJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createAgentJobTestUser(t, ds)
+	ritualID := createAgentJobTestRitual(t, ds, userID)
+	first, err := ds.CreateAgentJob(ctx, userID, baseAgentJobModel())
+	require.NoError(t, err)
+	second, err := ds.CreateAgentJob(ctx, userID, baseAgentJobModel())
+	require.NoError(t, err)
+
+	require.NoError(t, ds.AddAgentJobRitual(ctx, userID, first.ID, ritualID))
+	require.NoError(t, ds.AddAgentJobRitual(ctx, userID, second.ID, ritualID))
+
+	for _, id := range []uuid.UUID{first.ID, second.ID} {
+		got, err := ds.GetAgentJob(ctx, userID, id)
+		require.NoError(t, err)
+		require.Len(t, got.Rituals, 1)
+		require.Equal(t, ritualID, got.Rituals[0].ID)
+	}
+
+	require.NoError(t, ds.RemoveAgentJobRitual(ctx, userID, second.ID, ritualID))
+	got, err := ds.GetAgentJob(ctx, userID, first.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Rituals, 1)
+}
+
 func TestAddAgentJobRitual_JobNotFound(t *testing.T) {
 	ds, cleanup := newAgentJobTestDatastore(t)
 	defer cleanup()

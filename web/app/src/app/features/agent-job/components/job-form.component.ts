@@ -6,8 +6,33 @@ import { AgentJob, AgentJobScheduleParseRequest, AgentJobSchedulePreview, Update
 import { Chat } from '../../../core/models/chat.model';
 import { Model } from '../../../core/models/model.model';
 import { Personality } from '../../../core/models/personality.model';
+import {
+  AGENT_LOOP_DESCRIPTIONS,
+  AGENT_LOOP_OPTIONS,
+  AgentLoopUpdate,
+  REASONING_EFFORT_DESCRIPTION,
+  REASONING_EFFORT_OPTIONS,
+  ReasoningEffortUpdate,
+} from '../../../core/models/turn-settings.model';
 import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
+
+/**
+ * The form's values as last hydrated from the job, normalized the way the dirty checks compare
+ * them (trimmed strings, timezone defaulting to UTC, `''` for an unset turn setting). Compared
+ * against the live signals to tell local draft edits apart from a server refresh.
+ */
+interface JobFormSnapshot {
+  title: string;
+  prompt: string;
+  scheduleInput: string;
+  timezone: string;
+  chatId: string;
+  personalityId: string;
+  modelId: string;
+  reasoningEffort: ReasoningEffortUpdate;
+  agentLoop: AgentLoopUpdate;
+}
 
 @Component({
   selector: 'app-job-form',
@@ -38,17 +63,16 @@ export class JobFormComponent {
   readonly chatId = signal('');
   readonly personalityId = signal('');
   readonly modelId = signal('');
+  /** Turn settings for this job's runs (ADR 0x026); `''` = use the thread's (and its mode's). */
+  readonly reasoningEffort = signal<ReasoningEffortUpdate>('');
+  readonly agentLoop = signal<AgentLoopUpdate>('');
+  readonly reasoningEffortOptions = REASONING_EFFORT_OPTIONS;
+  readonly reasoningEffortDescription = REASONING_EFFORT_DESCRIPTION;
+  readonly agentLoopOptions = AGENT_LOOP_OPTIONS;
+  readonly agentLoopDescriptions = AGENT_LOOP_DESCRIPTIONS;
   private hydratedJobId: string | null = null;
   private hydratedJobUpdatedAt: string | null = null;
-  private hydratedFormSnapshot: {
-    title: string;
-    prompt: string;
-    scheduleInput: string;
-    timezone: string;
-    chatId: string;
-    personalityId: string;
-    modelId: string;
-  } | null = null;
+  private hydratedFormSnapshot: JobFormSnapshot | null = null;
   // Reflect local draft edits without rehydrating on poll refreshes for the same job.
   readonly hasUnsavedEdits = computed(() => {
     const current = this.job();
@@ -60,7 +84,9 @@ export class JobFormComponent {
       this.normalizeTimezone(this.timezone()) !== this.normalizeTimezone(current.timezone) ||
       this.normalize(this.chatId()) !== this.normalize(current.chat_id) ||
       this.normalize(this.personalityId()) !== this.normalize(current.personality_id) ||
-      this.normalize(this.modelId()) !== this.normalize(current.model_id)
+      this.normalize(this.modelId()) !== this.normalize(current.model_id) ||
+      this.reasoningEffort() !== (current.reasoning_effort ?? '') ||
+      this.agentLoop() !== (current.agent_loop ?? '')
     );
   });
 
@@ -121,6 +147,8 @@ export class JobFormComponent {
       chat_id: this.chatId().trim() || '',
       personality_id: this.personalityId().trim() || '',
       model_id: this.modelId().trim() || '',
+      reasoning_effort: this.reasoningEffort(),
+      agent_loop: this.agentLoop(),
     });
   }
 
@@ -143,6 +171,8 @@ export class JobFormComponent {
     this.chatId.set(current.chat_id || '');
     this.personalityId.set(current.personality_id || '');
     this.modelId.set(current.model_id || '');
+    this.reasoningEffort.set(current.reasoning_effort ?? '');
+    this.agentLoop.set(current.agent_loop ?? '');
     this.hydratedFormSnapshot = {
       title: this.normalize(current.title),
       prompt: this.normalize(current.prompt),
@@ -151,6 +181,8 @@ export class JobFormComponent {
       chatId: this.normalize(current.chat_id),
       personalityId: this.normalize(current.personality_id),
       modelId: this.normalize(current.model_id),
+      reasoningEffort: current.reasoning_effort ?? '',
+      agentLoop: current.agent_loop ?? '',
     };
   }
 
@@ -164,7 +196,9 @@ export class JobFormComponent {
       this.normalizeTimezone(this.timezone()) !== snapshot.timezone ||
       this.normalize(this.chatId()) !== snapshot.chatId ||
       this.normalize(this.personalityId()) !== snapshot.personalityId ||
-      this.normalize(this.modelId()) !== snapshot.modelId
+      this.normalize(this.modelId()) !== snapshot.modelId ||
+      this.reasoningEffort() !== snapshot.reasoningEffort ||
+      this.agentLoop() !== snapshot.agentLoop
     );
   }
 
@@ -176,7 +210,9 @@ export class JobFormComponent {
       this.normalizeTimezone(this.timezone()) === this.normalizeTimezone(current.timezone) &&
       this.normalize(this.chatId()) === this.normalize(current.chat_id) &&
       this.normalize(this.personalityId()) === this.normalize(current.personality_id) &&
-      this.normalize(this.modelId()) === this.normalize(current.model_id)
+      this.normalize(this.modelId()) === this.normalize(current.model_id) &&
+      this.reasoningEffort() === (current.reasoning_effort ?? '') &&
+      this.agentLoop() === (current.agent_loop ?? '')
     );
   }
 }

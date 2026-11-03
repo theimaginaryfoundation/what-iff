@@ -1,0 +1,39 @@
+@use './providers-shared' as shared;
+
+.provider-form__title {
+  color: var(--text-primary);
+  font-size: 1.05rem;
+  font-weight: 650;
+  margin: 0;
+}
+
+.provider-form__subtitle {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin: 0.25rem 0 0;
+}
+
+.provider-form__body {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.provider-form__field {
+  @include shared.field;
+}
+
+.provider-form__message {
+  @include shared.message;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.provider-form__actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.provider-form__button {
+  @include shared.button;
+}

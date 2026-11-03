@@ -4,7 +4,7 @@ import { MemoryProvenance } from '../../../core/models/memory.model';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
 /**
- * "External" pill for a memory learned from other people in a Discord relay thread
+ * "External" pill for a memory learned from other people in a relay thread (Discord, Buzz or Slack)
  * (unverified), naming who it came from when known. Renders nothing for your own memories.
  */
 @Component({
@@ -49,6 +49,6 @@ export class MemoryProvenanceBadgeComponent {
   readonly label = computed(() => (this.speaker() ? `External · ${this.speaker()}` : 'External'));
   readonly hint = computed(() => {
     const who = this.speaker() ? `${this.speaker()}, ` : 'someone ';
-    return `Learned from ${who}in a Discord thread, not from you. Unverified: the persona treats it that way too.`;
+    return `Learned from ${who}in a Discord, Buzz or Slack thread, not from you. Unverified: the persona treats it that way too.`;
   });
 }

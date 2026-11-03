@@ -4,7 +4,8 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ActivatedRoute, Router } from '@angular/router';
-import { BehaviorSubject, of, throwError } from 'rxjs';
+import { By } from '@angular/platform-browser';
+import { BehaviorSubject, NEVER, of, throwError } from 'rxjs';
 
 import { ChatService } from '../../../core/services/chat.service';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
@@ -16,6 +17,7 @@ import { Chat } from '../../../core/models/chat.model';
 import { Personality } from '../../../core/models/personality.model';
 import { UserPreferences } from '../../../core/models/user.model';
 import { PersonalityDetailPageComponent } from './personality-detail-page.component';
+import { EntityMarketplaceOutletComponent } from '../../../extensions/entity-marketplace-outlet.component';
 
 function makePersonality(overrides: Partial<Personality> = {}): Personality {
     return {
@@ -128,6 +130,16 @@ describe('PersonalityDetailPageComponent', () => {
         fixture.detectChanges();
         const nameInput = fixture.nativeElement.querySelector('input[aria-label="Personality name"]') as HTMLInputElement;
         expect(nameInput.value).toBe('Vera Calder');
+    });
+
+    it('mounts the marketplace outlet in the header with the personality identity', () => {
+        fixture.detectChanges();
+        const outlet = fixture.debugElement.query(By.directive(EntityMarketplaceOutletComponent));
+        expect(outlet).toBeTruthy();
+        const instance = outlet.componentInstance as EntityMarketplaceOutletComponent;
+        expect(instance.kind()).toBe('personality');
+        expect(instance.entityId()).toBe('p-1');
+        expect((outlet.nativeElement as HTMLElement).closest('header')).toBeTruthy();
     });
 
     it('explains each section with a help hint next to its heading', () => {
@@ -252,5 +264,98 @@ describe('PersonalityDetailPageComponent', () => {
         const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
         expect(request.name).toBe('Renamed via header');
         expect(request.scratchpad).toBe('New scratchpad body');
+    });
+
+    describe('thread settings card', () => {
+        function selects(): HTMLSelectElement[] {
+            return Array.from(fixture.nativeElement.querySelectorAll('app-personality-turn-settings-fields select'));
+        }
+
+        function choose(select: HTMLSelectElement, value: string): void {
+            select.value = value;
+            select.dispatchEvent(new Event('change'));
+            fixture.detectChanges();
+        }
+
+        it('shows the saved values under a "Thread settings" heading', () => {
+            vi.mocked(personalityService.getPersonality).mockReturnValue(of(makePersonality({ reasoning_effort: 'low', agent_loop: 'advanced' })));
+            fixture.detectChanges();
+
+            const heading = fixture.nativeElement.querySelector('#personality-thread-settings-heading') as HTMLElement;
+            expect(heading.textContent).toContain('Thread settings');
+            const [effort, loop] = selects();
+            expect(effort.value).toBe('low');
+            expect(loop.value).toBe('advanced');
+            expect(fixture.componentInstance.turnSettings()).toEqual({ reasoning_effort: 'low', agent_loop: 'advanced' });
+        });
+
+        it('saves a reasoning effort immediately, keeping the rest of the saved personality', () => {
+            const saved = makePersonality({ reasoning_effort: 'high' });
+            vi.mocked(personalityService.updatePersonality).mockReturnValue(of(saved));
+            fixture.detectChanges();
+            fixture.componentInstance.setDraftField('name', 'Half-typed name');
+
+            choose(selects()[0], 'high');
+
+            const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
+            expect(request.reasoning_effort).toBe('high');
+            expect(request.name).toBe('Vera Calder');
+            expect(fixture.componentInstance.turnSettingsUpdating()).toBe(false);
+            expect(fixture.componentInstance.personality()?.reasoning_effort).toBe('high');
+            expect(fixture.componentInstance.turnSettings().reasoning_effort).toBe('high');
+        });
+
+        it('saves an agent loop immediately and clears it back to the account default', () => {
+            fixture.detectChanges();
+
+            choose(selects()[1], 'advanced');
+            expect(vi.mocked(personalityService.updatePersonality).mock.lastCall![1].agent_loop).toBe('advanced');
+
+            choose(selects()[1], '');
+            expect(vi.mocked(personalityService.updatePersonality).mock.lastCall![1].agent_loop).toBeNull();
+            expect(fixture.componentInstance.turnSettings().agent_loop).toBeNull();
+        });
+
+        it('disables the fields while a save is in flight', () => {
+            vi.mocked(personalityService.updatePersonality).mockReturnValue(NEVER);
+            fixture.detectChanges();
+
+            fixture.componentInstance.onTurnSettingChange({ agent_loop: 'advanced' });
+            fixture.detectChanges();
+
+            expect(fixture.componentInstance.turnSettingsUpdating()).toBe(true);
+            expect(selects().every(select => select.disabled)).toBe(true);
+        });
+
+        it('reverts the shown values and alerts when the save fails', async () => {
+            vi.spyOn(console, 'error').mockImplementation(() => undefined);
+            vi.mocked(personalityService.getPersonality).mockReturnValue(of(makePersonality({ reasoning_effort: 'low', agent_loop: null })));
+            vi.mocked(personalityService.updatePersonality).mockReturnValue(throwError(() => new Error('nope')));
+            fixture.detectChanges();
+
+            fixture.componentInstance.onTurnSettingChange({ reasoning_effort: 'high' });
+
+            await vi.waitFor(() =>
+                expect(TestBed.inject(ConfirmationService).alert).toHaveBeenCalledWith({
+                    message: 'Failed to update thread settings. Please try again.',
+                    type: 'danger',
+                }),
+            );
+            expect(fixture.componentInstance.turnSettings()).toEqual({ reasoning_effort: 'low', agent_loop: null });
+            expect(fixture.componentInstance.turnSettingsUpdating()).toBe(false);
+        });
+
+        it('carries draft turn settings on the full-page Save changes', () => {
+            fixture.detectChanges();
+
+            fixture.componentInstance.setDraftField('reasoning_effort', 'medium');
+            fixture.componentInstance.setDraftField('agent_loop', 'advanced');
+            expect(fixture.componentInstance.turnSettings()).toEqual({ reasoning_effort: 'medium', agent_loop: 'advanced' });
+            fixture.componentInstance.saveEditor();
+
+            const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
+            expect(request.reasoning_effort).toBe('medium');
+            expect(request.agent_loop).toBe('advanced');
+        });
     });
 });

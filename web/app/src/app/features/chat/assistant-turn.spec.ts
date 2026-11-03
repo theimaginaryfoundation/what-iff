@@ -1,5 +1,40 @@
 import { CHAT_TURN_WAITING_STATES } from '../../core/models/job.model';
-import { chatTurnWaitingLabel, parseChatTurnToolCalls, parseChatTurnWaiting } from './assistant-turn';
+import { chatTurnWaitingLabel, parseChatTurnAdvancedProgress, parseChatTurnToolCalls, parseChatTurnWaiting } from './assistant-turn';
+
+describe('parseChatTurnAdvancedProgress', () => {
+    it('reads the step and plan of an Advanced turn, dropping malformed plan items', () => {
+        const progress = JSON.stringify({
+            tool_calls: [],
+            step: 3,
+            plan: [
+                { content: 'Search', status: 'completed' },
+                { content: 'Summarize', status: 'in_progress' },
+                { content: '', status: 'pending' },
+                { content: 'Bogus', status: 'blocked' },
+                null,
+            ],
+        });
+        expect(parseChatTurnAdvancedProgress(progress)).toEqual({
+            step: 3,
+            plan: [
+                { content: 'Search', status: 'completed' },
+                { content: 'Summarize', status: 'in_progress' },
+            ],
+        });
+    });
+
+    it('is null for a Standard turn or an unreadable payload', () => {
+        expect(parseChatTurnAdvancedProgress(JSON.stringify({ tool_calls: [] }))).toBeNull();
+        expect(parseChatTurnAdvancedProgress(JSON.stringify({ step: 0 }))).toBeNull();
+        expect(parseChatTurnAdvancedProgress('not json')).toBeNull();
+        expect(parseChatTurnAdvancedProgress('null')).toBeNull();
+        expect(parseChatTurnAdvancedProgress(undefined)).toBeNull();
+    });
+
+    it('treats a missing plan as empty', () => {
+        expect(parseChatTurnAdvancedProgress(JSON.stringify({ step: 1 }))).toEqual({ step: 1, plan: [] });
+    });
+});
 
 describe('parseChatTurnToolCalls', () => {
   it('reads the tool timeline from a chat_message progress payload', () => {

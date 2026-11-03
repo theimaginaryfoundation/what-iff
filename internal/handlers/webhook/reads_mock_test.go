@@ -46,6 +46,13 @@ func (m *mockProvider) GetChatMessage(ctx context.Context, userID, messageID uui
 	return nil, errNotImplemented
 }
 
+func (m *mockProvider) GetChatSummary(ctx context.Context, userID, chatID uuid.UUID) (*models.ChatSummary, error) {
+	if m.getSummaryFn != nil {
+		return m.getSummaryFn(ctx, userID, chatID)
+	}
+	return nil, errNotImplemented
+}
+
 func (m *mockProvider) GetJob(ctx context.Context, userID, jobID uuid.UUID) (*models.Job, error) {
 	if m.getJobFn != nil {
 		return m.getJobFn(ctx, userID, jobID)

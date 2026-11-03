@@ -79,16 +79,18 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
             >
               Vendor
             </button>
-            <button
-              type="button"
-              role="tab"
-              class="model-picker__tab"
-              [class.model-picker__tab--active]="viewMode() === 'tier'"
-              [attr.aria-selected]="viewMode() === 'tier'"
-              (click)="setViewMode('tier')"
-            >
-              Tier
-            </button>
+            @if (hasTiers()) {
+              <button
+                type="button"
+                role="tab"
+                class="model-picker__tab"
+                [class.model-picker__tab--active]="viewMode() === 'tier'"
+                [attr.aria-selected]="viewMode() === 'tier'"
+                (click)="setViewMode('tier')"
+              >
+                Tier
+              </button>
+            }
           </div>
 
           @if (favoritesError(); as favoritesError) {
@@ -440,6 +442,8 @@ export class ModelPickerComponent {
   readonly menuPlacement = signal<'above' | 'below'>('above');
   readonly selectedModel = computed(() => this.models().find(model => model.id === this.selectedId()));
   readonly sortedModels = computed(() => sortedModelsByName(this.models()));
+  /** The API sends tiers only where a deployment bills by them; without any, there is no Tier tab. */
+  readonly hasTiers = computed(() => this.models().some(model => modelTierRank(model.subscription_tier) != null));
   readonly availableProviders = computed(() => {
     const providers = this.sortedModels().map(model => modelProvider(model));
     return sortedProviders(providers);
@@ -520,7 +524,7 @@ export class ModelPickerComponent {
     return modelTierCompactLabel(model.subscription_tier);
   }
 
-  /** Tiers set which plans include a model (internal/models/model.go): low = most plans, ultra = none. */
+  /** Shown only where the deployment bills by tier: low is included in the most plans, ultra in none. */
   tierTooltip(model: Model): string {
     const rank = modelTierRank(model.subscription_tier);
     return rank == null ? '' : `Tier ${rank} of 4: higher tiers are included in fewer plans`;

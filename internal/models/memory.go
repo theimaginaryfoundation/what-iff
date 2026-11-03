@@ -217,7 +217,10 @@ type MemoryScopeMove struct {
 // the content to embed for it. CreatedAt doubles as the keyset cursor when
 // paging through backfill candidates.
 type MemoryEmbeddingCandidate struct {
-	MemoryID  uuid.UUID
+	MemoryID uuid.UUID
+	// OwnerID is the memory's account: its embedding is made as that account,
+	// with that account's provider key when keys belong to accounts.
+	OwnerID   uuid.UUID
 	Content   string
 	CreatedAt time.Time
 }

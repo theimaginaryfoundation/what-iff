@@ -2,6 +2,9 @@ package providerkeys
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,14 +73,36 @@ func (f fixedResolver) Key(context.Context, models.ModelProvider) string { retur
 func (fixedResolver) Configured(models.ModelProvider) bool               { return true }
 func (fixedResolver) AccountsSupplyKeys() bool                           { return true }
 
-// Until accounts can add keys in the app, the server keeps using the
-// deployment's.
-func TestNew_DefaultsToTheDeploymentsKeys(t *testing.T) {
+// By default each account brings its own keys, and a key configured on the
+// deployment is not used. AccountKeys is tested rather than New, because a
+// build that supplies keys itself rebinds New.
+func TestAccountKeysIgnoresTheDeploymentsKeys(t *testing.T) {
 	t.Parallel()
 	deployment := NewDeploymentResolver(map[models.ModelProvider]string{models.ModelProviderOpenAI: "sk-deployment"})
 
-	r := New(deployment, fixedResolver("sk-account"))
-	require.Equal(t, "sk-deployment", r.Key(context.Background(), models.ModelProviderOpenAI))
-	require.False(t, r.Configured(models.ModelProviderAnthropic))
-	require.False(t, r.AccountsSupplyKeys())
+	r := AccountKeys(deployment, fixedResolver("sk-account"))
+	require.Equal(t, "sk-account", r.Key(context.Background(), models.ModelProviderOpenAI))
+	require.True(t, r.AccountsSupplyKeys())
+}
+
+// A missing key is recorded as a plain statement, not as the transport error
+// wrapping it, which would include the request URL. Anything else is recorded
+// as it is.
+func TestFailureText(t *testing.T) {
+	t.Parallel()
+	wrapped := fmt.Errorf("OpenAI API call failed: %w", &url.Error{
+		Op: "Post", URL: "https://api.openai.com/v1/responses",
+		Err: &NotConfiguredError{Provider: models.ModelProviderOpenAI},
+	})
+	require.Equal(t, "No OpenAI API key is set.", FailureText(wrapped))
+	require.Equal(t, "No Xiaomi MiMo API key is set.", FailureText(&NotConfiguredError{Provider: models.ModelProviderXiaomi}))
+	require.Equal(t, "No acme API key is set.", FailureText(&NotConfiguredError{Provider: "acme"}), "an unknown provider is named as it is")
+
+	other := errors.New("model overloaded")
+	require.Equal(t, "model overloaded", FailureText(other))
+}
+
+func TestNotConfiguredIsAnAuthFailure(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, 401, (&NotConfiguredError{}).HTTPStatusCode())
 }

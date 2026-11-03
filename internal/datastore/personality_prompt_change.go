@@ -106,6 +106,8 @@ func (d *Datastore) UpdatePersonalityWithPromptHistory(ctx context.Context, user
 		SetScratchpadHistory(history).
 		SetExpressionsEnabled(personalityModel.ExpressionsEnabled).
 		SetImageStyle(personalityModel.ImageStyle)
+	// PUT semantics: the turn settings are replaced (nil clears).
+	applyTurnSettings[personality.ReasoningEffort, personality.AgentLoop](update, personalityModel.TurnSettingValues)
 	if personalityModel.AccentColor != nil {
 		update = update.SetAccentColor(*personalityModel.AccentColor)
 	} else {

@@ -10,145 +10,93 @@ package accountkeys
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
-	"strings"
-	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
-	"github.com/theimaginaryfoundation/what-iff/ent/accountproviderkey"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
-)
-
-// Bounds on a stored key. Real provider keys sit well inside them; the minimum
-// keeps the four-character hint from being the whole key.
-const (
-	minKeyLen = 8
-	maxKeyLen = 512
+	"github.com/theimaginaryfoundation/what-iff/internal/providerconnections"
+	"github.com/theimaginaryfoundation/what-iff/internal/reauth"
 )
 
 var (
-	ErrUnknownProvider = errors.New("unknown model provider")
-	ErrInvalidKey      = errors.New("provider key must be 8 to 512 characters, without spaces")
+	ErrUnknownProvider = providerconnections.ErrUnknownProvider
+	ErrInvalidKey      = providerconnections.ErrInvalidKey
 	ErrKeyNotFound     = errors.New("no key stored for this provider")
 )
 
 // Sealer encrypts keys at rest with the deployment's token key.
-type Sealer interface {
-	EncryptToken(plaintext string) (string, error)
-	DecryptToken(ciphertext string) (string, error)
-}
+type Sealer = providerconnections.Sealer
 
 // Keys stores accounts' provider keys and answers requests with them.
 type Keys struct {
-	client *ent.Client
-	sealer Sealer
-	logger *zap.Logger
+	store   *providerconnections.Store
+	confirm reauth.Confirmer
+	logger  *zap.Logger
 }
 
 // New builds Keys over the database and the deployment's token key.
-func New(client *ent.Client, sealer Sealer, logger *zap.Logger) *Keys {
-	return &Keys{client: client, sealer: sealer, logger: logger}
+//
+// confirm checks that whoever sets a key is the account's owner, not just
+// someone holding its session.
+func New(client *ent.Client, sealer Sealer, confirm reauth.Confirmer, logger *zap.Logger) *Keys {
+	return &Keys{store: providerconnections.NewStore(client, sealer), confirm: confirm, logger: logger}
 }
 
 // --- Storage
+//
+// An account's key for a built-in provider is that provider's built-in
+// connection (ADR 0x027), stored by internal/providerconnections.
 
-func toSummary(row *ent.AccountProviderKey) models.ProviderKeySummary {
+func toSummary(c providerconnections.Connection) models.ProviderKeySummary {
 	return models.ProviderKeySummary{
-		Provider:  models.ModelProvider(row.Provider),
-		Hint:      row.Hint,
-		UpdatedAt: row.UpdatedAt,
+		Provider:  models.ModelProvider(c.Preset),
+		Hint:      c.Hint,
+		UpdatedAt: c.UpdatedAt,
 	}
 }
 
 // Set stores the account's key for provider, replacing any key already stored
 // for it.
 func (k *Keys) Set(ctx context.Context, userID uuid.UUID, provider models.ModelProvider, key string) (models.ProviderKeySummary, error) {
-	if !provider.Known() {
-		return models.ProviderKeySummary{}, ErrUnknownProvider
-	}
-	key = strings.TrimSpace(key)
-	if len(key) < minKeyLen || len(key) > maxKeyLen || strings.ContainsFunc(key, unicode.IsSpace) {
-		return models.ProviderKeySummary{}, ErrInvalidKey
-	}
-	enc, err := k.sealer.EncryptToken(key)
+	c, err := k.store.SetBuiltinKey(ctx, userID, provider, key)
 	if err != nil {
-		return models.ProviderKeySummary{}, fmt.Errorf("encrypt provider key: %w", err)
+		return models.ProviderKeySummary{}, err
 	}
-
-	id, err := k.client.AccountProviderKey.Create().
-		SetUserID(userID).
-		SetProvider(string(provider)).
-		SetKey(enc).
-		SetHint(key[len(key)-4:]).
-		OnConflictColumns(accountproviderkey.FieldUserID, accountproviderkey.FieldProvider).
-		UpdateKey().
-		UpdateHint().
-		UpdateUpdatedAt().
-		ID(ctx)
-	if err != nil {
-		return models.ProviderKeySummary{}, fmt.Errorf("store provider key: %w", err)
-	}
-	row, err := k.client.AccountProviderKey.Get(ctx, id)
-	if err != nil {
-		return models.ProviderKeySummary{}, fmt.Errorf("read stored provider key: %w", err)
-	}
-	return toSummary(row), nil
+	return toSummary(c), nil
 }
 
 // List describes the account's stored keys, in provider order.
 func (k *Keys) List(ctx context.Context, userID uuid.UUID) ([]models.ProviderKeySummary, error) {
-	rows, err := k.client.AccountProviderKey.Query().
-		Where(accountproviderkey.UserID(userID)).
-		Order(ent.Asc(accountproviderkey.FieldProvider)).
-		All(ctx)
+	conns, err := k.store.Builtins(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("list provider keys: %w", err)
+		return nil, err
 	}
-	out := make([]models.ProviderKeySummary, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, toSummary(row))
+	out := make([]models.ProviderKeySummary, 0, len(conns))
+	for _, c := range conns {
+		out = append(out, toSummary(c))
 	}
 	return out, nil
 }
 
 // Delete removes the account's key for provider.
 func (k *Keys) Delete(ctx context.Context, userID uuid.UUID, provider models.ModelProvider) error {
-	n, err := k.client.AccountProviderKey.Delete().
-		Where(accountproviderkey.UserID(userID), accountproviderkey.Provider(string(provider))).
-		Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("delete provider key: %w", err)
-	}
-	if n == 0 {
+	err := k.store.DeleteBuiltin(ctx, userID, provider)
+	if errors.Is(err, providerconnections.ErrNotFound) {
 		return ErrKeyNotFound
 	}
-	return nil
+	return err
 }
 
 // stored returns the account's decrypted key for provider, or "" when it has
 // none.
 func (k *Keys) stored(ctx context.Context, userID uuid.UUID, provider models.ModelProvider) (string, error) {
-	row, err := k.client.AccountProviderKey.Query().
-		Where(accountproviderkey.UserID(userID), accountproviderkey.Provider(string(provider))).
-		Only(ctx)
-	if ent.IsNotFound(err) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("read provider key: %w", err)
-	}
-	key, err := k.sealer.DecryptToken(row.Key)
-	if err != nil {
-		return "", fmt.Errorf("decrypt provider key: %w", err)
-	}
-	return key, nil
+	return k.store.BuiltinKey(ctx, userID, provider)
 }
 
 // --- Resolver (providerkeys.Resolver)
@@ -216,9 +164,21 @@ func (k *Keys) handleSet(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Key string `json:"key"`
+		// CurrentPassword confirms the change. A session alone is not enough to
+		// redirect where the account's conversations are sent.
+		CurrentPassword string `json:"current_password"`
 	}
 	if err := handlerutils.DecodeJSON(r, &req); err != nil {
 		handlerutils.RespondWithError(w, k.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid request body", nil)
+		return
+	}
+	if err := k.confirm.Confirm(r.Context(), userID, req.CurrentPassword); err != nil {
+		if errors.Is(err, reauth.ErrNotConfirmed) {
+			handlerutils.RespondWithError(w, k.logger, http.StatusForbidden, models.ErrCodeReauthenticationRequired,
+				"Confirm your current password to change a provider key", nil)
+			return
+		}
+		handlerutils.RespondWithError(w, k.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to confirm the change", err)
 		return
 	}
 	summary, err := k.Set(r.Context(), userID, models.ModelProvider(mux.Vars(r)["provider"]), req.Key)

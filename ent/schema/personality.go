@@ -23,7 +23,7 @@ type PersonalityThumbnailCircle struct {
 
 // Fields of the Personality.
 func (Personality) Fields() []ent.Field {
-	return []ent.Field{
+	return append([]ent.Field{
 		field.UUID("id", uuid.UUID{}).
 			Default(uuid.New).
 			Immutable(),
@@ -68,7 +68,7 @@ func (Personality) Fields() []ent.Field {
 		field.String("image_style").
 			Default("auto").
 			Comment("Preferred image generation style (e.g. 'auto', 'anime', 'none'). Used for portrait and expression grid generation."),
-	}
+	}, turnSettingFields("personality")...)
 }
 
 // Edges of the Personality.
@@ -93,6 +93,9 @@ func (Personality) Edges() []ent.Edge {
 		// from. Separate table so hot-path personality reads never load it.
 		edge.To("card", PersonalityCard.Type).
 			Unique().
+			Annotations(entsql.OnDelete(entsql.Cascade)),
+		// Entities pinned to this personality (ADR 0x034) go with it; global ones stay.
+		edge.To("agent_entities", AgentEntity.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }

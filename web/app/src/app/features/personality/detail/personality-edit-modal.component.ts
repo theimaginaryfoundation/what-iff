@@ -38,6 +38,7 @@ import {
 } from '../../../shared/ui/icons/icons';
 import { PersonalityAttachmentsListComponent } from './personality-attachments-list.component';
 import { PersonalityPortraitFocusEditorComponent } from './personality-portrait-focus-editor.component';
+import { PersonalityTurnSettingsFieldsComponent } from '../components/personality-turn-settings-fields.component';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import {
   TEXT_LIMIT_HARD_MAX,
@@ -52,16 +53,20 @@ const PORTRAIT_EDITOR_WIDTH = 200;
 const PORTRAIT_EDITOR_HEIGHT = 267;
 const THUMBNAIL_PREVIEW_SIZE = 96;
 
+import { EntityMarketplaceOutletComponent } from '../../../extensions/entity-marketplace-outlet.component';
+
 @Component({
   selector: 'app-personality-edit-modal',
   standalone: true,
   imports: [
     AsyncPipe,
     AuthImagePipe,
+    EntityMarketplaceOutletComponent,
     FormsModule,
     ModalComponent,
     PersonalityAttachmentsListComponent,
     PersonalityPortraitFocusEditorComponent,
+    PersonalityTurnSettingsFieldsComponent,
     BellIconComponent,
     BrainIconComponent,
     ArrowRightIconComponent,
@@ -71,7 +76,12 @@ const THUMBNAIL_PREVIEW_SIZE = 96;
   template: `
     <ui-modal [open]="open()" [labelledBy]="titleId" size="lg" (dismiss)="onModalDismiss($event)">
       <div modal-header class="flex min-w-0 flex-1 items-center justify-between gap-3">
-        <h2 [id]="titleId" class="text-base font-semibold text-(--color-text-primary)">Edit personality</h2>
+        <div class="flex min-w-0 flex-wrap items-center gap-2">
+          <h2 [id]="titleId" class="text-base font-semibold text-(--color-text-primary)">Edit personality</h2>
+          @if (personality(); as p) {
+            <app-entity-marketplace-outlet kind="personality" [entityId]="p.id" />
+          }
+        </div>
         <button
           type="button"
           class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-(--color-text-secondary) hover:bg-(--color-surface-elevated) hover:text-(--color-text-primary) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)"
@@ -307,6 +317,16 @@ const THUMBNAIL_PREVIEW_SIZE = 96;
             </button>
           </section>
 
+          <section class="flex flex-col gap-2" aria-labelledby="personality-edit-thread-settings">
+            <p id="personality-edit-thread-settings" class="text-sm font-semibold text-(--color-text-primary)">Thread settings</p>
+            <app-personality-turn-settings-fields
+              [reasoningEffort]="value.reasoning_effort"
+              [agentLoop]="value.agent_loop"
+              (reasoningEffortChange)="setDraftField('reasoning_effort', $event)"
+              (agentLoopChange)="setDraftField('agent_loop', $event)"
+            />
+          </section>
+
           @if (personality(); as current) {
             <div class="flex flex-col gap-1">
               <span class="text-xs font-semibold text-(--color-text-secondary)">Attached files</span>
@@ -469,6 +489,8 @@ export class PersonalityEditModalComponent {
       draft.auto_pin_memories !== original.auto_pin_memories ||
       (draft.accent_color ?? null) !== (original.accent_color ?? null) ||
       (draft.cover_image_id ?? null) !== (original.cover_image_id ?? null) ||
+      draft.reasoning_effort !== (original.reasoning_effort ?? null) ||
+      draft.agent_loop !== (original.agent_loop ?? null) ||
       !thumbnailCirclesEqual(draft.thumbnail_circle, originalCircle)
     );
   });
@@ -668,6 +690,10 @@ export class PersonalityEditModalComponent {
       memory_write_prompt: personality.memory_write_prompt,
       archival_model: personality.archival_model,
     };
+    // The server keeps an omitted turn setting, so send only the ones the user changed: a value
+    // this client does not know is then never written back or cleared.
+    if (draft.reasoning_effort !== (personality.reasoning_effort ?? null)) request.reasoning_effort = draft.reasoning_effort;
+    if (draft.agent_loop !== (personality.agent_loop ?? null)) request.agent_loop = draft.agent_loop;
     this.saving.set(true);
     this.personalityService.updatePersonality(personality.id, request).subscribe({
       next: updated => {

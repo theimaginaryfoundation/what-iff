@@ -17,6 +17,7 @@ const binding: DiscordBinding = {
   inbound_enabled: true,
   allow_user_ids: [],
   deny_user_ids: [],
+  answer_agents: false,
   allow_unrestricted: false,
   chat_sandboxed: false,
   status: 'active',

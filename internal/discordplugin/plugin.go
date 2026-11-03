@@ -26,6 +26,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/discordrelay/gateway"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
+	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
 	"github.com/theimaginaryfoundation/what-iff/internal/replyhook"
 	"go.uber.org/zap"
 )
@@ -79,7 +80,7 @@ func apply(d plugins.Deps) {
 		logger.Warn("discord relay: no turn starter or lifecycle; replies to tags are disabled")
 		return
 	}
-	svc := &discordrelay.Service{Store: d.DataStore, Discord: rest, Turns: d.Turns, Logger: logger}
+	svc := &discordrelay.Service{Store: d.DataStore, Discord: rest, Turns: d.Turns, Logger: logger, Policy: relaykit.PolicyFromEnv(logger)}
 	if d.FileStore != nil {
 		svc.Files = d.FileStore
 	}
@@ -135,13 +136,19 @@ func (b botSource) ActiveBots(ctx context.Context) ([]gateway.Bot, error) {
 	return out, nil
 }
 
-// inbound is what the gateway sink hands messages to (the relay service).
+// inbound is what the gateway sink hands events to (the relay service).
 type inbound interface {
 	HandleInbound(ctx context.Context, botID uuid.UUID, botUserID string, msg discordrelay.InboundMessage)
+	ChannelRenamed(ctx context.Context, botID uuid.UUID, channelID, name string)
 }
 
 type sink struct{ svc inbound }
 
 func (s sink) HandleInbound(ctx context.Context, bot gateway.Bot, msg discordrelay.InboundMessage) {
 	s.svc.HandleInbound(ctx, bot.ID, bot.BotUserID, msg)
+}
+
+// ChannelRenamed runs off the gateway's event goroutine: it writes to the database.
+func (s sink) ChannelRenamed(ctx context.Context, bot gateway.Bot, channelID, name string) {
+	go s.svc.ChannelRenamed(ctx, bot.ID, channelID, name)
 }

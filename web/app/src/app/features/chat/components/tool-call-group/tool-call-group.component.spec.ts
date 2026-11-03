@@ -52,6 +52,30 @@ describe('ToolCallGroupComponent', () => {
         expect(fixture.nativeElement.querySelector('.tool-call-group__toggle')).toBeNull();
         expect(fixture.nativeElement.querySelectorAll('app-tool-call').length).toBe(1);
     });
+
+    it('labels each Advanced step and shows the live plan', () => {
+        fixture.componentRef.setInput('toolCalls', [
+            { ...toolCall('1'), step: 1 },
+            { ...toolCall('2'), step: 1 },
+            { ...toolCall('3'), step: 2, status: 'running' },
+        ]);
+        fixture.componentRef.setInput('live', true);
+        fixture.componentRef.setInput('advanced', {
+            step: 2,
+            plan: [
+                { content: 'Find sources', status: 'completed' },
+                { content: 'Write it up', status: 'in_progress' },
+            ],
+        });
+        fixture.detectChanges();
+        const host = fixture.nativeElement as HTMLElement;
+
+        expect([...host.querySelectorAll('.tool-call-group__step')].map(el => el.textContent?.trim())).toEqual(['Step 1', 'Step 2']);
+        expect(host.querySelector('.advanced-run__step')?.textContent).toContain('Step 2');
+        expect(host.querySelector('.advanced-run__step')?.textContent).toContain('1 of 2 done');
+        const items = [...host.querySelectorAll('.advanced-run__item')].map(el => el.textContent?.trim());
+        expect(items).toEqual(['●Done: Find sources', '◐In progress: Write it up']);
+    });
 });
 
 function toolCall(id: string): ToolCall {

@@ -1,12 +1,13 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 
+import { EntityMarketplaceOutletComponent } from '../../../extensions/entity-marketplace-outlet.component';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import { JobCardVm } from '../helpers/job-vm.helpers';
 
 @Component({
   selector: 'app-job-card',
   standalone: true,
-  imports: [TooltipDirective],
+  imports: [TooltipDirective, EntityMarketplaceOutletComponent],
   templateUrl: './job-card.component.html',
   styleUrl: './job-card.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -15,11 +15,12 @@ import {
   TestMCPServerConnectionResponse
 } from '../../core/models/mcp-server.model';
 import { Ritual } from '../../core/models/ritual.model';
+import { EntityMarketplaceOutletComponent } from '../../extensions/entity-marketplace-outlet.component';
 
 @Component({
   selector: 'app-integrations-connectors-tab',
   standalone: true,
-  imports: [CommonModule, FormsModule, HelpHintComponent, TooltipDirective],
+  imports: [CommonModule, FormsModule, HelpHintComponent, TooltipDirective, EntityMarketplaceOutletComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './integrations-connectors-tab.component.html'
 })

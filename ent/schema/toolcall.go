@@ -31,16 +31,25 @@ func (ToolCall) Fields() []ent.Field {
 		field.Text("tool_error").
 			Optional().
 			Comment("The error from the tool call execution"),
+		field.Int("step").
+			Optional().
+			Default(0).
+			Comment("Advanced-loop step (ADR 0x026) the call ran in, 1-based; 0 for Standard turns."),
 	}
 }
 
 // Edges of the ToolCall.
 func (ToolCall) Edges() []ent.Edge {
 	return []ent.Edge{
+		// chat_message is the message the call belongs to. It is unset only while an Advanced
+		// run is in progress: the call is then linked to the run's job instead (draft_job), and
+		// moves onto the reply when the run ends (ADR 0x026).
 		edge.From("chat_message", ChatMessage.Type).
 			Ref("tool_calls").
-			Unique().
-			Required(),
+			Unique(),
+		edge.From("draft_job", Job.Type).
+			Ref("draft_tool_calls").
+			Unique(),
 	}
 }
 
@@ -49,6 +58,7 @@ func (ToolCall) Indexes() []ent.Index {
 	return []ent.Index{
 		// Used by ChatMessage eager-loading: WHERE chat_message_tool_calls IN (...)
 		index.Edges("chat_message"),
+		index.Edges("draft_job"),
 	}
 }
 

@@ -64,3 +64,12 @@ func TestModelProviderKnown(t *testing.T) {
 	require.False(t, ModelProvider("acme").Known())
 	require.False(t, ModelProvider("").Known())
 }
+
+func TestModelProviderDisplayName(t *testing.T) {
+	for _, p := range ModelProviders {
+		_, named := providerNames[p]
+		require.True(t, named, "every provider has a display name: %s", p)
+	}
+	require.Equal(t, "Google Gemini", ModelProviderGoogle.DisplayName())
+	require.Equal(t, "acme", ModelProvider("acme").DisplayName())
+}

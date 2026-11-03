@@ -600,6 +600,69 @@ describe('ChatSessionService', () => {
         expect(service.thread()?.model_id).toBe('model-1');
     });
 
+    it('patches turn settings onto the active thread, sending an empty string to clear', () => {
+        const patch$ = new Subject<any>();
+        chatService.patchChat.mockReturnValue(patch$ as any);
+        service.setActive('chat-1');
+
+        service.setReasoningEffort('high');
+        expect(chatService.patchChat).toHaveBeenCalledWith('chat-1', { reasoning_effort: 'high' });
+        expect(service.thread()?.reasoning_effort).toBe('high');
+
+        // A second change while the first PATCH is in flight survives the first response.
+        service.setAgentLoop('advanced');
+        expect(chatService.patchChat).toHaveBeenLastCalledWith('chat-1', { agent_loop: 'advanced' });
+        patch$.next({ ...chat, reasoning_effort: 'high', agent_loop: null });
+        expect(service.thread()?.agent_loop).toBe('advanced');
+
+        service.setReasoningEffort(null);
+        expect(chatService.patchChat).toHaveBeenLastCalledWith('chat-1', { reasoning_effort: '' });
+        expect(service.thread()?.reasoning_effort).toBeNull();
+    });
+
+    it('rolls back a turn setting when its PATCH fails', () => {
+        service.setActive('chat-1');
+        chatService.patchChat.mockReturnValue(throwError(() => new Error('patch failed')));
+
+        service.setAgentLoop('advanced');
+
+        expect(service.thread()?.agent_loop ?? null).toBeNull();
+        expect(service.error()).toBeTruthy();
+    });
+
+    it('keeps a later turn-setting change when an earlier PATCH fails', () => {
+        const first$ = new Subject<any>();
+        const second$ = new Subject<any>();
+        chatService.patchChat.mockReturnValueOnce(first$ as any).mockReturnValueOnce(second$ as any);
+        service.setActive('chat-1');
+
+        service.setReasoningEffort('high');
+        service.setReasoningEffort('low');
+        first$.error(new Error('first failed'));
+
+        expect(service.thread()?.reasoning_effort).toBe('low');
+        expect(service.error()).toBeTruthy();
+    });
+
+    it('ignores an empty turn-settings patch', () => {
+        service.setActive('chat-1');
+        chatService.patchChat.mockClear();
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+        (service as unknown as { setTurnSettings(values: object): void }).setTurnSettings({});
+
+        expect(chatService.patchChat).not.toHaveBeenCalled();
+        expect(consoleError).toHaveBeenCalled();
+        consoleError.mockRestore();
+    });
+
+    it('does not patch an unchanged turn setting', () => {
+        service.setActive('chat-1');
+        chatService.patchChat.mockClear();
+        service.setAgentLoop(null);
+        expect(chatService.patchChat).not.toHaveBeenCalled();
+    });
+
     it('patches active mode onto the active chat', () => {
         service.setActive('chat-1');
         service.setActiveMood('mood-1');

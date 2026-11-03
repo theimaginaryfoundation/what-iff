@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -60,7 +59,7 @@ func appendOpenAIResponseInputImages(parts responses.ResponseInputMessageContent
 		if len(im.RawBytes) == 0 {
 			continue
 		}
-		dataURL := fmt.Sprintf("data:%s;base64,%s", normalizeImageMediaType(im.MediaType), base64.StdEncoding.EncodeToString(im.RawBytes))
+		dataURL := imageDataURL(normalizeImageMediaType(im.MediaType), im.RawBytes)
 		img := &responses.ResponseInputImageParam{
 			Detail:   responses.ResponseInputImageDetailAuto,
 			ImageURL: openai.String(dataURL),
@@ -212,7 +211,7 @@ func RenderOpenAIInputItems(ctx *ModelContext) []responses.ResponseInputItemUnio
 			out = append(out, responses.ResponseInputItemParamOfMessage(seg.Content, RoleDeveloper))
 		case SegmentKindToolResult:
 			out = append(out, responses.ResponseInputItemParamOfMessage(seg.Content, RoleDeveloper))
-		case SegmentKindMood:
+		case SegmentKindMood, SegmentKindSkills, SegmentKindSkillsIndex:
 			out = append(out, responses.ResponseInputItemParamOfMessage(seg.Content, RoleDeveloper))
 		case SegmentKindDeveloperContext:
 			out = append(out, responses.ResponseInputItemParamOfMessage(seg.Content, RoleDeveloper))

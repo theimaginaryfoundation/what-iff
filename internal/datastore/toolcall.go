@@ -32,37 +32,45 @@ func toToolCallModel(e *ent.ToolCall) *models.ToolCall {
 		ToolInput:     e.ToolInput,
 		ToolOutput:    e.ToolOutput,
 		ToolError:     e.ToolError,
+		Step:          e.Step,
 		CreatedAt:     e.CreatedAt,
 		UpdatedAt:     e.UpdatedAt,
 	}
 }
 
-// createToolCallsBulk creates multiple tool calls in bulk within the provided transaction
+// createToolCallsBulk saves a message's tool calls within tx. A call an Advanced run already
+// saved as a job draft (JobDraft) is moved onto the message; the rest are created, keeping their
+// id when the caller assigned one (an Advanced run's events refer to it).
 func (d *Datastore) createToolCallsBulk(ctx context.Context, tx *ent.Tx, chatMessageID uuid.UUID, toolCalls []*models.ToolCall) error {
-	if len(toolCalls) == 0 {
-		return nil
-	}
-
-	toolCallCreates := make([]*ent.ToolCallCreate, len(toolCalls))
-	for i, toolCall := range toolCalls {
+	var creates []*ent.ToolCallCreate
+	for _, toolCall := range toolCalls {
+		if toolCall.JobDraft && toolCall.ID != uuid.Nil {
+			n, err := tx.ToolCall.Update().
+				Where(toolcall.ID(toolCall.ID), toolcall.Not(toolcall.HasChatMessage())).
+				SetChatMessageID(chatMessageID).
+				ClearDraftJob().
+				Save(ctx)
+			if err != nil {
+				return err
+			}
+			if n > 0 {
+				continue
+			}
+			// The draft row is missing (its write failed): create it below with the same id.
+		}
 		create := tx.ToolCall.Create().
 			SetToolName(toolCall.ToolName).
 			SetChatMessageID(chatMessageID)
-
-		if toolCall.ToolInput != "" {
-			create.SetToolInput(toolCall.ToolInput)
+		if toolCall.ID != uuid.Nil {
+			create.SetID(toolCall.ID)
 		}
-		if toolCall.ToolOutput != "" {
-			create.SetToolOutput(toolCall.ToolOutput)
-		}
-		if toolCall.ToolError != "" {
-			create.SetToolError(toolCall.ToolError)
-		}
-
-		toolCallCreates[i] = create
+		setToolCallFields(create, toolCall)
+		creates = append(creates, create)
 	}
-
-	_, err := tx.ToolCall.CreateBulk(toolCallCreates...).Save(ctx)
+	if len(creates) == 0 {
+		return nil
+	}
+	_, err := tx.ToolCall.CreateBulk(creates...).Save(ctx)
 	return err
 }
 
@@ -84,6 +92,29 @@ func (d *Datastore) ChatToolNamesUsedSince(ctx context.Context, userID, chatID u
 	out := make(map[string]struct{}, len(names))
 	for _, n := range names {
 		out[n] = struct{}{}
+	}
+	return out, nil
+}
+
+// ChatToolInputsSince returns the recorded inputs of every call to toolName by the chat's
+// messages sent at or after since (every message when since is nil), oldest first. The checkpoint
+// skill step reads load_skill calls this way to learn which skills the segment loaded.
+func (d *Datastore) ChatToolInputsSince(ctx context.Context, userID, chatID uuid.UUID, since *time.Time, toolName string) ([]string, error) {
+	msgPreds := []predicate.ChatMessage{chatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID)))}
+	if since != nil {
+		msgPreds = append(msgPreds, chatmessage.SentAtGTE(*since))
+	}
+	rows, err := d.dbClient.ToolCall.Query().
+		Where(toolcall.ToolName(toolName), toolcall.HasChatMessageWith(msgPreds...)).
+		Order(ent.Asc(toolcall.FieldCreatedAt)).
+		Select(toolcall.FieldToolInput).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.ToolInput)
 	}
 	return out, nil
 }

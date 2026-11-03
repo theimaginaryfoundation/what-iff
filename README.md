@@ -77,16 +77,18 @@ Want the story behind it? Read the [Imagination Foundry blog](https://imaginatio
 
 The fastest way to run the full stack locally is Docker Compose.
 
-**Prerequisites:** Docker, and at least one model provider API key (e.g. OpenAI).
+**Prerequisites:** Docker, and an OpenAI API key, which you add in the app.
 
 ```bash
-# 1. Set your model provider key.
-export OPENAI_API_KEY="your-api-key-here"
-
-# 2. Start the stack. On first run it generates this install's secrets, runs
-#    migrations, and seeds the model catalog.
+# Start the stack. On first run it generates this install's secrets, runs
+# migrations, and seeds the model catalog.
 docker compose up --build
 ```
+
+Then open http://localhost:8081, create an account, and add your OpenAI key when the
+app asks (it lives in **Profile & Settings → Providers**, where you can add other
+providers too: OpenRouter, a model server on this computer, or any compatible server).
+Keys belong to your account and are stored encrypted; there is nothing to put in `.env`.
 
 The JWT and token-encryption secrets are generated once per install and kept in a
 Docker volume; nothing is shipped in the repository. Values you set in your shell or
@@ -97,6 +99,15 @@ Docker volume; nothing is shipped in the repository. Values you set in your shel
 | Frontend | http://localhost:8081 |
 | API | http://localhost:8080 |
 | PostgreSQL | localhost:5432 |
+
+**Models on this computer.** The API runs in a container, where `localhost` is the
+container itself, so it reaches a model server on your machine (Ollama, LM Studio) as
+`host.docker.internal`. Two things on the host have to allow that:
+
+- **The server has to listen beyond loopback.** Ollama listens on `127.0.0.1` by default;
+  start it with `OLLAMA_HOST=0.0.0.0`. In LM Studio, turn on serving on the local network.
+- **A host firewall has to let the Docker network in** on that port (11434 for Ollama,
+  1234 for LM Studio). Firewalls such as ufw drop that traffic by default.
 
 > Compose is for **local development only**. Its defaults (`DESTRUCTIVE_MIGRATION=false`, `DB_SSL_MODE=disable`, no secret fallbacks) are deliberately conservative — every deployed environment must set its own real secrets and connection settings explicitly.
 
@@ -126,13 +137,14 @@ Configuration is via environment variables. The essentials:
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | Model provider key (required for AI features; add other providers' keys as needed) |
+| `OPENAI_API_KEY` and other provider keys | Not used by default: each account adds its own keys in the app. A deployment that supplies keys for everyone binds `providerkeys.New` to these instead |
 | `JWT_SECRET`, `JWT_REFRESH_SECRET` | JWT access/refresh token signing (≥32 chars). Generated automatically under Docker Compose |
 | `TOKEN_ENCRYPTION_SECRET` | Encryption key for at-rest secrets (≥32 chars). Generated automatically under Docker Compose |
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | PostgreSQL connection |
 | `SERVER_HOST`, `SERVER_PORT` | API bind address (default `localhost:8080`) |
 | `ENVIRONMENT` | `development` \| `staging` \| `production` |
 | `AUTO_MIGRATE` | Run migrations on boot (`true`/`false`) |
+| `LOCAL_SERVER_HOST` | The name a model server on this computer is reached by: `localhost` by default, `host.docker.internal` in the container image |
 | `DESTRUCTIVE_MIGRATION` | Allow dropping columns/indexes during auto-migrate — keep `false` in deployed envs |
 
 See `.env.example` and `docker-compose.yml` for the full set.
@@ -164,6 +176,7 @@ what-iff/
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — system design, patterns, and internals
 - **[openapi.yaml](openapi.yaml)** — full REST API specification
+- **[Mullet mode](docs/guides/mullet-mode.md)** — keep a copy of your whatiff.chat threads on your own server and continue them there
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to contribute
 - **[SECURITY.md](SECURITY.md)** — reporting vulnerabilities
 

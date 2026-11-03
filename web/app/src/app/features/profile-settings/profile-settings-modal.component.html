@@ -6,10 +6,10 @@
     </div>
   </div>
 
-  <!-- A bar with a single tab is just noise (the public build only has Profile). -->
-  @if (tabs.length > 1) {
+  <!-- A bar with a single tab is just noise: without account keys there is only Profile. -->
+  @if (tabs().length > 1) {
     <nav class="profile-settings__tabs" aria-label="Profile settings sections">
-      @for (tab of tabs; track tab.id) {
+      @for (tab of tabs(); track tab.id) {
         <button
           type="button"
           class="profile-settings__tab"
@@ -17,7 +17,14 @@
           [attr.aria-selected]="modal.activeTab() === tab.id"
           (click)="setTab(tab.id)"
         >
-          <ui-user-icon [size]="13" />
+          @switch (tab.icon) {
+            @case ('providers') {
+              <ui-shield-icon [size]="13" />
+            }
+            @default {
+              <ui-user-icon [size]="13" />
+            }
+          }
           {{ tab.label }}
         </button>
       }
@@ -31,6 +38,9 @@
   }
 
   <div class="profile-settings__body">
+    @if (modal.activeTab() === 'providers' && tabs().length > 1) {
+      <app-providers-section />
+    } @else {
     <section class="profile-settings__section">
       @if (loadingProfile()) {
         <div class="profile-settings__empty">Loading profile...</div>
@@ -140,6 +150,33 @@
               }
             </select>
           </label>
+          <label class="profile-settings__field">
+            <span>Reasoning effort</span>
+            <select
+              data-testid="default-reasoning-effort-select"
+              [disabled]="loadingAction()"
+              [uiTooltip]="reasoningEffortDescription"
+              (change)="onDefaultReasoningEffortChange($any($event.target).value)"
+            >
+              <option value="" [selected]="!preferences()?.reasoning_effort">Model default</option>
+              @for (option of reasoningEffortOptions; track option.value) {
+                <option [value]="option.value" [selected]="option.value === preferences()?.reasoning_effort">{{ option.label }}</option>
+              }
+            </select>
+          </label>
+          <label class="profile-settings__field">
+            <span>Agent loop</span>
+            <select
+              data-testid="default-agent-loop-select"
+              [disabled]="loadingAction()"
+              [uiTooltip]="agentLoopDescriptions.advanced"
+              (change)="onDefaultAgentLoopChange($any($event.target).value)"
+            >
+              <option value="" [selected]="!preferences()?.agent_loop">Standard (default)</option>
+              <option value="advanced" [selected]="preferences()?.agent_loop === 'advanced'">{{ agentLoopLabels.advanced }}</option>
+            </select>
+          </label>
+          <small>Reasoning effort and agent loop apply to every thread that doesn't set its own, unless its personality does. Changes reach existing threads too; sandboxed threads don't use them.</small>
         </fieldset>
 
         @if (imageGenerationProviders().length > 1) {
@@ -184,5 +221,6 @@
         </div>
       }
     </section>
+    }
   </div>
 </ui-modal>

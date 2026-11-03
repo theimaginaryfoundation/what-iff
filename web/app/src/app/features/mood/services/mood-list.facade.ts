@@ -1,11 +1,12 @@
 import { computed, effect, inject, Injectable, signal } from '@angular/core';
 import { Router } from '@angular/router';
 
-import { Mood, UpdateMoodRequest } from '../../../core/models/mood.model';
+import { CreateMoodRequest, Mood, UpdateMoodRequest } from '../../../core/models/mood.model';
 import { Model } from '../../../core/models/model.model';
 import { MCPServer } from '../../../core/models/mcp-server.model';
 import { Personality } from '../../../core/models/personality.model';
 import { Ritual } from '../../../core/models/ritual.model';
+import { AgentLoop, ReasoningEffort, parseAgentLoop, parseReasoningEffort } from '../../../core/models/turn-settings.model';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
 import { ImageGalleryService } from '../../../core/services/image-gallery.service';
 import { ModeViewService } from '../../../core/services/mode-view.service';
@@ -66,6 +67,9 @@ export class MoodListFacade {
   formDescription = signal('');
   formPromptSnippet = signal('');
   formRecommendedModel = signal('');
+  /** `''` = the mode does not change the thread's setting. */
+  formReasoningEffort = signal<ReasoningEffort | ''>('');
+  formAgentLoop = signal<AgentLoop | ''>('');
   formImageIds = signal<string[]>([]);
   formRitualIds = signal<string[]>([]);
   /** Snapshot of the form as last hydrated; null while no modal is open. */
@@ -74,6 +78,8 @@ export class MoodListFacade {
     description: string;
     promptSnippet: string;
     recommendedModel: string;
+    reasoningEffort: ReasoningEffort | '';
+    agentLoop: AgentLoop | '';
     imageIds: string[];
     ritualIds: string[];
   } | null>(null);
@@ -166,6 +172,8 @@ export class MoodListFacade {
     description: this.formDescription(),
     promptSnippet: this.formPromptSnippet(),
     recommendedModel: this.formRecommendedModel(),
+    reasoningEffort: this.formReasoningEffort(),
+    agentLoop: this.formAgentLoop(),
     attachedSkills: this.formRitualIds().map(id => ({ id, label: this.ritualLabel(id) })),
     attachedMCPServers: this.attachedMCPServerIds().map(id => ({ id, label: this.mcpLabel(id) })),
   }));
@@ -187,6 +195,8 @@ export class MoodListFacade {
       this.formDescription() !== snap.description ||
       this.formPromptSnippet() !== snap.promptSnippet ||
       this.formRecommendedModel() !== snap.recommendedModel ||
+      this.formReasoningEffort() !== snap.reasoningEffort ||
+      this.formAgentLoop() !== snap.agentLoop ||
       !stringArraysEqual(this.formImageIds(), snap.imageIds) ||
       !stringArraysEqual(this.formRitualIds(), snap.ritualIds)
     );
@@ -270,6 +280,8 @@ export class MoodListFacade {
         this.formDescription.set(mood.description);
         this.formPromptSnippet.set(mood.prompt_snippet);
         this.formRecommendedModel.set(mood.recommended_model ?? '');
+        this.formReasoningEffort.set(mood.reasoning_effort ?? '');
+        this.formAgentLoop.set(mood.agent_loop ?? '');
         this.formImageIds.set([...(mood.image_ids ?? [])]);
         this.formRitualIds.set([...(mood.ritual_ids ?? [])]);
         this.editFormSnapshot.set({
@@ -277,6 +289,8 @@ export class MoodListFacade {
           description: mood.description,
           promptSnippet: mood.prompt_snippet,
           recommendedModel: mood.recommended_model ?? '',
+          reasoningEffort: mood.reasoning_effort ?? '',
+          agentLoop: mood.agent_loop ?? '',
           imageIds: [...(mood.image_ids ?? [])],
           ritualIds: [...(mood.ritual_ids ?? [])],
         });
@@ -345,6 +359,11 @@ export class MoodListFacade {
       image_ids: this.formImageIds(),
       ritual_ids: this.formRitualIds(),
     };
+    // The server keeps an omitted turn setting, so send only the ones the user changed: a stored
+    // value this client does not recognise is then left as it is rather than cleared.
+    const snap = this.editFormSnapshot();
+    if (!snap || this.formReasoningEffort() !== snap.reasoningEffort) updateReq.reasoning_effort = this.formReasoningEffort() || null;
+    if (!snap || this.formAgentLoop() !== snap.agentLoop) updateReq.agent_loop = this.formAgentLoop() || null;
     this.moodService.updateMood(moodID, updateReq).subscribe({
       next: updated => {
         this.moods.update(current =>
@@ -497,6 +516,8 @@ export class MoodListFacade {
     this.formDescription.set('');
     this.formPromptSnippet.set('');
     this.formRecommendedModel.set('');
+    this.formReasoningEffort.set('');
+    this.formAgentLoop.set('');
     this.formImageIds.set([]);
     this.formRitualIds.set([]);
     this.editFormSnapshot.set({
@@ -504,6 +525,8 @@ export class MoodListFacade {
       description: '',
       promptSnippet: '',
       recommendedModel: '',
+      reasoningEffort: '',
+      agentLoop: '',
       imageIds: [],
       ritualIds: [],
     });
@@ -519,13 +542,15 @@ export class MoodListFacade {
       return;
     }
     this.editSaving.set(true);
-    const req = {
+    const req: CreateMoodRequest = {
       name,
       description: this.formDescription(),
       prompt_snippet: this.formPromptSnippet(),
       recommended_model: this.formRecommendedModel(),
       image_ids: this.formImageIds(),
       ritual_ids: this.formRitualIds(),
+      reasoning_effort: this.formReasoningEffort() || null,
+      agent_loop: this.formAgentLoop() || null,
     };
     this.moodService.createMood(req).subscribe({
       next: mood => {
@@ -595,6 +620,14 @@ export class MoodListFacade {
 
   setFormRecommendedModel(value: string): void {
     this.formRecommendedModel.set(value);
+  }
+
+  setFormReasoningEffort(value: string): void {
+    this.formReasoningEffort.set(parseReasoningEffort(value) ?? '');
+  }
+
+  setFormAgentLoop(value: string): void {
+    this.formAgentLoop.set(parseAgentLoop(value) ?? '');
   }
 
   private loadRitualsIfNeeded(): void {

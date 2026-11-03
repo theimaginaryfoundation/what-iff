@@ -1,3 +1,5 @@
+import { ReasoningSupport } from './turn-settings.model';
+
 export interface Model {
   id: string;
   name: string;
@@ -18,9 +20,16 @@ export interface Model {
    */
   base_credits_per_slab?: number;
   /**
-   * Subscription tier this model is accessible from (e.g. 'casual', 'regular').
-   * Optional for the same rollout-safety reason.
+   * Billing grade: 'low', 'medium', 'high' or 'ultra'. The API sends it only
+   * where the deployment bills by tier, so it is absent otherwise.
    */
   subscription_tier?: string;
+  /**
+   * How the model takes a reasoning effort (ADR 0x026). Optional for rollout safety; absence is
+   * treated as `none` (no control shown).
+   */
+  reasoning_support?: ReasoningSupport;
+  /** Admin-only: an override of `reasoning_support` (which then equals it); null derives it from the provider and model. */
+  reasoning_support_override?: ReasoningSupport | null;
 }
 

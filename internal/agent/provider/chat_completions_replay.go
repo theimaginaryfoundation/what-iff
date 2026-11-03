@@ -71,3 +71,54 @@ func chatCompletionToolCallParam(tc openai.ChatCompletionMessageToolCallUnion) o
 		},
 	}
 }
+
+// chatCompletionsFinal remembers a Chat Completions adapter's last final reply so ContinueWith
+// can record it before the next user turn (the loop never appends a final reply itself).
+type chatCompletionsFinal struct {
+	last *openai.ChatCompletion
+}
+
+// continueWith appends the remembered reply (replaying reasoning when the provider needs it
+// echoed) and then text as a user turn.
+func (f *chatCompletionsFinal) continueWith(messages *[]openai.ChatCompletionMessageParamUnion, text, reasoning string) {
+	f.continueWithReplay(messages, text, reasoning, reasoningContentReplay{})
+}
+
+// continueWithReplay is continueWith with the provider's way of replaying reasoning.
+func (f *chatCompletionsFinal) continueWithReplay(messages *[]openai.ChatCompletionMessageParamUnion, text, reasoning string, replay assistantReasoningReplay) {
+	if f.last != nil && len(f.last.Choices) > 0 {
+		// Built from the extracted text rather than the SDK's ToAssistantMessageParam, which can
+		// lose the content of a message the stream accumulator assembled (see
+		// chatCompletionAssistantReplay).
+		*messages = append(*messages, replay.finalTurn(ExtractChatCompletionText(f.last), reasoning))
+		f.last = nil
+	}
+	*messages = append(*messages, openai.UserMessage(text))
+}
+
+// assistantReasoningReplay is how a provider wants a turn's reasoning sent back with the
+// assistant message it belongs to.
+type assistantReasoningReplay interface {
+	// toolTurn is the assistant tool-call message for the next tool round.
+	toolTurn(msg openai.ChatCompletionMessage, reasoning string) openai.ChatCompletionMessageParamUnion
+	// finalTurn is a finished reply recorded before a continuation (ContinueWith).
+	finalTurn(text, reasoning string) openai.ChatCompletionMessageParamUnion
+}
+
+// reasoningContentReplay echoes reasoning in the non-standard reasoning_content field (MiMo,
+// DeepSeek, Qwen).
+type reasoningContentReplay struct{}
+
+func (reasoningContentReplay) toolTurn(msg openai.ChatCompletionMessage, reasoning string) openai.ChatCompletionMessageParamUnion {
+	return chatCompletionAssistantReplay(msg, reasoning)
+}
+
+func (reasoningContentReplay) finalTurn(text, reasoning string) openai.ChatCompletionMessageParamUnion {
+	p := openai.ChatCompletionAssistantMessageParam{
+		Content: openai.ChatCompletionAssistantMessageParamContentUnion{OfString: openai.String(text)},
+	}
+	if strings.TrimSpace(reasoning) != "" {
+		p.SetExtraFields(map[string]any{"reasoning_content": reasoning})
+	}
+	return openai.ChatCompletionMessageParamUnion{OfAssistant: &p}
+}

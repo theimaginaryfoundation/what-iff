@@ -43,9 +43,41 @@ func (FileAttachment) Fields() []ent.Field {
 			Default("").
 			MaxLen(255).
 			Comment("Gallery folder path, e.g. \"charts/oura\"; \"\" is the top level. A label only: the S3 key is unaffected by moves."),
+		field.Bool("context_only").
+			Default(false).
+			Comment("A reference row shown with an assistant reply for an existing file the agent fetched to look at (find_context). Not a new output: kept out of the gallery and not relayed."),
 		field.Time("created_at").
 			Immutable().
 			Default(time.Now),
+		// Who wrote the file (ADR 0x034). An agent may change only "agent" files its personality
+		// wrote, or, with no personality, the files written in its conversation; every other file,
+		// including all of the user's uploads, is read-only to agents. A string enum (varchar in
+		// Postgres), so a new origin is a new value, not a migration.
+		field.Enum("origin").
+			Values("user", "agent", "skill").
+			Default("user").
+			Comment("Who wrote the file: \"user\" (uploads, imports, reply outputs), \"agent\" (an agent's file tools) or \"skill\" (a skill bundle's file, ADR 0x035). Only agent files can be changed by an agent."),
+		field.UUID("skill_id", uuid.UUID{}).
+			Optional().
+			Nillable().
+			Comment("The skill (ritual) whose bundle this file belongs to, for origin = skill; the row goes with the skill."),
+		field.UUID("created_by_personality_id", uuid.UUID{}).
+			Optional().
+			Nillable().
+			Comment("Personality whose agent created the file; the owner for agent edits. Null with no personality."),
+		field.UUID("created_by_chat_id", uuid.UUID{}).
+			Optional().
+			Nillable().
+			Comment("Conversation the agent created the file in; the owner for agent edits when there is no personality."),
+		field.Time("updated_at").
+			Optional().
+			Nillable().
+			Comment("When an agent last changed the content. Null for files never changed after upload."),
+		field.Int64("size_bytes").
+			Optional().
+			Nillable().
+			NonNegative().
+			Comment("Bytes in the stored object. Set for skill bundle files, so the bundle's 30 MB limit is checked without reading objects (ADR 0x035 §3); null on other rows."),
 	}
 }
 
@@ -62,6 +94,12 @@ func (FileAttachment) Edges() []ent.Edge {
 		edge.From("personality", Personality.Type).
 			Ref("file_attachments").
 			Unique(),
+		// A skill bundle's files (ADR 0x035 §3): deleting the skill deletes its files' rows (the
+		// cascade is declared on Ritual.files); the handler releases their objects first.
+		edge.From("skill", Ritual.Type).
+			Ref("files").
+			Unique().
+			Field("skill_id"),
 	}
 }
 
@@ -79,5 +117,8 @@ func (FileAttachment) Indexes() []ent.Index {
 		index.Fields("s3_key").Edges("owner"),
 		// Backs gallery folder navigation and the agent's folder-prefix listing.
 		index.Fields("folder").Edges("owner"),
+		// Backs a skill's file listing and its cascade, and keeps one file per path in a bundle.
+		// Rows outside a bundle have a null skill_id and never conflict.
+		index.Fields("skill_id", "folder", "name").Unique(),
 	}
 }

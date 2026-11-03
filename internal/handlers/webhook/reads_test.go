@@ -92,6 +92,10 @@ func untouched(t *testing.T) *mockProvider {
 			fail("GetJob")
 			return nil, nil
 		},
+		getSummaryFn: func(context.Context, uuid.UUID, uuid.UUID) (*models.ChatSummary, error) {
+			fail("GetChatSummary")
+			return nil, nil
+		},
 	}
 }
 
@@ -101,6 +105,7 @@ func readPaths() map[string]string {
 		"list chats":    "/webhooks/chat",
 		"list personas": "/webhooks/personality",
 		"list messages": "/webhooks/chat/" + chat + "/messages",
+		"get summary":   "/webhooks/chat/" + chat + "/summary",
 		"get message":   "/webhooks/chat/chat-message/" + msg,
 		"get job":       "/webhooks/job/" + job,
 	}
@@ -246,6 +251,9 @@ func TestOthersRecordsAreIndistinguishableFromMissingOnes(t *testing.T) {
 			return nil, datastore.ErrChatMessageNotFound
 		},
 		getJobFn: func(context.Context, uuid.UUID, uuid.UUID) (*models.Job, error) { return nil, datastore.ErrJobNotFound },
+		getSummaryFn: func(context.Context, uuid.UUID, uuid.UUID) (*models.ChatSummary, error) {
+			return nil, datastore.ErrChatNotFound
+		},
 	}
 	router := readRouter(NewHandler(p, &mockAgent{}, zap.NewNop()), readScopes)
 	for name, path := range readPaths() {
@@ -358,4 +366,26 @@ func TestReadsAreAuditedByTokenWithoutContent(t *testing.T) {
 func toJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+func TestGetChatSummaryServesTheSummaryAndWhereItEnds(t *testing.T) {
+	chatID := uuid.New()
+	start := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	p := &mockProvider{
+		getSummaryFn: func(_ context.Context, userID, id uuid.UUID) (*models.ChatSummary, error) {
+			require.Equal(t, testOwner, userID)
+			return &models.ChatSummary{ChatID: id, Summary: "They planned a trip.", WindowStart: &start}, nil
+		},
+	}
+	router := readRouter(NewHandler(p, &mockAgent{}, zap.NewNop()), readScopes)
+
+	rec := get(t, router, "/webhooks/chat/"+chatID.String()+"/summary", true)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+	body := decode(t, rec)
+	require.Equal(t, chatID.String(), body["chat_id"])
+	require.Equal(t, "They planned a trip.", body["summary"])
+	require.Equal(t, "2026-10-20T09:00:00Z", body["window_start"])
+
+	require.Equal(t, http.StatusBadRequest, get(t, router, "/webhooks/chat/not-a-uuid/summary", true).Code)
 }

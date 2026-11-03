@@ -9,7 +9,8 @@
 - **`fileattachment.go`:** Utilities for reading uploads and binding to models (see tests for expected behavior).
   It also owns the upload metrics for every upload path (chat, personality, image gallery), through `telemetry.Global()`.
   `UploadFileAttachment` is the multipart wrapper over `ProcessUpload`, which holds the steps that need no HTTP: type check, buffering to a temp file (at most `MaxUploadBytes`, 30 MB; exported so callers that already hold the bytes can check up front), and image normalization; the temp file is the bytes the caller then stores.
-  Image normalization (`imageutil.NormalizeForUpload`) re-encodes every accepted image (PNG, JPEG, GIF, WebP) as PNG capped at 2048px, so a WebP upload is stored, thumbnailed and sent to vendors as PNG.
+  Image normalization (`imageutil.NormalizeForUpload`) re-encodes every accepted image (PNG, JPEG, GIF, WebP) capped at 2048px: as JPEG (quality 90) when it is opaque, as PNG when it has transparency (ADR 0x038).
+  So a WebP upload is stored, thumbnailed and sent to vendors as JPEG, and the file is renamed to match.
   `ProcessUpload` returns an `*UploadError` (the status and message a client sees; it wraps `ErrUnsupportedFileType` or `ErrFileTooLarge` where they apply), and `RespondWithUploadError` writes one.
   `StoreChatAttachment` is the storage half for a chat upload: the record, the object-store key (images under the gallery path with a thumbnail, other files under the chat), and chunking.
   The chat upload handler and the plugin attachment seam (`internal/server/plugin_attachments.go`) both call it.
@@ -18,7 +19,7 @@
   `TriggerAsyncFileChunking` runs its embeddings as the attachment's owner (`apicontext.WithUserID`), so they use that account's provider key after the request has ended.
   Callers must not count uploads themselves.
   A caller whose attachment record fails to save calls `AbandonFileAttachmentUpload`, which counts the failure and removes the temp file.
-- **`httpresponse.go`:** The response helpers every handler writes through — `RespondWithJSON`, `RespondWithHTML`, `RespondWithNoContent`, and `RespondWithError`.
+- **`httpresponse.go`:** The response helpers every handler writes through — `RespondWithJSON`, `RespondWithHTML`, `RespondWithNoContent`, and `RespondWithError` (`RespondWithErrorDetails` adds the envelope's structured `details`).
   The last takes a code as its fourth argument: either a specific code from the models taxonomy, or `CodeNotSet` where none has been assigned yet, in which case the helper fills in the generic code for the status.
   A blank or whitespace-only code is treated as `CodeNotSet`.
 
@@ -51,10 +52,14 @@
 - **`CodeNotSet` is also the progress marker.**
   Its occurrence count is how many call sites still lack a specific code, so `grep -c` measures what remains of ADR 0x020's phase 2.
 
+- **Error details:** `RespondWithErrorDetails` is `RespondWithError` plus `models.ErrorResponse.Details`, for a specific code whose contract includes structured details; the envelope is still built only in `httpresponse.go`.
+- **Missing provider key:** `RespondIfProviderNotConfigured` answers an error caused by `providerkeys.NotConfiguredError` with 409, code `provider_not_configured` and `details.provider`, and reports whether it did; handlers call it before their generic failure response.
+
 ## Testing
 
+- `provider_errors_test.go` — the 409 envelope through wrapping, with no transport detail in the body; other errors are left to the caller.
 - `fileattachment_test.go` — multipart and edge cases.
-- `fileattachment_ingest_test.go` — `ProcessUpload` without HTTP (type, size, normalization including WebP to PNG, provider failure) and `StoreChatAttachment` (key routing, thumbnail, rollback, cleanup).
+- `fileattachment_ingest_test.go` — `ProcessUpload` without HTTP (type, size, normalization including WebP to JPEG, provider failure) and `StoreChatAttachment` (key routing, thumbnail, rollback, cleanup).
 - `fileattachment_failures_test.go` — the failure paths: unparseable/partial multipart, unreadable source, undecodable image, an unsaved S3 key, and what `TriggerAsyncFileChunking` does with files it will not chunk.
 - `fileattachment_metrics_test.go` — upload size/kind, the normalize stage, that each upload is counted exactly once, and provider-file cleanup for abandoned uploads.
 - `httpresponse_test.go` — that raw errors never reach the body, and that every error response carries a code (including unmapped statuses).

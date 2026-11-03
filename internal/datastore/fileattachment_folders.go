@@ -33,6 +33,12 @@ func galleryFiles(userID uuid.UUID, kind models.GalleryKind) []predicate.FileAtt
 	return scope
 }
 
+// galleryMutableFiles is galleryFiles minus skill bundle files, which the gallery lists under
+// their skill and never moves or renames (ADR 0x035 §3): the skill editor manages them.
+func galleryMutableFiles(userID uuid.UUID, kind models.GalleryKind) []predicate.FileAttachment {
+	return append(galleryFiles(userID, kind), entfileattachment.OriginNEQ(entfileattachment.OriginSkill))
+}
+
 // galleryKindPredicate narrows to images or to every other file. Any other kind (all, or unset)
 // returns nil: no narrowing.
 func galleryKindPredicate(kind models.GalleryKind) predicate.FileAttachment {
@@ -55,7 +61,7 @@ func (d *Datastore) ListGalleryFolders(ctx context.Context, userID uuid.UUID, ki
 		Count  int    `json:"count"`
 	}
 	err := d.dbClient.FileAttachment.Query().
-		Where(galleryFiles(userID, kind)...).
+		Where(galleryMutableFiles(userID, kind)...).
 		Where(entfileattachment.FolderNEQ("")).
 		GroupBy(entfileattachment.FieldFolder).
 		Aggregate(ent.Count()).
@@ -82,9 +88,66 @@ func (d *Datastore) MoveFileAttachmentsToFolder(ctx context.Context, userID uuid
 	if len(ids) == 0 {
 		return 0, nil
 	}
+	if models.IsReservedFolder(folder) {
+		return 0, models.ErrReservedFolder
+	}
+	match, err := d.galleryOriginalsOf(ctx, userID, ids)
+	if err != nil {
+		d.logger.Error("failed to resolve files to move", zap.Error(err))
+		return 0, err
+	}
+	moved, err := d.dbClient.FileAttachment.Update().
+		Where(galleryMutableFiles(userID, models.GalleryKindAll)...).
+		Where(match).
+		SetFolder(folder).
+		Save(ctx)
+	if err != nil {
+		d.logger.Error("failed to move files to a folder", zap.Error(err))
+		return 0, err
+	}
+	return moved, nil
+}
+
+// RenameGalleryFile sets the display name of the user's gallery file id and returns the name it
+// stored. Like a move, an id naming a chat-reuse copy renames the original it shares a stored object
+// with. name is a requested name, normalized with models.NormalizeFileName against the current one
+// (so a name without an extension keeps the file's). Only the label changes; the stored object keeps
+// its key. It returns ErrFileAttachmentNotFound when id is not one of the user's files.
+func (d *Datastore) RenameGalleryFile(ctx context.Context, userID, id uuid.UUID, name string) (string, error) {
+	match, err := d.galleryOriginalsOf(ctx, userID, []uuid.UUID{id})
+	if err != nil {
+		d.logger.Error("failed to resolve the file to rename", zap.Error(err))
+		return "", err
+	}
+	scope := append(galleryMutableFiles(userID, models.GalleryKindAll), match)
+	current, err := d.dbClient.FileAttachment.Query().
+		Where(scope...).
+		Order(ent.Asc(entfileattachment.FieldCreatedAt)).
+		First(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			return "", ErrFileAttachmentNotFound
+		}
+		return "", err
+	}
+	stored, err := models.NormalizeFileName(name, current.Name)
+	if err != nil {
+		return "", err
+	}
+	if _, err := d.dbClient.FileAttachment.Update().Where(scope...).SetName(stored).Save(ctx); err != nil {
+		d.logger.Error("failed to rename a file", zap.Error(err))
+		return "", err
+	}
+	return stored, nil
+}
+
+// galleryOriginalsOf matches the files ids name, plus every file sharing a stored object with one
+// of them, so a chat-reuse copy's id reaches its original. Combine it with galleryFiles to act on
+// the originals only.
+func (d *Datastore) galleryOriginalsOf(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) (predicate.FileAttachment, error) {
 	// Only rows that have a key can name its reference copies. s3_key is NULL for legacy rows and for
 	// files that never live in S3 (code-interpreter documents), and a NULL cannot scan into a string,
-	// so leave those out of the read; they are still moved by id below.
+	// so leave those out of the read; they are still matched by id below.
 	named, err := d.dbClient.FileAttachment.Query().
 		Where(
 			entfileattachment.HasOwnerWith(user.ID(userID)),
@@ -95,23 +158,13 @@ func (d *Datastore) MoveFileAttachmentsToFolder(ctx context.Context, userID uuid
 		Select(entfileattachment.FieldS3Key).
 		Strings(ctx)
 	if err != nil {
-		d.logger.Error("failed to resolve files to move", zap.Error(err))
-		return 0, err
+		return nil, err
 	}
 	match := []predicate.FileAttachment{entfileattachment.IDIn(ids...)}
 	if len(named) > 0 {
 		match = append(match, entfileattachment.S3KeyIn(named...))
 	}
-	moved, err := d.dbClient.FileAttachment.Update().
-		Where(galleryFiles(userID, models.GalleryKindAll)...).
-		Where(entfileattachment.Or(match...)).
-		SetFolder(folder).
-		Save(ctx)
-	if err != nil {
-		d.logger.Error("failed to move files to a folder", zap.Error(err))
-		return 0, err
-	}
-	return moved, nil
+	return entfileattachment.Or(match...), nil
 }
 
 // maxFolderMovePasses bounds how many times a folder rename re-reads what is left under the old
@@ -133,6 +186,9 @@ func (d *Datastore) MoveGalleryFolder(ctx context.Context, userID uuid.UUID, fro
 	if from == to {
 		return 0, nil
 	}
+	if models.IsReservedFolder(from) || models.IsReservedFolder(to) {
+		return 0, models.ErrReservedFolder
+	}
 	if models.FolderIsWithin(to, from) {
 		return 0, ErrFolderIntoItself
 	}
@@ -151,7 +207,7 @@ func (d *Datastore) MoveGalleryFolder(ctx context.Context, userID uuid.UUID, fro
 	total := 0
 	for pass := 0; pass < maxFolderMovePasses; pass++ {
 		folders, err := tx.FileAttachment.Query().
-			Where(galleryFiles(userID, models.GalleryKindAll)...).
+			Where(galleryMutableFiles(userID, models.GalleryKindAll)...).
 			Where(entfileattachment.Or(
 				entfileattachment.FolderEQ(from),
 				entfileattachment.FolderHasPrefix(from+"/"),
@@ -170,7 +226,7 @@ func (d *Datastore) MoveGalleryFolder(ctx context.Context, userID uuid.UUID, fro
 				dest = dest[1:] // moving up to the top level: drop the separator
 			}
 			n, err := tx.FileAttachment.Update().
-				Where(galleryFiles(userID, models.GalleryKindAll)...).
+				Where(galleryMutableFiles(userID, models.GalleryKindAll)...).
 				Where(entfileattachment.FolderEQ(folder)).
 				SetFolder(dest).
 				Save(ctx)

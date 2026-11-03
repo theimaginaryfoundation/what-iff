@@ -24,6 +24,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/ent/userpreference"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/skills"
 )
 
 const accountBackupMaxJSONLine = 16 << 20 // 16 MiB
@@ -175,7 +176,9 @@ func (d *Datastore) importBackupMoods(ctx context.Context, targetUserID uuid.UUI
 			SetRecommendedModel(rec.RecommendedModel).
 			SetOwnerID(targetUserID).
 			SetCreatedAt(rec.CreatedAt).
-			SetUpdatedAt(rec.UpdatedAt)
+			SetUpdatedAt(rec.UpdatedAt).
+			SetNillableReasoningEffort(entEffort[mood.ReasoningEffort](rec.ReasoningEffort)).
+			SetNillableAgentLoop(entLoop[mood.AgentLoop](rec.AgentLoop))
 		if _, err := create.Save(ctx); err != nil {
 			if ent.IsConstraintError(err) {
 				res.Duplicate++
@@ -224,6 +227,8 @@ func (d *Datastore) importBackupPersonalities(ctx context.Context, targetUserID 
 			SetMemorySearchPrompt(rec.MemorySearchPrompt).
 			SetMemoryWritePrompt(rec.MemoryWritePrompt).
 			SetAutoPinMemories(rec.AutoPinMemories).
+			SetNillableReasoningEffort(entEffort[personality.ReasoningEffort](rec.ReasoningEffort)).
+			SetNillableAgentLoop(entLoop[personality.AgentLoop](rec.AgentLoop)).
 			SetUserID(targetUserID).
 			SetCreatedAt(rec.CreatedAt).
 			SetUpdatedAt(rec.UpdatedAt).
@@ -301,13 +306,40 @@ func (d *Datastore) importBackupRituals(ctx context.Context, targetUserID uuid.U
 			res.Conflict++
 			continue
 		}
+		// Backups made before the Agent Skills fields have no slug; derive one and keep it unique
+		// among the target account's skills, as the editor would.
+		slug := strings.TrimSpace(rec.Slug)
+		if slug == "" || skills.ValidateSlug(slug) != nil {
+			slug = skills.Slugify(name)
+		}
+		slug, err = skills.UniqueSlug(slug, func(candidate string) (bool, error) {
+			return ritualSlugTaken(ctx, d.dbClient, targetUserID, candidate, uuid.Nil)
+		})
+		if err != nil {
+			return err
+		}
+		meta := rec.Metadata
+		if meta == nil {
+			meta = map[string]string{}
+		}
+		allowed := rec.AllowedTools
+		if allowed == nil {
+			allowed = []string{}
+		}
 		create := d.dbClient.Ritual.Create().
 			SetID(rec.ID).
 			SetOwnerID(targetUserID).
 			SetName(name).
+			SetSlug(slug).
 			SetDescription(desc).
 			SetContent(content).
 			SetHotkeys(rec.Hotkeys).
+			SetLicense(rec.License).
+			SetCompatibility(rec.Compatibility).
+			SetMetadata(meta).
+			SetAllowedTools(allowed).
+			SetDisableModelInvocation(rec.DisableModelInvocation).
+			SetUserInvocable(rec.UserInvocable == nil || *rec.UserInvocable).
 			SetCreatedAt(rec.CreatedAt).
 			SetUpdatedAt(rec.UpdatedAt)
 		if rec.PersonalityID != nil {
@@ -385,7 +417,9 @@ func (d *Datastore) importBackupChats(ctx context.Context, targetUserID uuid.UUI
 			SetContextScope(entchat.ContextScope(rec.ContextScope.OrDefault())).
 			SetResponseID("").
 			SetCreatedAt(rec.CreatedAt).
-			SetUpdatedAt(rec.UpdatedAt)
+			SetUpdatedAt(rec.UpdatedAt).
+			SetNillableReasoningEffort(entEffort[entchat.ReasoningEffort](rec.ReasoningEffort)).
+			SetNillableAgentLoop(entLoop[entchat.AgentLoop](rec.AgentLoop))
 		if rec.LastMessageTime != nil {
 			create.SetLastMessageTime(*rec.LastMessageTime)
 		}
@@ -458,6 +492,9 @@ func (d *Datastore) importBackupChatMessages(ctx context.Context, targetUserID u
 			SetChatID(rec.ChatID).
 			SetSentAt(rec.SentAt).
 			SetTokens(rec.Tokens)
+		if rec.AgentRun != nil {
+			create.SetAgentRun(rec.AgentRun)
+		}
 		if rec.GenerationModel != "" {
 			create.SetGenerationModel(rec.GenerationModel)
 		}
@@ -571,6 +608,9 @@ func (d *Datastore) importBackupToolCalls(ctx context.Context, targetUserID uuid
 		if rec.ToolError != "" {
 			create.SetToolError(rec.ToolError)
 		}
+		if rec.Step > 0 {
+			create.SetStep(rec.Step)
+		}
 		if _, err := create.Save(ctx); err != nil {
 			if ent.IsConstraintError(err) {
 				res.Duplicate++
@@ -608,6 +648,8 @@ func (d *Datastore) importBackupAgentJobs(ctx context.Context, targetUserID uuid
 			SetID(rec.ID).
 			SetOwnerID(targetUserID).
 			SetPrompt(rec.Prompt).
+			SetNillableReasoningEffort(entEffort[agentjob.ReasoningEffort](rec.ReasoningEffort)).
+			SetNillableAgentLoop(entLoop[agentjob.AgentLoop](rec.AgentLoop)).
 			SetScheduleInput(rec.ScheduleInput).
 			SetScheduleType(agentjob.ScheduleType(rec.ScheduleType)).
 			SetTimezone(rec.Timezone).

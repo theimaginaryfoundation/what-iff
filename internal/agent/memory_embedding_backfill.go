@@ -94,13 +94,14 @@ func runMemoryEmbeddingBackfillPass(
 		zap.Int("embedded", stats.Embedded),
 		zap.Int("skipped", stats.Skipped),
 		zap.Int("failed", stats.Failed),
+		zap.Int("no_key", stats.NoKey),
 	}
 	switch {
 	case err != nil && ctx.Err() != nil:
 		logger.Info("memory embedding backfill interrupted by shutdown", fields...)
 	case err != nil:
 		logger.Warn("memory embedding backfill stopped early", append(fields, zap.Error(err))...)
-	case stats.Embedded+stats.Skipped+stats.Failed > 0:
+	case stats.Embedded+stats.Skipped+stats.Failed+stats.NoKey > 0:
 		logger.Info("memory embedding backfill finished", fields...)
 	default:
 		logger.Debug("memory embedding backfill: nothing to do")

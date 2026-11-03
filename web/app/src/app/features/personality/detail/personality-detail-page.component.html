@@ -47,6 +47,7 @@
                 Default
               </span>
             }
+            <app-entity-marketplace-outlet kind="personality" [entityId]="personality.id" />
           </div>
         </div>
         <div class="flex flex-wrap gap-2">
@@ -179,6 +180,20 @@
             [class.translate-x-5]="editorDraft()?.auto_pin_memories ?? personality.auto_pin_memories"
           ></span>
         </button>
+      </section>
+
+      <section
+        class="flex flex-col gap-2 rounded-2xl border border-(--color-border-default) bg-(--color-surface-card) p-4"
+        aria-labelledby="personality-thread-settings-heading"
+      >
+        <h2 id="personality-thread-settings-heading" class="text-base font-semibold text-(--color-text-primary)">Thread settings</h2>
+        <app-personality-turn-settings-fields
+          [reasoningEffort]="turnSettings().reasoning_effort ?? null"
+          [agentLoop]="turnSettings().agent_loop ?? null"
+          [disabled]="turnSettingsUpdating()"
+          (reasoningEffortChange)="onTurnSettingChange({ reasoning_effort: $event })"
+          (agentLoopChange)="onTurnSettingChange({ agent_loop: $event })"
+        />
       </section>
 
       <app-personality-expressions-manager

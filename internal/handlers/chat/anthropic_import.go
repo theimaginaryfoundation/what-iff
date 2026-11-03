@@ -240,7 +240,7 @@ func prepareAnthropicConversation(raw anthropicConversation, now time.Time) (*mo
 		Title:      title,
 		CreatedAt:  createdAt,
 		Source:     models.ChatSourceAnthropic,
-		ImportHash: conversationHash(raw.UUID),
+		ImportHash: models.ConversationImportHash(raw.UUID),
 		Messages:   msgs,
 	}, errs
 }

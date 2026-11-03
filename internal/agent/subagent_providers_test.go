@@ -41,12 +41,37 @@ func newChatCompletionsRecorder(t *testing.T, status int, respBody string) *chat
 		rec.bodies = append(rec.bodies, body)
 		rec.authHdrs = append(rec.authHdrs, r.Header.Get("Authorization"))
 		rec.mu.Unlock()
+		if stream, _ := body["stream"].(bool); stream && status == http.StatusOK {
+			// A streamed request gets the reply as one SSE chunk, as the real API sends it.
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte(chatCompletionAsSSE(respBody)))
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(respBody))
 	}))
 	t.Cleanup(rec.srv.Close)
 	return rec
+}
+
+// chatCompletionAsSSE turns a non-streamed chat completion body into an SSE stream of one chunk
+// carrying each choice's message as its delta.
+func chatCompletionAsSSE(body string) string {
+	var resp map[string]any
+	if json.Unmarshal([]byte(body), &resp) != nil {
+		return "data: [DONE]\n\n"
+	}
+	choices, _ := resp["choices"].([]any)
+	for _, c := range choices {
+		if m, ok := c.(map[string]any); ok {
+			m["delta"] = m["message"]
+			delete(m, "message")
+		}
+	}
+	resp["object"] = "chat.completion.chunk"
+	chunk, _ := json.Marshal(resp)
+	return "data: " + string(chunk) + "\n\ndata: [DONE]\n\n"
 }
 
 func (r *chatCompletionsRecorder) requests() int {
@@ -229,7 +254,7 @@ func TestRunSubagentChatCompletions_ProviderErrorIsPreserved(t *testing.T) {
 		subagentModelCapabilities{Provider: "qwen", ToolSupport: true}, "qwen3.7-plus",
 		buildSubagentModelContext("", "", "hi"), nil, nil, false)
 
-	require.Nil(t, out)
+	require.True(t, out == nil || out.Output == "", "a failed call returns no output (only the usage of calls it made)")
 	require.ErrorContains(t, err, "qwen subagent call failed")
 	require.ErrorContains(t, err, "Qwen API call failed")
 	require.ErrorContains(t, err, "does not accept parameter foo")
@@ -260,7 +285,7 @@ func TestRunSubagentChatCompletions_EmptyChoicesIsAnError(t *testing.T) {
 		subagentModelCapabilities{Provider: "qwen", ToolSupport: true}, "qwen3.7-plus",
 		buildSubagentModelContext("", "", "hi"), nil, nil, false)
 
-	require.Nil(t, out)
+	require.True(t, out == nil || out.Output == "", "a failed call returns no output (only the usage of calls it made)")
 	require.ErrorContains(t, err, "qwen subagent call failed")
 }
 

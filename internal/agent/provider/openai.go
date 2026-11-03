@@ -69,9 +69,11 @@ func (c *OpenAIProvider) responsesNewStreaming(
 	ctx context.Context,
 	params responses.ResponseNewParams,
 	onTextDelta func(delta string),
+	onReasoningDelta func(delta string),
 	call *genAICall,
 ) (*responses.Response, bool, error) {
 	call.beginAttempt()
+	summaryParts := 0
 	stream := c.oaiClient.Responses.NewStreaming(ctx, params, option.WithMaxRetries(sdkNoRetries))
 	defer stream.Close()
 
@@ -89,9 +91,19 @@ func (c *OpenAIProvider) responsesNewStreaming(
 				deltaEmitted = true
 				call.firstToken()
 			}
+		case "response.reasoning_summary_part.added":
+			// Summary parts read as paragraphs, matching ExtractOpenAIReasoningSummary.
+			if summaryParts > 0 && onReasoningDelta != nil {
+				onReasoningDelta("\n\n")
+			}
+			summaryParts++
 		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 			if ev.Delta != "" {
 				call.firstToken()
+			}
+			// Only summaries are shown: raw reasoning text is not requested or displayed.
+			if ev.Type == "response.reasoning_summary_text.delta" && onReasoningDelta != nil && ev.Delta != "" {
+				onReasoningDelta(ev.Delta)
 			}
 		case "response.completed":
 			resp := ev.AsResponseCompleted().Response
@@ -165,8 +177,44 @@ func (c *OpenAIProvider) CallWithRetryStreaming(
 	onTextDelta func(delta string),
 ) (*responses.Response, error) {
 	return c.callWithRetry(ctx, func(ctx context.Context, params responses.ResponseNewParams, call *genAICall) (*responses.Response, bool, error) {
-		return c.responsesNewStreaming(ctx, params, onTextDelta, call)
+		return c.responsesNewStreaming(ctx, params, onTextDelta, nil, call)
 	}, params)
+}
+
+// CallWithRetryStreamingReasoning is CallWithRetryStreaming that also streams reasoning
+// summaries to reasoning (when a reasoning effort asked for them; ADR 0x026). A retried
+// attempt that had streamed reasoning first fires OnReset, as on the Claude path.
+func (c *OpenAIProvider) CallWithRetryStreamingReasoning(
+	ctx context.Context,
+	params responses.ResponseNewParams,
+	onTextDelta func(delta string),
+	reasoning ReasoningStream,
+) (*responses.Response, error) {
+	onReasoning, beforeAttempt := retryAwareThinking(reasoning)
+	return c.callWithRetry(ctx, func(ctx context.Context, params responses.ResponseNewParams, call *genAICall) (*responses.Response, bool, error) {
+		beforeAttempt()
+		return c.responsesNewStreaming(ctx, params, onTextDelta, onReasoning, call)
+	}, params)
+}
+
+// ExtractOpenAIReasoningSummary returns the reasoning summaries in a Responses API response,
+// one paragraph per summary part. Empty when none were requested or returned.
+func ExtractOpenAIReasoningSummary(resp *responses.Response) string {
+	if resp == nil {
+		return ""
+	}
+	var parts []string
+	for _, item := range resp.Output {
+		if item.Type != "reasoning" {
+			continue
+		}
+		for _, s := range item.AsReasoning().Summary {
+			if t := strings.TrimSpace(s.Text); t != "" {
+				parts = append(parts, t)
+			}
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // callWithRetry runs caller under retryLLMCall. It is also where the logical call's

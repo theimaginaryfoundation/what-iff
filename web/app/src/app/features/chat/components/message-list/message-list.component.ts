@@ -55,10 +55,11 @@ interface AssistantVisual {
                 (showContext)="showContext.emit($event)"
                 (toggleBookmark)="toggleBookmark.emit($event)"
                 (retryUserMessage)="retryUserMessage.emit($event)"
+                (openToolCall)="openToolCallDetail.emit($event)"
               />
             }
             @case ('tool-call-group') {
-              <app-tool-call-group [toolCalls]="item.toolCalls" [live]="item.live ?? false" (openDetail)="openToolCallDetail.emit($event)" />
+              <app-tool-call-group [toolCalls]="item.toolCalls" [live]="item.live ?? false" [advanced]="item.advanced ?? null" (openDetail)="openToolCallDetail.emit($event)" />
             }
             @case ('model-change-divider') {
               <div class="message-list__divider" role="separator" aria-label="Model changed">

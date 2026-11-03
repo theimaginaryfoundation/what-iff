@@ -37,3 +37,48 @@ func TurnSourceFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(ctxKeyTurnSource{}).(string)
 	return v
 }
+
+type ctxKeyAgentLoop struct{}
+
+// WithAgentLoop returns a child context carrying the turn's agent loop ("standard" or
+// "advanced"; ADR 0x026), so Meter.Check can gate an Advanced turn differently before it runs.
+func WithAgentLoop(ctx context.Context, loop string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if loop == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxKeyAgentLoop{}, loop)
+}
+
+// AgentLoopFromContext returns the turn's agent loop, or "" (standard) when none was set.
+func AgentLoopFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	v, _ := ctx.Value(ctxKeyAgentLoop{}).(string)
+	return v
+}
+
+type ctxKeyPendingUsage struct{}
+
+// WithPendingUsage returns a child context carrying usage a running turn has incurred but not yet
+// recorded: the calls an Advanced step has made so far (ADR 0x026). Check is asked with it before
+// each further model call, so a meter can refuse once recording what is pending would leave
+// nothing to pay for another call, instead of only seeing the balance from before the step.
+func WithPendingUsage(ctx context.Context, u Usage) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, ctxKeyPendingUsage{}, u)
+}
+
+// PendingUsageFromContext returns the usage WithPendingUsage attached, if any.
+func PendingUsageFromContext(ctx context.Context) (Usage, bool) {
+	if ctx == nil {
+		return Usage{}, false
+	}
+	u, ok := ctx.Value(ctxKeyPendingUsage{}).(Usage)
+	return u, ok
+}

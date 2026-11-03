@@ -55,7 +55,7 @@ type fakeDialer struct {
 	mu      sync.Mutex
 	dials   map[uuid.UUID]int
 	conns   map[uuid.UUID]*fakeConn
-	deliver map[uuid.UUID]func(discordrelay.InboundMessage)
+	deliver map[uuid.UUID]Handlers
 	fail    map[uuid.UUID]bool
 }
 
@@ -63,12 +63,12 @@ func newFakeDialer() *fakeDialer {
 	return &fakeDialer{
 		dials:   map[uuid.UUID]int{},
 		conns:   map[uuid.UUID]*fakeConn{},
-		deliver: map[uuid.UUID]func(discordrelay.InboundMessage){},
+		deliver: map[uuid.UUID]Handlers{},
 		fail:    map[uuid.UUID]bool{},
 	}
 }
 
-func (d *fakeDialer) dial(_ context.Context, bot Bot, on func(discordrelay.InboundMessage)) (Conn, error) {
+func (d *fakeDialer) dial(_ context.Context, bot Bot, on Handlers) (Conn, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.dials[bot.ID]++
@@ -101,6 +101,12 @@ type recordingSink struct {
 func (r *recordingSink) HandleInbound(_ context.Context, bot Bot, msg discordrelay.InboundMessage) {
 	r.mu.Lock()
 	r.seen = append(r.seen, bot.BotUserID+":"+msg.ID)
+	r.mu.Unlock()
+}
+
+func (r *recordingSink) ChannelRenamed(_ context.Context, bot Bot, channelID, name string) {
+	r.mu.Lock()
+	r.seen = append(r.seen, bot.BotUserID+":rename:"+channelID+"="+name)
 	r.mu.Unlock()
 }
 
@@ -182,15 +188,16 @@ func TestReconcileKeepsConnectionsWhenListingFails(t *testing.T) {
 	assert.ElementsMatch(t, []uuid.UUID{a.ID}, s.Connected())
 }
 
-func TestMessagesReachTheSinkWithTheirBot(t *testing.T) {
+func TestEventsReachTheSinkWithTheirBot(t *testing.T) {
 	a := Bot{ID: uuid.New(), Token: "t", BotUserID: "111"}
 	d := newFakeDialer()
 	sink := &recordingSink{}
 	s := newSupervisor(&fakeSource{bots: []Bot{a}}, d, sink, SingleInstanceLocker{})
 	s.Reconcile(context.Background())
 
-	d.deliver[a.ID](discordrelay.InboundMessage{ID: "m1"})
-	assert.Equal(t, []string{"111:m1"}, sink.seen)
+	d.deliver[a.ID].Message(discordrelay.InboundMessage{ID: "m1"})
+	d.deliver[a.ID].ChannelRenamed("c1", "lounge")
+	assert.Equal(t, []string{"111:m1", "111:rename:c1=lounge"}, sink.seen)
 }
 
 // flakyLock reports healthy until told otherwise.
@@ -319,4 +326,32 @@ func TestToInboundCarriesAttachments(t *testing.T) {
 	assert.Equal(t, []discordrelay.Attachment{
 		{Filename: "cat.png", ContentType: "image/png", URL: "https://cdn.discordapp.com/a/cat.png", Size: 1234},
 	}, in.Attachments)
+}
+
+func TestToInboundCarriesTheBoundChannelsCurrentName(t *testing.T) {
+	state := discordgo.NewState()
+	require.NoError(t, state.GuildAdd(&discordgo.Guild{ID: "g"}))
+	require.NoError(t, state.ChannelAdd(&discordgo.Channel{ID: "c", GuildID: "g", Name: "lounge", Type: discordgo.ChannelTypeGuildText}))
+	require.NoError(t, state.ChannelAdd(&discordgo.Channel{ID: "th", GuildID: "g", ParentID: "c", Name: "a thread", Type: discordgo.ChannelTypeGuildPublicThread}))
+	s := &discordgo.Session{State: state}
+
+	tests := map[string]struct {
+		channel    string
+		wantParent string
+	}{
+		"in the channel":  {channel: "c"},
+		"in its thread":   {channel: "th", wantParent: "c"},
+		"unknown channel": {channel: "x"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			in := ToInbound(s, &discordgo.Message{ID: "m", GuildID: "g", ChannelID: tt.channel})
+			assert.Equal(t, tt.wantParent, in.ParentChannelID)
+			if tt.channel == "x" {
+				assert.Empty(t, in.BindingChannelName)
+			} else {
+				assert.Equal(t, "lounge", in.BindingChannelName, "the bound channel's name, not the thread's")
+			}
+		})
+	}
 }

@@ -323,7 +323,9 @@ func newMCPLifecycleAgentFixture(t *testing.T, serverURL string) (*Agent, *chatC
 			import_hash text,
 			rehydration_state text,
 			context_scope text NOT NULL DEFAULT 'account',
-			user_chats uuid NOT NULL
+			user_chats uuid NOT NULL,
+			reasoning_effort text,
+			agent_loop text
 		)`,
 		`CREATE TABLE mcp_servers (
 			id uuid PRIMARY KEY,
@@ -368,10 +370,25 @@ func newMCPLifecycleAgentFixture(t *testing.T, serverURL string) (*Agent, *chatC
 			description text NOT NULL,
 			content text NOT NULL,
 			hotkeys text NOT NULL,
-			agent_job_rituals uuid,
-			mood_rituals uuid,
+			slug text NOT NULL DEFAULT '',
+			license text NOT NULL DEFAULT '',
+			compatibility text NOT NULL DEFAULT '',
+			metadata json,
+			allowed_tools json,
+			disable_model_invocation bool NOT NULL DEFAULT false,
+			user_invocable bool NOT NULL DEFAULT true,
 			ritual_personality uuid,
 			user_rituals uuid NOT NULL
+		)`,
+		`CREATE TABLE mood_rituals (
+			mood_id uuid NOT NULL,
+			ritual_id uuid NOT NULL,
+			PRIMARY KEY (mood_id, ritual_id)
+		)`,
+		`CREATE TABLE agent_job_rituals (
+			agent_job_id uuid NOT NULL,
+			ritual_id uuid NOT NULL,
+			PRIMARY KEY (agent_job_id, ritual_id)
 		)`,
 		`CREATE TABLE ritual_mcp_servers (
 			ritual_id uuid NOT NULL,

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
@@ -74,10 +75,12 @@ func (a *Agent) runPersonalityMediaJob(
 
 	resultID, err := work(runCtx)
 	if err != nil {
-		if _, failErr := a.ds.UpdateJobStatus(runCtx, userID, jobID, models.JobStatusFailed, err.Error()); failErr != nil {
+		if _, failErr := a.ds.UpdateJobStatus(runCtx, userID, jobID, models.JobStatusFailed, providerkeys.FailureText(err)); failErr != nil {
 			a.logger.Error("personality media job: failed to mark failed",
 				zap.String("job_id", jobID.String()),
 				zap.Error(failErr))
+		} else {
+			a.recordJobFailureCode(runCtx, userID, jobID, err)
 		}
 		a.logger.Error("personality media job failed",
 			zap.String("job_id", jobID.String()),

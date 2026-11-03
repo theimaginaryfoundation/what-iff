@@ -1,8 +1,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -310,6 +314,10 @@ func TestParseGenerateImageFolder(t *testing.T) {
 
 	_, err = parseGenerateImageFolder(&bad)
 	require.ErrorIs(t, err, models.ErrInvalidFolder)
+
+	reserved := "skills/pdf-forms/assets"
+	_, err = parseGenerateImageFolder(&reserved)
+	require.ErrorIs(t, err, models.ErrReservedFolder, "refused before an image is generated")
 }
 
 func TestGenerateImageTool_InvalidFolderReturnsErrorResult(t *testing.T) {
@@ -431,4 +439,30 @@ func TestGenerateImageTool_RejectedByMeterGeneratesNothing(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
 	require.False(t, result.Success)
 	require.Contains(t, result.Error, "credits")
+}
+
+// Each generated image carries its thumbnail, so the tool loop shows the model that instead of
+// the full image and the save stores it (what-iff#419). An undecodable payload has none.
+func TestGenerateImageTool_AttachesAThumbnailOfEachImage(t *testing.T) {
+	t.Parallel()
+	var pic bytes.Buffer
+	require.NoError(t, png.Encode(&pic, image.NewNRGBA(image.Rect(0, 0, 1024, 1536))))
+	srv := imagesGenerateJSONServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(imagesSuccessBody(base64.StdEncoding.EncodeToString(pic.Bytes()))))
+	})
+	defer srv.Close()
+
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
+	args, err := json.Marshal(generateImageToolArgs{Prompt: "a cat"})
+	require.NoError(t, err)
+	_, atts, err := a.generateImageTool(context.Background(), &models.Chat{UserID: uuid.New(), ID: uuid.New()}, args)
+	require.NoError(t, err)
+	require.Len(t, atts, 1)
+	thumb, format, err := image.Decode(bytes.NewReader(atts[0].Thumbnail))
+	require.NoError(t, err)
+	require.Equal(t, "jpeg", format)
+	require.Equal(t, image.Pt(170, 256), thumb.Bounds().Size())
+
+	require.Nil(t, a.generatedImageThumbnail("aGVsbG8="), "not an image")
 }

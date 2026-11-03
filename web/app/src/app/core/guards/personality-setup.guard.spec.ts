@@ -53,6 +53,12 @@ describe('personalitySetupGuard', () => {
         expect(personalityService.listPersonalities).not.toHaveBeenCalled();
     });
 
+    it('lets a new account reach Tools, where remote sync brings its history in', async () => {
+        const value = await runGuard('/integrations?tab=remote-sync');
+        expect(value).toBe(true);
+        expect(personalityService.listPersonalities).not.toHaveBeenCalled();
+    });
+
     it('redirects to personalities when the user has none', async () => {
         personalityService.listPersonalities.mockReturnValue(of({ results: [], total_count: 0, page: 1 }));
 

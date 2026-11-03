@@ -52,6 +52,7 @@ By area (`tags` in the spec):
 | `GET /webhooks/chat` | `chat:read` | List threads; `personality_id` filters by persona |
 | `GET /webhooks/personality` | `chat:read` | List personas (id, name, cover) to choose a filter from |
 | `GET /webhooks/chat/{chatId}/messages` | `chat:read` | Read a thread, newest first, paged or by cursor |
+| `GET /webhooks/chat/{chatId}/summary` | `chat:read` | Read a thread's running summary and where it ends |
 | `GET /webhooks/chat/chat-message/{id}` | `chat:read` | Read one message |
 | `GET /webhooks/job/{id}` | `chat:read` | Poll a background job |
 
@@ -79,6 +80,11 @@ The principles behind them, for anyone designing an integration or extending the
 The bridge holds one token with only the scopes it needs, keeps its own mapping from an external channel to a What Iff chat id, posts inbound messages, and polls for replies.
 One token per bridge lets you revoke it alone.
 First-party clients use the session API instead.
+
+**A self-hosted copy (remote sync).**
+What Iff itself is the first-party client of this surface: a self-hosted server with remote sync on holds a `chat:read` token from the hosted app and copies its owner's threads in, walking the thread list and each changed thread's messages with `cursor` ([ADR 0x033](adr/0x033-mullet-mode-remote-sync.md)).
+It needs nothing beyond `chat:read`, which is why persona prompts, memories and attachments are not part of the copy.
+It syncs when the local app is used rather than on a clock, so a connected home server costs this surface little more than its owner's own visits; see the [mullet mode guide](guides/mullet-mode.md).
 
 ## What to expect from the contract
 

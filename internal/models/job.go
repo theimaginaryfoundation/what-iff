@@ -23,12 +23,15 @@ const (
 
 // Job represents an asynchronous background job in the system
 type Job struct {
-	ID        uuid.UUID  `json:"id"`
-	UserID    uuid.UUID  `json:"user_id"`
-	JobType   string     `json:"job_type"`
-	Reference string     `json:"reference"`
-	Status    JobStatus  `json:"status"`
-	Error     string     `json:"error,omitempty"`
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	JobType   string    `json:"job_type"`
+	Reference string    `json:"reference"`
+	Status    JobStatus `json:"status"`
+	Error     string    `json:"error,omitempty"`
+	// ErrorCode is a stable code for the failure when it has one (for example
+	// provider_not_configured), so clients can branch on it rather than on Error.
+	ErrorCode string     `json:"error_code,omitempty"`
 	ResultID  *uuid.UUID `json:"result_id,omitempty"`
 	// DraftDeltas are incremental assistant text chunks emitted while inference is in progress.
 	DraftDeltas []string `json:"draft_deltas,omitempty"`

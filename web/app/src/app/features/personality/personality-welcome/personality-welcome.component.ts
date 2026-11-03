@@ -1,17 +1,25 @@
-import { ChangeDetectionStrategy, Component, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 
 import { guideUrl } from '../../../core/constants/guides.constants';
 import { SparkleIconComponent } from '../../../shared/ui/icons/icons';
+
+/** Copied threads waiting for a persona (see PersonalityWelcomeComponent.remoteSyncWaiting). */
+export interface RemoteSyncWaiting {
+  threads: number;
+  personas: string[];
+}
 
 /**
  * First-run welcome shown on the personalities page when the user has none yet (where the
  * personality-setup guard sends brand-new accounts). Explains what WhatIff is before asking the
  * user to make their first personality, and offers the three ways to start.
  */
+import { MarketplaceBrowseLinkComponent } from '../../../extensions/marketplace-browse-link.component';
+
 @Component({
   selector: 'app-personality-welcome',
   standalone: true,
-  imports: [SparkleIconComponent],
+  imports: [SparkleIconComponent, MarketplaceBrowseLinkComponent],
   templateUrl: './personality-welcome.component.html',
   styleUrl: './personality-welcome.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -20,6 +28,14 @@ export class PersonalityWelcomeComponent {
   readonly generate = output<void>();
   readonly createManually = output<void>();
   readonly importData = output<void>();
+  /** Offers remote sync (keeping a copy of whatiff.chat threads here) when the server runs it. */
+  readonly remoteSyncAvailable = input(false);
+  readonly openRemoteSync = output<void>();
+  /**
+   * Threads remote sync already copied here, and the remote persona names they were written with:
+   * creating (or importing) a persona with one of those names gives it those threads.
+   */
+  readonly remoteSyncWaiting = input<RemoteSyncWaiting | null>(null);
 
   readonly gettingStartedHref = guideUrl('gettingStarted');
 

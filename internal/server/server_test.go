@@ -79,3 +79,31 @@ func TestMetricHTTPRoute_unmatched(t *testing.T) {
 	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/no-such-path", nil))
 	assert.Equal(t, metricRouteUnmatched, got)
 }
+
+func TestUnmatchedRoutesCarryCORSHeaders(t *testing.T) {
+	t.Parallel()
+	const origin = "https://app.example.com"
+	s := &Server{router: mux.NewRouter(), config: &Config{AllowedOrigins: []string{origin}}}
+	s.setupMiddleware()
+	// Same shape as setupRoutes: API routes live on an /api subrouter.
+	api := s.router.PathPrefix("/api").Subrouter()
+	api.HandleFunc("/known", func(w http.ResponseWriter, _ *http.Request) {}).Methods(http.MethodGet)
+
+	for _, tt := range []struct {
+		name, method, path string
+		want               int
+	}{
+		{"switched-off plugin route", http.MethodGet, "/api/buzz/bindings", http.StatusNotFound},
+		{"wrong method", http.MethodDelete, "/api/known", http.StatusMethodNotAllowed},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req.Header.Set("Origin", origin)
+			rec := httptest.NewRecorder()
+			s.router.ServeHTTP(rec, req)
+			assert.Equal(t, tt.want, rec.Code)
+			assert.Equal(t, origin, rec.Header().Get("Access-Control-Allow-Origin"), "a cross-origin caller must be able to read the status")
+		})
+	}
+}

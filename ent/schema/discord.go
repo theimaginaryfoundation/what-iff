@@ -84,6 +84,9 @@ func (DiscordBinding) Fields() []ent.Field {
 		// Discord user ids. Empty allow list = anyone not denied; deny always wins.
 		field.JSON("allow_user_ids", []string{}).Default([]string{}),
 		field.JSON("deny_user_ids", []string{}).Default([]string{}),
+		// Whether other bots (other personas' among them) may start turns. Off by default;
+		// when on, the loop guard bounds agent-to-agent exchanges (docs/adr/0x031).
+		field.Bool("answer_agents").Default(false),
 		// The owner's explicit acknowledgement that this relay thread is NOT sandboxed,
 		// so anyone allowed to tag the bot can use its full memory, scratchpad and tools.
 		// Default false: the relay answers only sandboxed threads unless this is set (fail
@@ -144,6 +147,9 @@ func (DiscordMessageLink) Fields() []ent.Field {
 		field.Enum("status").Values("received", "pending", "sent", "failed").Default("received"),
 		field.String("error").Optional().Nillable(),
 		field.Int("attempts").Default(0),
+		// Inbound: how many turns in a row agents have started on the binding, this one
+		// included (0 when a person wrote it). The loop guard reads the newest (docs/adr/0x031).
+		field.Int("agent_depth").Default(0),
 	}
 }
 
@@ -157,6 +163,9 @@ func (DiscordMessageLink) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("discord_message_id").Edges("binding").Unique(),
 		index.Fields("chat_message_id"),
+		// The binding's newest inbound message within the loop guard's chain gap (a recent range of
+		// created_at, then the binding).
+		index.Fields("created_at").Edges("binding"),
 	}
 }
 

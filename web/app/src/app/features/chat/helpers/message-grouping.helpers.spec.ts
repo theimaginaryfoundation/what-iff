@@ -120,6 +120,27 @@ describe('groupMessages', () => {
 
         expect(groups.map(g => g.kind)).toEqual(['tool-call-group']);
     });
+
+    it('leaves an Advanced reply\'s step tool calls to its working notes', () => {
+        const tool = (id: string) => ({
+            id,
+            chat_message_id: '1',
+            tool_name: 'search',
+            tool_input: '{}',
+            tool_output: '{}',
+            tool_error: '',
+            created_at: '2024-01-01T00:00:00Z',
+            updated_at: '2024-01-01T00:00:00Z',
+        });
+        const agent_run = { version: 1, steps: [{ step: 1, events: [{ kind: 'tool_call', tool_call_id: 'tool-1' }] }] };
+
+        const noted = groupMessages([message('1', 'Assistant', { message: '', tool_calls: [tool('tool-1')], agent_run })]);
+        expect(noted.map(g => g.kind)).toEqual(['message-group']);
+
+        const mixed = groupMessages([message('1', 'Assistant', { message: '', tool_calls: [tool('tool-1'), tool('tool-2')], agent_run })]);
+        expect(mixed.map(g => g.kind)).toEqual(['tool-call-group', 'message-group']);
+        expect(mixed[0].kind === 'tool-call-group' && mixed[0].toolCalls.map(c => c.id)).toEqual(['tool-2']);
+    });
 });
 
 describe('needsPendingAssistantPlaceholder', () => {
@@ -217,6 +238,27 @@ describe('appendLiveToolCallGroup', () => {
             expect(new Set(dupes.toolCalls.map(c => c.id)).size).toBe(2);
         }
         expect(group.toolCalls[2].updated_at).toBe('t4');
+    });
+
+    it('keeps a call\'s id when older calls drop off the front, and carries its step', () => {
+        const calls = [
+            { id: 'a', name: 'x', status: 'complete' as const, round: 0, step: 1, started_at: 't0' },
+            { id: 'b', name: 'y', status: 'running' as const, round: 0, step: 2, started_at: 't1' },
+        ];
+        const before = appendLiveToolCallGroup([], pending, calls)[0];
+        const after = appendLiveToolCallGroup([], pending, calls.slice(1))[0];
+        if (before.kind !== 'tool-call-group' || after.kind !== 'tool-call-group') throw new Error('expected tool-call groups');
+        expect(after.toolCalls[0].id).toBe(before.toolCalls[1].id);
+        expect(after.toolCalls[0].step).toBe(2);
+    });
+
+    it('shows an Advanced turn\'s step and plan even before its first tool call', () => {
+        const advanced = { step: 1, plan: [{ content: 'Look it up', status: 'in_progress' as const }] };
+        const [group] = appendLiveToolCallGroup([], pending, [], advanced);
+        expect(group.kind).toBe('tool-call-group');
+        if (group.kind !== 'tool-call-group') return;
+        expect(group.advanced).toEqual(advanced);
+        expect(group.toolCalls).toEqual([]);
     });
 });
 

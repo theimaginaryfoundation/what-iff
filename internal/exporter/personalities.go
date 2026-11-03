@@ -25,6 +25,9 @@ type PersonalityInput struct {
 	CharacterCard map[string]any
 	// OmittedCardFields are card fields import left out of the prompt (see stcard.ExportInput).
 	OmittedCardFields []string
+	// ReasoningEffort / AgentLoop are the personality's turn settings (ADR 0x026); empty is not set.
+	ReasoningEffort string
+	AgentLoop       string
 }
 
 // PersonalityFile is the per-personality JSON written to the archive (and read back on import). The
@@ -42,6 +45,8 @@ type PersonalityFile struct {
 	// SillyTavern card keeps its greetings, tags and extensions through an account export/import.
 	CharacterCard     map[string]any `json:"character_card,omitempty"`
 	OmittedCardFields []string       `json:"omitted_card_fields,omitempty"`
+	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
+	AgentLoop         string         `json:"agent_loop,omitempty"`
 }
 
 // PersonalityDir returns the archive directory for a personality; exported so the importer can find
@@ -70,6 +75,8 @@ func WritePersonalities(tree Tree, ps []PersonalityInput) error {
 			UpdatedAt:         p.UpdatedAt.UTC(),
 			CharacterCard:     p.CharacterCard,
 			OmittedCardFields: p.OmittedCardFields,
+			ReasoningEffort:   p.ReasoningEffort,
+			AgentLoop:         p.AgentLoop,
 		})
 		if err != nil {
 			return err

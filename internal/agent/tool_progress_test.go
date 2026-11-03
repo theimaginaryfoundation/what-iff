@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -242,4 +243,28 @@ func TestExecuteToolUses_RecordsLiveToolProgress(t *testing.T) {
 	assert.Equal(t, models.ChatTurnToolError, final[1].Status)
 	assert.Contains(t, final[1].Output, "nope")
 	assert.Equal(t, 2, final[1].Round)
+}
+
+// An Advanced run's progress carries its step and plan, tags calls with the step, and keeps only
+// the newest calls live.
+func TestJobToolProgress_AdvancedStepPlanAndCap(t *testing.T) {
+	w := &fakeProgressWriter{}
+	p := newJobToolProgress(context.Background(), w, zap.NewNop(), testChatJob(), nil)
+	require.NotNil(t, p)
+	p.SetStep(2)
+	p.SetPlan([]models.PlanItem{{Content: "a", Status: models.PlanItemPending}})
+	for i := 0; i < advancedProgressMaxEntries+5; i++ {
+		p.Started(0, provider.ToolUse{ID: fmt.Sprintf("c%d", i), Name: "t"})
+	}
+	p.Close()
+	got := w.latest(t)
+	assert.Equal(t, 2, got.Step)
+	assert.Equal(t, []models.PlanItem{{Content: "a", Status: models.PlanItemPending}}, got.Plan)
+	require.Len(t, got.ToolCalls, advancedProgressMaxEntries)
+	assert.Equal(t, "c5", got.ToolCalls[0].ID, "the oldest calls are dropped")
+	assert.Equal(t, 2, got.ToolCalls[0].Step)
+
+	var nilProgress *jobToolProgress
+	nilProgress.SetStep(1) // nil-safe
+	nilProgress.SetPlan(nil)
 }

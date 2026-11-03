@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -58,18 +57,29 @@ func (a *Agent) persistInferencePhase(ctx context.Context, chatJob *models.Job, 
 	// Only now wake the turns queued behind this one: the chat's response chain is saved.
 	a.noteTurnJobStatus(chatJob)
 
-	if err := a.ds.SetChatMessageLastError(ctx, chatJob.UserID, chatMessage.ID, nil); err != nil {
+	if err := a.ds.SetChatMessageLastError(ctx, chatJob.UserID, chatMessage.ID, nil, ""); err != nil {
 		a.logger.Warn("failed to clear user message last_error_message after inference", zap.Error(err))
 	}
 
 	return nil
 }
 
+// turnContextTokens is the size of the context the turn started from, which drives checkpointing.
+// The final call's input says that for a Standard turn, but an Advanced run's final call also
+// carries everything the run did (tool results, notes) that the thread's next turn will not, so
+// its first call is used: otherwise a long run would checkpoint a thread that is not long.
+func turnContextTokens(chatCtx *chatContext, result *provider.GenerateResponse) int64 {
+	if chatCtx != nil && chatCtx.turnSettings.Advanced() && len(chatCtx.calls) > 0 && chatCtx.calls[0].InputTokens > 0 {
+		return chatCtx.calls[0].InputTokens
+	}
+	return result.InputTokens
+}
+
 // persistUserTurnAndChatAfterInference updates user-turn tokens/context and chat continuity after inference.
 // Errors are logged only; callers should have already marked the job inference-complete when required.
 func (a *Agent) persistUserTurnAndChatAfterInference(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage, chat *models.Chat, chatCtx *chatContext, result *provider.GenerateResponse, persistUserTurnUpdate bool) {
 	if persistUserTurnUpdate && chatMessage != nil && result != nil {
-		chatMessage.Tokens = result.InputTokens
+		chatMessage.Tokens = turnContextTokens(chatCtx, result)
 		if chatCtx != nil {
 			chatMessage.AdditionalContext = additionalContextItemsFromChatContext(chatCtx)
 		}
@@ -80,7 +90,7 @@ func (a *Agent) persistUserTurnAndChatAfterInference(ctx context.Context, userID
 
 	if chat != nil && result != nil {
 		chat.ResponseID = &result.ID
-		lastMessageTime := time.Unix(result.CreatedAt, 0)
+		lastMessageTime := result.CreatedTime()
 		chat.LastMessageTime = &lastMessageTime
 		// Continuity only: chat is the turn-start copy, and saving it whole reverted any model,
 		// personality or setting change the user made while the turn ran (#347).

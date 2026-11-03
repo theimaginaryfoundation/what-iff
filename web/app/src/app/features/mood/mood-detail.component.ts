@@ -15,11 +15,12 @@ import { FileAttachment } from '../../core/models/file-attachment.model';
 import { Ritual } from '../../core/models/ritual.model';
 import { Personality } from '../../core/models/personality.model';
 import { Model } from '../../core/models/model.model';
+import { EntityMarketplaceOutletComponent } from '../../extensions/entity-marketplace-outlet.component';
 
 @Component({
   selector: 'app-mood-detail',
   standalone: true,
-  imports: [CommonModule, FormsModule, AuthImagePipe],
+  imports: [CommonModule, FormsModule, AuthImagePipe, EntityMarketplaceOutletComponent],
   templateUrl: './mood-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./mood-detail.component.scss']

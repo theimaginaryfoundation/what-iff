@@ -24,6 +24,7 @@ import { MemoryCardGridComponent } from './components/memory-card-grid.component
 import { MemoryFocusPanelComponent } from './components/memory-focus-panel.component';
 import { MemoryScopeDialogComponent } from './components/memory-scope-dialog.component';
 import { DeleteMemoryModalComponent } from './components/delete-memory-modal.component';
+import { EntityListComponent } from './components/entity-list.component';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { CalendarIconComponent, ChevDownIconComponent, SearchIconComponent } from '../../shared/ui/icons/icons';
@@ -40,6 +41,7 @@ const DESKTOP_FOCUS_QUERY = '(min-width: 961px)';
     MemoryFocusPanelComponent,
     MemoryScopeDialogComponent,
     DeleteMemoryModalComponent,
+    EntityListComponent,
     ModalComponent,
     CalendarIconComponent,
     ChevDownIconComponent,
@@ -90,8 +92,8 @@ export class MemoriesListTabComponent implements OnInit {
   readonly globalScopeLabel = GLOBAL_SCOPE_LABEL;
   readonly provenanceFilterHint = computed(() =>
     this.filters().provenance === 'external'
-      ? 'Memories learned from other people in Discord threads (unverified)'
-      : 'Filter by where memories came from: yours, or learned from other people in Discord threads',
+      ? 'Memories learned from other people in Discord, Buzz or Slack threads (unverified)'
+      : 'Filter by where memories came from: yours, or learned from other people in Discord, Buzz or Slack threads',
   );
   readonly deleting = this.view.deleting;
   readonly mutating = this.view.mutating;
@@ -111,6 +113,7 @@ export class MemoriesListTabComponent implements OnInit {
   readonly statusFilter = computed(() => this.filters().status);
   readonly isArchivedView = computed(() => this.statusFilter() === 'inactive');
   readonly isSummariesView = computed(() => this.statusFilter() === 'summaries');
+  readonly isEntitiesView = computed(() => this.statusFilter() === 'entities');
   readonly isThreadView = computed(() => this.filters().scope === 'chat');
   readonly countLabel = computed(() => {
     const n = this.totalCount();
@@ -183,6 +186,12 @@ export class MemoriesListTabComponent implements OnInit {
   }
 
   setStatusFilter(status: MemoryStatusFilter): void {
+    if (status === 'entities') {
+      this.clearSelection();
+      this.clearFocus();
+      this.onFilterChanged({ status, scope: 'all', level: 'all' });
+      return;
+    }
     if (status === 'summaries') {
       this.clearSelection();
       this.clearFocus();

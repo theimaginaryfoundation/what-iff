@@ -2,12 +2,14 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -59,12 +61,32 @@ func (t *ListTool) listPersonalities(ctx context.Context, chat *models.Chat, a l
 	return t.okPaged(listKindPersonalities, items, listTruncationNote("personalities", meta, len(items)), meta)
 }
 
-func (t *ListTool) listSkills(ctx context.Context, chat *models.Chat, a listArgs) (string, error) {
+// listSkills lists the owner's skills with the slug load_skill takes and whether each is loaded
+// in this chat; filter matches slug, name, description and instructions (ADR 0x035).
+func (t *ListTool) listSkills(ctx context.Context, chat *models.Chat, a listArgs, loadedIDs []uuid.UUID) (string, error) {
 	limit := clampLimit(a.Limit, listDiscoveryLimit)
 	pageNum := clampPage(a.Page)
-	page, err := t.store.ListRituals(ctx, chat.UserID, pageNum, limit, models.RitualFilters{})
+	filters := models.RitualFilters{}
+	if q, ok := validateNonEmptyString(a.Filter); ok {
+		filters.Query = &q
+	}
+	page, err := t.store.ListRituals(ctx, chat.UserID, pageNum, limit, filters)
 	if err != nil {
 		return t.fail(listKindSkills, fmt.Sprintf("failed to list skills: %v", err))
+	}
+	loaded := make(map[uuid.UUID]struct{}, len(loadedIDs))
+	for _, id := range loadedIDs {
+		loaded[id] = struct{}{}
+	}
+	var ids []uuid.UUID
+	for _, r := range page.Results {
+		if ritual, ok := r.(*models.Ritual); ok && ritual != nil {
+			ids = append(ids, ritual.ID)
+		}
+	}
+	fileCounts, err := t.store.CountSkillFiles(ctx, chat.UserID, ids)
+	if err != nil {
+		return t.fail(listKindSkills, fmt.Sprintf("failed to count skill files: %v", err))
 	}
 	items := make([]listItem, 0, len(page.Results))
 	for _, r := range page.Results {
@@ -72,14 +94,21 @@ func (t *ListTool) listSkills(ctx context.Context, chat *models.Chat, a listArgs
 		if !ok || ritual == nil {
 			continue
 		}
+		_, isLoaded := loaded[ritual.ID]
+		hasFiles := fileCounts[ritual.ID] > 0
 		items = append(items, listItem{
 			ID:          ritual.ID.String(),
+			Slug:        ritual.Slug,
 			Name:        ritual.Name,
 			Description: ritual.Description,
+			Loaded:      &isLoaded,
+			HasFiles:    &hasFiles,
 		})
 	}
 	meta := listPageMeta{Page: pageNum, Limit: limit, TotalCount: page.TotalCount}
-	return t.okPaged(listKindSkills, items, listTruncationNote("skills", meta, len(items)), meta)
+	note := listTruncationNote("skills", meta, len(items))
+	note = joinNotes(note, "Load a skill's instructions with load_skill and its slug; loaded is whether this chat has it loaded now; has_files means the bundle has reference files or scripts under skills/<slug>/.")
+	return t.okPaged(listKindSkills, items, note, meta)
 }
 
 // listSandboxFiles lists the files uploaded to this conversation: the only files a sandboxed chat
@@ -125,7 +154,17 @@ func (t *ListTool) listSandboxFiles(ctx context.Context, chat *models.Chat, a li
 }
 
 func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs) (string, error) {
-	limit := clampLimit(a.Limit, listDefaultLimit)
+	view := strings.ToLower(strings.TrimSpace(a.View))
+	if view != "" && view != listFileViewList && view != listFileViewTree {
+		return t.fail(listKindFiles, fmt.Sprintf("unknown view %q; use \"list\" or \"tree\"", a.View))
+	}
+	// A tree is drawn from one page, so it defaults to the largest page: one folder's whole tree
+	// in most libraries.
+	defLimit := listDefaultLimit
+	if view == listFileViewTree {
+		defLimit = listMaxLimit
+	}
+	limit := clampLimit(a.Limit, defLimit)
 	pageNum := clampPage(a.Page)
 	if chat.IsSandboxed() {
 		return t.listSandboxFiles(ctx, chat, a, limit, pageNum)
@@ -145,6 +184,14 @@ func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs)
 		if folder != "" { // "/" or "" would mean the top level, which is "no folder filter" here
 			filters.FolderPrefix = &folder
 		}
+	}
+
+	switch origin := models.FileOrigin(strings.ToLower(strings.TrimSpace(a.Origin))); origin {
+	case "":
+	case models.FileOriginAgent, models.FileOriginUser, models.FileOriginSkill:
+		filters.Origin = origin
+	default:
+		return t.fail(listKindFiles, fmt.Sprintf("unknown origin %q; use \"agent\", \"user\" or \"skill\"", a.Origin))
 	}
 
 	switch normalizeFileScope(a.Scope) {
@@ -169,14 +216,24 @@ func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs)
 		if !ok || fa == nil {
 			continue
 		}
-		items = append(items, listItem{
+		item := listItem{
 			ID:       fa.ID.String(),
 			Name:     fa.Name,
 			FileType: fa.FileType,
 			Folder:   fa.Folder,
-		})
+		}
+		if fa.Origin != "" && fa.Origin != models.FileOriginUser {
+			item.Origin = string(fa.Origin)
+		}
+		items = append(items, item)
 	}
 	meta := listPageMeta{Page: pageNum, Limit: limit, TotalCount: page.TotalCount}
+	if view == listFileViewTree {
+		res := pagedListResult(listKindFiles, items, listTruncationNote("files", meta, len(items)), meta)
+		res.Tree = renderFileTree(items)
+		res.Items = []listItem{}
+		return marshalToolResult(res, listToolName)
+	}
 	return t.okPaged(listKindFiles, items, listTruncationNote("files", meta, len(items)), meta)
 }
 
@@ -222,6 +279,11 @@ func (t *ListTool) listConversations(ctx context.Context, chat *models.Chat, a l
 }
 
 func (t *ListTool) listJobs(ctx context.Context, chat *models.Chat, a listArgs) (string, error) {
+	// A job id as the filter reads that one job in full, whatever its status: rows otherwise show only
+	// the start of each prompt, and a model about to rewrite a prompt needs the whole of it.
+	if id, err := uuid.Parse(strings.TrimSpace(a.Filter)); err == nil {
+		return t.getJob(ctx, chat, id)
+	}
 	limit := clampLimit(a.Limit, listDefaultLimit)
 	pageNum := clampPage(a.Page)
 	filters := models.AgentJobFilters{}
@@ -242,29 +304,61 @@ func (t *ListTool) listJobs(ctx context.Context, chat *models.Chat, a listArgs) 
 		if !ok || j == nil {
 			continue
 		}
-		name := ""
-		if j.Title != nil {
-			name = *j.Title
-		}
-		item := listItem{
-			ID:     j.ID.String(),
-			Name:   name,
-			Status: string(j.Status),
-		}
-		// Next run only for jobs that still have a future — schedule_input ("in 5 minutes")
-		// is stale nonsense next to status=complete/failed.
-		if j.Status != models.AgentJobStatusComplete && j.Status != models.AgentJobStatusFailed {
-			item.NextRuntime = rfc3339Ptr(j.NextRunAt)
-		}
+		item := jobListItem(j)
+		item.Description = TruncateRunes(item.Description, listJobPromptRunes)
 		items = append(items, item)
 	}
 	meta := listPageMeta{Page: pageNum, Limit: limit, TotalCount: page.TotalCount}
 	activeNote := ""
 	if !a.IncludeCompleted {
-		activeNote = "Active jobs only; pass include_completed=true to also see finished/failed one-offs."
+		activeNote = "Active jobs only; pass include_completed=true to also see paused jobs and finished/failed one-offs."
 	}
-	note := joinNotes(activeNote, listTruncationNote("jobs", meta, len(items)))
+	note := joinNotes(activeNote, listJobPromptNote, listTruncationNote("jobs", meta, len(items)))
 	return t.okPaged(listKindJobs, items, note, meta)
+}
+
+// getJob lists the one job id names, with its whole prompt, model and skills.
+func (t *ListTool) getJob(ctx context.Context, chat *models.Chat, id uuid.UUID) (string, error) {
+	j, err := t.store.GetAgentJob(ctx, chat.UserID, id)
+	if errors.Is(err, datastore.ErrAgentJobNotFound) {
+		return t.ok(listKindJobs, nil, "No job has that id; list jobs (include_completed=true) to find it.")
+	}
+	if err != nil {
+		return t.fail(listKindJobs, fmt.Sprintf("failed to load job: %v", err))
+	}
+	item := jobListItem(j)
+	if j.ModelID != nil {
+		item.ModelID = j.ModelID.String()
+	}
+	for _, r := range j.Rituals {
+		if r != nil {
+			item.SkillIDs = append(item.SkillIDs, r.ID.String())
+		}
+	}
+	sort.Strings(item.SkillIDs)
+	return t.ok(listKindJobs, []listItem{item}, "The job in full: description is its whole prompt.")
+}
+
+// jobListItem is a job's row with its prompt uncut; the list view cuts it to a preview.
+func jobListItem(j *models.AgentJob) listItem {
+	item := listItem{
+		ID:          j.ID.String(),
+		Description: strings.TrimSpace(j.Prompt),
+		Status:      string(j.Status),
+		Schedule:    j.ScheduleInput,
+	}
+	if j.Title != nil {
+		item.Name = *j.Title
+	}
+	if j.ChatID != nil {
+		item.ThreadID = j.ChatID.String()
+	}
+	// Next run only for jobs that still have a future — schedule_input ("in 5 minutes")
+	// is stale nonsense next to status=complete/failed.
+	if j.Status != models.AgentJobStatusComplete && j.Status != models.AgentJobStatusFailed {
+		item.NextRuntime = rfc3339Ptr(j.NextRunAt)
+	}
+	return item
 }
 
 func (t *ListTool) listMCPServers(ctx context.Context, chat *models.Chat, scope MCPScopeFunc) (string, error) {

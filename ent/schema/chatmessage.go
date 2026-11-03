@@ -58,10 +58,17 @@ func (ChatMessage) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("Provider-reported reasoning/thinking text for an assistant turn (e.g. GLM thinking blocks, MiMo reasoning_content), concatenated across the turn's tool rounds. Display-only: never replayed into model context."),
+		field.JSON("agent_run", &modeltypes.AgentRun{}).
+			Optional().
+			Comment("Structured record of an Advanced-loop turn (ADR 0x026): its steps, plan and end reason. Display and continuation only; NULL on Standard turns."),
 		field.Text("last_error_message").
 			Optional().
 			Nillable().
 			Comment("User-visible generation failure for this user message; cleared on successful delivery"),
+		field.String("last_error_code").
+			Optional().
+			Nillable().
+			Comment("Stable code for last_error_message when it has one (models error codes); set and cleared with it"),
 		field.Time("checkpoint_completed_at").
 			Optional().
 			Nillable().

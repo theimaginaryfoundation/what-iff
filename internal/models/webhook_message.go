@@ -58,6 +58,16 @@ type WebhookMessage struct {
 	Attachments               []WebhookAttachment `json:"attachments,omitempty"`
 }
 
+// ChatSummary is a thread's running summary: the text a reply reads in place of every message
+// sent before WindowStart (the chat's last_checkpoint_at). Messages from WindowStart on are read
+// as they are. An empty Summary means the thread has none yet. The webhook read API serves it, so
+// remote sync can give a copy the summary instead of summarizing the history again.
+type ChatSummary struct {
+	ChatID      uuid.UUID  `json:"chat_id"`
+	Summary     string     `json:"summary"`
+	WindowStart *time.Time `json:"window_start,omitempty"`
+}
+
 // WebhookAttachment is attachment metadata only. File contents are not served on this surface.
 type WebhookAttachment struct {
 	ID          uuid.UUID `json:"id"`

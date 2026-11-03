@@ -84,6 +84,9 @@ type DiscordBinding struct {
 	InboundEnabled bool      `json:"inbound_enabled"`
 	AllowUserIDs   []string  `json:"allow_user_ids"`
 	DenyUserIDs    []string  `json:"deny_user_ids"`
+	// AnswerAgents lets other bots (other personas' among them) start turns, within the
+	// relay's loop guard (docs/adr/0x031).
+	AnswerAgents bool `json:"answer_agents"`
 	// AllowUnrestricted is the owner's stored acknowledgement that the bound thread
 	// is not sandboxed. Without it the relay answers only sandboxed threads.
 	AllowUnrestricted bool `json:"allow_unrestricted"`
@@ -107,6 +110,7 @@ type DiscordBindingCreate struct {
 	InboundEnabled bool
 	AllowUserIDs   []string
 	DenyUserIDs    []string
+	AnswerAgents   bool
 	// AllowUnrestricted records the acknowledgement for a thread that is not sandboxed.
 	AllowUnrestricted bool
 }
@@ -119,6 +123,7 @@ type DiscordBindingPatch struct {
 	InboundEnabled    *bool
 	AllowUserIDs      *[]string
 	DenyUserIDs       *[]string
+	AnswerAgents      *bool
 	AllowUnrestricted *bool
 	Status            *DiscordBindingStatus
 	// LastError: a pointer to "" clears it.
@@ -158,7 +163,10 @@ type DiscordMessageLink struct {
 	Status           DiscordLinkStatus `json:"status"`
 	Error            *string           `json:"error,omitempty"`
 	Attempts         int               `json:"attempts"`
-	CreatedAt        time.Time         `json:"created_at"`
+	// AgentDepth (inbound): consecutive agent-started turns on the binding, this one
+	// included; 0 when a person wrote it.
+	AgentDepth int       `json:"agent_depth"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // DiscordInbound is a Discord message about to become a user message.
@@ -168,6 +176,7 @@ type DiscordInbound struct {
 	DiscordChannelID string
 	AuthorID         string
 	AuthorName       string
+	AgentDepth       int
 }
 
 // DiscordPendingPostSource is what asked for the next reply to be posted.

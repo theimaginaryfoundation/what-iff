@@ -45,6 +45,11 @@ type Config struct {
 	// LocalLLMModel is the model name requested from the local server
 	// (LOCAL_LLM_MODEL). Required when LLMBackend == "local".
 	LocalLLMModel string
+	// LocalServerHost is the name a model server on this computer is reached
+	// by (LOCAL_SERVER_HOST): "localhost" by default, and
+	// "host.docker.internal" in the container image, where localhost is the
+	// container itself. It fills in the Ollama and LM Studio presets' addresses.
+	LocalServerHost string
 	// LLMRequestTimeout, LLMStreamTimeout and LLMStreamIdleTimeout bound each HTTP attempt
 	// of a provider SDK call (LLM_REQUEST_TIMEOUT, LLM_STREAM_TIMEOUT,
 	// LLM_STREAM_IDLE_TIMEOUT; Go durations, 0 disables). Defaults and their rationale are
@@ -99,6 +104,8 @@ type Config struct {
 	//   80920031 AGENTJOBS_SCHEDULER_LOCK_KEY        agent job scheduler leadership
 	//   80920032 reserved: DISCORD_GATEWAY_LOCK_KEY  Discord relay gateway leader (private overlay; held for the leader's lifetime)
 	//   80920033 MEMORY_EMBEDDING_BACKFILL_LOCK_KEY  memory embedding backfill pass
+	//   80920034 BUZZ_GATEWAY_LOCK_KEY               Buzz relay gateway leader (internal/buzzplugin; held for the leader's lifetime)
+	//   80920035 SLACK_GATEWAY_LOCK_KEY              Slack relay gateway leader (internal/slackplugin; held for the leader's lifetime)
 	AgentJobsSchedulerLockKey int64
 	// MemoryEmbeddingBackfillLockKey is the Postgres advisory lock key that lets
 	// exactly one instance run each memory embedding backfill pass.
@@ -194,6 +201,10 @@ func NewConfig() *Config {
 	llmBackend, mockLLMMode, mockLLMFixedResponses, mockLLMStreamDelay := parseMockLLMConfig()
 	localLLMBaseURL := strings.TrimSpace(os.Getenv("LOCAL_LLM_BASE_URL"))
 	localLLMModel := strings.TrimSpace(os.Getenv("LOCAL_LLM_MODEL"))
+	localServerHost := strings.TrimSpace(os.Getenv("LOCAL_SERVER_HOST"))
+	if localServerHost == "" {
+		localServerHost = "localhost"
+	}
 
 	openAIKey := os.Getenv("OPENAI_API_KEY")
 	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
@@ -353,6 +364,7 @@ func NewConfig() *Config {
 		MockLLMStreamDelay:                  mockLLMStreamDelay,
 		LocalLLMBaseURL:                     localLLMBaseURL,
 		LocalLLMModel:                       localLLMModel,
+		LocalServerHost:                     localServerHost,
 		LLMRequestTimeout:                   durationEnv("LLM_REQUEST_TIMEOUT", callTimeouts.Request),
 		LLMStreamTimeout:                    durationEnv("LLM_STREAM_TIMEOUT", callTimeouts.Stream),
 		LLMStreamIdleTimeout:                durationEnv("LLM_STREAM_IDLE_TIMEOUT", callTimeouts.StreamIdle),

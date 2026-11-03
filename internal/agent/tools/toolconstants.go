@@ -232,10 +232,71 @@ var CreateAgentJobToolSpec = FunctionToolSpec{
 		},
 		"use_current_thread": map[string]interface{}{
 			"type":        "boolean",
-			"description": "When true, run the job in the current conversation thread. When false or omitted, create a dedicated thread on first run (default).",
+			"description": "Same as thread_id=\"current\". Prefer thread_id.",
+		},
+		"thread_id": map[string]interface{}{
+			"type":        "string",
+			"description": "Where the job runs: \"current\" for this conversation, the id of another conversation (from list kind=\"conversations\"; not a sandboxed one), or \"new\" (the default when omitted) for a dedicated thread made on its first run.",
 		},
 	},
 	Required: []string{"schedule_input", "prompt"},
+}
+
+const UpdateAgentJobToolDescription = `Change a scheduled job that already exists, instead of deleting it and creating a new one.
+
+Use it when the user wants an existing reminder or recurring task changed: a new time ("move my 8am check-in to 9"), different wording, a different thread to post in, a different model or skills, or to pause or resume it. To snooze a reminder that just fired, prefer a new create_agent_job.
+
+Notes:
+- job_id is the id list (kind="jobs") shows. Pass include_completed=true to also see paused, finished and failed jobs.
+- list shows only the start of each prompt. Before rewriting one, read the job in full with list (kind="jobs", filter=<the job's id>).
+- Only the fields you pass change; leave the rest out.
+- thread_id: "current" for this conversation, the id of another conversation (from list kind="conversations"; not a sandboxed one), or "new" for a dedicated thread made on the next run.
+- schedule_input is re-read in natural language, like when creating. A new schedule reactivates a finished one-off job.
+- model_override: a model name or id; "" goes back to the default model.
+- skill_ids replaces the job's skills with exactly this list; [] removes them all.
+- status: "paused" stops the job from running until it is set back to "active".
+- The result shows the job as it now stands.`
+
+var UpdateAgentJobToolSpec = FunctionToolSpec{
+	Name:        "update_agent_job",
+	Description: UpdateAgentJobToolDescription,
+	Properties: map[string]interface{}{
+		"job_id": map[string]interface{}{
+			"type":        "string",
+			"description": "Id of the job to change, from list (kind=\"jobs\").",
+		},
+		"title": map[string]interface{}{
+			"type":        "string",
+			"description": "New short title; \"\" clears it.",
+		},
+		"prompt": map[string]interface{}{
+			"type":        "string",
+			"description": "New prompt to run when the job fires.",
+		},
+		"schedule_input": map[string]interface{}{
+			"type":        "string",
+			"description": "New schedule in natural language (e.g. 'every weekday at 9 AM', 'tomorrow at noon'). Not more often than every 5 minutes.",
+		},
+		"model_override": map[string]interface{}{
+			"type":        "string",
+			"description": "Model name or id to run the job with; \"\" for the default model.",
+		},
+		"thread_id": map[string]interface{}{
+			"type":        "string",
+			"description": "Where the job runs: \"current\", a conversation id from list (kind=\"conversations\"), or \"new\" for a dedicated thread.",
+		},
+		"skill_ids": map[string]interface{}{
+			"type":        "array",
+			"description": "The job's skills, replacing the current ones (from list kind=\"skills\"); [] removes them all.",
+			"items":       map[string]interface{}{"type": "string"},
+		},
+		"status": map[string]interface{}{
+			"type":        "string",
+			"enum":        []string{"active", "paused"},
+			"description": "\"paused\" to stop the job running, \"active\" to resume it.",
+		},
+	},
+	Required: []string{"job_id"},
 }
 
 const RunSubagentToolDescription = `Synchronously run a focused subagent call and return only its output.

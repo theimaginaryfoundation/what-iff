@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
+)
 
 // ChatTurnToolStatus is the lifecycle state of one tool call in an in-flight chat turn.
 type ChatTurnToolStatus string
@@ -19,7 +23,24 @@ type ChatTurnProgress struct {
 	// WaitingOn is set while the turn is queued behind an earlier turn in its chat (the turn gate),
 	// naming the phase of that earlier turn it is waiting on. Empty once the turn runs.
 	WaitingOn ChatTurnWaiting `json:"waiting_on,omitempty"`
+	// Step is the current Advanced-loop step (1-based; ADR 0x026). Zero on Standard turns.
+	Step int `json:"step,omitempty"`
+	// Plan is the Advanced run's current checklist (update_plan). Empty on Standard turns.
+	Plan []PlanItem `json:"plan,omitempty"`
 }
+
+// PlanItemStatus, PlanItem and the statuses live in modeltypes (shared with the Ent schema).
+type (
+	PlanItemStatus = modeltypes.PlanItemStatus
+	PlanItem       = modeltypes.PlanItem
+)
+
+const (
+	PlanItemPending    = modeltypes.PlanItemPending
+	PlanItemInProgress = modeltypes.PlanItemInProgress
+	PlanItemCompleted  = modeltypes.PlanItemCompleted
+	PlanItemCancelled  = modeltypes.PlanItemCancelled
+)
 
 // ChatTurnWaiting is what a queued turn is waiting on.
 type ChatTurnWaiting string
@@ -40,7 +61,9 @@ type ChatTurnToolCall struct {
 	// Output is the tool result (or error text) preview, set once the call finishes.
 	Output string `json:"output,omitempty"`
 	// Round is the zero-based agent-loop round that requested the call.
-	Round      int        `json:"round"`
+	Round int `json:"round"`
+	// Step is the Advanced-loop step (1-based) that requested the call; 0 on Standard turns.
+	Step       int        `json:"step,omitempty"`
 	StartedAt  time.Time  `json:"started_at"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 }

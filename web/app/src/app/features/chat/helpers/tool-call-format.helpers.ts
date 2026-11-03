@@ -100,6 +100,16 @@ export function friendlyToolName(name: string): string {
     .join(' ');
 }
 
+/** How a tool call's name is shown in the chat: `recall_memories` → `recall memories`. */
+export function toolCallDisplayName(name: string): string {
+  return friendlyToolName(name.trim()).toLowerCase();
+}
+
+/** Whether a saved (settled) tool call failed. */
+export function toolCallFailed(call: { tool_error?: string | null }): boolean {
+  return !!call.tool_error?.trim();
+}
+
 function isTruncatedJson(raw: string | null | undefined): boolean {
   const text = raw?.trim() ?? '';
   return /^[[{]/.test(text) && text.endsWith('…');

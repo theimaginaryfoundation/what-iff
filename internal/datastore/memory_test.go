@@ -989,7 +989,9 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			chat_personality uuid,
 			chat_active_mood uuid,
 			context_scope text NOT NULL DEFAULT 'account',
-			user_chats uuid NOT NULL
+			user_chats uuid NOT NULL,
+			reasoning_effort text,
+			agent_loop text
 		)`,
 		`CREATE TABLE personalities (
 			id uuid PRIMARY KEY,
@@ -1008,7 +1010,9 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			thumbnail_circle json,
 			expressions_enabled bool NOT NULL DEFAULT true,
 			image_style text NOT NULL DEFAULT 'auto',
-			user_personalities uuid NOT NULL
+			user_personalities uuid NOT NULL,
+			reasoning_effort text,
+			agent_loop text
 		)`,
 		`CREATE TABLE memories (
 			id uuid PRIMARY KEY,

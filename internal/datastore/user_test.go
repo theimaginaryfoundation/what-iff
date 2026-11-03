@@ -552,3 +552,32 @@ func TestToUserModel(t *testing.T) {
 		require.Equal(t, defaultTheme.String(), resp.Theme)
 	})
 }
+
+func TestCheckUserPassword(t *testing.T) {
+	ds, cleanup := newUserTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	hash, err := auth.HashPassword("correct horse")
+	require.NoError(t, err)
+	local, err := ds.dbClient.User.Create().SetUsername("local").SetEmail("local@example.test").SetPasswordHash(hash).Save(ctx)
+	require.NoError(t, err)
+
+	ok, err := ds.CheckUserPassword(ctx, local.ID, "correct horse")
+	require.NoError(t, err)
+	require.True(t, ok)
+	ok, err = ds.CheckUserPassword(ctx, local.ID, "wrong")
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	// An account signed in through an identity provider has no local password.
+	external, err := ds.dbClient.User.Create().SetUsername("external").SetEmail("external@example.test").
+		SetPasswordHash(auth.ExternalAuthPasswordPlaceholder).Save(ctx)
+	require.NoError(t, err)
+	ok, err = ds.CheckUserPassword(ctx, external.ID, auth.ExternalAuthPasswordPlaceholder)
+	require.NoError(t, err)
+	require.False(t, ok, "the placeholder is not a password")
+
+	_, err = ds.CheckUserPassword(ctx, uuid.New(), "anything")
+	require.ErrorIs(t, err, ErrUserNotFound)
+}

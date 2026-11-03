@@ -67,9 +67,17 @@ type Chat struct {
 	// RehydrationState tracks lazy summarization of imported threads on unarchive:
 	// "" (none) / "pending" / "processing" / "ready" / "failed". Surfaced read-only so the UI can
 	// show a "preparing thread" affordance while the summary is generated.
-	RehydrationState string    `json:"rehydration_state,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	RehydrationState string `json:"rehydration_state,omitempty"`
+	// TurnSettingValues are the thread's reasoning effort and agent loop (ADR 0x026), seeded at
+	// creation from the personality or account default and thread-local after. CreateChat
+	// applies them as given (nil seeds); UpdateChat writes each only when its Set flag is true.
+	TurnSettingValues
+	// SetReasoningEffort / SetAgentLoop mark an explicit change on UpdateChat, for the same reason
+	// as SetContextScope. Only the chat HTTP handlers set them.
+	SetReasoningEffort bool      `json:"-"`
+	SetAgentLoop       bool      `json:"-"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 	// IsFirstChat is an internal-only flag set by CreateChat to indicate whether
 	// this row is the user's first chat at creation time.
 	IsFirstChat bool `json:"-"`

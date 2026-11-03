@@ -819,6 +819,293 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/remote-sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get remote sync settings and status
+         * @description The account's remote sync (ADR 0x033): the remote address, the stored token's last four characters, whether sync is on, how the last run went, and totals. The token is never returned. `configured` is false when sync was never set up. Only served when the server runs with REMOTE_SYNC_ENABLED=true; otherwise this route does not exist (404).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Settings and status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RemoteSyncSettings"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /**
+         * Save remote sync settings
+         * @description Saves the remote address, the token (required the first time; omit to keep the stored one) and whether sync is on. Unless the request switches sync off, the token is first checked against the remote (it must hold chat:read), and a refusal is reported as 400 with the reason. A successful save starts a run. The address must be https unless the server allows http (REMOTE_SYNC_ALLOW_LOCAL_NETWORK); the hosted app's web addresses map to its API.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RemoteSyncUpsertRequest"];
+                };
+            };
+            responses: {
+                /** @description Saved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RemoteSyncSettings"];
+                    };
+                };
+                /** @description Invalid address or token, or the remote refused the token */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Remove remote sync
+         * @description Stops syncing and forgets the token and the thread links. Local threads stay.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Removed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote-sync/wake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The app is being used
+         * @description The web app calls this when a signed-in session starts and when it comes back after a while (remote sync, ADR 0x033). The server starts a sync if the last one is more than a couple of minutes old, and otherwise does nothing; sync being off, not set up, waiting on its owner or already running is not an error. This is what keeps copies current without polling.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Whether a sync was started */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description A run started; poll GET /remote-sync for its outcome */
+                            started: boolean;
+                            /** @description Copied threads that just got a local persona whose name matches their remote one */
+                            rematched: number;
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote-sync/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync now
+         * @description Starts a run in the background. Poll GET /remote-sync for its outcome.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Run started */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RemoteSyncSettings"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Remote sync is not set up */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A run is already in progress, or sync is switched off */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/discord/bots": {
         parameters: {
             query?: never;
@@ -1368,6 +1655,1314 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/buzz/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Buzz identities
+         * @description Returns the user's personas that have a Buzz identity, each with the communities it is in. A secret key is never returned.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Buzz identities */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzAgent"][];
+                    };
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        put?: never;
+        /**
+         * Give a persona a Buzz identity
+         * @description Generates a keypair for the persona. The secret key stays on the server, encrypted; the public key is shown as an npub so people can add the persona in Buzz.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BuzzAgentCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Identity created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzAgent"];
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                409: components["responses"]["BuzzConflict"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/agents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a Buzz identity
+         * @description Removes the identity and its communities and bindings. The key is gone for good, so Buzz will see a new member if the persona is connected again.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Identity removed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Pause or resume a Buzz identity */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        enabled: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated identity */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzAgent"];
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        trace?: never;
+    };
+    "/buzz/agents/{id}/sync-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish the persona's name and portrait
+         * @description Republishes the persona's Buzz profile (name, portrait, bot flag) to every community it is in.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Where the profile was published */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            published: number;
+                            failed: string[];
+                        };
+                    };
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/agents/{id}/communities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join a persona to a community
+         * @description Reads the community, verifies an owner attestation when one is given, claims an invite when one is given (after the owner accepted the community's join terms for the persona), records the community, publishes the persona's profile and checks whether it is let in. A 409 with code terms_required carries the terms to show and accept. Re-adding a community the persona is already in is a 409 before anything is sent to it, so no invite is used up.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BuzzCommunityCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Community added */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzCommunity"];
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                /** @description The community has join terms to accept first, or the persona is already in it */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzTermsRequired"];
+                    };
+                };
+                500: components["responses"]["BuzzServerError"];
+                502: components["responses"]["BuzzUpstreamError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview a community's join terms */
+        get: {
+            parameters: {
+                query: {
+                    relay_url: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The community and its join terms (policy is null when it has none) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            name: string;
+                            relay_url: string;
+                            policy?: components["schemas"]["BuzzJoinPolicy"];
+                        };
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                502: components["responses"]["BuzzUpstreamError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/communities/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Leave a community
+         * @description Removes the community and its bindings from What Iff. Nothing is deleted in Buzz.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Community removed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Update a community
+         * @description Pauses or resumes the persona there, replaces or removes the attestation, claims an invite, or checks access again.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BuzzCommunityUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated community */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzCommunity"];
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                /** @description The community has join terms to accept first */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzTermsRequired"];
+                    };
+                };
+                500: components["responses"]["BuzzServerError"];
+                502: components["responses"]["BuzzUpstreamError"];
+            };
+        };
+        trace?: never;
+    };
+    "/buzz/communities/{id}/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List a community's channels
+         * @description The message channels the persona is in, and the public ones it could join.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Channels, the persona's own first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzChannel"][];
+                    };
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                502: components["responses"]["BuzzUpstreamError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/communities/{id}/channels/{channelId}/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join a public channel
+         * @description Sends a join request for the persona (NIP-29).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                    channelId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Join requested */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                502: components["responses"]["BuzzUpstreamError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Buzz channel bindings */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Bindings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzBinding"][];
+                    };
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        put?: never;
+        /**
+         * Connect a channel to a thread
+         * @description Binds a community channel to a relay thread. Without chat_id a new sandboxed relay thread is created. Binding an existing thread that is not sandboxed needs allow_unrestricted.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BuzzBindingCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Channel connected */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzBinding"];
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                409: components["responses"]["BuzzConflict"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/bindings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disconnect a channel */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Channel disconnected */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Update a binding */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BuzzBindingUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated binding */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzBinding"];
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        trace?: never;
+    };
+    "/buzz/chats/{chatId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chatId: components["parameters"]["BuzzChatID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A thread's Buzz state
+         * @description The thread's bindings, which of them will post the next reply, and the recent messages that crossed between the thread and Buzz.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: components["parameters"]["BuzzChatID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Buzz state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzChatState"];
+                    };
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/chats/{chatId}/pending/{bindingId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chatId: components["parameters"]["BuzzChatID"];
+                bindingId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Post the next reply to a Buzz channel
+         * @description Arms the composer toggle. The next reply in the thread is posted to the binding's channel; the request expires after 30 minutes. A binding that is broken, or whose persona or community is paused, cannot be armed (409); a pause also stops a post already armed.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: components["parameters"]["BuzzChatID"];
+                    bindingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Armed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                409: components["responses"]["BuzzConflict"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        post?: never;
+        /** Do not post the next reply to Buzz */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: components["parameters"]["BuzzChatID"];
+                    bindingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Disarmed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/slack/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Slack app manifest for a personality
+         * @description The manifest of a Slack app that speaks as the personality (its name, Socket Mode on, token rotation off, and the scopes and events the relay uses), and the link that opens Slack's "create an app" flow with it filled in.
+         */
+        get: {
+            parameters: {
+                query: {
+                    personality_id: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Manifest */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackManifest"];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/slack/apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Slack apps
+         * @description Returns the user's personalities' Slack apps. Tokens are never returned.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Apps retrieved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackApp"][];
+                    };
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        put?: never;
+        /**
+         * Connect a Slack app
+         * @description Checks the bot token with Slack (its workspace, bot user and app) and that the app-level token belongs to the same app (by opening a Socket Mode connection), then stores both, encrypted, for one of the user's personalities. One app per personality per workspace, and an app can be connected once. Needs TOKEN_ENCRYPTION_SECRET on the server.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SlackAppCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description App connected */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackApp"];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                409: components["responses"]["SlackConflict"];
+                500: components["responses"]["SlackServerError"];
+                502: components["responses"]["SlackUpstreamError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/slack/apps/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                id: components["parameters"]["SlackID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Disconnect a Slack app
+         * @description Removes the app's tokens and, with them, its channel bindings. The relay threads stay, and nothing changes in Slack.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                    id: components["parameters"]["SlackID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description App disconnected */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Update a Slack app
+         * @description Replaces either token (they must stay the same app's), re-reads the workspace's and bot's names from Slack, or pauses and resumes the app.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                    id: components["parameters"]["SlackID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SlackAppUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description App updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackApp"];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                500: components["responses"]["SlackServerError"];
+                502: components["responses"]["SlackUpstreamError"];
+            };
+        };
+        trace?: never;
+    };
+    "/slack/apps/{id}/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                id: components["parameters"]["SlackID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the workspace's channels
+         * @description The workspace's public channels and the private channels the app is in, without archived ones; `is_member` says whether the app is in each.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                    id: components["parameters"]["SlackID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Channels */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackChannel"][];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                502: components["responses"]["SlackUpstreamError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/slack/apps/{id}/channels/{channelId}/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                id: components["parameters"]["SlackID"];
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add the app to a public channel
+         * @description Private channels cannot be joined this way; invite the persona in Slack (`/invite`) instead (400).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                    id: components["parameters"]["SlackID"];
+                    channelId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Joined */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackChannel"];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                502: components["responses"]["SlackUpstreamError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/slack/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Slack channel bindings */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Bindings retrieved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackBinding"][];
+                    };
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        put?: never;
+        /**
+         * Connect a Slack channel to a relay thread
+         * @description Binds a channel of the app's workspace to a thread. Without `chat_id` a new relay thread is created for the app's personality, sandboxed, with no MCP connectors and the sandbox's default-off tools. Binding an existing thread leaves its settings alone; a thread that is not sandboxed is refused unless `allow_unrestricted` is true.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SlackBindingCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Channel connected */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackBinding"];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                409: components["responses"]["SlackConflict"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/slack/bindings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                id: components["parameters"]["SlackID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disconnect a Slack channel */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                    id: components["parameters"]["SlackID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Channel disconnected */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Update a Slack channel binding
+         * @description Repointing to a thread that is not sandboxed needs `allow_unrestricted`; the acknowledgement is only recorded while the thread is not sandboxed.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                    id: components["parameters"]["SlackID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SlackBindingUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description Binding updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackBinding"];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        trace?: never;
+    };
+    "/slack/chats/{chatId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The What Iff thread (chat) id */
+                chatId: components["parameters"]["SlackChatID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A thread's Slack state
+         * @description The thread's Slack bindings, which of them will post the next reply, and the recent messages that crossed between the thread and Slack.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The What Iff thread (chat) id */
+                    chatId: components["parameters"]["SlackChatID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Slack state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackChatState"];
+                    };
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/slack/chats/{chatId}/pending/{bindingId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The What Iff thread (chat) id */
+                chatId: components["parameters"]["SlackChatID"];
+                bindingId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Post the next reply to a Slack channel
+         * @description Arms the composer toggle. The next reply in the thread is posted to the binding's channel; the request expires after 30 minutes. A binding that is broken, or whose app is paused or has its tokens refused, cannot be armed (409); a pause also stops a post already armed.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The What Iff thread (chat) id */
+                    chatId: components["parameters"]["SlackChatID"];
+                    bindingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Armed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                409: components["responses"]["SlackConflict"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        post?: never;
+        /** Do not post the next reply to a Slack channel */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The What Iff thread (chat) id */
+                    chatId: components["parameters"]["SlackChatID"];
+                    bindingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Disarmed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhook-tokens": {
         parameters: {
             query?: never;
@@ -1555,6 +3150,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/provider-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Which model providers this account can reach
+         * @description Where the account's provider keys come from (`deployment`: the server's own configuration, the same for everyone; `account`: each account adds its own) and which providers it has a key for right now. Names providers only, never keys.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The account's provider access */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderAccess"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/provider-keys": {
         parameters: {
             query?: never;
@@ -1625,7 +3268,7 @@ export interface paths {
         get?: never;
         /**
          * Store the account's key for a provider
-         * @description Stores the key, encrypted at rest, replacing any key already stored for this provider. The key is never returned.
+         * @description Stores the key, encrypted at rest, replacing any key already stored for this provider. The key is never returned. Requires the account's current password.
          */
         put: {
             parameters: {
@@ -1663,6 +3306,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The current password was missing or wrong. `code` is `reauthentication_required`; the session itself is still valid. */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -1740,6 +3392,424 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/provider-connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the account's provider connections
+         * @description How this account reaches model providers (ADR 0x027): its connections to built-in providers first, in provider order, then the rest by name. Keys are write-only; only whether there is one and its last four characters are returned. Served only when the server takes keys from accounts.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The account's connections */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderConnection"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Add a provider connection
+         * @description Lists the provider's models with the details given, and stores the connection only if that works, answering with the connection and the models found. Requires the account's current password. An account has at most one connection to each built-in provider.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateProviderConnectionRequest"];
+                };
+            };
+            responses: {
+                /** @description Connection added */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderConnected"];
+                    };
+                };
+                /** @description Invalid request: an unknown preset, a missing or malformed key, name, flavor or address, or an address for a preset that sets its own */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description `reauthentication_required` when the current password was missing or wrong; `custom_address_not_allowed` when the preset lets the account choose an address and this server does not allow that. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The account already has a connection to that built-in provider; `code` is `provider_connection_exists` */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Listing the provider's models failed, and nothing was stored. `code` is `provider_unreachable`, `provider_key_rejected`, `provider_incompatible` or `provider_unavailable`; `details.preset` names the preset. */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/provider-connections/presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the presets a connection can be made from
+         * @description What the "Add provider" form offers, with each preset's default address filled in for this deployment. Presets whose address the account chooses are left out when this server does not allow that.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Presets, in the order to offer them */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderPreset"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/provider-connections/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The connection */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a provider connection */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The connection */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Connection removed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such connection on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Edit a provider connection
+         * @description Renames a connection, or changes its key or address. A rename needs nothing more. A new key or address needs the account's current password, and is checked by listing the provider's models before it is saved; on failure the connection is left as it was. An empty `key` removes the key, where the preset allows none.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The connection */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateProviderConnectionRequest"];
+                };
+            };
+            responses: {
+                /** @description Connection updated. `models` holds the models found when the key or address changed, and is empty otherwise. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderConnected"];
+                    };
+                };
+                /** @description Invalid request, or an address for a preset that sets its own */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description `reauthentication_required` or `custom_address_not_allowed`, as for adding one */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such connection on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Listing with the new key or address failed, as for adding one */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/provider-connections/{id}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The connection */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List the models a connection's provider offers
+         * @description Asks the provider now, with the connection's stored key; nothing is cached.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The connection */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Models, sorted by id */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ListedModel"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such connection on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Listing failed; `code` as for adding a connection */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3231,6 +5301,128 @@ export interface paths {
             };
         };
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-job/{id}/rituals/{ritualId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach a skill to an agent job
+         * @description Links a skill (ritual) the user owns to the job. A skill can be attached to any number of jobs and modes at once.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description AgentJob ID */
+                    id: string;
+                    /** @description Skill (ritual) ID */
+                    ritualId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Skill attached (or already attached) */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid job or skill ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description AgentJob or skill not found for this user */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /**
+         * Detach a skill from an agent job
+         * @description Removes the link between the job and the skill. Other jobs and modes that use the skill are unaffected.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description AgentJob ID */
+                    id: string;
+                    /** @description Skill (ritual) ID */
+                    ritualId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Skill detached (or was not attached) */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid job or skill ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description AgentJob or skill not found for this user */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -4789,6 +6981,259 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/entities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List entity wiki pages
+         * @description Lists the user's entity pages (ADR 0x034), most recently changed first. Agents write these short pages about people, places and projects with the entity_write tool; global ones are shared by every personality, and pinned ones (written by a personality with auto_pin_memories on) by that personality only.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    page?: number;
+                    limit?: number;
+                    /** @description Case-insensitive match on the name or text. */
+                    query?: string;
+                    /** @description Only entities pinned to this personality. */
+                    personality_id?: string;
+                    /** @description Only global entities. */
+                    global_only?: boolean;
+                    /** @description List the entities an agent deleted (archived) instead of the live ones. Archived entities are hidden from agents and can be restored. */
+                    archived?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Entities retrieved successfully */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaginatedResponse"] & {
+                            results?: components["schemas"]["AgentEntity"][];
+                        };
+                    };
+                };
+                /** @description Invalid personality_id */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/entities/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete an entity
+         * @description Removes a live or archived entity for good.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Entity deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Entity not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Edit an entity's text
+         * @description Replaces the entity's text. The edit is the user's, so the agent provenance is cleared.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        body: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Entity updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentEntity"];
+                    };
+                };
+                /** @description Missing body, or text over 5000 characters */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Entity not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/memory/entities/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore an archived entity
+         * @description Brings back an entity an agent deleted (archived). The restore is the user's, so the agent provenance is cleared.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Entity restored */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentEntity"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No archived entity with this id */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A live entity in the same scope has taken the name since it was archived */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/compaction-events": {
         parameters: {
             query?: never;
@@ -5898,6 +8343,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description The account has no key for the provider that embeds imported memories. `code` is `provider_not_configured` and `details.provider` names the provider. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Internal server error */
                 500: {
                     headers: {
@@ -6002,6 +8456,8 @@ export interface paths {
                          * @description ID of the personality this ritual is associated with (optional)
                          */
                         personality_id?: string;
+                        /** @description Connectors (MCP servers) whose tools this ritual brings along. Replaces the existing links. */
+                        mcp_server_ids?: string[];
                     };
                 };
             };
@@ -6033,9 +8489,408 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Another of the account's skills already uses the requested slug */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a skill from an Agent Skills bundle
+         * @description Creates a skill from an Agent Skills bundle (ADR 0x035 §7), or with `ritual_id` replaces an existing skill's contents. Send a multipart form with either `file` (a zip with SKILL.md at its root or inside one top-level folder, or a lone SKILL.md) or several `files` parts whose filenames are paths inside the skill directory. Frontmatter is parsed leniently: a missing or invalid `name` is derived with a warning, unknown keys are kept in `metadata`, and only a missing `description` or body is an error. A slug the account already uses gets a numeric suffix. The bundle's other files are stored under `skills/<slug>/` and replace the skill's previous files; a re-import that sends only a SKILL.md keeps them (`files_kept`). Two paths that differ only in case are refused.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description A skill zip or a SKILL.md
+                         */
+                        file?: string;
+                        /** @description The skill directory's files, named by their relative paths */
+                        files?: string[];
+                        /**
+                         * Format: uuid
+                         * @description Bind the imported skill to this personality
+                         */
+                        personality_id?: string;
+                        /**
+                         * Format: uuid
+                         * @description Re-import into this skill, which keeps its slug, personality and connectors
+                         */
+                        ritual_id?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Existing skill re-imported */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RitualImportResult"];
+                    };
+                };
+                /** @description Skill imported */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RitualImportResult"];
+                    };
+                };
+                /** @description Not a bundle, no SKILL.md, or SKILL.md without a description or body; `message` says which */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No skill with `ritual_id` */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Another skill took every slug tried, in concurrent imports of the same skill */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Bundle larger than 30 MB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/{id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export a skill as an Agent Skills bundle
+         * @description A zip holding `<slug>/SKILL.md`, rendered from the skill's fields: `name` (the slug), `description`, `license`, `compatibility`, `allowed-tools`, and `metadata` with `display_name`, `whatiff-hotkeys`, `whatiff-connectors` (connector names) and the invocation flags. Imports unchanged into any Agent Skills harness.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ritual ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The bundle */
+                200: {
+                    headers: {
+                        /** @description attachment; filename="<slug>.zip" */
+                        "Content-Disposition"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/zip": string;
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The skill's files total more than the 30 MB bundle limit */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a skill's bundle files
+         * @description The skill's reference documents, scripts and assets (ADR 0x035 §3), filed in the gallery under `skills/<slug>/` and read-only to agents.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The bundle's files, by folder then name */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SkillFile"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Add or replace a skill bundle file
+         * @description Stores one file in the skill's bundle at `path`, replacing a file already there. Any content
+         *     type; at most 10 MB a file, 200 files and 30 MB a skill. `SKILL.md` at the bundle root is
+         *     rendered from the skill and cannot be uploaded.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /** Format: binary */
+                        file: string;
+                        /** @description The file's place in the bundle, e.g. `references/FORMS.md`. Defaults to `references/<filename>`. */
+                        path?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The stored file */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SkillFile"];
+                    };
+                };
+                /** @description Invalid path, the reserved SKILL.md, or over the bundle's file or byte limit */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file is larger than 10 MB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description This deployment has no file storage for skill files */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/{id}/files/{fileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a skill bundle file */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    fileId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual or file not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -6123,6 +8978,8 @@ export interface paths {
                          * @description ID of the personality this ritual is associated with (optional, set to null to make it global)
                          */
                         personality_id?: string;
+                        /** @description Connectors (MCP servers) whose tools this ritual brings along. Replaces the existing links when present; omit to leave them unchanged. */
+                        mcp_server_ids?: string[];
                     };
                 };
             };
@@ -6156,6 +9013,15 @@ export interface paths {
                 };
                 /** @description Ritual not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Another of the account's skills already uses the requested slug */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -6397,6 +9263,10 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        /** @description The new thread's own reasoning effort. Omit to leave it unset, so each turn uses the personality's, then the account default. */
+                        reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+                        /** @description The new thread's own agent loop. Omit to leave it unset, so each turn uses the personality's, then the account default. */
+                        agent_loop?: components["schemas"]["AgentLoop"] | null;
                         /** @description Name of the chat session */
                         name: string;
                         /**
@@ -6798,6 +9668,16 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        /**
+                         * @description Change the thread's reasoning effort. Omit to keep; an empty string clears it.
+                         * @enum {string}
+                         */
+                        reasoning_effort?: "" | "off" | "low" | "medium" | "high";
+                        /**
+                         * @description Change the thread's agent loop. Omit to keep; an empty string clears it.
+                         * @enum {string}
+                         */
+                        agent_loop?: "" | "standard" | "advanced";
                         /** @description Name of the chat session */
                         name: string;
                         /**
@@ -6931,6 +9811,16 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        /**
+                         * @description Change the thread's reasoning effort. Omit to keep; an empty string clears it.
+                         * @enum {string}
+                         */
+                        reasoning_effort?: "" | "off" | "low" | "medium" | "high";
+                        /**
+                         * @description Change the thread's agent loop. Omit to keep; an empty string clears it.
+                         * @enum {string}
+                         */
+                        agent_loop?: "" | "standard" | "advanced";
                         /** @description Name of the chat session */
                         name?: string;
                         /**
@@ -8405,6 +11295,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/webhooks/chat/{chatId}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a thread's running summary (webhook)
+         * @description Returns the thread's running summary: the text a reply reads in place of every message sent before
+         *     `window_start`. Messages from `window_start` on are read as they are. An empty `summary` (and no
+         *     `window_start`) means the thread has none yet. The summary is derived from the thread's own messages,
+         *     which `chat:read` already serves. Remote sync uses it so a copy need not summarize the history again
+         *     (ADR 0x033). Requires the `chat:read` scope. A thread that does not exist and one that belongs to
+         *     someone else both return 404.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Chat ID */
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Summary retrieved successfully */
+                200: {
+                    headers: {
+                        /** @description Always `no-store`. */
+                        "Cache-Control"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChatSummary"];
+                    };
+                };
+                /** @description Invalid chat ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Missing or invalid webhook token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The token does not have the `chat:read` scope */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found (or not yours) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhooks/chat/chat-message/{id}": {
         parameters: {
             query?: never;
@@ -8741,6 +11725,132 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{chatId}/loaded-skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the skills the agent loaded in a thread
+         * @description The skills the agent loaded with `load_skill` (ADR 0x035), oldest load first. Skills a mode or a message preloads are active for their turn only and are not listed. Loaded skills stay until unloaded here, by the agent, or by a checkpoint that found them unused.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Loaded skills */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LoadedSkill"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{chatId}/loaded-skills/{ritualId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unload a skill the agent loaded in a thread
+         * @description Forgets the skill as loaded; its instructions leave the thread's context from the next turn.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                    ritualId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Unloaded (or was not loaded) */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid skill ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -10735,6 +13845,10 @@ export interface components {
          *     }
          */
         UserPreferences: {
+            /** @description Account-default reasoning effort (ADR 0x026), used by every turn whose job, mode, thread and personality set none (never in a sandboxed thread). Null when not set. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description Account-default agent loop, used like reasoning_effort. Null when not set (standard). */
+            agent_loop?: components["schemas"]["AgentLoop"] | null;
             /**
              * Format: uuid
              * @description Unique identifier for the user preferences record
@@ -10779,6 +13893,28 @@ export interface components {
             readonly image_generation_providers?: components["schemas"]["ImageGenerationProvider"][];
         };
         /**
+         * @description How hard a turn asks the model to think (ADR 0x026). Not set means the model's own
+         *     default. `off` asks for no reasoning where the model allows it; a model that always
+         *     reasons runs it as `low`. Open-ended: values may be added, so a client must accept an
+         *     unknown value in a response (show it generically, and never save over it in its place).
+         * @enum {string}
+         */
+        ReasoningEffort: "off" | "low" | "medium" | "high";
+        /**
+         * @description How a turn drives tools (ADR 0x026): `standard` is the original tool loop; `advanced` is
+         *     the long-horizon loop that works in steps until its plan is done, showing its interim
+         *     output as reasoning. Not set means `standard`. Open-ended like ReasoningEffort.
+         * @enum {string}
+         */
+        AgentLoop: "standard" | "advanced";
+        /**
+         * @description How a model takes a reasoning effort: `none` (no control), `optional` (off and the
+         *     three levels), `toggle` (on or off only) or `always` (levels, no off). Open-ended like
+         *     ReasoningEffort.
+         * @enum {string}
+         */
+        ReasoningSupport: "none" | "optional" | "toggle" | "always";
+        /**
          * @description The vendor the generate_image tool and the image ritual call: OpenAI (GPT Image),
          *     Google (Gemini image), z.ai (GLM-Image) or Qwen (Qwen-Image). Defaults to `openai`
          *     for a user who never chose.
@@ -10803,6 +13939,16 @@ export interface components {
          *     }
          */
         UserPreferencesUpdateRequest: {
+            /**
+             * @description Account-default reasoning effort. Preserved when absent; an empty string clears it.
+             * @enum {string}
+             */
+            reasoning_effort?: "" | "off" | "low" | "medium" | "high";
+            /**
+             * @description Account-default agent loop. Preserved when absent; an empty string clears it.
+             * @enum {string}
+             */
+            agent_loop?: "" | "standard" | "advanced";
             /**
              * Format: uuid
              * @description ID of the user's preferred default AI model. Preserved when absent: omitting the
@@ -10859,6 +14005,9 @@ export interface components {
          *     }
          */
         Model: {
+            reasoning_support?: components["schemas"]["ReasoningSupport"];
+            /** @description An admin's override of reasoning_support; when set, reasoning_support is this value. Null derives reasoning_support from the provider and model name. */
+            reasoning_support_override?: components["schemas"]["ReasoningSupport"] | null;
             /**
              * Format: uuid
              * @description Unique identifier for the model
@@ -10885,10 +14034,10 @@ export interface components {
              */
             base_credits_per_slab: number;
             /**
-             * @description Minimum plan tier for free-chat access (ultra = overage only, never free)
+             * @description The model's billing grade, lowest to highest. Present only where the deployment bills by tier; omitted where tiers have no effect.
              * @enum {string}
              */
-            subscription_tier: "low" | "medium" | "high" | "ultra";
+            subscription_tier?: "low" | "medium" | "high" | "ultra";
             /** @description Whether the model is soft deleted */
             deleted: boolean;
             /** @description Whether this is the application-wide default model (at most one active model) */
@@ -10934,11 +14083,13 @@ export interface components {
             reference?: string;
             status?: components["schemas"]["JobStatus"];
             error?: string;
+            /** @description Stable code for the failure when it has one (a specific ErrorCode such as `provider_not_configured`), so clients can branch on it rather than on `error`. Absent otherwise. */
+            error_code?: string;
             /** Format: uuid */
             result_id?: string;
             /** @description Incremental assistant text chunks emitted while inference is in progress. */
             draft_deltas?: string[];
-            /** @description Incremental model reasoning chunks emitted while inference is in progress (z.ai GLM, Xiaomi MiMo). Display-only. Unlike draft_deltas this can be reset (emptied and re-sent) when a truncated call is retried, so clients should render the whole array on each poll rather than appending by cursor. */
+            /** @description Incremental model reasoning chunks emitted while inference is in progress (z.ai GLM, Xiaomi MiMo, and OpenAI/Anthropic when a reasoning effort is selected). On an Advanced turn it carries everything the model writes before its final reply, with step headers, and the final reply streams here too until it is saved as the message (whose agent_run then holds the notes by step). Display-only. Unlike draft_deltas this can be reset (emptied and re-sent) when a truncated call is retried, so clients should render the whole array on each poll rather than appending by cursor. */
             draft_reasoning?: string[];
             /**
              * @description Optional JSON-encoded progress payload for long-running jobs. Opaque to clients except per
@@ -10950,7 +14101,10 @@ export interface components {
              *     `error`, `input`/`output` are truncated previews, and `output`/`finished_at` are set once the
              *     call finishes. It is display-only; the saved assistant message's `tool_calls` are authoritative.
              *     While the turn is queued behind an earlier turn in its chat the payload also carries
-             *     `waiting_on` (`reply`), absent once the turn runs.
+             *     `waiting_on` (`reply`), absent once the turn runs. On an Advanced turn (ADR 0x026) it also
+             *     carries `step` (the current step, 1-based) and `plan` (`[{content, status}]`, status
+             *     `pending`, `in_progress`, `completed` or `cancelled`), each tool call carries its `step`, and
+             *     only the newest 60 tool calls are kept.
              */
             progress?: string;
             /** Format: date-time */
@@ -10990,6 +14144,10 @@ export interface components {
          *     }
          */
         AgentJob: {
+            /** @description Reasoning effort for this job's runs; overrides the thread and mode. Null when not set. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description Agent loop for this job's runs; overrides the thread and mode. Null when not set. */
+            agent_loop?: components["schemas"]["AgentLoop"] | null;
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
@@ -11036,6 +14194,16 @@ export interface components {
             next_runs: string[];
         };
         UpdateAgentJobRequest: {
+            /**
+             * @description Reasoning effort for this job's runs. Preserved when absent; an empty string clears it.
+             * @enum {string}
+             */
+            reasoning_effort?: "" | "off" | "low" | "medium" | "high";
+            /**
+             * @description Agent loop for this job's runs. Preserved when absent; an empty string clears it.
+             * @enum {string}
+             */
+            agent_loop?: "" | "standard" | "advanced";
             /** @description Set to empty string or null to clear title */
             title?: string | null;
             /** @description Agent prompt text (must be non-empty when provided) */
@@ -11069,6 +14237,10 @@ export interface components {
          *     }
          */
         Chat: {
+            /** @description The thread's own reasoning effort. Null when the thread sets none; each turn then uses its personality's, then the account default (none of those in a sandboxed thread). An active mode's value overrides the thread's for a turn (not in a sandboxed thread), and an agent job's overrides everything. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description The thread's own agent loop, resolved like reasoning_effort. Null when the thread sets none. */
+            agent_loop?: components["schemas"]["AgentLoop"] | null;
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
@@ -11349,10 +14521,14 @@ export interface components {
             generation_expression_label?: string | null;
             /** @description Short classifier rationale for why this expression portrait was chosen */
             generation_expression_reasoning?: string | null;
-            /** @description Reasoning/thinking text the model reported for this assistant turn (e.g. z.ai GLM thinking blocks, Xiaomi MiMo reasoning_content), joined across the turn's tool rounds. Display-only; never replayed to the model. Omitted when the provider reported none. */
+            /** @description Reasoning/thinking text the model reported for this assistant turn (e.g. z.ai GLM thinking blocks, Xiaomi MiMo reasoning_content, OpenAI reasoning summaries and Anthropic thinking when a reasoning effort is selected), joined across the turn's tool rounds. Display-only; never replayed to the model. Omitted when the provider reported none, and on Advanced turns, whose working notes are in agent_run. */
             model_reasoning?: string | null;
+            /** @description The Advanced run (ADR 0x026) that produced this assistant message: its working notes per step, its plan and why it ended. The message text is the run's final reply. Absent on Standard turns. */
+            agent_run?: components["schemas"]["AgentRun"] | null;
             /** @description User-visible async generation failure for this user turn; cleared after a successful reply */
             last_error_message?: string | null;
+            /** @description Stable code for last_error_message when it has one (a specific ErrorCode such as `provider_not_configured`); set and cleared with it. */
+            last_error_code?: string | null;
             /**
              * Format: date-time
              * @description When scratchpad, memory extraction, and summary checkpoint finished for the assistant turn ending with this message
@@ -11375,6 +14551,35 @@ export interface components {
             cacheable: boolean;
             /** @description Image payloads carried by this kind (token estimates do not account for images). */
             images?: number;
+        };
+        /** @description A saved Advanced run (ADR 0x026). Readers branch on version and must skip event kinds and render other enum-like values they do not know, rather than reject the message. */
+        AgentRun: {
+            /** @description The format of this record (1). */
+            version?: number;
+            /** @description Per step, in order, what happened before the final reply: the model's reasoning, the text it wrote between tool calls, and its tool calls. Notes are capped in size; tool-call events are always kept. */
+            steps?: {
+                /** @description The step, 1-based. */
+                step?: number;
+                events?: {
+                    /** @description `reasoning` (the model's native reasoning), `text` (text it wrote) or `tool_call` (a tool call, by tool_call_id). */
+                    kind?: string;
+                    /** @description The note, for `reasoning` and `text`. */
+                    text?: string;
+                    /**
+                     * Format: uuid
+                     * @description For `tool_call`, the id of one of the message's tool_calls.
+                     */
+                    tool_call_id?: string;
+                }[];
+            }[];
+            /** @description The run's plan as it stood when the run ended. */
+            plan?: {
+                content?: string;
+                /** @description `pending`, `in_progress`, `completed` or `cancelled`. */
+                status?: string;
+            }[];
+            /** @description Why the run ended: `done`, `stalled`, `duration_limit`, `step_limit`, `quota`, `cancelled` or `failed`. Open plan items of a run that ended for any reason other than `done`, at most a week ago, are shown to the thread's next Advanced turn. */
+            end_reason?: string;
         };
         /** @description Snapshot of the model context assembled for one assistant turn — "what was in the model's head" for that reply. The total uses vendor-reported input usage when available; named context buckets are estimates plus a reconciliation remainder. */
         ContextBreakdown: {
@@ -11465,6 +14670,100 @@ export interface components {
          * @enum {string}
          */
         ModelProvider: "openai" | "anthropic" | "zai" | "google" | "mistral" | "deepseek" | "qwen" | "xiaomi";
+        ProviderAccess: {
+            /**
+             * @description Where provider keys come from. With `account`, the provider-key routes are served.
+             * @enum {string}
+             */
+            keys_from: "deployment" | "account";
+            /** @description Providers the account has a key for right now, in provider order. Empty when none. */
+            providers: components["schemas"]["ModelProvider"][];
+            /** @description Whether an account may choose a provider's address (Custom, or a server on the same computer) when adding a connection. */
+            custom_addresses: boolean;
+        };
+        /** @description One way the account reaches one model provider, without its key. */
+        ProviderConnection: {
+            /** Format: uuid */
+            id: string;
+            /** @description The preset it was made from; see GET /provider-connections/presets. */
+            preset: string;
+            name: string;
+            /**
+             * @description The API a custom connection speaks. Absent for a preset, which implies it.
+             * @enum {string}
+             */
+            flavor?: "openai" | "anthropic";
+            /** @description The address the account chose. Absent means the preset's own, including when the account gave exactly that, so the connection follows the preset. */
+            base_url?: string;
+            /** @description The key's last four characters. Absent when there is no key. */
+            hint?: string;
+            has_key: boolean;
+            /** @description A connection to a built-in provider; the account has at most one of each. */
+            builtin: boolean;
+            /** @description `converted` for a key stored before connections existed. Absent for a connection added in the app. */
+            source?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description Details that fill in a new connection. */
+        ProviderPreset: {
+            id: string;
+            name: string;
+            /**
+             * @description Absent for Custom, where the account chooses it.
+             * @enum {string}
+             */
+            flavor?: "openai" | "anthropic";
+            /** @description The address a new connection gets. Absent for Custom. */
+            base_url?: string;
+            /** @description Whether the account may change the address. */
+            address_editable: boolean;
+            key_required: boolean;
+            builtin: boolean;
+            /** @description A server expected on the same computer. */
+            local: boolean;
+            /** @description Where to create a key, when known. */
+            keys_url?: string;
+        };
+        /** @description A model a provider offers. */
+        ListedModel: {
+            id: string;
+            /** @description The provider's own name for it, when it gives one. */
+            display_name?: string;
+        };
+        ProviderConnected: {
+            connection: components["schemas"]["ProviderConnection"];
+            models: components["schemas"]["ListedModel"][];
+        };
+        CreateProviderConnectionRequest: {
+            preset: string;
+            /** @description Defaults to the preset's name. Required for Custom. */
+            name?: string;
+            /**
+             * @description Required for Custom; ignored otherwise.
+             * @enum {string}
+             */
+            flavor?: "openai" | "anthropic";
+            /** @description For presets whose address the account chooses; defaults to the preset's. Required for Custom. Rejected for the others. */
+            base_url?: string;
+            /** @description Required where the preset says so. */
+            key?: string;
+            /** Format: password */
+            current_password: string;
+        };
+        UpdateProviderConnectionRequest: {
+            name?: string;
+            base_url?: string;
+            /** @description A new key, or empty to remove it where the preset allows none. */
+            key?: string;
+            /**
+             * Format: password
+             * @description Required when changing the key or address.
+             */
+            current_password?: string;
+        };
         /** @description A stored provider key, without the key. */
         ProviderKeySummary: {
             provider: components["schemas"]["ModelProvider"];
@@ -11476,6 +14775,11 @@ export interface components {
         SetProviderKeyRequest: {
             /** @description The provider API key, 8 to 512 characters. Leading and trailing whitespace is trimmed; whitespace inside the key is rejected. */
             key: string;
+            /**
+             * Format: password
+             * @description The account's current password. Holding a session is not enough to change where the account's conversations are sent.
+             */
+            current_password: string;
         };
         WebhookToken: {
             /** Format: uuid */
@@ -11511,11 +14815,23 @@ export interface components {
         };
         /**
          * @description What a webhook token may do. `messages:write` allows `POST /webhooks/chat/{chatId}/messages`.
-         *     `chat:read` allows the read routes (threads, messages, job status, persona names) and never exposes
+         *     `chat:read` allows the read routes (threads, messages, thread summaries, job status, persona names) and never exposes
          *     system prompts, scratchpads or memories. Tokens created before scopes existed are `messages:write` only.
          * @enum {string}
          */
         WebhookScope: "messages:write" | "chat:read";
+        /** @description A thread's running summary, as `GET /webhooks/chat/{chatId}/summary` returns it. */
+        ChatSummary: {
+            /** Format: uuid */
+            chat_id: string;
+            /** @description The summary text. Empty when the thread has none yet. */
+            summary: string;
+            /**
+             * Format: date-time
+             * @description Messages sent before this are covered by the summary; messages from it on are not.
+             */
+            window_start?: string;
+        };
         /**
          * @description A message as the webhook read routes return it: a stable subset of `ChatMessage` with the same field
          *     names. Tool calls, model reasoning, context breakdowns, portrait thumbnails, rituals, bookmarks and
@@ -11700,10 +15016,40 @@ export interface components {
              */
             created_at: string;
             /**
-             * @description Server-derived origin class used by the gallery's Generated/Imported filter. `generated` = attached to an assistant message or produced by a generation pipeline (expression grid, portrait); `imported` = uploaded by the user (gallery import, personality upload, user chat message). Omitted when the server could not determine it.
+             * @description Server-derived origin class used by the gallery's Generated/Imported filter. `generated` = attached to an assistant message or produced by a generation pipeline (expression grid, portrait); `imported` = uploaded by the user (gallery import, personality upload, user chat message). Agent-authored files are `generated`. Omitted when the server could not determine it.
              * @enum {string}
              */
             source?: "generated" | "imported";
+            /**
+             * @description Who wrote the file (ADR 0x034, 0x035). `user` = uploads, imports and reply outputs; `agent` = written by an agent's file tools; `skill` = a skill bundle's file under `skills/<slug>/`, read-only and managed in the skill editor. Only `agent` files can be changed by an agent, and only by the personality (or, with none, the thread) that created them. More values may be added, so treat an unknown one like `user`.
+             * @enum {string}
+             */
+            origin?: "user" | "agent" | "skill";
+            /**
+             * Format: uuid
+             * @description For origin "skill", the skill whose bundle the file belongs to.
+             */
+            skill_id?: string;
+            /**
+             * Format: int64
+             * @description Bytes in the stored object, for origin "skill" (counted against the bundle's 30 MB limit).
+             */
+            size_bytes?: number;
+            /**
+             * Format: uuid
+             * @description Personality whose agent created the file (agent-authored files only).
+             */
+            created_by_personality_id?: string;
+            /**
+             * Format: uuid
+             * @description Thread the agent created the file in, when it had no personality (agent-authored files only).
+             */
+            created_by_chat_id?: string;
+            /**
+             * Format: date-time
+             * @description When an agent last changed the file's content. Omitted for files never changed.
+             */
+            updated_at?: string;
         };
         FileAttachmentPersonality: {
             /** Format: uuid */
@@ -11722,6 +15068,8 @@ export interface components {
          *     }
          */
         ToolCall: {
+            /** @description Advanced-loop step (1-based) the call ran in; absent on Standard turns. */
+            step?: number;
             /** Format: uuid */
             id: string;
             tool_name: string;
@@ -11755,6 +15103,10 @@ export interface components {
          *     }
          */
         Personality: {
+            /** @description Reasoning effort for this personality's threads that set none of their own (over the account default; read at each turn). On update, omitting the field keeps it; null or an empty string clears it. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description Agent loop for this personality's threads that set none of their own. On update, omitting the field keeps it; null or an empty string clears it. */
+            agent_loop?: components["schemas"]["AgentLoop"] | null;
             /** Format: uuid */
             id: string;
             /** @description Name of the personality */
@@ -11987,6 +15339,21 @@ export interface components {
             message: string;
             active: components["schemas"]["ActivePersonalityMediaJob"];
         };
+        /** @description A file of a skill's bundle (ADR 0x035 §3). */
+        SkillFile: {
+            /** Format: uuid */
+            id: string;
+            /** @description The file's place in the bundle, e.g. `scripts/fill.py`. */
+            path: string;
+            file_type: string;
+            /** @description Its gallery folder, `skills/<slug>/<subdir>`, the path agents read it at. */
+            folder: string;
+            name: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /** Format: date-time */
+            created_at: string;
+        };
         /**
          * @example {
          *       "id": "123e4567-e89b-12d3-a456-426614174000",
@@ -12017,10 +15384,90 @@ export interface components {
             personality_id?: string;
             /** @description MCP servers to enable when this ritual is triggered (omit on update to leave links unchanged). */
             mcp_server_ids?: string[];
+            /** @description The skill's name in the Agent Skills sense (ADR 0x035): 1-64 chars of [a-z0-9-], unique among the account's skills. Omit on create to derive it from `name`; omit on update to keep the stored slug. Taken slugs answer 409. */
+            slug?: string;
+            /** @description SKILL.md `license`. Omit on update to leave unchanged. */
+            license?: string;
+            /** @description SKILL.md `compatibility`, what the skill needs from its environment. Omit on update to leave unchanged. */
+            compatibility?: string;
+            /** @description SKILL.md `metadata`, string to string. Keys starting with `whatiff-` are reserved. Omit on update to leave unchanged. */
+            metadata?: {
+                [key: string]: string;
+            };
+            /** @description SKILL.md `allowed-tools`: tools loaded with the skill when it is activated. Never a permission grant; the thread's disabled tools still win. Omit on update to leave unchanged. */
+            allowed_tools?: string[];
+            /**
+             * @description When true the skill is left out of the model's skills index; only the user, a mode or a job can activate it.
+             * @default false
+             */
+            disable_model_invocation: boolean;
+            /**
+             * @description When false the skill is hidden from the /skill picker and hotkeys (and from `available-rituals`); the model may still load it.
+             * @default true
+             */
+            user_invocable: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description A skill the agent loaded in a thread with load_skill (ADR 0x035). */
+        LoadedSkill: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+            description: string;
+        };
+        RitualImportResult: {
+            ritual: components["schemas"]["Ritual"];
+            /** @description Lenient-parse repairs and import-time substitutions to show the user */
+            warnings: string[];
+            /** @description Bundle files stored under skills/<slug>/ */
+            files_imported: number;
+            /** @description True when a re-import sent only a SKILL.md and the skill's files were left as they were */
+            files_kept: boolean;
+            /** @description Exporter connector names matched to this account's connectors */
+            connectors_linked: string[];
+            /** @description Exporter connector names with no match here */
+            connectors_missing: string[];
+        };
+        /** @description One entity wiki page (ADR 0x034). */
+        AgentEntity: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** @description Normalized lookup key (lowercase, single spaces). */
+            key: string;
+            /** @description The name as first written. */
+            title: string;
+            body: string;
+            /**
+             * Format: uuid
+             * @description Set when only this personality sees the entity; absent for a global entity.
+             */
+            pinned_personality_id?: string;
+            pinned_personality_name?: string;
+            /**
+             * Format: uuid
+             * @description Personality whose agent last wrote it; absent when the user last edited it.
+             */
+            last_personality_id?: string;
+            /**
+             * Format: uuid
+             * @description Conversation that last wrote it; absent when the user last edited it.
+             */
+            last_chat_id?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /**
+             * Format: date-time
+             * @description When an agent deleted (archived) the entity; absent for a live entity.
+             */
+            archived_at?: string;
         };
         /**
          * @example {
@@ -12098,6 +15545,68 @@ export interface components {
             id: string;
             name: string;
         };
+        /** @description Counts from one run. Never content. */
+        RemoteSyncRunStats: {
+            threads_checked?: number;
+            /** @description New local copies */
+            threads_created?: number;
+            /** @description Matched to a thread an account import already brought over */
+            threads_adopted?: number;
+            /** @description Had new messages appended */
+            threads_updated?: number;
+            /** @description Diverged (written in both places) and continued in a new local thread */
+            threads_forked?: number;
+            /** @description Retried next run */
+            threads_failed?: number;
+            /** @description Left for the next run by the per-run cap */
+            threads_deferred?: number;
+            messages_added?: number;
+        };
+        RemoteSyncTotals: {
+            /** @description Remote threads being copied */
+            threads: number;
+            /** @description Remote messages copied */
+            messages: number;
+            /** @description Times a thread forked because both sides wrote */
+            forks: number;
+        };
+        RemoteSyncSettings: {
+            configured: boolean;
+            enabled?: boolean;
+            /** @example https://api.whatiff.chat */
+            base_url?: string;
+            /** @description The stored token's last four characters */
+            token_hint?: string;
+            /**
+             * @description pending: never run. ok: the last run succeeded. error: it failed and will be retried. needs_attention: the remote refused the token; runs stop until the settings are saved again.
+             * @enum {string}
+             */
+            status?: "pending" | "ok" | "error" | "needs_attention";
+            last_error?: string | null;
+            /** Format: date-time */
+            last_run_at?: string | null;
+            /** Format: date-time */
+            last_success_at?: string | null;
+            last_run?: components["schemas"]["RemoteSyncRunStats"];
+            running: boolean;
+            totals?: components["schemas"]["RemoteSyncTotals"];
+            /** @description Remote persona names whose copied threads have no persona here yet. Creating or importing a persona with one of these names gives it those threads (on the next wake or run). */
+            unmatched_personas?: string[];
+            /** @description Background sync interval; absent when syncs start only when the app is used */
+            interval_seconds?: number;
+            default_base_url?: string;
+            allow_local_network?: boolean;
+        };
+        RemoteSyncUpsertRequest: {
+            /**
+             * @description The remote server's address. Empty means the hosted app, not the saved address, so send it on every save.
+             * @example https://api.whatiff.chat
+             */
+            base_url?: string;
+            /** @description A wht_ webhook token with chat:read, created on the remote. Required the first time, and whenever base_url names a different host from the saved one (400 otherwise); a saved token is only sent to the host it came from. */
+            token?: string;
+            enabled?: boolean;
+        };
         /** @description A user's own Discord bot, speaking as one of their personalities. The token is never returned. */
         DiscordBot: {
             /** Format: uuid */
@@ -12151,6 +15660,8 @@ export interface components {
             allow_user_ids: string[];
             /** @description Discord user ids that may never tag the bot; deny always wins */
             deny_user_ids: string[];
+            /** @description Let other bots (other personas' among them) start turns. Off by default; the relay's loop guard caps consecutive bot-started turns and asks the persona to wrap up near the cap (ADR 0x031). */
+            answer_agents: boolean;
             /** @description The owner's acknowledgement that the bound thread is not sandboxed, so it can read the account. Without it the relay answers only sandboxed threads. */
             allow_unrestricted: boolean;
             /** @description Whether the bound thread is sandboxed right now (computed; absent when the thread could not be read) */
@@ -12181,6 +15692,8 @@ export interface components {
             inbound_enabled: boolean;
             allow_user_ids?: string[];
             deny_user_ids?: string[];
+            /** @default false */
+            answer_agents: boolean;
             /** @description Acknowledge binding an existing thread that is not sandboxed */
             allow_unrestricted?: boolean;
         };
@@ -12192,6 +15705,7 @@ export interface components {
             deny_user_ids?: string[];
             channel_name?: string;
             guild_name?: string;
+            answer_agents?: boolean;
             allow_unrestricted?: boolean;
             /** @description Clear a broken status after fixing the bot's access */
             reactivate?: boolean;
@@ -12217,6 +15731,8 @@ export interface components {
             status: "received" | "pending" | "sent" | "failed";
             error?: string;
             attempts: number;
+            /** @description Inbound only. Consecutive bot-started turns on the binding, this message included; 0 when a person wrote it (the loop guard, ADR 0x031) */
+            agent_depth?: number;
             /** Format: date-time */
             created_at: string;
         };
@@ -12224,6 +15740,361 @@ export interface components {
             bindings: components["schemas"]["DiscordBinding"][];
             pending_binding_ids: string[];
             links: components["schemas"]["DiscordMessageLink"][];
+        };
+        /** @description A personality's Buzz identity, with the communities it is in. */
+        BuzzAgent: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            personality_id: string;
+            persona_name?: string;
+            /** @description The public key, lowercase hex */
+            pubkey: string;
+            /** @description The public key as a NIP-19 npub, for people to find and add the persona in Buzz */
+            npub: string;
+            /** @enum {string} */
+            status: "active" | "disabled";
+            last_error?: string;
+            communities?: components["schemas"]["BuzzCommunity"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        BuzzAgentCreateRequest: {
+            /** Format: uuid */
+            personality_id: string;
+        };
+        /** @description One community a persona is in, or is trying to get into. */
+        BuzzCommunity: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            agent_id: string;
+            /** @description The community's WebSocket address (wss://host) */
+            relay_url: string;
+            name: string;
+            relay_pubkey: string;
+            /** @description Whether the owner gave an attestation for the persona's key */
+            attested: boolean;
+            owner_pubkey?: string;
+            /** @description The join terms version the owner accepted for the persona */
+            policy_version?: string;
+            /** @enum {string} */
+            status: "active" | "needs_access" | "error" | "disabled";
+            last_error?: string;
+            /** Format: date-time */
+            last_connected_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        BuzzCommunityCreateRequest: {
+            /** @description The community's address, or an invite link to it */
+            relay_url: string;
+            /** @description An invite link or code, when relay_url is not already one */
+            invite?: string;
+            /** @description The owner's NIP-OA attestation for the persona's key, as its JSON auth tag */
+            attestation?: string;
+            /** @description The join terms version the owner read and accepted for the persona */
+            accept_terms_version?: string;
+            /** @description The owner's confirmation of the community's age requirement, when it has one */
+            confirm_age?: boolean;
+        };
+        BuzzCommunityUpdateRequest: {
+            enabled?: boolean;
+            /** @description Replaces the attestation; an empty string removes it */
+            attestation?: string;
+            invite?: string;
+            accept_terms_version?: string;
+            confirm_age?: boolean;
+            /** @description Check access again (after an admin added the persona, say) */
+            recheck?: boolean;
+        };
+        BuzzJoinPolicy: {
+            terms_markdown?: string;
+            privacy_markdown?: string;
+            age_attestation_required?: boolean;
+            version?: string;
+        } | null;
+        /** @description The error envelope (code buzz_terms_required) with the community's join terms in details.policy */
+        BuzzTermsRequired: components["schemas"]["Error"] & {
+            details?: {
+                policy?: components["schemas"]["BuzzJoinPolicy"];
+            };
+        };
+        BuzzChannel: {
+            id: string;
+            name: string;
+            about?: string;
+            public: boolean;
+            /** @description Whether the persona is in the channel */
+            member: boolean;
+            archived?: boolean;
+        };
+        /** @description One community channel bound to a relay thread. */
+        BuzzBinding: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            community_id: string;
+            community_name?: string;
+            /** Format: uuid */
+            chat_id: string;
+            channel_id: string;
+            channel_name: string;
+            /** @description Whether mentioning the persona in the channel starts a turn */
+            inbound_enabled: boolean;
+            /** @description Pubkeys (hex) that may mention the persona; empty means anyone not denied */
+            allow_pubkeys: string[];
+            /** @description Pubkeys (hex) that may never mention the persona; deny always wins */
+            deny_pubkeys: string[];
+            /** @description Whether other agents (events carrying an owner attestation) may start turns */
+            answer_agents: boolean;
+            /** @description The owner's acknowledgement that the bound thread is not sandboxed */
+            allow_unrestricted: boolean;
+            /** @description Whether the bound thread is sandboxed right now (computed) */
+            chat_sandboxed?: boolean;
+            /** @enum {string} */
+            status: "active" | "broken";
+            last_error?: string;
+            /** Format: date-time */
+            last_activity_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        BuzzBindingCreateRequest: {
+            /** Format: uuid */
+            community_id: string;
+            channel_id: string;
+            channel_name?: string;
+            /**
+             * Format: uuid
+             * @description Binds an existing thread; omitted creates a new sandboxed relay thread
+             */
+            chat_id?: string;
+            inbound_enabled?: boolean;
+            /** @description Pubkeys as npub or hex */
+            allow_pubkeys?: string[];
+            deny_pubkeys?: string[];
+            answer_agents?: boolean;
+            allow_unrestricted?: boolean;
+        };
+        BuzzBindingUpdateRequest: {
+            /** Format: uuid */
+            chat_id?: string;
+            inbound_enabled?: boolean;
+            allow_pubkeys?: string[];
+            deny_pubkeys?: string[];
+            answer_agents?: boolean;
+            channel_name?: string;
+            allow_unrestricted?: boolean;
+            /** @description Clears a broken status */
+            reactivate?: boolean;
+        };
+        /** @description One message that crossed between a relay thread and its Buzz channel. */
+        BuzzMessageLink: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            binding_id: string;
+            /** @enum {string} */
+            direction: "inbound" | "outbound";
+            /** Format: uuid */
+            chat_message_id?: string;
+            event_id?: string;
+            thread_root: string;
+            posted_event_ids: string[];
+            author_pubkey?: string;
+            author_name?: string;
+            /** Format: uuid */
+            reply_to_link_id?: string;
+            /** @enum {string} */
+            status: "received" | "pending" | "sent" | "failed";
+            error?: string;
+            attempts: number;
+            /** @description Inbound only. Consecutive bot-started turns on the binding, this message included; 0 when a person wrote it (the loop guard, ADR 0x031) */
+            agent_depth?: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        BuzzChatState: {
+            bindings: components["schemas"]["BuzzBinding"][];
+            pending_binding_ids: string[];
+            links: components["schemas"]["BuzzMessageLink"][];
+        };
+        SlackManifest: {
+            /** @description The Slack app manifest (JSON), for pasting into "Create an app → From a manifest" */
+            manifest: {
+                [key: string]: unknown;
+            };
+            /** @description Opens Slack's "create an app" flow with the manifest filled in */
+            create_url: string;
+            /** @description The bot token scopes the app asks for */
+            scopes: string[];
+            /** @description The events the app subscribes to */
+            events: string[];
+        };
+        /** @description A personality's own Slack app in one workspace. Its bot and app-level tokens are never returned. */
+        SlackApp: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            personality_id: string;
+            team_id: string;
+            team_name: string;
+            team_url: string;
+            app_id: string;
+            /** @description The app's bot user, what people mention */
+            bot_user_id: string;
+            bot_id: string;
+            bot_name: string;
+            /** @enum {string} */
+            status: "active" | "invalid_token" | "disabled";
+            /** @description Why Slack refused the app, or why its connection is retrying */
+            last_error?: string;
+            /** Format: date-time */
+            last_connected_at?: string;
+            /** @description The app's settings page in Slack, where its icon is uploaded */
+            settings_url: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SlackAppCreateRequest: {
+            /** Format: uuid */
+            personality_id: string;
+            /** @description The Bot User OAuth Token (xoxb-) from OAuth & Permissions, after installing the app */
+            bot_token: string;
+            /** @description An app-level token (xapp-) with the connections:write scope, from Basic Information */
+            app_token: string;
+        };
+        SlackAppUpdateRequest: {
+            /** @description Replaces the bot token; it must belong to the same app and workspace */
+            bot_token?: string;
+            /** @description Replaces the app-level token; it must belong to the same app */
+            app_token?: string;
+            /** @description Re-read the workspace's and the bot's names from Slack */
+            refresh?: boolean;
+            /** @description Pause (false) or resume (true) the app */
+            enabled?: boolean;
+        };
+        SlackChannel: {
+            id: string;
+            name: string;
+            is_private: boolean;
+            /** @description Whether the app is in the channel (it only hears channels it is in) */
+            is_member: boolean;
+            is_archived: boolean;
+            num_members?: number;
+        };
+        /** @description One Slack channel of an app's workspace, bound to a relay thread. */
+        SlackBinding: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The Slack app row (not Slack's own app id)
+             */
+            app_id: string;
+            team_name?: string;
+            /** Format: uuid */
+            chat_id: string;
+            channel_id: string;
+            channel_name: string;
+            is_private: boolean;
+            /** @description Whether mentioning the persona in the channel starts a turn */
+            inbound_enabled: boolean;
+            /** @description Slack user ids (U…) that may mention the persona; empty means anyone not denied */
+            allow_user_ids: string[];
+            /** @description Slack user ids that may never mention the persona; deny always wins */
+            deny_user_ids: string[];
+            /** @description Let other apps' bots start turns, behind the relay's loop guard (ADR 0x031) */
+            answer_agents: boolean;
+            /** @description The owner's acknowledgement that the bound thread is not sandboxed. Without it the relay answers only sandboxed threads. */
+            allow_unrestricted: boolean;
+            /** @description Whether the bound thread is sandboxed right now (computed; absent when the thread could not be read) */
+            chat_sandboxed?: boolean;
+            /** @enum {string} */
+            status: "active" | "broken";
+            last_error?: string;
+            /** Format: date-time */
+            last_activity_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SlackBindingCreateRequest: {
+            /** Format: uuid */
+            app_id: string;
+            /** @description The Slack channel id (C… or G…) */
+            channel_id: string;
+            channel_name?: string;
+            is_private?: boolean;
+            /**
+             * Format: uuid
+             * @description Bind an existing thread; omit to create a new relay thread
+             */
+            chat_id?: string;
+            /** @default true */
+            inbound_enabled: boolean;
+            allow_user_ids?: string[];
+            deny_user_ids?: string[];
+            /** @default false */
+            answer_agents: boolean;
+            /** @description Acknowledge binding an existing thread that is not sandboxed */
+            allow_unrestricted?: boolean;
+        };
+        SlackBindingUpdateRequest: {
+            /** Format: uuid */
+            chat_id?: string;
+            inbound_enabled?: boolean;
+            allow_user_ids?: string[];
+            deny_user_ids?: string[];
+            channel_name?: string;
+            answer_agents?: boolean;
+            allow_unrestricted?: boolean;
+            /** @description Clear a broken status after fixing the app's access to the channel */
+            reactivate?: boolean;
+        };
+        /** @description One message that crossed between a relay thread and its Slack channel. */
+        SlackMessageLink: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            binding_id: string;
+            /** @enum {string} */
+            direction: "inbound" | "outbound";
+            /** Format: uuid */
+            chat_message_id?: string;
+            /** @description Inbound only. The Slack message's ts */
+            message_ts?: string;
+            /** @description The Slack thread the message is in */
+            thread_ts: string;
+            /** @description Outbound only. The ts of each message the reply was posted as */
+            posted_ts: string[];
+            author_user_id?: string;
+            author_name?: string;
+            /** Format: uuid */
+            reply_to_link_id?: string;
+            /** @enum {string} */
+            status: "received" | "pending" | "sent" | "failed";
+            error?: string;
+            attempts: number;
+            /** @description Inbound only. Consecutive bot-started turns on the binding, this message included; 0 when a person wrote it (ADR 0x031) */
+            agent_depth: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        SlackChatState: {
+            bindings: components["schemas"]["SlackBinding"][];
+            pending_binding_ids: string[];
+            links: components["schemas"]["SlackMessageLink"][];
         };
         MemoryCreateRequest: {
             content: string;
@@ -12603,7 +16474,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**
@@ -12698,10 +16569,124 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description Invalid request (an address that is not a Buzz community, a refused invite, an attestation not signed for this key, a bad pubkey) */
+        BuzzBadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Unauthorized */
+        BuzzUnauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Not found (including another account's identity, community, binding, thread or personality) */
+        BuzzNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The personality already has a Buzz identity, is already in that community, or the channel is already bound */
+        BuzzConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The community refused the request or could not be reached */
+        BuzzUpstreamError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Internal server error */
+        BuzzServerError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Invalid request, or Slack rejected a token (a token of the wrong kind, a revoked one, two tokens of different apps) */
+        SlackBadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Unauthorized */
+        SlackUnauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Not found (including another account's app, binding, thread or personality) */
+        SlackNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The app is already connected, the personality already has an app in that workspace, or the channel is already bound */
+        SlackConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Slack refused the request or could not be reached */
+        SlackUpstreamError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Internal server error */
+        SlackServerError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: {
         DiscordBotID: string;
         DiscordChatID: string;
+        BuzzID: string;
+        BuzzChatID: string;
+        /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+        SlackID: string;
+        /** @description The What Iff thread (chat) id */
+        SlackChatID: string;
     };
     requestBodies: never;
     headers: never;

@@ -284,6 +284,7 @@ func TestCreateBindingWithoutAChatCreatesARelayThreadForThePersona(t *testing.T)
 	assert.Equal(t, "general", store.bindings[0].ChannelName)
 	assert.True(t, store.bindings[0].InboundEnabled, "inbound defaults on")
 	assert.Equal(t, []string{"123"}, store.bindings[0].AllowUserIDs)
+	assert.False(t, store.bindings[0].AnswerAgents, "other bots are not answered unless asked for")
 }
 
 func TestCreateBindingOnAnExistingChatCreatesNoThread(t *testing.T) {
@@ -291,13 +292,14 @@ func TestCreateBindingOnAnExistingChatCreatesNoThread(t *testing.T) {
 	store := &stubStore{bots: map[uuid.UUID]*models.DiscordBotCredentials{botID: {ID: botID}}}
 
 	rec := serve(t, newHandler(store, &stubDiscord{}), http.MethodPost, "/bindings", map[string]any{
-		"bot_id": botID, "guild_id": "g", "channel_id": "c", "chat_id": chatID, "inbound_enabled": false,
+		"bot_id": botID, "guild_id": "g", "channel_id": "c", "chat_id": chatID, "inbound_enabled": false, "answer_agents": true,
 	})
 
 	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
 	assert.Empty(t, store.chats, "binding an existing thread creates none and leaves its settings alone")
 	assert.Equal(t, chatID, store.bindings[0].ChatID)
 	assert.False(t, store.bindings[0].InboundEnabled)
+	assert.True(t, store.bindings[0].AnswerAgents)
 }
 
 func TestSetPendingArmsTheNextReply(t *testing.T) {

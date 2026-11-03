@@ -1,3 +1,5 @@
+import { AgentLoop, AgentLoopUpdate, ReasoningEffort, ReasoningEffortUpdate } from './turn-settings.model';
+
 export interface UserRegisterRequest {
   username: string;
   email: string;
@@ -82,6 +84,22 @@ export interface UserPreferences {
   image_generation_provider?: ImageGenerationProvider;
   /** Read-only: the image vendors this deployment has keys for, in display order. */
   image_generation_providers?: ImageGenerationProvider[];
+  /**
+   * Account-default reasoning effort (ADR 0x026): used at each turn whose job, mode, thread and
+   * personality set none (never in a sandboxed thread). Null when not set (the model's default).
+   */
+  reasoning_effort?: ReasoningEffort | null;
+  /** Account-default agent loop, used like `reasoning_effort`. Null when not set (standard). */
+  agent_loop?: AgentLoop | null;
+}
+
+/**
+ * Body of `PUT /user/preferences`. The turn settings are preserved when absent or null, and an
+ * empty string clears them.
+ */
+export interface UserPreferencesUpdateRequest extends Omit<UserPreferences, 'reasoning_effort' | 'agent_loop'> {
+  reasoning_effort?: ReasoningEffortUpdate | null;
+  agent_loop?: AgentLoopUpdate | null;
 }
 
 export type ImageGenerationProvider = 'openai' | 'google' | 'zai' | 'qwen';

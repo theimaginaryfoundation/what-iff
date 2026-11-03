@@ -16,6 +16,7 @@ function binding(overrides: Partial<DiscordBinding> = {}): DiscordBinding {
     inbound_enabled: true,
     allow_user_ids: [],
     deny_user_ids: [],
+    answer_agents: false,
     allow_unrestricted: false,
     status: 'active',
     created_at: '',
