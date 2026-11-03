@@ -257,11 +257,14 @@ describe('ModelChooserComponent', () => {
       expect(chooser.changes()).toEqual([]);
     });
 
-    it('goes back to the id when the name is cleared', async () => {
+    it('goes back to the name the listing offers when the name is cleared', async () => {
+      connections.models.mockReturnValue(
+        of([{ id: 'anthropic/claude-sonnet-4.6', display_name: 'Sonnet', default_name: 'Claude Sonnet 4.6', enabled: true }]),
+      );
       await render();
       chooser.startRename(row('anthropic/claude-sonnet-4.6'));
       chooser.commitRename(row('anthropic/claude-sonnet-4.6'), '   ');
-      expect(row('anthropic/claude-sonnet-4.6').name).toBe('anthropic/claude-sonnet-4.6');
+      expect(row('anthropic/claude-sonnet-4.6').name).toBe('Claude Sonnet 4.6');
     });
   });
 
@@ -346,7 +349,7 @@ describe('model chooser helpers', () => {
   });
 
   it("sends an enabled model's new name, and nothing for one renamed back", () => {
-    const base = { id: 'm', enabled: true, tools: true, images: false };
+    const base = { id: 'm', defaultName: 'm', enabled: true, tools: true, images: false };
     const initial = { name: 'Old', enabled: true, tools: true, images: false };
     expect(choicesFrom([{ ...base, name: 'New', initial }])).toEqual([
       { id: 'm', enabled: true, display_name: 'New', tool_support: true, vision_support: false },
@@ -356,7 +359,7 @@ describe('model chooser helpers', () => {
 
   it('turning a model off sends no capabilities', () => {
     const rows: ChooserRow[] = [
-      { id: 'm', name: 'M', enabled: false, tools: true, images: false, initial: { name: 'M', enabled: true, tools: true, images: false } },
+      { id: 'm', name: 'M', defaultName: 'M', enabled: false, tools: true, images: false, initial: { name: 'M', enabled: true, tools: true, images: false } },
     ];
     expect(choicesFrom(rows)).toEqual([{ id: 'm', enabled: false }]);
   });

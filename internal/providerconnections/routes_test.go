@@ -633,3 +633,61 @@ func TestConnectionNames_AreUniquePerAccount(t *testing.T) {
 	})
 	require.Equal(t, "Ollama", decode[connected](t, bobs).Connection.Name, "another account's names don't count")
 }
+
+// A name the account gave a model stays while the model is off, so turning it
+// on again keeps it; the listing also says what the name goes back to.
+func TestModels_KeepTheirNameWhileOff(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	path := "/provider-connections/" + conn.ID.String() + "/models"
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true, DisplayName: "My alpha"}).Code)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: false}).Code)
+
+	listed := decode[[]ConnectionModel](t, f.call(t, f.alice, http.MethodGet, path, nil))
+	byID := map[string]ConnectionModel{}
+	for _, m := range listed {
+		byID[m.ID] = m
+	}
+	require.False(t, byID["alpha"].Enabled)
+	require.Equal(t, "My alpha", byID["alpha"].DisplayName)
+	require.Equal(t, "alpha", byID["alpha"].DefaultName)
+}
+
+// Two of a connection's models can't share a name, ignoring case, and one on a
+// built-in provider's connection can't take the deployment's own model's name.
+func TestModels_NamesAreDistinct(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	rec := f.enableModels(t, f.alice, conn.ID,
+		ModelChoice{ID: "alpha", Enabled: true, DisplayName: "Same"},
+		ModelChoice{ID: "zeta", Enabled: true, DisplayName: "same"},
+	)
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), models.ErrCodeModelNameTaken)
+	require.Zero(t, f.store.client.Model.Query().CountX(context.Background()), "nothing is saved")
+
+	long := strings.Repeat("x", maxModelNameLen+1)
+	require.Equal(t, http.StatusBadRequest, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true, DisplayName: long}).Code)
+
+	builtin := decode[connected](t, f.call(t, f.alice, http.MethodPost, "/provider-connections", map[string]string{
+		"preset": "openai", "key": aliceOpenAI, "current_password": "right",
+	})).Connection
+	_, err := f.store.client.Model.Create().SetName("gpt-5.4").SetDisplayName("GPT-5.4").SetDescription("").SetProvider("openai").Save(context.Background())
+	require.NoError(t, err)
+	rec = f.enableModels(t, f.alice, builtin.ID, ModelChoice{ID: "alpha", Enabled: true, DisplayName: "gpt-5.4"})
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "already available from this deployment")
+}
+
+// Listed models whose short names would match keep their full ids.
+func TestKeepDistinctNames(t *testing.T) {
+	listed := []ListedModel{
+		{ID: "hf.co/a/Qwen3-0.6B-GGUF:latest", DisplayName: "Qwen3-0.6B-GGUF"},
+		{ID: "hf.co/b/Qwen3-0.6B-GGUF:latest", DisplayName: "qwen3-0.6b-gguf"},
+		{ID: "llama3.2:3b"},
+	}
+	keepDistinctNames(listed)
+	require.Empty(t, listed[0].DisplayName)
+	require.Empty(t, listed[1].DisplayName)
+	require.Empty(t, listed[2].DisplayName)
+}

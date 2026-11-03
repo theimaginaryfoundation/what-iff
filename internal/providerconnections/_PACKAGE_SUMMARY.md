@@ -40,7 +40,10 @@ How accounts reach model providers (ADR 0x027): the `provider_connections` table
   OpenAI lists every model an account can reach, chat or not (about 140 in October 2026, some 55 of them for speech, transcription, images, video, embeddings or moderation, or completions-only), so its preset drops those by narrow name patterns (`openAICannotChat`); slow or costly chat models are still offered.
   Each quirk is a field on its preset (`Target`), not a branch in the listing code.
   Every listing offers short names (`shortName`): the provider's own without a vendor prefix ("Anthropic: "), or else the last part of the id without ":latest".
-  A model the account enabled is listed under the name it was saved with, which the chooser lets the account change.
+  Models whose short names would match, ignoring case, keep their full ids (`keepDistinctNames`), and each listed model carries the name it is offered under (`default_name`), which a cleared name goes back to.
+  A model is listed under the name the account saved for it, kept while the model is off.
+  On saving, no two of a connection's enabled models may share a name, ignoring case, and none on a built-in provider's connection may take the deployment's own model's name in that provider's group (`model_name_taken`); names are at most 100 characters.
+  An `iF:` comment there marks the open decision on listing a deployment's catalog apart from account keys.
 
 ## Dependencies
 

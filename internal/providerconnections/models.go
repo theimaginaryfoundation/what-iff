@@ -21,6 +21,9 @@ import (
 // shorter.
 const maxModelIDLen = 200
 
+// maxModelNameLen bounds the name an account gives a model, as a connection's.
+const maxModelNameLen = 100
+
 // maxEnabledModels bounds how many models an account enables on one
 // connection. Choosing models is for the handful an account chats with.
 const maxEnabledModels = 200
@@ -32,6 +35,7 @@ var (
 	ErrDefaultModelInUse = errors.New("that is your default model; choose another default first")
 	ErrInvalidModelID    = errors.New("model id must be 1 to 200 characters")
 	ErrTooManyModels     = fmt.Errorf("a connection can have at most %d models enabled", maxEnabledModels)
+	ErrInvalidModelName  = fmt.Errorf("a model's name must be at most %d characters", maxModelNameLen)
 	// ErrModelsChanged is returned when another change to the same models won
 	// the race; the account reloads and tries again.
 	ErrModelsChanged = errors.New("these models were changed at the same time; reload and try again")
@@ -45,12 +49,31 @@ func (e *UnknownModelError) Error() string {
 	return fmt.Sprintf("%s isn't one of this connection's models", e.ID)
 }
 
+// ModelNameTakenError is returned when a model would share its name, ignoring
+// case, with another of the connection's, or with the deployment's own model of
+// that provider: in the picker they would be two entries alike.
+type ModelNameTakenError struct {
+	Name string
+	// Catalog is true when the deployment's own model has the name.
+	Catalog bool
+}
+
+func (e *ModelNameTakenError) Error() string {
+	if e.Catalog {
+		return fmt.Sprintf("%s is already available from this deployment; give yours another name", e.Name)
+	}
+	return fmt.Sprintf("another of this connection's models is called %s; give one another name", e.Name)
+}
+
 // ConnectionModel is one of a connection's models as the account sees it: what
 // the provider lists, whether the account enabled it, and its capabilities
 // (the enabled row's, or what the provider reports).
 type ConnectionModel struct {
 	ListedModel
-	Enabled bool `json:"enabled"`
+	// DefaultName is the name the listing offers the model under, which a name
+	// the account clears goes back to.
+	DefaultName string `json:"default_name,omitempty"`
+	Enabled     bool   `json:"enabled"`
 }
 
 // ModelChoice enables or disables one model on a connection. The capabilities
@@ -66,8 +89,13 @@ type ModelChoice struct {
 
 // enabledModels returns the connection's enabled model rows by name.
 func (s *Store) enabledModels(ctx context.Context, connectionID uuid.UUID) (map[string]*ent.Model, error) {
+	return s.modelRows(ctx, connectionID, entmodel.Deleted(false))
+}
+
+// modelRows maps the connection's model rows, filtered by where, by name.
+func (s *Store) modelRows(ctx context.Context, connectionID uuid.UUID, where ...predicate.Model) (map[string]*ent.Model, error) {
 	rows, err := s.client.Model.Query().
-		Where(entmodel.ConnectionID(connectionID), entmodel.Deleted(false)).
+		Where(append(where, entmodel.ConnectionID(connectionID))...).
 		All(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read a connection's models: %w", err)
@@ -84,20 +112,26 @@ func (s *Store) enabledModels(ctx context.Context, connectionID uuid.UUID) (map[
 // model the provider no longer lists still appears while it is enabled, so it
 // can be seen and turned off.
 func (s *Store) withEnabled(ctx context.Context, connectionID uuid.UUID, listed []ListedModel) ([]ConnectionModel, error) {
-	enabled, err := s.enabledModels(ctx, connectionID)
+	rows, err := s.modelRows(ctx, connectionID)
 	if err != nil {
 		return nil, err
 	}
+	enabled := make(map[string]*ent.Model, len(rows))
+	for name, row := range rows {
+		if !row.Deleted {
+			enabled[name] = row
+		}
+	}
 	out := make([]ConnectionModel, 0, len(listed)+len(enabled))
 	for _, m := range listed {
-		cm := ConnectionModel{ListedModel: m}
+		cm := ConnectionModel{ListedModel: m, DefaultName: listedName(m)}
+		// The name the account gave it, or the one it was enabled under, kept
+		// while it is turned off too. A model saved without one is under its id.
+		if row, ok := rows[m.ID]; ok && row.DisplayName != row.Name {
+			cm.DisplayName = row.DisplayName
+		}
 		if row, ok := enabled[m.ID]; ok {
 			cm.Enabled = true
-			// The name the account gave it, or the one it was enabled under. A
-			// model enabled without one was saved under its id.
-			if row.DisplayName != row.Name {
-				cm.DisplayName = row.DisplayName
-			}
 			cm.ToolSupport, cm.VisionSupport = capabilitiesOf(row)
 			delete(enabled, m.ID)
 		}
@@ -142,6 +176,9 @@ func (s *Store) SetModels(ctx context.Context, userID uuid.UUID, conn *ent.Provi
 		c.ID = strings.TrimSpace(c.ID)
 		if c.ID == "" || len(c.ID) > maxModelIDLen {
 			return ErrInvalidModelID
+		}
+		if len(strings.TrimSpace(c.DisplayName)) > maxModelNameLen {
+			return ErrInvalidModelName
 		}
 		choices[i] = c
 		if !c.Enabled {
@@ -192,15 +229,53 @@ func (s *Store) SetModels(ctx context.Context, userID uuid.UUID, conn *ent.Provi
 			return err
 		}
 	}
-	enabled, err := tx.Model.Query().Where(entmodel.ConnectionID(conn.ID), entmodel.Deleted(false)).Count(ctx)
+	enabled, err := tx.Model.Query().Where(entmodel.ConnectionID(conn.ID), entmodel.Deleted(false)).All(ctx)
 	if err != nil {
-		return fmt.Errorf("count a connection's models: %w", err)
+		return fmt.Errorf("read a connection's models: %w", err)
 	}
-	if enabled > maxEnabledModels {
+	if len(enabled) > maxEnabledModels {
 		return ErrTooManyModels
+	}
+	if err := distinctModelNames(ctx, tx, conn, enabled); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit a connection's models: %w", err)
+	}
+	return nil
+}
+
+// distinctModelNames checks that no two of the connection's enabled models share
+// a name, ignoring case, and, on a built-in provider's connection, that none
+// takes the name of the deployment's own model of that provider, which the
+// picker lists in the same group.
+func distinctModelNames(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConnection, enabled []*ent.Model) error {
+	seen := make(map[string]bool, len(enabled))
+	for _, m := range enabled {
+		key := strings.ToLower(m.DisplayName)
+		if seen[key] {
+			return &ModelNameTakenError{Name: m.DisplayName}
+		}
+		seen[key] = true
+	}
+	if conn.Builtin == nil {
+		return nil
+	}
+	// iF: whether a deployment with both a catalog and account keys (bring your own key)
+	// should list them apart in the picker, by who pays for the turn, is still
+	// to decide, together with how a connection turn is metered. Until then the
+	// built-in group stays one namespace, so it can't show two entries alike.
+	catalog, err := tx.Model.Query().
+		Where(entmodel.ConnectionIDIsNil(), entmodel.Deleted(false), entmodel.ProviderEQ(entmodel.Provider(*conn.Builtin))).
+		Select(entmodel.FieldDisplayName).
+		Strings(ctx)
+	if err != nil {
+		return fmt.Errorf("read the deployment's models: %w", err)
+	}
+	for _, name := range catalog {
+		if seen[strings.ToLower(name)] {
+			return &ModelNameTakenError{Name: name, Catalog: true}
+		}
 	}
 	return nil
 }

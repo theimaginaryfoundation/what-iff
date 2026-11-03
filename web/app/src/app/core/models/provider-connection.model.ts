@@ -56,6 +56,8 @@ export interface ListedModel {
  */
 export interface ConnectionModel extends ListedModel {
   enabled: boolean;
+  /** The name the listing offers it under, which a cleared name goes back to. */
+  default_name?: string;
 }
 
 /** Enables or disables one model (PUT /provider-connections/{id}/models). */

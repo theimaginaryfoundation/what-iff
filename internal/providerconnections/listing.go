@@ -195,11 +195,35 @@ func (l *Lister) List(ctx context.Context, t Target) ([]ListedModel, error) {
 	for i := range out {
 		out[i].DisplayName = shortName(out[i].ID, out[i].DisplayName)
 	}
+	keepDistinctNames(out)
 	if out == nil {
 		out = []ListedModel{}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+// keepDistinctNames gives models whose names would match, ignoring case, their
+// full ids instead, so two hf.co/*/Qwen3-0.6B-GGUF repos stay apart: a
+// connection's models must have names of their own.
+func keepDistinctNames(models []ListedModel) {
+	seen := make(map[string]int, len(models))
+	for _, m := range models {
+		seen[strings.ToLower(listedName(m))]++
+	}
+	for i, m := range models {
+		if m.DisplayName != "" && seen[strings.ToLower(m.DisplayName)] > 1 {
+			models[i].DisplayName = ""
+		}
+	}
+}
+
+// listedName is the name a listed model is offered under.
+func listedName(m ListedModel) string {
+	if m.DisplayName != "" {
+		return m.DisplayName
+	}
+	return m.ID
 }
 
 // vendorPrefix is a short "Something: " before a listed model's name, such as

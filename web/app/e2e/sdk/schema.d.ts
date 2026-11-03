@@ -3884,7 +3884,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Disabling the account's default model; `code` is `default_model_in_use` */
+                /** @description Disabling the account's default model (`code` is `default_model_in_use`), or a model named like another of the connection's, ignoring case, or like the deployment's own model of that provider (`code` is `model_name_taken`) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -14846,6 +14846,8 @@ export interface components {
         /** @description One of a connection's models as the account sees it. */
         ConnectionModel: components["schemas"]["ListedModel"] & {
             enabled: boolean;
+            /** @description The name the listing offers the model under, which a name the account clears goes back to. `display_name` is the account's own name for it, kept while the model is off too. */
+            default_name?: string;
         };
         SetConnectionModelsRequest: {
             models: {
@@ -16602,7 +16604,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "connection_name_taken" | "no_model_selected";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "connection_name_taken" | "model_name_taken" | "no_model_selected";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**

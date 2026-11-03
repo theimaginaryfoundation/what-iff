@@ -566,9 +566,13 @@ func (h *Handler) handleSetModels(w http.ResponseWriter, r *http.Request) {
 	}
 	err = h.store.SetModels(r.Context(), userID, row, req.Models)
 	var unknown *UnknownModelError
+	var taken *ModelNameTakenError
 	switch {
-	case errors.Is(err, ErrInvalidModelID), errors.Is(err, ErrTooManyModels), errors.As(err, &unknown):
+	case errors.Is(err, ErrInvalidModelID), errors.Is(err, ErrInvalidModelName), errors.Is(err, ErrTooManyModels), errors.As(err, &unknown):
 		badRequest(w, h.logger, err.Error())
+		return
+	case errors.As(err, &taken):
+		handlerutils.RespondWithError(w, h.logger, http.StatusConflict, models.ErrCodeModelNameTaken, err.Error(), nil)
 		return
 	case errors.Is(err, ErrModelsChanged):
 		handlerutils.RespondWithError(w, h.logger, http.StatusConflict, handlerutils.CodeNotSet, err.Error(), nil)

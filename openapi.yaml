@@ -2157,7 +2157,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Disabling the account's default model; `code` is `default_model_in_use`
+          description: >-
+            Disabling the account's default model (`code` is `default_model_in_use`), or a
+            model named like another of the connection's, ignoring case, or like the
+            deployment's own model of that provider (`code` is `model_name_taken`)
           content:
             application/json:
               schema:
@@ -11088,6 +11091,12 @@ components:
           properties:
             enabled:
               type: boolean
+            default_name:
+              type: string
+              description: >-
+                The name the listing offers the model under, which a name the account
+                clears goes back to. `display_name` is the account's own name for it,
+                kept while the model is off too.
     SetConnectionModelsRequest:
       type: object
       required: [models]
@@ -14090,6 +14099,7 @@ components:
         - provider_connection_exists
         - default_model_in_use
         - connection_name_taken
+        - model_name_taken
         - no_model_selected
 
     # Cross-resource search schemas (GET /search)

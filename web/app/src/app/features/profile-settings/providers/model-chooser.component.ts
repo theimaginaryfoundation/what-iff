@@ -17,6 +17,8 @@ export interface ChooserRow {
   id: string;
   /** What the picker calls it: the provider's name, or the account's own. */
   name: string;
+  /** The name the listing offers it under, which clearing the name goes back to. */
+  defaultName: string;
   enabled: boolean;
   /** Whether it takes tools: confirmed, as reported, or undefined when nothing says. */
   tools: boolean | undefined;
@@ -220,13 +222,13 @@ export class ModelChooserComponent {
     this.renaming.set(row.id);
   }
 
-  /** Keeps the name typed; an empty one goes back to the model's id. */
+  /** Keeps the name typed; an empty one goes back to the name the listing offers. */
   commitRename(row: ChooserRow, value: string): void {
     if (this.renaming() !== row.id) {
       return;
     }
     this.renaming.set(null);
-    this.patch(row.id, { name: value.trim() || row.id });
+    this.patch(row.id, { name: value.trim() || row.defaultName });
   }
 
   /** Escape leaves the name as it was, and keeps the dialog open. */
@@ -290,6 +292,7 @@ function toRow(model: ConnectionModel): ChooserRow {
   const row = {
     id: model.id,
     name: model.display_name || model.id,
+    defaultName: model.default_name || model.id,
     enabled: model.enabled,
     tools: model.tool_support,
     images: model.vision_support,

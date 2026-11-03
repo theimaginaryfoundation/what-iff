@@ -91,6 +91,9 @@ const (
 	// ErrCodeConnectionNameTaken: the account already has a provider connection
 	// by that name (ignoring case); it picks another.
 	ErrCodeConnectionNameTaken = "connection_name_taken"
+	// ErrCodeModelNameTaken: another of the connection's models, or the
+	// deployment's own model of that provider, has that name (ignoring case).
+	ErrCodeModelNameTaken = "model_name_taken"
 	// ErrCodeNoModelSelected: the account has no model to run the turn on: the
 	// chat names none and the account has no default, since it has not enabled
 	// one yet.
@@ -134,6 +137,7 @@ var AllErrorCodes = []string{
 	ErrCodeProviderConnectionExists,
 	ErrCodeDefaultModelInUse,
 	ErrCodeConnectionNameTaken,
+	ErrCodeModelNameTaken,
 	ErrCodeNoModelSelected,
 }
 
