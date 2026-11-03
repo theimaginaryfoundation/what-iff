@@ -917,6 +917,9 @@ type chatContext struct {
 	// memoryProgress is the memory-load row already shown in that timeline; the tool recorder
 	// starts from it so its snapshots keep the row. Nil when retrieval showed nothing.
 	memoryProgress *memoryLoadProgress
+	// jobRunCall is the display-only run_job call a scheduled job's turn opens with (ADR 0x040),
+	// nil on other turns.
+	jobRunCall *models.ToolCall
 	// mcpServers caches the connectors in scope for this turn (thread-attached plus the active
 	// skills' connectors) for the list/load/unload tools and dynamic mcp__ tool dispatch.
 	mcpServers []*models.MCPServer
@@ -1295,7 +1298,7 @@ func (a *Agent) finishGeneration(ctx context.Context, userID uuid.UUID, chatMess
 	if opts.mergeToolCalls != nil {
 		toolCalls = opts.mergeToolCalls(toolCalls)
 	}
-	toolCalls = append(memoryToolCallsForChatContext(chatCtx), toolCalls...)
+	toolCalls = append(leadToolCallsForChatContext(chatCtx), toolCalls...)
 	a.recordToolCalls(ctx, toolCalls)
 
 	// Checked after tool-call metrics and the web-search count: the work in this turn
@@ -1627,7 +1630,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	}
 	chatCtx.webSearchCount = a.turnWebSearchCount(adapter, toolCalls)
 
-	toolCalls = append(memoryToolCallsForChatContext(chatCtx), toolCalls...)
+	toolCalls = append(leadToolCallsForChatContext(chatCtx), toolCalls...)
 	a.recordToolCalls(ctx, toolCalls)
 
 	// See runGeneration: guard after metrics so a failed turn still counts its work.

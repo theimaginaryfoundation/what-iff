@@ -48,6 +48,10 @@ func toolContextPolicyFor(toolName string) toolContextPolicy {
 	name := strings.TrimSpace(toolName)
 
 	switch name {
+	case jobRunToolCallName:
+		// The run_job pseudo call shows a scheduled job's prompt with its reply (ADR 0x040). The
+		// prompt is deliberately never part of the thread's history, so never carry it over.
+		return toolContextPolicy{persist: false}
 	case memoryEnrichmentToolCallName:
 		// "Load Memory" is a display-only pseudo tool call recording the automatic
 		// per-turn memory enrichment. That same context is re-fetched and injected fresh

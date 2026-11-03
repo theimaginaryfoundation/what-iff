@@ -11,6 +11,23 @@ import { BrainIconComponent, ChevRightIconComponent, ClockIconComponent, StarIco
 import { MessageContentComponent } from '../message-content/message-content.component';
 import { AgentRunNotesComponent } from '../agent-run-notes/agent-run-notes.component';
 import { AgentRunView, agentRunView } from '../../helpers/agent-run.helpers';
+import { JobRunRef, jobRunHref, jobRunName, jobRunRef } from '../../helpers/job-run.helpers';
+
+interface JobChip {
+  href: string | null;
+  /** Text beside the clock: the live "Job running"; null once the turn is saved. */
+  label: string | null;
+  live: boolean;
+  /** Which job, for the tooltip and screen readers. */
+  description: string;
+}
+
+function jobChip(ref: JobRunRef | null, liveLabel: string | null): JobChip {
+  const href = ref ? jobRunHref(ref) : null;
+  const name = ref ? jobRunName(ref) : 'a scheduled job';
+  const description = (liveLabel ? `Running for ${name}` : `Reply from ${name}`) + (href ? '. Open the job.' : '');
+  return { href, label: liveLabel, live: !!liveLabel, description };
+}
 
 @Component({
   selector: 'app-message-bubble',
@@ -24,11 +41,37 @@ import { AgentRunView, agentRunView } from '../../helpers/agent-run.helpers';
       [class.bubble--bookmarked]="message().bookmarked && !isPendingPlaceholder()"
       [attr.aria-label]="ariaLabel()"
     >
-      @if (isPendingPlaceholder() && message().pending_label; as label) {
-        <span class="bubble__pending-label">
-          <ui-clock-icon [size]="12" />
-          <span>{{ label }}</span>
-        </span>
+      @if (jobChip(); as chip) {
+        <!-- A job's turn (ADR 0x039, 0x040): "Job running" while it runs, then just the clock. It
+             links to the job when the turn names it; the tooltip says which job. -->
+        @if (chip.href) {
+          <a
+            class="bubble__job-chip"
+            [class.bubble__job-chip--live]="chip.live"
+            [href]="chip.href"
+            [uiTooltip]="chip.description"
+            [attr.aria-label]="chip.description"
+            (click)="openJob($event, chip.href)"
+          >
+            <ui-clock-icon [size]="12" />
+            @if (chip.label) {
+              <span>{{ chip.label }}</span>
+            }
+          </a>
+        } @else {
+          <span
+            class="bubble__job-chip"
+            [class.bubble__job-chip--live]="chip.live"
+            [uiTooltip]="chip.description"
+            [attr.aria-label]="chip.description"
+            role="note"
+          >
+            <ui-clock-icon [size]="12" />
+            @if (chip.label) {
+              <span>{{ chip.label }}</span>
+            }
+          </span>
+        }
       }
       @if (agentRun(); as run) {
         <!-- A saved Advanced reply (ADR 0x026): its per-step working notes, plan and stop reason,
@@ -437,19 +480,32 @@ import { AgentRunView, agentRunView } from '../../helpers/agent-run.helpers';
       opacity: 1;
     }
 
-    .bubble__pending-label {
+    .bubble__job-chip {
       align-items: center;
-      background: color-mix(in srgb, var(--color-accent) 12%, transparent);
       border-radius: 999px;
-      color: var(--color-accent);
+      color: var(--color-text-muted);
       display: flex;
       font-size: 0.6875rem;
       font-weight: 600;
       gap: 0.25rem;
       letter-spacing: 0.01em;
       margin-bottom: 0.375rem;
-      padding: 0.125rem 0.5rem;
+      padding: 0.125rem 0.375rem;
+      text-decoration: none;
+      transition: background-color 120ms ease, color 120ms ease;
       width: fit-content;
+    }
+
+    .bubble__job-chip--live {
+      background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+      color: var(--color-accent);
+      padding-inline: 0.5rem;
+    }
+
+    a.bubble__job-chip:hover,
+    a.bubble__job-chip:focus-visible {
+      background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+      color: var(--color-accent);
     }
 
     .bubble__pending-status {
@@ -570,6 +626,16 @@ export class MessageBubbleComponent {
   }
 
   readonly isPendingPlaceholder = computed(() => this.message().id === CHAT_PENDING_ASSISTANT_MESSAGE_ID);
+  /** The job chip on a job's turn: the live label while it runs, then the clock alone. */
+  readonly jobChip = computed<JobChip | null>(() => {
+    const message = this.message();
+    if (message.origin !== 'Assistant') return null;
+    if (this.isPendingPlaceholder()) {
+      return message.pending_label ? jobChip(message.pending_job_run ?? null, message.pending_label) : null;
+    }
+    const ref = jobRunRef(message.tool_calls);
+    return ref ? jobChip(ref, null) : null;
+  });
   readonly showPendingDots = computed(
     () => this.isPendingPlaceholder() && !this.displayContent().trim(),
   );
@@ -601,6 +667,14 @@ export class MessageBubbleComponent {
   );
 
   /** Plain click navigates in-app; modified clicks keep the browser's new-tab behaviour. */
+  openJob(event: MouseEvent, href: string): void {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+    event.preventDefault();
+    void this.router.navigateByUrl(href);
+  }
+
   openReferencedThread(event: MouseEvent, threadId: string): void {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
       return;

@@ -26,7 +26,8 @@ const (
 // Retrieval that finds nothing removes the row again, matching the saved reply, which has none.
 //
 // Writes are synchronous but bounded and best-effort: progress is cosmetic and never fails the
-// turn. Nil-safe: paths without a chat job (agent-job runs, tests) pass nil and record nothing.
+// turn. Nil-safe: paths without a job to report to (tests, a turn with no turn gate) pass nil and
+// record nothing.
 type memoryLoadProgress struct {
 	ds     jobProgressWriter
 	logger *zap.Logger
@@ -34,6 +35,9 @@ type memoryLoadProgress struct {
 	jobID  uuid.UUID
 	now    func() time.Time
 
+	// lead are rows shown above the memory-load row for the whole turn: a scheduled job's run_job
+	// row (ADR 0x040).
+	lead []models.ChatTurnToolCall
 	// entry is the memory-load row, nil until retrieval starts and again if it found nothing.
 	entry *models.ChatTurnToolCall
 	// written is set once the row reached the job, so an empty result knows to clear it.
@@ -53,6 +57,15 @@ func (a *Agent) newMemoryLoadProgress(job *models.Job) *memoryLoadProgress {
 	return &memoryLoadProgress{ds: a.ds, logger: logger, userID: job.UserID, jobID: job.ID, now: time.Now}
 }
 
+// Lead shows rows above the memory-load row from now on, starting now.
+func (p *memoryLoadProgress) Lead(ctx context.Context, rows ...models.ChatTurnToolCall) {
+	if p == nil || len(rows) == 0 {
+		return
+	}
+	p.lead = append(p.lead, rows...)
+	p.written = p.write(ctx) || p.written
+}
+
 // Started shows the memory-load row as running. Call it only when retrieval really runs.
 func (p *memoryLoadProgress) Started(ctx context.Context) {
 	if p == nil {
@@ -64,7 +77,7 @@ func (p *memoryLoadProgress) Started(ctx context.Context) {
 		Status:    models.ChatTurnToolRunning,
 		StartedAt: p.now().UTC(),
 	}
-	p.written = p.write(ctx)
+	p.written = p.write(ctx) || p.written
 }
 
 // Finished completes the row with what retrieval returned: the memories, an error, or (when it
@@ -92,13 +105,17 @@ func (p *memoryLoadProgress) Finished(ctx context.Context, memories []string, fa
 	p.write(ctx)
 }
 
-// Entries is the memory-load row to start the turn's tool recorder with, so its snapshots keep
-// the row instead of replacing it. Nil when retrieval showed nothing.
+// Entries are the lead rows and the memory-load row to start the turn's tool recorder with, so
+// its snapshots keep them instead of replacing them. Nil when there are none.
 func (p *memoryLoadProgress) Entries() []models.ChatTurnToolCall {
-	if p == nil || p.entry == nil {
+	if p == nil || (len(p.lead) == 0 && p.entry == nil) {
 		return nil
 	}
-	return []models.ChatTurnToolCall{*p.entry}
+	out := append([]models.ChatTurnToolCall(nil), p.lead...)
+	if p.entry != nil {
+		out = append(out, *p.entry)
+	}
+	return out
 }
 
 func (p *memoryLoadProgress) write(ctx context.Context) bool {

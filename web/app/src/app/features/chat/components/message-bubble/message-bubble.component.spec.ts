@@ -356,11 +356,83 @@ describe('MessageBubbleComponent', () => {
         fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), pending_label: 'Job running' });
         fixture.componentRef.setInput('displayContent', 'Checking the forecast');
         fixture.detectChanges();
-        expect(fixture.nativeElement.querySelector('.bubble__pending-label')?.textContent).toContain('Job running');
+        expect(fixture.nativeElement.querySelector('.bubble__job-chip')?.textContent).toContain('Job running');
 
         fixture.componentRef.setInput('message', { ...message('Assistant'), pending_label: 'Job running' });
         fixture.detectChanges();
-        expect(fixture.nativeElement.querySelector('.bubble__pending-label')).toBeNull();
+        expect(fixture.nativeElement.querySelector('.bubble__job-chip')).toBeNull();
+    });
+
+    describe('job chip (ADR 0x040)', () => {
+        const JOB_ID = '33333333-3333-4333-8333-333333333333';
+        const runJobCall = (input: object) => ({
+            id: 'tc-1',
+            chat_message_id: 'm-1',
+            tool_name: 'run_job',
+            tool_input: JSON.stringify(input),
+            tool_output: 'Plan this week\'s meals.',
+            tool_error: '',
+            created_at: '2026-11-03T13:00:00Z',
+            updated_at: '2026-11-03T13:00:00Z',
+        });
+        const chip = () => fixture.nativeElement.querySelector('.bubble__job-chip') as HTMLElement | null;
+
+        it('links a running job turn to its job, naming it', () => {
+            fixture.componentRef.setInput('message', {
+                ...pendingAssistantMessage(),
+                pending_label: 'Job running',
+                pending_job_run: { agentJobId: JOB_ID, title: 'Weekly meal planning' },
+            });
+            fixture.componentRef.setInput('displayContent', '');
+            fixture.detectChanges();
+
+            expect(chip()?.tagName).toBe('A');
+            expect(chip()?.getAttribute('href')).toBe(`/agent-jobs/${JOB_ID}`);
+            expect(chip()?.textContent).toContain('Job running');
+            expect(chip()?.getAttribute('aria-label')).toBe('Running for the job “Weekly meal planning”. Open the job.');
+        });
+
+        it('keeps just the clock on a saved job reply, linked to the job', () => {
+            fixture.componentRef.setInput('message', {
+                ...message('Assistant'),
+                tool_calls: [runJobCall({ agent_job_id: JOB_ID, title: 'Weekly meal planning' })],
+            });
+            fixture.detectChanges();
+
+            expect(chip()?.tagName).toBe('A');
+            expect(chip()?.classList).not.toContain('bubble__job-chip--live');
+            expect(chip()?.textContent?.trim()).toBe('');
+            expect(chip()?.querySelector('ui-clock-icon')).not.toBeNull();
+            expect(chip()?.getAttribute('href')).toBe(`/agent-jobs/${JOB_ID}`);
+            expect(chip()?.getAttribute('aria-label')).toBe('Reply from the job “Weekly meal planning”. Open the job.');
+        });
+
+        it('opens the job in-app', () => {
+            const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+            fixture.componentRef.setInput('message', { ...message('Assistant'), tool_calls: [runJobCall({ agent_job_id: JOB_ID, title: 'T' })] });
+            fixture.detectChanges();
+
+            chip()?.click();
+
+            expect(navigate).toHaveBeenCalledWith(`/agent-jobs/${JOB_ID}`);
+        });
+
+        it('still marks a job reply that names no job, without a link', () => {
+            fixture.componentRef.setInput('message', { ...message('Assistant'), tool_calls: [runJobCall({ title: '' })] });
+            fixture.detectChanges();
+
+            expect(chip()?.tagName).toBe('SPAN');
+            expect(chip()?.getAttribute('aria-label')).toBe('Reply from a scheduled job');
+        });
+
+        it('leaves other replies unmarked', () => {
+            fixture.componentRef.setInput('message', {
+                ...message('Assistant'),
+                tool_calls: [{ ...runJobCall({}), tool_name: 'find_context' }],
+            });
+            fixture.detectChanges();
+            expect(chip()).toBeNull();
+        });
     });
 
     it('renders typing dots for the pending assistant placeholder without copy chrome', () => {

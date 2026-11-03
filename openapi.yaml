@@ -11506,6 +11506,10 @@ components:
           format: uuid
         tool_name:
           type: string
+          description: >-
+            The tool called. Two display-only pseudo calls are not real tools: `Load Memory` (the turn's automatic memory load)
+            and `run_job` (ADR 0x040), which opens a scheduled job's reply. A `run_job` call's `tool_input` is
+            `{"agent_job_id": "<uuid>", "title": "<job title>"}` and its `tool_output` is the job's prompt.
         tool_input:
           type: string
         tool_output:

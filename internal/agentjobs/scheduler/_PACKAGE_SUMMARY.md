@@ -31,6 +31,7 @@
   The run returns an error wrapping `agent.ErrTurnStopped`, which `runStopped` tells apart: `last_error` reads `StoppedRunText` and no failure message is posted to the thread.
   A run cancelled for any other reason (a worker shutting down) carries plain `context.Canceled` and is recorded as a failure.
   A stopped one-off job still ends `failed`, and the run counts as `failed` in the metrics.
+- **Which job a reply came from:** the run's context carries the job's id and title (`models.WithJobRunSource`), so the agent opens the reply with a display-only `run_job` tool call naming the job and showing its prompt (ADR 0x040).
 - **MVP note:** `Config.EnableAgentJobsScheduler` gates whether the scheduler runs at all.
 
 ## Testing

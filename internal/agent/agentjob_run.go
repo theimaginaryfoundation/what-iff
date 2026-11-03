@@ -207,8 +207,9 @@ func detachedUserContext(ctx context.Context) (context.Context, error) {
 	if !ok {
 		return nil, errors.New("user ID not found in context")
 	}
-	// An agent job's reasoning effort / agent loop ride on the context (ADR 0x026).
-	return models.CopyJobTurnSettings(ctx, detached), nil
+	// An agent job's reasoning effort / agent loop (ADR 0x026) and its name (ADR 0x040) ride on
+	// the context.
+	return models.CopyJobRunSource(ctx, models.CopyJobTurnSettings(ctx, detached)), nil
 }
 
 // handleEphemeralPrompt runs the turn on ctx as given, which must carry the user ID: callers
@@ -296,10 +297,18 @@ func (a *Agent) handleEphemeralPrompt(
 	// model, and a checkpoint treats messages saved after it as unseen (checkpointWindowStart).
 	ephemeralUserMessage.SentAt = time.Now()
 
-	chatCtx, err := a.prepareChatContext(ctx, userID, ephemeralUserMessage, nil)
+	// A scheduled job's turn opens with its run_job row, naming the job and showing its prompt
+	// (ADR 0x040); the memory load follows it, live as on a user's turn.
+	jobRunCall := jobRunToolCall(ctx, prompt)
+	memoryProgress := a.newMemoryLoadProgress(draftJob)
+	if jobRunCall != nil {
+		memoryProgress.Lead(ctx, jobRunProgressEntry(jobRunCall, time.Now().UTC()))
+	}
+	chatCtx, err := a.prepareChatContext(ctx, userID, ephemeralUserMessage, memoryProgress)
 	if err != nil {
 		return nil, err
 	}
+	chatCtx.jobRunCall = jobRunCall
 
 	// Overrides below apply only to this run; the save after inference writes continuity only, so
 	// they never reach the Chat row.

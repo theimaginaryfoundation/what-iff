@@ -4,6 +4,7 @@ import { ToolCall, ToolCallView } from '../../../core/models/toolcall.model';
 
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../chat.constants';
 import { toolCallsOutsideAgentRun } from './agent-run.helpers';
+import { JobRunRef } from './job-run.helpers';
 
 export type GroupedItem =
   | MessageGroupItem
@@ -147,6 +148,8 @@ export function pendingAssistantPlaceholderMessage(opts: {
   pendingStatus?: string;
   /** Marks whose turn this is when it is not a reply to the user (a job's run, ADR 0x039). */
   pendingLabel?: string;
+  /** The job a running job turn is for, when its live run_job row names one (ADR 0x040). */
+  pendingJobRun?: JobRunRef | null;
   generationPersonality: string;
   thinkingImageUrl: string | null;
 }): ChatMessage {
@@ -157,6 +160,7 @@ export function pendingAssistantPlaceholderMessage(opts: {
     model_reasoning: opts.draftReasoning || undefined,
     pending_status: opts.pendingStatus,
     pending_label: opts.pendingLabel,
+    pending_job_run: opts.pendingJobRun ?? undefined,
     origin: 'Assistant',
     sent_at: CHAT_PENDING_ASSISTANT_PLACEHOLDER_SENT_AT,
     generation_personality: opts.generationPersonality,

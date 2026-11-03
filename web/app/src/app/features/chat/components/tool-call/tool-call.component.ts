@@ -1,7 +1,9 @@
 
-import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import { Router } from '@angular/router';
 
 import { ToolCall, ToolCallStatus } from '../../../../core/models/toolcall.model';
+import { isJobRunToolCall, jobRunHref, jobRunRef } from '../../helpers/job-run.helpers';
 import { formatToolPayload, summarizeToolCall, toolCallDisplayName, toolCallFailed } from '../../helpers/tool-call-format.helpers';
 
 
@@ -36,20 +38,31 @@ import { formatToolPayload, summarizeToolCall, toolCallDisplayName, toolCallFail
       </button>
       @if (expanded()) {
         <div class="tool-call__panel" [id]="panelId()">
-          @if (formattedInput()) {
+          @if (jobRun()) {
+            <!-- A job's run_job call (ADR 0x040): its output is the job's prompt. -->
             <section class="tool-call__section">
-              <h4 class="tool-call__section-label">Input</h4>
-              <pre>{{ formattedInput() }}</pre>
+              <h4 class="tool-call__section-label">Prompt</h4>
+              <pre>{{ formattedResult() }}</pre>
             </section>
-          }
-          <section class="tool-call__section">
-            <h4 class="tool-call__section-label">{{ hasError() ? 'Error' : 'Output' }}</h4>
-            <pre>{{ formattedResult() }}</pre>
-          </section>
-          @if (!isRunning()) {
-            <button type="button" class="tool-call__details" (click)="openDetail.emit(toolCall())">
-              View details
-            </button>
+            @if (jobHref(); as href) {
+              <a class="tool-call__details" [href]="href" (click)="openJob($event, href)">Open job</a>
+            }
+          } @else {
+            @if (formattedInput()) {
+              <section class="tool-call__section">
+                <h4 class="tool-call__section-label">Input</h4>
+                <pre>{{ formattedInput() }}</pre>
+              </section>
+            }
+            <section class="tool-call__section">
+              <h4 class="tool-call__section-label">{{ hasError() ? 'Error' : 'Output' }}</h4>
+              <pre>{{ formattedResult() }}</pre>
+            </section>
+            @if (!isRunning()) {
+              <button type="button" class="tool-call__details" (click)="openDetail.emit(toolCall())">
+                View details
+              </button>
+            }
           }
         </div>
       }
@@ -215,6 +228,7 @@ import { formatToolPayload, summarizeToolCall, toolCallDisplayName, toolCallFail
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ToolCallComponent {
+  private readonly router = inject(Router);
   readonly toolCall = input.required<ToolCall>();
   readonly grouped = input(false);
   /** Set for live (in-flight) calls; saved calls derive complete/error from tool_error. */
@@ -231,11 +245,26 @@ export class ToolCallComponent {
   readonly displayName = computed(() => toolCallDisplayName(this.toolCall().tool_name));
   readonly summary = computed(() => summarizeToolCall(this.toolCall(), this.resolvedStatus()));
   readonly formattedInput = computed(() => formatToolPayload(this.toolCall().tool_input));
+  /** The job a run_job call names (ADR 0x040); null for every other tool. */
+  readonly jobRun = computed(() => (isJobRunToolCall(this.toolCall()) ? jobRunRef([this.toolCall()]) : null));
+  readonly jobHref = computed(() => {
+    const ref = this.jobRun();
+    return ref ? jobRunHref(ref) : null;
+  });
+
   readonly formattedResult = computed(() => {
     if (this.isRunning()) return 'Waiting for result…';
     const call = this.toolCall();
     return formatToolPayload(this.hasError() ? call.tool_error : call.tool_output) || 'No output';
   });
+
+  openJob(event: MouseEvent, href: string): void {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+    event.preventDefault();
+    void this.router.navigateByUrl(href);
+  }
 
   toggle(): void {
     this.expanded.set(!this.expanded());

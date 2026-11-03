@@ -321,6 +321,12 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 	}
 	// The job's reasoning effort and agent loop override the thread and mode for this run (ADR 0x026).
 	execCtx = models.WithJobTurnSettings(execCtx, job.TurnSettingValues)
+	// The reply shows which job it came from, and the job's prompt (ADR 0x040).
+	title := ""
+	if job.Title != nil {
+		title = *job.Title
+	}
+	execCtx = models.WithJobRunSource(execCtx, models.JobRunSource{AgentJobID: agentJobID, Title: title})
 	runStart := time.Now()
 	_, runErr := m.agent.HandleAgentJobPrompt(execCtx, *chatID, job.Prompt, job.ModelID, job.PersonalityID, ritualIDs, nil)
 	runOutcome := runOutcomeRan

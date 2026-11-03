@@ -63,6 +63,7 @@ import { BrainIconComponent, ChevDownIconComponent, EditIconComponent, FileIconC
 import { thumbnailCircleToCirclePreviewTransform } from '../../shared/ui/avatar/avatar-thumbnail.helpers';
 import { personalityAccent, personalityAccentSurface } from '../personality/helpers/personality-vm.helpers';
 import { JOB_RUN_COMPOSER_NOTICE, JOB_RUN_PENDING_LABEL, chatTurnWaitingLabel } from './assistant-turn';
+import { jobRunRef } from './helpers/job-run.helpers';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from './chat.constants';
 import { HOTKEY_RITUALS_LIMIT, HOTKEY_SEQUENCE_TIMEOUT } from '../../core/constants/app.constants';
 import { parseHotkey, normalizeKey } from '../../core/utils/hotkey.utils';
@@ -151,6 +152,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
         draftReasoning: this.session.pendingAssistantDraftReasoning(),
         pendingStatus: waiting ? chatTurnWaitingLabel(waiting) : undefined,
         pendingLabel: jobRun ? JOB_RUN_PENDING_LABEL : undefined,
+        pendingJobRun: jobRun ? jobRunRef(this.session.liveToolCalls()) : null,
         generationPersonality: name,
         thinkingImageUrl: this.selectedPersonality()?.expressions_enabled === false
           ? null

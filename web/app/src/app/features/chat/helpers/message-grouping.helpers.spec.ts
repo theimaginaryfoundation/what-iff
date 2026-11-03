@@ -212,6 +212,17 @@ describe('appendPendingAssistantGroup', () => {
         expect(queued.pending_status).toBe('Waiting for the previous reply…');
         expect(pending.pending_status).toBeUndefined();
 
+        const jobRun = pendingAssistantPlaceholderMessage({
+            chatId: 'chat-1',
+            draftText: '',
+            pendingLabel: 'Job running',
+            pendingJobRun: { agentJobId: 'job-1', title: 'Weekly meal planning' },
+            generationPersonality: 'Kai',
+            thinkingImageUrl: null,
+        });
+        expect(jobRun.pending_job_run).toEqual({ agentJobId: 'job-1', title: 'Weekly meal planning' });
+        expect(pending.pending_job_run).toBeUndefined();
+
         const extended = appendPendingAssistantGroup([], pending);
         expect(extended.length).toBe(1);
         expect(extended[0].kind).toBe('message-group');

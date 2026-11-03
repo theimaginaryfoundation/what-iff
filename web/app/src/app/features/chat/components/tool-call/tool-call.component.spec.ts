@@ -1,5 +1,6 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { Router } from '@angular/router';
 
 import { ToolCall } from '../../../../core/models/toolcall.model';
 import { ToolCallComponent } from './tool-call.component';
@@ -107,6 +108,50 @@ describe('ToolCallComponent', () => {
 
         (fixture.nativeElement.querySelector('.tool-call__details') as HTMLButtonElement).click();
         expect(emitted).toEqual(toolCall);
+    });
+
+    describe('a job\'s run_job call (ADR 0x040)', () => {
+        const JOB_ID = '33333333-3333-4333-8333-333333333333';
+        const runJob: ToolCall = {
+            ...toolCall,
+            tool_name: 'run_job',
+            tool_input: JSON.stringify({ agent_job_id: JOB_ID, title: 'Weekly meal planning' }),
+            tool_output: 'Plan this week\'s meals.',
+        };
+
+        it('names the job, shows its prompt and links to it', () => {
+            fixture.componentRef.setInput('toolCall', runJob);
+            fixture.componentInstance.expanded.set(true);
+            fixture.detectChanges();
+            const host = fixture.nativeElement as HTMLElement;
+
+            expect(host.querySelector('.tool-call__name')?.textContent).toBe('run job');
+            expect(host.querySelector('.tool-call__summary')?.textContent).toContain('"Weekly meal planning"');
+            expect(sections(host)).toEqual([['Prompt', 'Plan this week\'s meals.']]);
+            const link = host.querySelector('a.tool-call__details') as HTMLAnchorElement;
+            expect(link.textContent?.trim()).toBe('Open job');
+            expect(link.getAttribute('href')).toBe(`/agent-jobs/${JOB_ID}`);
+        });
+
+        it('opens the job in-app', () => {
+            const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+            fixture.componentRef.setInput('toolCall', runJob);
+            fixture.componentInstance.expanded.set(true);
+            fixture.detectChanges();
+
+            (fixture.nativeElement.querySelector('a.tool-call__details') as HTMLAnchorElement).click();
+
+            expect(navigate).toHaveBeenCalledWith(`/agent-jobs/${JOB_ID}`);
+        });
+
+        it('shows no link when the call names no job', () => {
+            fixture.componentRef.setInput('toolCall', { ...runJob, tool_input: '{"title":"Orphan"}' });
+            fixture.componentInstance.expanded.set(true);
+            fixture.detectChanges();
+
+            expect(sections(fixture.nativeElement)).toEqual([['Prompt', 'Plan this week\'s meals.']]);
+            expect(fixture.nativeElement.querySelector('a.tool-call__details')).toBeNull();
+        });
     });
 });
 
