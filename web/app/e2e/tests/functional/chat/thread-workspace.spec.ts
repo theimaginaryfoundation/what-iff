@@ -120,7 +120,7 @@ test('shows a reply’s token breakdown from its Context action', async ({ chatP
   await expect(chatPage.contextPanel).toBeVisible();
   await expect(chatPage.contextBreakdown).toBeVisible();
   await expect(chatPage.contextBreakdown.getByText('Turn context', { exact: true })).toBeVisible();
-  await expect(chatPage.contextBreakdown.getByRole('img', { name: /^Context is \d+% of budget:/ })).toBeVisible();
+  await expect(chatPage.contextBreakdown.getByRole('img', { name: /^Context is \d+% of (checkpoint budget|run limit)[:,]/ })).toBeVisible();
 
   // The cost outlet is mounted for every assistant turn, whether or not the
   // turn's model resolves to a priced estimate — the X-ray passes it the
