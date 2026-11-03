@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/reugn/go-quartz/quartz"
@@ -31,7 +32,9 @@ const (
 	schedulerLockHealthInterval = 5 * time.Second
 	// schedulerExecutionWindow is the sliding window used for per-user execution limiting.
 	schedulerExecutionWindow = 30 * time.Minute
-	// schedulerMaxExecutionsPerWindow is the max successful executions allowed per user per window.
+	// schedulerMaxExecutionsPerWindow is the max executions allowed per user per window. What is
+	// counted is the user's job_run usage events (datastore.CountRecentSuccessfulAgentJobExecutions),
+	// which can exceed their agent-job runs (issue #427).
 	schedulerMaxExecutionsPerWindow = 10
 	// schedulerShortRecurrenceThreshold skips immediately when over limit.
 	schedulerShortRecurrenceThreshold = 10 * time.Minute
@@ -47,6 +50,9 @@ const (
 	schedulerRecurrenceSampleRuns = 64
 	// schedulerSkipMessage is sent when a run is skipped due to congestion/rate limiting.
 	schedulerSkipMessage = "I skipped this scheduled run because you reached the limit of 10 scheduled runs in 30 minutes. Please revise your schedules to run less frequently."
+	// schedulerManualSkipMessage is sent when a manual run loses the last slot in the window to
+	// another run after RunAgentJobNow accepted it.
+	schedulerManualSkipMessage = "I skipped this run because you reached the limit of 10 job runs in 30 minutes. Please try again later."
 	// schedulerSkipInfraMessage is sent when congestion guard infrastructure fails while over-limit.
 	schedulerSkipInfraMessage = "I skipped this scheduled run because the scheduler has encountered an error. Please try again in a few minutes."
 	// schedulerSystemGenerationPersonality tags hardcoded scheduler messages as system personality.
@@ -70,6 +76,7 @@ type reconciliationStore interface {
 type executionStore interface {
 	GetAgentJob(ctx context.Context, userID, id uuid.UUID) (*models.AgentJob, error)
 	CountRecentSuccessfulAgentJobExecutions(ctx context.Context, userID uuid.UUID, since time.Time) (int, error)
+	ListRecentAgentJobExecutionTimes(ctx context.Context, userID uuid.UUID, since time.Time) ([]time.Time, error)
 	RecordAgentJobRun(ctx context.Context, userID, id uuid.UUID, lastRunAt time.Time, nextRunAt *time.Time, runError string, newStatus *models.AgentJobStatus) (*models.AgentJob, error)
 	SetAgentJobChat(ctx context.Context, userID, id uuid.UUID, chatID *uuid.UUID) (*models.AgentJob, error)
 	CreateChat(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error)
@@ -128,6 +135,11 @@ type Manager struct {
 
 	schedulerFactory   func() (quartz.Scheduler, error)
 	lockHealthInterval time.Duration
+
+	// running is true while this instance's manager is up: after a successful Start, or for the
+	// whole of Run (leader or follower). Manual runs need only this (RunAgentJobNow), not the
+	// quartz scheduler, which only the leader has.
+	running atomic.Bool
 }
 
 func NewManager(ds schedulerStore, a *agent.Agent, logger *zap.Logger, cfg Config) (*Manager, error) {
@@ -182,10 +194,13 @@ func (m *Manager) Start(ctx context.Context) {
 	}
 	if err := m.startLeader(ctx, nil); err != nil {
 		m.logger.Error("agent job scheduler start failed", zap.Error(err))
+		return
 	}
+	m.running.Store(true)
 }
 
 func (m *Manager) Stop(ctx context.Context) {
+	m.running.Store(false)
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 	m.stopLeader(ctx, "stop-called")
@@ -200,6 +215,8 @@ func (m *Manager) Run(ctx context.Context) {
 		return
 	}
 
+	// A follower serves manual runs too, so the manager counts as running from here until Stop.
+	m.running.Store(true)
 	m.logger.Info("agent job scheduler distributed mode started",
 		zap.String("instance_id", m.cfg.InstanceID),
 		zap.Int64("lock_key", m.cfg.LockKey),

@@ -50,7 +50,8 @@ export type SpecificErrorCode =
   | 'provider_unavailable'
   | 'custom_address_not_allowed'
   | 'provider_connection_exists'
-  | 'buzz_terms_required';
+  | 'buzz_terms_required'
+  | 'job_run_limit_reached';
 
 export interface PaginatedResponse<T> {
   results: T[];

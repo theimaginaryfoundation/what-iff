@@ -37,7 +37,10 @@ const (
 )
 
 type executionOptions struct {
-	allowPaused        bool
+	allowPaused bool
+	// manual marks a RunAgentJobNow run: it is never deferred when over the limit (see
+	// handleSchedulerCongestion) and has no planned time for lateness.
+	manual             bool
 	deferredRetryCount int
 	recurrenceHint     recurrenceBucket
 }
@@ -154,24 +157,6 @@ func (m *Manager) executeAgentJob(ctx context.Context, userID, agentJobID uuid.U
 		deferredRetryCount: 0,
 		recurrenceHint:     recurrenceBucketUnknown,
 	})
-}
-
-// RunAgentJobNow triggers an agent job execution asynchronously outside normal schedule recurrence.
-func (m *Manager) RunAgentJobNow(ctx context.Context, userID, id uuid.UUID) error {
-	m.mu.RLock()
-	schedulerActive := m.sched != nil
-	m.mu.RUnlock()
-	if !schedulerActive {
-		return ErrSchedulerNotActive
-	}
-
-	execCtx := context.WithoutCancel(ctx)
-	go m.executeAgentJobDetached(execCtx, userID, id, executionOptions{
-		allowPaused:        true,
-		deferredRetryCount: 0,
-		recurrenceHint:     recurrenceBucketUnknown,
-	})
-	return nil
 }
 
 // executeAgentJobDetached is executeAgentJobWithOptions for a run on its own goroutine (Execute,
@@ -350,6 +335,7 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 //   - short recurrence (<=10m): skip immediately and post a system skip message.
 //   - medium recurrence (>10m && <=20m): allow one deferred retry (+5m), then skip.
 //   - long recurrence (>20m): allow two deferred retries (+5m each), then skip.
+//   - manual run (RunAgentJobNow): skip immediately, whatever the recurrence.
 //
 // It returns true when the current execution should stop (either deferred or skipped).
 func (m *Manager) handleSchedulerCongestion(
@@ -376,6 +362,16 @@ func (m *Manager) handleSchedulerCongestion(
 	}
 	if executions < schedulerMaxExecutionsPerWindow {
 		return false
+	}
+
+	// A manual run is never deferred: RunAgentJobNow already refused it if the user was over the
+	// limit, so it only gets here when another run took the last slot in between. Deferring would
+	// need the quartz scheduler, which only the leader has, and would replay a run the user asked
+	// for now minutes later (as a scheduled run, which skips a paused job).
+	if opts.manual {
+		recordRun(ctx, runOutcomeSkippedCongestion)
+		m.postSchedulerMessage(ctx, userID, chatID, schedulerManualSkipMessage)
+		return true
 	}
 
 	bucket := opts.recurrenceHint

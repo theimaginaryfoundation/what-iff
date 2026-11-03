@@ -5236,7 +5236,10 @@ export interface paths {
         put?: never;
         /**
          * Run agent job now
-         * @description Triggers immediate asynchronous execution of an AgentJob without changing its schedule
+         * @description Triggers immediate asynchronous execution of an AgentJob without changing its schedule.
+         *     Any API instance serves it while the scheduler is running there (leader or follower).
+         *     A run is refused with 429 `job_run_limit_reached` when the user has used up the per-user
+         *     job run window (10 per 30 minutes), checked before the run is accepted.
          */
         post: {
             parameters: {
@@ -5289,7 +5292,24 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Scheduler unavailable */
+                /**
+                 * @description Job run limit reached (`code: job_run_limit_reached`). `details` is a
+                 *     JobRunLimitDetails; `Retry-After` (seconds) is set when `details.retry_at` is.
+                 */
+                429: {
+                    headers: {
+                        /** @description Seconds until the window allows another run, when known. */
+                        "Retry-After"?: number;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobRunLimitReached"];
+                    };
+                };
+                /**
+                 * @description The scheduler is not enabled on this deployment, or not running on the instance that
+                 *     took the request (not started, failed to start, or shutting down).
+                 */
                 503: {
                     headers: {
                         [name: string]: unknown;
@@ -16460,6 +16480,28 @@ export interface components {
             /** @description Optional structured metadata for clients */
             details?: unknown;
         };
+        /** @description Details of a job_run_limit_reached error (POST /agent-job/{id}/run). */
+        JobRunLimitDetails: {
+            /**
+             * @description Runs allowed per window, per user.
+             * @example 10
+             */
+            limit: number;
+            /**
+             * @description Length of the sliding window in seconds.
+             * @example 1800
+             */
+            window_seconds: number;
+            /**
+             * Format: date-time
+             * @description When the window next allows a run. Omitted when the server cannot tell.
+             */
+            retry_at?: string;
+        };
+        /** @description The error envelope (code job_run_limit_reached) with the limit and reset time in details */
+        JobRunLimitReached: components["schemas"]["Error"] & {
+            details?: components["schemas"]["JobRunLimitDetails"];
+        };
         /**
          * @description Stable machine-readable error identifier. Always present on an error response.
          *
@@ -16474,7 +16516,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "job_run_limit_reached";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**

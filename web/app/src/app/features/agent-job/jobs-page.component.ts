@@ -31,6 +31,8 @@ export class JobsPageComponent implements OnInit, OnDestroy {
   readonly totalPages = this.view.totalPages;
   readonly totalCount = this.view.totalCount;
   readonly runningNowIds = this.view.runningNowIds;
+  /** Why the last "Run now" from this page failed; shown above the cards. */
+  readonly runNowError = signal<string | null>(null);
 
   readonly cardVms = computed(() => this.jobs().map(job => toJobCardVm(job)));
 
@@ -78,11 +80,20 @@ export class JobsPageComponent implements OnInit, OnDestroy {
   }
 
   onRunNow(jobId: string): void {
+    this.runNowError.set(null);
     this.view.runNow(jobId).subscribe({
       next: () => {
         this.view.startPollingActiveJobs();
       },
+      // A refused run (e.g. the job run limit, issue #427) used to fail silently here.
+      error: (error: unknown) => {
+        this.runNowError.set(error instanceof Error && error.message ? error.message : 'Failed to run job now');
+      },
     });
+  }
+
+  dismissRunNowError(): void {
+    this.runNowError.set(null);
   }
 
   async onDelete(jobId: string): Promise<void> {
