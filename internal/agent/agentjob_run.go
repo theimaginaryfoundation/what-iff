@@ -287,34 +287,25 @@ func (a *Agent) handleEphemeralPrompt(
 	// model, and a checkpoint treats messages saved after it as unseen (checkpointWindowStart).
 	ephemeralUserMessage.SentAt = time.Now()
 
-	chatCtx, err := a.prepareChatContext(ctx, userID, ephemeralUserMessage, nil)
+	// A model the job names is resolved first, so the thread's own model, turned
+	// off or gone, can't fail a run that doesn't use it.
+	var model *models.Model
+	if modelOverrideID != nil {
+		if model, err = a.jobModel(ctx, *modelOverrideID); err != nil {
+			return nil, err
+		}
+	}
+	chatCtx, err := a.prepareChatContextOn(ctx, userID, ephemeralUserMessage, nil, model)
 	if err != nil {
 		return nil, err
 	}
 
 	// Overrides below apply only to this run; the save after inference writes continuity only, so
 	// they never reach the Chat row.
-	if modelOverrideID != nil {
-		model, err := a.jobModel(ctx, *modelOverrideID)
-		if err != nil {
-			return nil, err
-		}
-		if model != nil {
-			// A provider connection's model runs through its connection (ADR 0x027).
-			connection, err := a.connectionFor(ctx, userID, model)
-			if err != nil {
-				return nil, err
-			}
-			chatCtx.chat.ModelID = model.ID
-			chatCtx.chat.ModelName = model.Name
-			chatCtx.chat.ToolsEnabled = model.ToolSupport
-			chatCtx.model = model.Name
-			chatCtx.modelProvider = model.Provider
-			chatCtx.connection = connection
-			chatCtx.modelReasoningSupport = model.ReasoningSupport
-			chatCtx.modelSubscriptionTier = model.SubscriptionTier
-			chatCtx.modelVisionSupport = model.VisionSupport
-		}
+	if model != nil {
+		chatCtx.chat.ModelID = model.ID
+		chatCtx.chat.ModelName = model.Name
+		chatCtx.chat.ToolsEnabled = model.ToolSupport
 	}
 	if personalityOverrideID != nil {
 		personality, err := a.ds.GetPersonality(ctx, userID, *personalityOverrideID)

@@ -2224,6 +2224,13 @@ func memoryToolCallsForChatContext(chatCtx *chatContext) []*models.ToolCall {
 // memoryProgress (nil-safe) shows memory retrieval in the chat job's live tool timeline; pass nil
 // when the turn has no job to report to.
 func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage, memoryProgress *memoryLoadProgress) (*chatContext, error) {
+	return a.prepareChatContextOn(ctx, userID, chatMessage, memoryProgress, nil)
+}
+
+// prepareChatContextOn is prepareChatContext on model instead of the chat's own,
+// when it is given: a job that names a model runs on it, so the thread's model,
+// turned off or gone, is never checked for it.
+func (a *Agent) prepareChatContextOn(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage, memoryProgress *memoryLoadProgress, model *models.Model) (*chatContext, error) {
 	defer a.timeTurnStage(ctx, turnStagePrepareContext)()
 	// Get parent chat
 	parentChat, err := a.ds.GetChat(ctx, userID, chatMessage.ChatID)
@@ -2236,7 +2243,12 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
 	// (gpt-5.1) even when the user selected a different provider.
-	resolved := a.resolveModelForChat(ctx, parentChat)
+	var resolved resolvedChatModel
+	if model != nil {
+		resolved = resolvedFromRow(model)
+	} else {
+		resolved = a.resolveModelForChat(ctx, parentChat)
+	}
 	if err := a.assertUserCanRunChatModel(ctx, userID, parentChat, resolved.provider); err != nil {
 		return nil, err
 	}
@@ -2299,6 +2311,24 @@ type resolvedChatModel struct {
 	row *models.Model
 }
 
+// resolvedFromRow is the model a turn runs on, from its row.
+func resolvedFromRow(dbModel *models.Model) resolvedChatModel {
+	provider := string(models.ProviderForModel(dbModel.Provider, dbModel.Name))
+	if provider == "" && dbModel.ConnectionID != nil {
+		// A provider connection's model (ADR 0x027): keep its preset, so it is
+		// reached through its connection and never falls through to another path.
+		provider = dbModel.Provider
+	}
+	return resolvedChatModel{
+		name:             dbModel.Name,
+		provider:         provider,
+		subscriptionTier: dbModel.SubscriptionTier,
+		visionSupport:    dbModel.VisionSupport,
+		reasoningSupport: dbModel.ReasoningSupport,
+		row:              dbModel,
+	}
+}
+
 // resolveModelForChat loads the effective model for a chat turn. model_id on the
 // chat row is authoritative; model_name is a fallback only when the ID lookup fails.
 func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat) resolvedChatModel {
@@ -2347,20 +2377,7 @@ func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat
 		}
 	}
 	if dbModel != nil {
-		provider := string(models.ProviderForModel(dbModel.Provider, dbModel.Name))
-		if provider == "" && dbModel.ConnectionID != nil {
-			// A provider connection's model (ADR 0x027): keep its preset, so it is
-			// reached through its connection and never falls through to another path.
-			provider = dbModel.Provider
-		}
-		return resolvedChatModel{
-			name:             dbModel.Name,
-			provider:         provider,
-			subscriptionTier: dbModel.SubscriptionTier,
-			visionSupport:    dbModel.VisionSupport,
-			reasoningSupport: dbModel.ReasoningSupport,
-			row:              dbModel,
-		}
+		return resolvedFromRow(dbModel)
 	}
 
 	if name := strings.TrimSpace(parentChat.ModelName); name != "" {
