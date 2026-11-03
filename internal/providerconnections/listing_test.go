@@ -444,6 +444,7 @@ func TestOpenAICannotChat(t *testing.T) {
 		"whisper-1", "gpt-image-2", "chatgpt-image-latest", "sora-2-pro", "gpt-audio-mini",
 		"gpt-realtime-2.1-mini", "gpt-live-1", "gpt-transcribe", "gpt-4o-mini-transcribe",
 		"gpt-4o-mini-tts-2025-12-15", "gpt-3.5-turbo-instruct-0914",
+		"gpt-4o-search-preview", "gpt-4o-mini-search-preview-2025-03-11",
 	} {
 		require.True(t, openAICannotChat(id), id)
 	}

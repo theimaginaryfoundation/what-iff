@@ -225,7 +225,9 @@ var (
 		"tts-", "whisper-", "dall-e-", "gpt-image-", "chatgpt-image-", "sora-",
 		"gpt-audio", "gpt-realtime", "gpt-live-", "gpt-transcribe",
 	}
-	openAINonChatParts = []string{"-transcribe", "-tts", "-realtime", "-instruct"}
+	// "-search-preview" models answer over Chat Completions only, and the OpenAI
+	// provider calls the Responses API.
+	openAINonChatParts = []string{"-transcribe", "-tts", "-realtime", "-instruct", "-search-preview"}
 )
 
 func openAICannotChat(id string) bool {
