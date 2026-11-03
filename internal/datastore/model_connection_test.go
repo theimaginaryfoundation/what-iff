@@ -147,3 +147,28 @@ func TestCatalogNameLookups_IgnoreConnectionModels(t *testing.T) {
 	_, err = f.ds.AdminUpdateModel(ctx, created.ID, models.UpdateModelRequest{Name: newName})
 	require.Error(t, err, "renaming onto a catalog model's name is still refused")
 }
+
+// The admin model functions see only the catalog: an account's connection model
+// can't be listed, read, renamed, deleted or made the default through them.
+func TestAdminModelFunctions_AreTheCatalogOnly(t *testing.T) {
+	f := newConnectionModelsFixture(t)
+	ctx := context.Background()
+
+	listed, err := f.ds.AdminListModels(ctx, false)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, f.catalog, listed[0].ID)
+
+	_, err = f.ds.AdminGetModel(ctx, f.aliceOwn)
+	require.ErrorIs(t, err, ErrModelNotFound)
+	_, err = f.ds.AdminUpdateModel(ctx, f.aliceOwn, models.UpdateModelRequest{DisplayName: "renamed"})
+	require.ErrorIs(t, err, ErrModelNotFound)
+	require.ErrorIs(t, f.ds.AdminDeleteModel(ctx, f.aliceOwn), ErrModelNotFound)
+	_, err = f.ds.AdminSetDefaultModel(ctx, f.aliceOwn)
+	require.ErrorIs(t, err, ErrModelNotFound)
+
+	own, err := f.ds.dbClient.Model.Get(ctx, f.aliceOwn)
+	require.NoError(t, err)
+	require.False(t, own.Deleted)
+	require.False(t, own.IsDefault)
+}

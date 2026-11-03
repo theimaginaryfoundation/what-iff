@@ -404,6 +404,9 @@ func (d *Datastore) GetModelByName(ctx context.Context, name string) (*models.Mo
 	return toModelModel(dbModel), nil
 }
 
+// AdminListModels lists the deployment's catalog. The admin functions here see
+// only the catalog: models on an account's own connections are that account's
+// (ADR 0x027), so an admin can't list, rename, delete or make one the default.
 func (d *Datastore) AdminListModels(ctx context.Context, deleted bool) ([]*models.Model, error) {
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
@@ -419,7 +422,7 @@ func (d *Datastore) AdminListModels(ctx context.Context, deleted bool) ([]*model
 	}()
 
 	dbModels, err := tx.Model.Query().
-		Where(entmodel.Deleted(deleted)).
+		Where(entmodel.Deleted(deleted), entmodel.ConnectionIDIsNil()).
 		Order(ent.Asc(entmodel.FieldDisplayName)).
 		All(ctx)
 	if err != nil {
@@ -458,7 +461,7 @@ func (d *Datastore) AdminGetModel(ctx context.Context, id uuid.UUID) (*models.Mo
 	}()
 
 	dbModel, err := tx.Model.Query().
-		Where(entmodel.ID(id), entmodel.Deleted(false)).
+		Where(entmodel.ID(id), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
@@ -624,7 +627,7 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 	}()
 
 	current, err := tx.Model.Query().
-		Where(entmodel.ID(id), entmodel.Deleted(false)).
+		Where(entmodel.ID(id), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
@@ -767,7 +770,7 @@ func (d *Datastore) AdminDeleteModel(ctx context.Context, id uuid.UUID) error {
 	}()
 
 	affected, err := tx.Model.Update().
-		Where(entmodel.ID(id), entmodel.Deleted(false)).
+		Where(entmodel.ID(id), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		SetDeleted(true).
 		Save(ctx)
 	if err != nil {
@@ -819,7 +822,7 @@ func (d *Datastore) AdminSetDefaultModel(ctx context.Context, id uuid.UUID) (*mo
 
 	// The target must exist and be active (soft-deleted models cannot be the default).
 	if _, err := tx.Model.Query().
-		Where(entmodel.ID(id), entmodel.Deleted(false)).
+		Where(entmodel.ID(id), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		Only(ctx); err != nil {
 		if ent.IsNotFound(err) {
 			if rerr := tx.Rollback(); rerr != nil {
@@ -836,7 +839,7 @@ func (d *Datastore) AdminSetDefaultModel(ctx context.Context, id uuid.UUID) (*mo
 
 	// Clear the flag from any other model currently marked default.
 	if _, err := tx.Model.Update().
-		Where(entmodel.IsDefault(true), entmodel.IDNEQ(id)).
+		Where(entmodel.IsDefault(true), entmodel.IDNEQ(id), entmodel.ConnectionIDIsNil()).
 		SetIsDefault(false).
 		Save(ctx); err != nil {
 		d.logger.Error(i18n.T1("update.failed", "Entity", "model"), zap.Error(err))
