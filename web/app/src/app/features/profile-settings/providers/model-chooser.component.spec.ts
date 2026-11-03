@@ -1,7 +1,7 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 
 import { Model } from '../../../core/models/model.model';
 import { ConnectionModel, ProviderConnection } from '../../../core/models/provider-connection.model';
@@ -246,6 +246,20 @@ describe('ModelChooserComponent', () => {
     chooser.toggleCapability(row('mystery-model'), 'tools');
     chooser.toggleCapability(row('mystery-model'), 'images');
     expect(chooser.unconfirmed()).toBe(false);
+  });
+
+  it("never fills one connection's rows with another's slow listing", async () => {
+    await render();
+    const slowA = new Subject<ConnectionModel[]>();
+    connections.models.mockImplementation((id: string) => (id === 'c-a' ? slowA : of([{ id: 'b-model', enabled: false }])));
+    const loadA = chooser.load({ ...OPENROUTER, id: 'c-a', name: 'A' });
+    await chooser.load({ ...OPENROUTER, id: 'c-b', name: 'B' });
+    slowA.next([{ id: 'a-model', enabled: true }]);
+    slowA.complete();
+    await loadA;
+
+    expect(chooser.rows().map(r => r.id)).toEqual(['b-model']);
+    expect(chooser.loading()).toBe(false);
   });
 
   it("says when the provider can't be listed, and retries", async () => {

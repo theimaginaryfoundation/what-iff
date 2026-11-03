@@ -124,7 +124,12 @@ export class ModelChooserComponent {
     });
   }
 
+  /** Counts loads, so a slow listing for a connection closed since never fills another's rows. */
+  private loadSeq = 0;
+
   async load(connection: ProviderConnection): Promise<void> {
+    const seq = ++this.loadSeq;
+    this.rows.set([]);
     this.loading.set(true);
     this.loadError.set('');
     this.saveError.set('');
@@ -137,14 +142,22 @@ export class ModelChooserComponent {
         firstValueFrom(this.preferences.getUserPreferences()),
         firstValueFrom(this.modelService.getModels()),
       ]);
+      if (seq !== this.loadSeq) {
+        return;
+      }
       const defaultModel = models.find(m => m.id === prefs.default_model_id && m.connection_id === connection.id);
       this.defaultModelId.set(defaultModel?.name ?? null);
       this.rows.set(listed.map(toRow));
     } catch (err) {
+      if (seq !== this.loadSeq) {
+        return;
+      }
       this.rows.set([]);
       this.loadError.set(apiErrorMessage(err, `Couldn't list ${connection.name}'s models.`));
     } finally {
-      this.loading.set(false);
+      if (seq === this.loadSeq) {
+        this.loading.set(false);
+      }
     }
   }
 
