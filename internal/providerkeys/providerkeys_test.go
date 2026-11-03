@@ -107,13 +107,15 @@ func TestNotConfiguredIsAnAuthFailure(t *testing.T) {
 	require.Equal(t, 401, (&NotConfiguredError{}).HTTPStatusCode())
 }
 
-// AccountsSupplyKeys answers what New chooses: accounts' keys by default, the
-// deployment's in a build that sets New to the deployment resolver.
+// AccountsSupplyKeys answers what New chooses: accounts' keys with AccountKeys,
+// the deployment's in a build that sets New to the deployment resolver. New is
+// set both ways, since a build may replace it.
 func TestAccountsSupplyKeys_FollowsNew(t *testing.T) {
-	require.True(t, AccountsSupplyKeys())
-
 	prev := New
-	New = func(deployment DeploymentResolver, _ Resolver) Resolver { return deployment }
 	t.Cleanup(func() { New = prev })
+
+	New = AccountKeys
+	require.True(t, AccountsSupplyKeys())
+	New = func(deployment DeploymentResolver, _ Resolver) Resolver { return deployment }
 	require.False(t, AccountsSupplyKeys())
 }
