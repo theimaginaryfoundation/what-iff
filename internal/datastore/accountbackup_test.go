@@ -654,6 +654,23 @@ func TestReadBackupJSONL_MissingFileReturnsNoError(t *testing.T) {
 	require.Nil(t, records)
 }
 
+// No default model is an ordinary state since accounts choose their own models:
+// the import goes on, and a chat whose model the account lacks is restored
+// without one.
+func TestDefaultModelIDForUser_NoDefaultIsNotAnError(t *testing.T) {
+	ds, cleanup := newAccountBackupTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New()
+	createAccountBackupTestUser(t, ds, userID)
+	_, err := ds.dbClient.UserPreference.Create().SetUserID(userID).Save(ctx)
+	require.NoError(t, err)
+
+	got, err := ds.defaultModelIDForUser(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, uuid.Nil, got)
+}
+
 func TestDefaultModelIDForUser(t *testing.T) {
 	ds, cleanup := newAccountBackupTestDatastore(t)
 	defer cleanup()
