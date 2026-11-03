@@ -1,7 +1,9 @@
 import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { By } from '@angular/platform-browser';
 
+import { TooltipDirective } from '../tooltip/tooltip.directive';
 import { CheckboxComponent } from './checkbox.component';
 
 @Component({
@@ -17,6 +19,7 @@ import { CheckboxComponent } from './checkbox.component';
         ariaLabel="Select row"
         inputClass="row__select"
         testId="row-select"
+        tooltip="Pick this row"
         (change)="changes.push($any($event.target).checked)"
         (checkedChange)="values.push($event)"
       />
@@ -67,6 +70,13 @@ describe('CheckboxComponent', () => {
     expect(box.classList).toContain('row__select');
     // The name lives on the input only, so getByLabel / getByRole find exactly one element.
     expect(fixture.nativeElement.querySelector('ui-checkbox').getAttribute('aria-label')).toBeNull();
+  });
+
+  it('puts the tooltip on the input, so it shows on keyboard focus and describes the box', () => {
+    const { fixture, box } = bound();
+    const tooltip = fixture.debugElement.query(By.directive(TooltipDirective));
+    expect(tooltip.nativeElement).toBe(box);
+    expect(tooltip.injector.get(TooltipDirective).uiTooltip()).toBe('Pick this row');
   });
 
   it('reflects checked, indeterminate and disabled', () => {

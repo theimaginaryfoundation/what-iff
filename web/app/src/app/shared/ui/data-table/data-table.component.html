@@ -11,14 +11,13 @@
     <thead>
       <tr>
         <th scope="col" class="ui-data-table__select-col">
-          <input
-            type="checkbox"
-            class="ui-data-table__select-all"
+          <ui-checkbox
+            inputClass="ui-data-table__select-all"
             [checked]="selectAllState() === 'all'"
             [indeterminate]="selectAllState() === 'some'"
             (change)="selectAllChange.emit()"
-            [attr.aria-label]="selectAllLabel()"
-            [uiTooltip]="selectAllTooltip()"
+            [ariaLabel]="selectAllLabel()"
+            [tooltip]="selectAllTooltip()"
           />
         </th>
         <ng-content select="[uiTableHead]" />
