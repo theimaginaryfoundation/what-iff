@@ -118,6 +118,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   `ListChats` search matches chat **name**, **checkpoint_summary**, and individual **tags** (JSON array) with case-insensitive substring predicates.
   Favorite-count checks are a **best-effort UI guard** (non-locking count check, not a strict datastore invariant under races).
 - **Agent jobs:** `UpdateAgentJobSchedule` (`agentjob.go`) sets status back to **active** and clears **last_error** when the job was **complete** or **failed** and the new schedule still has a **next_run_at**, so the in-process scheduler (which only schedules **active** jobs) picks it up again.
+- **Agent job run limit (`agentjob_ratelimit.go`):** `CountRecentSuccessfulAgentJobExecutions` and `ListRecentAgentJobExecutionTimes` (oldest first, for the limit's reset time) call hooks a metering implementation links in; both are empty in the open-source build.
+  An implementation counts runs, not `job_run` usage events, which are billing rows (one per Advanced step, plus `run_subagent` from any turn; issue #427, [ADR 0x042](../../docs/adr/0x042-manual-job-runs-on-any-instance.md)).
 - **Live reasoning draft:** `Job.draft_reasoning` mirrors `draft_deltas` for model reasoning (`AppendJobDraftReasoning`).
   Unlike the text draft it can be emptied mid-turn (`ResetJobDraftReasoning`) when a truncated attempt is retried, so clients render it wholesale per poll.
   `ClearJobDraftDeltas` and the terminal-finalize paths clear both drafts.

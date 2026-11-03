@@ -373,7 +373,14 @@ func (s *Server) setupRoutes() {
 	chatHandler := chat.NewHandler(dataStore, s.logger, agent, chat.HandlerConfig{
 		RequireBilling: s.config.RequireBilling,
 	})
-	agentJobHandler := agentjob.NewHandler(dataStore, agent, s.agentJobScheduler, s.logger)
+	// Passed only when it exists: a nil *Manager in the interface would not compare equal to nil,
+	// so with the scheduler disabled the handler would call into it instead of answering
+	// "not enabled".
+	var agentJobRunner agentjob.AgentJobRunner
+	if s.agentJobScheduler != nil {
+		agentJobRunner = s.agentJobScheduler
+	}
+	agentJobHandler := agentjob.NewHandler(dataStore, agent, agentJobRunner, s.logger)
 	ritualHandler := ritual.NewHandler(dataStore, agent.FileStore(), s.logger)
 	fileAttachmentHandler := fileattachment.NewHandler(dataStore, s.logger, agent)
 	imageGalleryHandler := imagegallery.NewHandler(dataStore, s.logger, agent.FileStore(), agent)

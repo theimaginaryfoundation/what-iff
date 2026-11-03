@@ -104,7 +104,7 @@ func TestHandleSchedulerCongestion_DeferRecordsDeferredOutcome(t *testing.T) {
 func TestRecordLateness_SkipsManualRunsAndRetries(t *testing.T) {
 	tm := telemetrytest.UseGlobal(t)
 	planned := time.Now().Add(-time.Minute)
-	recordLateness(context.Background(), &planned, time.Now(), executionOptions{allowPaused: true})
+	recordLateness(context.Background(), &planned, time.Now(), executionOptions{manual: true, allowPaused: true})
 	recordLateness(context.Background(), &planned, time.Now(), executionOptions{deferredRetryCount: 1})
 	recordLateness(context.Background(), nil, time.Now(), executionOptions{})
 	require.Equal(t, uint64(0), tm.HistogramCount(t, telemetry.SchedulerLateness.Name))

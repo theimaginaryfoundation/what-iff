@@ -2,7 +2,10 @@ package agentjob
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	agentjobscheduler "github.com/theimaginaryfoundation/what-iff/internal/agentjobs/scheduler"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
@@ -17,6 +20,13 @@ import (
 
 type runAgentJobNowResponse struct {
 	Status string `json:"status"`
+}
+
+// jobRunLimitDetails is the details of a job_run_limit_reached error.
+type jobRunLimitDetails struct {
+	Limit         int        `json:"limit"`
+	WindowSeconds int        `json:"window_seconds"`
+	RetryAt       *time.Time `json:"retry_at,omitempty"`
 }
 
 func (h *Handler) RunAgentJobNow(w http.ResponseWriter, r *http.Request) {
@@ -65,6 +75,11 @@ func (h *Handler) RunAgentJobNow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.runner.RunAgentJobNow(r.Context(), userID, id); err != nil {
+		var limitErr *agentjobscheduler.RunLimitError
+		if errors.As(err, &limitErr) {
+			h.respondRunLimitReached(w, limitErr)
+			return
+		}
 		if errors.Is(err, agentjobscheduler.ErrSchedulerNotActive) {
 			handlerutils.RespondWithError(w, h.logger, http.StatusServiceUnavailable, handlerutils.CodeNotSet, "AgentJob scheduler is not active", nil)
 			return
@@ -79,4 +94,24 @@ func (h *Handler) RunAgentJobNow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusAccepted, runAgentJobNowResponse{Status: "triggered"})
+}
+
+// respondRunLimitReached answers a manual run refused by the per-user execution window with 429
+// job_run_limit_reached (issue #427). The message names the reset time in UTC; the web app shows
+// details.retry_at in the viewer's own time instead.
+func (h *Handler) respondRunLimitReached(w http.ResponseWriter, limitErr *agentjobscheduler.RunLimitError) {
+	details := jobRunLimitDetails{
+		Limit:         limitErr.Limit,
+		WindowSeconds: int(limitErr.Window / time.Second),
+	}
+	message := fmt.Sprintf("Job run limit reached (%d runs per %d minutes). Try again later.", limitErr.Limit, int(limitErr.Window/time.Minute))
+	if limitErr.RetryAt != nil {
+		retryAt := limitErr.RetryAt.UTC().Truncate(time.Second)
+		details.RetryAt = &retryAt
+		message = fmt.Sprintf("Job run limit reached (%d runs per %d minutes). Try again at %s UTC.", limitErr.Limit, int(limitErr.Window/time.Minute), retryAt.Format("15:04"))
+		if wait := time.Until(retryAt); wait > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		}
+	}
+	handlerutils.RespondWithErrorDetails(w, h.logger, http.StatusTooManyRequests, models.ErrCodeJobRunLimitReached, message, details, nil)
 }

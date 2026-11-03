@@ -17,6 +17,8 @@ import (
 type congestionStoreStub struct {
 	countToReturn int
 	countErr      error
+	times         []time.Time
+	timesErr      error
 	messages      []models.ChatMessage
 }
 
@@ -34,6 +36,10 @@ func (s *congestionStoreStub) GetAgentJob(ctx context.Context, userID, id uuid.U
 
 func (s *congestionStoreStub) CountRecentSuccessfulAgentJobExecutions(ctx context.Context, userID uuid.UUID, since time.Time) (int, error) {
 	return s.countToReturn, s.countErr
+}
+
+func (s *congestionStoreStub) ListRecentAgentJobExecutionTimes(ctx context.Context, userID uuid.UUID, since time.Time) ([]time.Time, error) {
+	return s.times, s.timesErr
 }
 
 func (s *congestionStoreStub) RecordAgentJobRun(ctx context.Context, userID, id uuid.UUID, lastRunAt time.Time, nextRunAt *time.Time, runError string, newStatus *models.AgentJobStatus) (*models.AgentJob, error) {

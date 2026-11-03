@@ -60,6 +60,10 @@ func (f *fakeDatastoreProvider) CountRecentSuccessfulAgentJobExecutions(ctx cont
 	return 0, nil
 }
 
+func (f *fakeDatastoreProvider) ListRecentAgentJobExecutionTimes(ctx context.Context, userID uuid.UUID, since time.Time) ([]time.Time, error) {
+	return nil, nil
+}
+
 func (f *fakeDatastoreProvider) SetAgentJobChat(ctx context.Context, userID, id uuid.UUID, chatID *uuid.UUID) (*models.AgentJob, error) {
 	return nil, nil
 }

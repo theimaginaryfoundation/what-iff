@@ -84,6 +84,11 @@ const (
 	// ErrCodeProviderConnectionExists: the account already has a connection to
 	// that built-in provider, and has at most one; it edits that one instead.
 	ErrCodeProviderConnectionExists = "provider_connection_exists"
+	// ErrCodeJobRunLimitReached: a manual agent job run was refused because the
+	// user used up the per-user job run window (429). Details is {"limit": n,
+	// "window_seconds": s, "retry_at": "<RFC 3339>"}; retry_at is omitted when the
+	// server cannot tell when the window frees a slot.
+	ErrCodeJobRunLimitReached = "job_run_limit_reached"
 )
 
 // AllErrorCodes is every code this API can emit. It is the source the
@@ -121,6 +126,7 @@ var AllErrorCodes = []string{
 	ErrCodeProviderUnavailable,
 	ErrCodeCustomAddressNotAllowed,
 	ErrCodeProviderConnectionExists,
+	ErrCodeJobRunLimitReached,
 }
 
 // genericErrorCodes maps HTTP statuses to their generic code.

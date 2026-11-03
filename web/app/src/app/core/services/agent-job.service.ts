@@ -4,7 +4,7 @@ import { Observable, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { PaginatedResponse } from '../models/common.model';
-import { apiErrorMessage } from '../utils/api-error.helpers';
+import { apiErrorEnvelope, apiErrorMessage, hasErrorCode } from '../utils/api-error.helpers';
 import {
   AgentJob,
   AgentJobFilters,
@@ -14,6 +14,25 @@ import {
   UpdateAgentJobRequest,
   UpdateAgentJobStatusRequest
 } from '../models/agent-job.model';
+
+/**
+ * The message for a failed "Run now". A run refused by the per-user job run limit
+ * (429 `job_run_limit_reached`) names the reset time in the viewer's own clock,
+ * read from `details.retry_at`; the server's message (which uses UTC) is the
+ * fallback when it has no reset time. Every other failure uses the envelope's
+ * message, as the other calls here do.
+ */
+export function runNowErrorMessage(error: unknown, locale?: string): string {
+  if (hasErrorCode(error, 'job_run_limit_reached')) {
+    const details = apiErrorEnvelope(error)?.details as { retry_at?: unknown } | null | undefined;
+    const retryAt = typeof details?.retry_at === 'string' ? new Date(details.retry_at) : null;
+    if (retryAt && !Number.isNaN(retryAt.getTime())) {
+      const time = retryAt.toLocaleTimeString(locale ?? [], { hour: 'numeric', minute: '2-digit' });
+      return `Job run limit reached — try again at ${time}.`;
+    }
+  }
+  return apiErrorMessage(error, 'Failed to run job now');
+}
 
 @Injectable({
   providedIn: 'root'
@@ -67,7 +86,7 @@ export class AgentJobService {
 
   runNow(id: string): Observable<{ status: string }> {
     return this.http.post<{ status: string }>(`${this.apiUrl}/${id}/run`, {})
-      .pipe(catchError(this.handleError));
+      .pipe(catchError((error: HttpErrorResponse) => throwError(() => new Error(runNowErrorMessage(error)))));
   }
 
   addRitual(jobId: string, ritualId: string): Observable<void> {

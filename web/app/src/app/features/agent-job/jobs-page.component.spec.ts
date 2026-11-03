@@ -1,6 +1,7 @@
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
+import { of, throwError } from 'rxjs';
 
 import { AgentJob } from '../../core/models/agent-job.model';
 import { ConfirmationService } from '../../core/services/confirmation.service';
@@ -109,6 +110,32 @@ describe('JobsPageComponent', () => {
         view.totalPages.set(1);
         fixture.detectChanges();
         expect(fixture.nativeElement.querySelector('footer')).toBeNull();
+    });
+
+    it('shows why Run now failed and lets it be dismissed', () => {
+        view.jobs.set([job('job-1', 'Morning summary')]);
+        view.runNow.mockReturnValue(throwError(() => new Error('Job run limit reached — try again at 3:05 PM.')));
+        fixture.detectChanges();
+
+        fixture.componentInstance.onRunNow('job-1');
+        fixture.detectChanges();
+
+        const alert = fixture.nativeElement.querySelector('[data-testid="run-now-error"]') as HTMLElement;
+        expect(alert.textContent).toContain('Job run limit reached — try again at 3:05 PM.');
+        expect(fixture.nativeElement.querySelectorAll('app-job-card').length).toBe(1);
+
+        (alert.querySelector('button') as HTMLButtonElement).click();
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('[data-testid="run-now-error"]')).toBeNull();
+    });
+
+    it('clears an earlier Run now error when a run is triggered', () => {
+        fixture.componentInstance.runNowError.set('earlier failure');
+        view.runNow.mockReturnValue(of(void 0));
+
+        fixture.componentInstance.onRunNow('job-1');
+
+        expect(fixture.componentInstance.runNowError()).toBeNull();
     });
 
     function job(id: string, title: string): AgentJob {
