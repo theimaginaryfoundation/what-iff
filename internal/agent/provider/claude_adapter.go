@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"go.uber.org/zap"
@@ -608,7 +607,7 @@ func claudeBetaImageBlocksFromUserImages(images []UserMessageImage, leadingText 
 			mt = "image/jpeg"
 		}
 		imageBlocks = append(imageBlocks, anthropic.NewBetaImageBlock(anthropic.BetaBase64ImageSourceParam{
-			Data:      base64.StdEncoding.EncodeToString(im.RawBytes),
+			Data:      encodeImageBase64(im.RawBytes),
 			MediaType: anthropic.BetaBase64ImageSourceMediaType(mt),
 		}))
 	}

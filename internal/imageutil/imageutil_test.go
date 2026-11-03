@@ -2,35 +2,67 @@ package imageutil
 
 import (
 	"bytes"
+	"context"
 	"image"
+	"image/color"
+	"image/draw"
 	"image/png"
 	"os"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
+	"go.uber.org/zap"
 )
 
-func TestNormalizeForUploadStreamsPNG(t *testing.T) {
+func TestNormalizeForUploadScalesOpaqueToJPEG(t *testing.T) {
 	t.Parallel()
 
+	src := image.NewRGBA(image.Rect(0, 0, 4000, 2000))
+	draw.Draw(src, src.Bounds(), image.NewUniform(color.RGBA{R: 40, G: 90, B: 160, A: 255}), image.Point{}, draw.Src)
 	var input bytes.Buffer
-	require.NoError(t, png.Encode(&input, image.NewRGBA(image.Rect(0, 0, 4000, 2000))))
+	require.NoError(t, png.Encode(&input, src))
 
 	var output bytes.Buffer
-	fileName, err := NormalizeForUpload(&input, &output, "original.jpeg", DefaultUploadImageMaxPx)
+	fileName, contentType, err := NormalizeForUpload(&input, &output, "original.png", DefaultUploadImageMaxPx)
 	require.NoError(t, err)
-	require.Equal(t, "original.png", fileName)
+	require.Equal(t, "original.jpg", fileName)
+	require.Equal(t, "image/jpeg", contentType)
 
 	normalized, format, err := image.Decode(&output)
 	require.NoError(t, err)
-	require.Equal(t, "png", format)
+	require.Equal(t, "jpeg", format)
 	require.Equal(t, 2048, normalized.Bounds().Dx())
 	require.Equal(t, 1024, normalized.Bounds().Dy())
 }
 
-// WebP uploads are accepted and stored as PNG like every other image, so
-// nothing downstream (thumbnails, vendors, gallery) ever sees a WebP upload.
-func TestNormalizeForUploadConvertsWebPToPNG(t *testing.T) {
+// Transparency survives normalization: JPEG has no alpha channel, so an image with any
+// non-opaque pixel stays a PNG rather than being flattened.
+func TestNormalizeForUploadKeepsTransparentAsPNG(t *testing.T) {
+	t.Parallel()
+
+	src := image.NewNRGBA(image.Rect(0, 0, 64, 32))
+	src.SetNRGBA(3, 3, color.NRGBA{R: 255, A: 255}) // the rest stays fully transparent
+	var input bytes.Buffer
+	require.NoError(t, png.Encode(&input, src))
+
+	var output bytes.Buffer
+	fileName, contentType, err := NormalizeForUpload(&input, &output, "sticker.png", DefaultUploadImageMaxPx)
+	require.NoError(t, err)
+	require.Equal(t, "sticker.png", fileName)
+	require.Equal(t, "image/png", contentType)
+
+	normalized, format, err := image.Decode(&output)
+	require.NoError(t, err)
+	require.Equal(t, "png", format)
+	_, _, _, a := normalized.At(0, 0).RGBA()
+	require.Zero(t, a, "transparent pixels stay transparent")
+}
+
+// WebP uploads are accepted and re-encoded like every other image, so nothing
+// downstream (thumbnails, vendors, gallery) ever sees a WebP upload.
+func TestNormalizeForUploadConvertsWebP(t *testing.T) {
 	t.Parallel()
 
 	webp, err := os.ReadFile("testdata/lossy.webp")
@@ -40,13 +72,14 @@ func TestNormalizeForUploadConvertsWebPToPNG(t *testing.T) {
 	require.Equal(t, "webp", format)
 
 	var output bytes.Buffer
-	fileName, err := NormalizeForUpload(bytes.NewReader(webp), &output, "sunset.webp", DefaultUploadImageMaxPx)
+	fileName, contentType, err := NormalizeForUpload(bytes.NewReader(webp), &output, "sunset.webp", DefaultUploadImageMaxPx)
 	require.NoError(t, err)
-	require.Equal(t, "sunset.png", fileName)
+	require.Equal(t, "sunset.jpg", fileName)
+	require.Equal(t, "image/jpeg", contentType)
 
 	normalized, format, err := image.Decode(&output)
 	require.NoError(t, err)
-	require.Equal(t, "png", format)
+	require.Equal(t, "jpeg", format)
 	require.Equal(t, src.Bounds().Size(), normalized.Bounds().Size(), "small images keep their size")
 }
 
@@ -72,4 +105,34 @@ func TestScaledDimensions(t *testing.T) {
 			require.Equal(t, tt.expectedH, height)
 		})
 	}
+}
+
+type recordingStore struct{ files map[string][]byte }
+
+func (s *recordingStore) UploadFile(_ context.Context, key string, content []byte, _ string) error {
+	s.files[key] = content
+	return nil
+}
+func (s *recordingStore) DownloadFile(context.Context, string) ([]byte, error) { return nil, nil }
+func (s *recordingStore) DeleteFile(context.Context, string) error             { return nil }
+
+// A thumbnail the caller already made is stored as is; without one, it is generated.
+func TestUploadBytesToGalleryPathUsesTheGivenThumbnail(t *testing.T) {
+	t.Parallel()
+
+	var pic bytes.Buffer
+	require.NoError(t, png.Encode(&pic, image.NewNRGBA(image.Rect(0, 0, 512, 512))))
+	userID, attID := uuid.New(), uuid.New()
+	thumbKey := storage.FileKeyForImageThumbnail(userID, attID)
+
+	store := &recordingStore{files: map[string][]byte{}}
+	UploadBytesToGalleryPath(t.Context(), store, zap.NewNop(), userID, attID, "a.png", "image/png", pic.Bytes(), []byte("premade"))
+	require.Equal(t, []byte("premade"), store.files[thumbKey])
+	require.Equal(t, pic.Bytes(), store.files[storage.FileKeyForImage(userID, attID, "a.png")])
+
+	store = &recordingStore{files: map[string][]byte{}}
+	UploadBytesToGalleryPath(t.Context(), store, zap.NewNop(), userID, attID, "a.png", "image/png", pic.Bytes(), nil)
+	_, format, err := image.Decode(bytes.NewReader(store.files[thumbKey]))
+	require.NoError(t, err)
+	require.Equal(t, "jpeg", format)
 }

@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -60,7 +59,7 @@ func appendOpenAIResponseInputImages(parts responses.ResponseInputMessageContent
 		if len(im.RawBytes) == 0 {
 			continue
 		}
-		dataURL := fmt.Sprintf("data:%s;base64,%s", normalizeImageMediaType(im.MediaType), base64.StdEncoding.EncodeToString(im.RawBytes))
+		dataURL := imageDataURL(normalizeImageMediaType(im.MediaType), im.RawBytes)
 		img := &responses.ResponseInputImageParam{
 			Detail:   responses.ResponseInputImageDetailAuto,
 			ImageURL: openai.String(dataURL),

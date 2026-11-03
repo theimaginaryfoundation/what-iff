@@ -82,8 +82,9 @@ type messageContextBuildRequest struct {
 	ExpressionsEnabled         bool
 	IncludeAttachmentContext   bool
 	AdditionalDeveloperContext string
-	// LoadHistoryImageBytes controls whether prior-turn image attachments are loaded
-	// as raw bytes for vision (set for every vision-capable model).
+	// LoadHistoryImageBytes controls whether prior-turn image attachments are inlined for
+	// vision (set for every vision-capable model): the thumbnails of the most recent
+	// maxHistoryImages of them.
 	LoadHistoryImageBytes bool
 }
 
@@ -294,14 +295,19 @@ func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID 
 	tz, _ := middleware.GetClientTimezoneFromContext(ctx)
 	normalizedTZ := normalizeTimezoneName(tz)
 
+	// Only the most recent prior-turn images are inlined; with vision off there are none.
+	var inlineImages historyImageSet
+	if loadHistoryImageBytes {
+		inlineImages = selectHistoryImages(carryOver, history, maxHistoryImages)
+	}
 	if chat.LastCheckpointAt != nil {
 		for _, t := range carryOver {
-			b.appendHistoryMessage(ctx, modelCtx, userID, chat.ID, t[0], normalizedTZ, loadHistoryImageBytes)
-			b.appendHistoryMessage(ctx, modelCtx, userID, chat.ID, t[1], normalizedTZ, loadHistoryImageBytes)
+			b.appendHistoryMessage(ctx, modelCtx, userID, chat.ID, t[0], normalizedTZ, inlineImages)
+			b.appendHistoryMessage(ctx, modelCtx, userID, chat.ID, t[1], normalizedTZ, inlineImages)
 		}
 	}
 	for _, msg := range history {
-		b.appendHistoryMessage(ctx, modelCtx, userID, chat.ID, msg, normalizedTZ, loadHistoryImageBytes)
+		b.appendHistoryMessage(ctx, modelCtx, userID, chat.ID, msg, normalizedTZ, inlineImages)
 	}
 
 	// Carry prior-turn tool results back into context so they don't vanish the moment
@@ -321,7 +327,7 @@ func (b *messageContextBuilder) appendHistoryMessage(
 	userID, chatID uuid.UUID,
 	msg *models.ChatMessage,
 	normalizedTZ string,
-	loadImageBytes bool,
+	inlineImages historyImageSet,
 ) {
 	if modelCtx == nil || msg == nil {
 		return
@@ -332,7 +338,7 @@ func (b *messageContextBuilder) appendHistoryMessage(
 		role = provider.RoleUser
 		body = formatUserMessageWithTime(msg.SentAt, normalizedTZ, msg.Message)
 	}
-	images := historyImagesForMessage(ctx, b.telemetry.Logger, b.fileStore, userID, chatID, msg, loadImageBytes)
+	images := historyImagesForMessage(ctx, b.telemetry.Logger, b.fileStore, userID, chatID, msg, inlineImages)
 	modelCtx.AppendHistoryTurn(role, body, images, true)
 }
 
