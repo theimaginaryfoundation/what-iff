@@ -5,7 +5,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { Chat } from '../../../core/models/chat.model';
 import { ContextBreakdown } from '../../../core/models/message.model';
 import { RightPanelService } from '../../../core/services/right-panel.service';
-import { ContextPanelService } from './context-panel.service';
+import { ContextPanelService, DESKTOP_OPEN_STORAGE_KEY } from './context-panel.service';
 
 function breakdown(total: number): ContextBreakdown {
     return {
@@ -210,6 +210,77 @@ describe('ContextPanelService', () => {
 
             expect(service.activeChat()).toBe(saved);
             expect(service.threadUpdate()).toBe(saved);
+        });
+    });
+
+    describe('remembering the docked panel open or closed (#300)', () => {
+        function mockViewport(mobile: boolean): void {
+            vi.spyOn(window, 'matchMedia').mockImplementation(
+                (query: string) => ({ matches: query === '(max-width: 1023px)' && mobile, media: query }) as MediaQueryList,
+            );
+        }
+
+        afterEach(() => vi.restoreAllMocks());
+
+        it('opens on restore when nothing is stored', () => {
+            service.restoreDesktopVisible();
+            expect(rightPanel.setVisible).toHaveBeenLastCalledWith(true);
+        });
+
+        it('restores the state the user last left it in on a desktop viewport', () => {
+            mockViewport(false);
+
+            service.setDesktopVisible(false);
+            expect(localStorage.getItem(DESKTOP_OPEN_STORAGE_KEY)).toBe('false');
+            service.restoreDesktopVisible();
+            expect(rightPanel.setVisible).toHaveBeenLastCalledWith(false);
+
+            service.setDesktopVisible(true);
+            service.restoreDesktopVisible();
+            expect(rightPanel.setVisible).toHaveBeenLastCalledWith(true);
+        });
+
+        it('keeps the remembered state when the chat page hides the panel on exit', () => {
+            service.setDesktopVisible(true);
+
+            service.hideOnPageExit();
+
+            expect(rightPanel.setVisible).toHaveBeenLastCalledWith(false);
+            expect(localStorage.getItem(DESKTOP_OPEN_STORAGE_KEY)).toBe('true');
+        });
+
+        it('does not let the mobile sheet flows change the remembered docked state', () => {
+            localStorage.setItem(DESKTOP_OPEN_STORAGE_KEY, 'false');
+            mockViewport(true);
+
+            service.setDesktopVisible(true);
+
+            expect(rightPanel.setVisible).toHaveBeenLastCalledWith(true);
+            expect(localStorage.getItem(DESKTOP_OPEN_STORAGE_KEY)).toBe('false');
+            // A persisted "open" never opens the sheet over the chat; only openMobile() does.
+            localStorage.setItem(DESKTOP_OPEN_STORAGE_KEY, 'true');
+            service.restoreDesktopVisible();
+            expect(service.mobileOpen()).toBe(false);
+        });
+
+        it('falls back to open when the stored value is unreadable', () => {
+            localStorage.setItem(DESKTOP_OPEN_STORAGE_KEY, '{not json');
+            service.restoreDesktopVisible();
+            expect(rightPanel.setVisible).toHaveBeenLastCalledWith(true);
+        });
+
+        it('keeps working when storage throws (private mode, quota)', () => {
+            vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+                throw new Error('SecurityError');
+            });
+            vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+                throw new Error('QuotaExceededError');
+            });
+
+            expect(() => service.setDesktopVisible(false)).not.toThrow();
+            expect(rightPanel.setVisible).toHaveBeenLastCalledWith(false);
+            expect(() => service.restoreDesktopVisible()).not.toThrow();
+            expect(rightPanel.setVisible).toHaveBeenLastCalledWith(true);
         });
     });
 });

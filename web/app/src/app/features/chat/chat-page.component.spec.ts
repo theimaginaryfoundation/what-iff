@@ -22,7 +22,7 @@ import { Chat } from '../../core/models/chat.model';
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { RightPanelService } from '../../core/services/right-panel.service';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
-import { ContextPanelService } from './services/context-panel.service';
+import { ContextPanelService, DESKTOP_OPEN_STORAGE_KEY } from './services/context-panel.service';
 import { ChatSendGate, NoopChatSendGate } from './services/chat-send-gate';
 
 describe('ChatPageComponent', () => {
@@ -187,6 +187,7 @@ describe('ChatPageComponent', () => {
         }).compileComponents();
 
         localStorage.removeItem('contextPanel.tabsByChat.v1');
+        localStorage.removeItem(DESKTOP_OPEN_STORAGE_KEY);
         TestBed.inject(ChatSendGate).clearCache();
 
         fixture = TestBed.createComponent(ChatPageComponent);
@@ -233,6 +234,39 @@ describe('ChatPageComponent', () => {
         expect(rightPanel.visible()).toBe(true);
         expect(memoriesButton.classList).toContain('chat-page__context-rail-button--active');
         expect(memoriesButton.getAttribute('aria-current')).toBe('true');
+    });
+
+    describe('remembering the context panel open or closed (#300)', () => {
+        async function render(): Promise<void> {
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+        }
+
+        it('reopens closed after the user closed it, and open after they reopened it', async () => {
+            const rightPanel = TestBed.inject(RightPanelService);
+            await render();
+            expect(rightPanel.visible()).toBe(true);
+
+            // Clicking the active tab's rail button closes the panel.
+            (fixture.nativeElement.querySelector('.chat-page__context-rail [aria-label="Open scratchpad"]') as HTMLButtonElement).click();
+            expect(rightPanel.visible()).toBe(false);
+
+            // Leaving the page hides the panel without counting as the user closing it...
+            fixture.destroy();
+            expect(rightPanel.visible()).toBe(false);
+
+            // ...and the next load ("refresh") restores the closed state.
+            fixture = TestBed.createComponent(ChatPageComponent);
+            await render();
+            expect(rightPanel.visible()).toBe(false);
+
+            fixture.componentInstance.openContextPanel('tools');
+            fixture.destroy();
+            fixture = TestBed.createComponent(ChatPageComponent);
+            await render();
+            expect(rightPanel.visible()).toBe(true);
+        });
     });
 
     describe('sandboxed thread', () => {

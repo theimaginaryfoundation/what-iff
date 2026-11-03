@@ -488,7 +488,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
         this.reloadPersonalities();
       }),
     );
-    this.contextPanel.setDesktopVisible(true);
+    this.contextPanel.restoreDesktopVisible();
     this.document.addEventListener('visibilitychange', this.onReturnToApp);
     const view = this.document.defaultView;
     view?.addEventListener('focus', this.onReturnToApp);
@@ -563,7 +563,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
       clearTimeout(this.clearBookmarkJumpStatusTimer);
       this.clearBookmarkJumpStatusTimer = null;
     }
-    this.contextPanel.setDesktopVisible(false);
+    this.contextPanel.hideOnPageExit();
     this.document.removeEventListener('visibilitychange', this.onReturnToApp);
     const view = this.document.defaultView;
     view?.removeEventListener('focus', this.onReturnToApp);
