@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -60,6 +61,9 @@ func (f *fakeListStore) ListPersonalities(_ context.Context, _ uuid.UUID, pageNu
 func (f *fakeListStore) ListRituals(_ context.Context, _ uuid.UUID, pageNum, pageSize int, _ models.RitualFilters) (*models.PaginatedResponse, error) {
 	f.lastPageNum, f.lastPageSize = pageNum, pageSize
 	return paginatePage(toAny(f.rituals), pageNum, pageSize), nil
+}
+func (f *fakeListStore) CountSkillFiles(context.Context, uuid.UUID, []uuid.UUID) (map[uuid.UUID]int, error) {
+	return map[uuid.UUID]int{}, nil
 }
 func (f *fakeListStore) ListFileAttachments(_ context.Context, _ uuid.UUID, pageNum, pageSize int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error) {
 	f.lastFileFilters = filters
@@ -674,6 +678,9 @@ func (e *erroringListStore) ListPersonalities(_ context.Context, _ uuid.UUID, _,
 func (e *erroringListStore) ListRituals(_ context.Context, _ uuid.UUID, _, _ int, _ models.RitualFilters) (*models.PaginatedResponse, error) {
 	return nil, errListStoreBoom
 }
+func (e *erroringListStore) CountSkillFiles(context.Context, uuid.UUID, []uuid.UUID) (map[uuid.UUID]int, error) {
+	return nil, errListStoreBoom
+}
 func (e *erroringListStore) ListFileAttachments(_ context.Context, _ uuid.UUID, _, _ int, _ models.FileAttachmentFilters) (*models.PaginatedResponse, error) {
 	return nil, errListStoreBoom
 }
@@ -754,4 +761,42 @@ func TestListFilesRejectsAnInvalidFolderWithoutQuerying(t *testing.T) {
 	if res.Error == "" || store.lastPageNum != 0 {
 		t.Fatalf("expected an error result and no query, got %+v (page %d)", res, store.lastPageNum)
 	}
+}
+
+func TestListFilesOriginAndTreeView(t *testing.T) {
+	chat := listTestChat()
+	store := &fakeListStore{files: []*models.FileAttachment{
+		{ID: uuid.New(), Name: "journal.md", FileType: "text/markdown", Folder: "notes", Origin: models.FileOriginAgent},
+		{ID: uuid.New(), Name: "Ideas.md", FileType: "text/markdown", Folder: "notes/later", Origin: models.FileOriginAgent},
+		{ID: uuid.New(), Name: "brief.pdf", FileType: "application/pdf"},
+		{ID: uuid.New(), Name: "a.md", FileType: "text/markdown", Folder: "notes"},
+	}}
+	tool := newTestListTool(store)
+
+	out, err := tool.List(context.Background(), chat, []byte(`{"kind":"files","origin":"agent"}`))
+	require.NoError(t, err)
+	res := decodeList(t, out)
+	require.Equal(t, models.FileOriginAgent, store.lastFileFilters.Origin)
+	require.Equal(t, "agent", res.Items[0].Origin)
+	require.Empty(t, res.Items[2].Origin)
+
+	out, err = tool.List(context.Background(), chat, []byte(`{"kind":"files","view":"tree"}`))
+	require.NoError(t, err)
+	res = decodeList(t, out)
+	require.Empty(t, res.Items)
+	require.Equal(t, 4, res.Count)
+	require.Equal(t, listMaxLimit, store.lastPageSize, "a tree defaults to the largest page")
+	require.Equal(t, strings.Join([]string{
+		".",
+		"├── notes/",
+		"│   ├── later/",
+		"│   │   └── Ideas.md (agent)",
+		"│   ├── a.md",
+		"│   └── journal.md (agent)",
+		"└── brief.pdf",
+	}, "\n"), res.Tree)
+
+	out, err = tool.List(context.Background(), chat, []byte(`{"kind":"files","origin":"robots"}`))
+	require.NoError(t, err)
+	require.Contains(t, decodeList(t, out).Error, "unknown origin")
 }

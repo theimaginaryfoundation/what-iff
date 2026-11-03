@@ -31,5 +31,9 @@ export interface Model {
   reasoning_support?: ReasoningSupport;
   /** Admin-only: an override of `reasoning_support` (which then equals it); null derives it from the provider and model. */
   reasoning_support_override?: ReasoningSupport | null;
+  /** The account's provider connection the model was enabled on (ADR 0x027); absent for the deployment's own models. */
+  connection_id?: string;
+  /** That connection's name, as the account named it; absent where connection_id is. */
+  connection_name?: string;
 }
 

@@ -12,6 +12,7 @@
 - **Gallery folder paths (`folder.go`):** `NormalizeFolder` is the one definition of a valid folder path, used by the gallery API and the agent tools (trimmed, lower-cased, `/` or `\` separate, no `.` or `..`, at most 8 levels and 255 characters), plus `FolderIsWithin` and `FolderCount`.
   `GalleryKind` (`images`, `files`, `all`) narrows the gallery and its folder counts; `ParseGalleryKind` reads an empty value as `images`, so clients that do not ask keep the image-only list.
   `ExpressionFolder` gives the folder a personality's generated expression images are filed under (`expressions/<name>`, always one level, always valid), so they do not crowd the top level of the gallery.
+  `ReservedSkillsFolder` (`skills`) holds skill bundles (ADR 0x035 §3); `IsReservedFolder` matches it and anything beneath, ignoring case, and `ErrReservedFolder` is what the datastore and tools return for any other write there.
 - Keeps handler payloads decoupled from Ent generated types (handlers map to/from Ent in datastore or thin adapters).
 
 ## Key types and entry points
@@ -29,7 +30,7 @@
   `WebhookMessage` and `WebhookPersonality` are the allow-listed shapes the webhook read routes return, built by `NewWebhookMessage` and `NewWebhookPersonality`; they deliberately omit tool calls, model reasoning, thumbnails, storage keys and a persona's prompt and scratchpad.
 - **Error envelope (`error.go`):** `ErrorResponse` plus the error-code registry — `ErrCode*` constants and `GenericErrorCode(status)`.
   This is the single source of truth for the taxonomy; the `ErrorCode` enum in `openapi.yaml` mirrors it and must be updated alongside.
-  Adding a provider connection that fails answers with `provider_unreachable`, `provider_key_rejected`, `provider_incompatible` or `provider_unavailable`, `custom_address_not_allowed` when the deployment does not let accounts choose an address, and `provider_connection_exists` for a second connection to a built-in provider (ADR 0x027).
+  Adding a provider connection that fails answers with `provider_unreachable`, `provider_key_rejected`, `provider_incompatible` or `provider_unavailable`, `custom_address_not_allowed` when the deployment does not let accounts choose an address, `provider_connection_exists` for a second connection to a built-in provider, and `default_model_in_use` when a change would take away the account's default model (ADR 0x027).
 
 ## Dependencies
 

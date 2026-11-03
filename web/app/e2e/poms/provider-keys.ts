@@ -40,6 +40,8 @@ export class ProvidersTab {
   readonly connectOpenAIButton: Locator;
   /** The add/edit form, while it is open. */
   readonly form: Locator;
+  /** A connection's model chooser (model-chooser.component), while it is open. */
+  readonly chooser: Locator;
 
   constructor(private readonly page: Page) {
     this.tab = page.getByRole('button', { name: 'Providers' });
@@ -50,6 +52,7 @@ export class ProvidersTab {
     // The form's dialog sits inside the settings dialog in the DOM, so it is
     // found by its own name (its title) rather than by what it contains.
     this.form = page.getByRole('dialog', { name: /^(Add a provider|Edit .+)$/ });
+    this.chooser = page.getByRole('dialog', { name: / models$/ });
   }
 
   /** A connection's row, by the preset it was made from. */
@@ -72,8 +75,27 @@ export class ProvidersTab {
     await this.form.getByRole('button', { name: /Connect and list models|^Save$/ }).click();
   }
 
-  /** Closes the form from its result. */
+  /** Closes the form from its result: "Done", or "Later" where it offers to choose the models it found. */
   async done(): Promise<void> {
-    await this.form.getByRole('button', { name: 'Done' }).click();
+    await this.form.getByRole('button', { name: /^(Done|Later)$/ }).click();
+  }
+
+  /** From the form's result, goes on to choose the connection's models. */
+  async chooseModelsFromForm(): Promise<void> {
+    await this.form.getByRole('button', { name: 'Choose models' }).click();
+  }
+
+  /** Types into the chooser's search. */
+  async searchModels(text: string): Promise<void> {
+    await this.chooser.getByRole('searchbox', { name: 'Search models' }).fill(text);
+  }
+
+  /** A model's checkbox in the chooser, by the name it shows. */
+  modelCheckbox(name: string): Locator {
+    return this.chooser.getByRole('checkbox', { name, exact: false });
+  }
+
+  async saveModels(): Promise<void> {
+    await this.chooser.getByRole('button', { name: 'Save' }).click();
   }
 }

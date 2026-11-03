@@ -72,7 +72,7 @@ func TestUploadFileAttachmentNormalizesOversizedImage(t *testing.T) {
 	require.Equal(t, decodedImage{format: "png", width: 2048, height: 1024}, decodeTempImage(t, tempPath))
 }
 
-func TestUploadFileAttachmentReencodesJPEGAsPNGWithoutUpscaling(t *testing.T) {
+func TestUploadFileAttachmentReencodesJPEGWithoutUpscaling(t *testing.T) {
 	var imageBytes bytes.Buffer
 	img := image.NewRGBA(image.Rect(0, 0, 640, 320))
 	require.NoError(t, jpeg.Encode(&imageBytes, img, &jpeg.Options{Quality: 90}))
@@ -88,9 +88,9 @@ func TestUploadFileAttachmentReencodesJPEGAsPNGWithoutUpscaling(t *testing.T) {
 	}
 
 	require.NoError(t, err)
-	require.Equal(t, "photo.png", attachment.Name)
-	require.Equal(t, "image/png", attachment.FileType)
-	require.Equal(t, decodedImage{format: "png", width: 640, height: 320}, decodeTempImage(t, tempPath))
+	require.Equal(t, "photo.jpg", attachment.Name)
+	require.Equal(t, "image/jpeg", attachment.FileType)
+	require.Equal(t, decodedImage{format: "jpeg", width: 640, height: 320}, decodeTempImage(t, tempPath))
 }
 
 func TestUploadFileAttachmentLeavesNonImageBytesAndMetadataUnchanged(t *testing.T) {

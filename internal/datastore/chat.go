@@ -10,6 +10,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
+	entchatskillstate "github.com/theimaginaryfoundation/what-iff/ent/chatskillstate"
 	entmemory "github.com/theimaginaryfoundation/what-iff/ent/memory"
 	entmodel "github.com/theimaginaryfoundation/what-iff/ent/model"
 	entmood "github.com/theimaginaryfoundation/what-iff/ent/mood"
@@ -279,13 +280,17 @@ func (d *Datastore) CreateChat(ctx context.Context, userID uuid.UUID, chat model
 	create := tx.Chat.Create().
 		SetName(chat.Name).
 		SetOwnerID(userID).
-		SetModelID(chat.ModelID).
 		SetTags(normalizedTags).
 		SetNillableIsFavorite(chat.IsFavorite).
 		SetIsAutoMood(true).
 		SetContextScope(entchat.ContextScope(scope)).
 		SetNillableReasoningEffort(entEffort[entchat.ReasoningEffort](chat.ReasoningEffort)).
 		SetNillableAgentLoop(entLoop[entchat.AgentLoop](chat.AgentLoop))
+	// No model means the account's default, which an account that has not
+	// enabled a model yet does not have (ADR 0x027).
+	if chat.ModelID != uuid.Nil {
+		create.SetModelID(chat.ModelID)
+	}
 	if len(disabledTools) > 0 {
 		// Server-created threads (a Discord relay thread, say) start with tools switched off in the
 		// same transaction, so the thread never exists with them on.
@@ -1117,6 +1122,15 @@ func (d *Datastore) DeleteChat(ctx context.Context, userID, id uuid.UUID) error 
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}
 		return ErrChatNotFound
+	}
+
+	// Skill states carry the chat ID without a foreign key, so nothing cascades to them.
+	if _, err := tx.ChatSkillState.Delete().Where(entchatskillstate.ChatID(id)).Exec(ctx); err != nil {
+		d.logger.Error(i18n.T1("delete.failed", "Entity", "chat skill state"), zap.Error(err))
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return err
 	}
 
 	// Delete chat (this will cascade delete messages due to FK constraint)

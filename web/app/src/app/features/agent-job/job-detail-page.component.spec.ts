@@ -5,7 +5,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { NEVER, of, throwError } from 'rxjs';
 
 import { AgentJob } from '../../core/models/agent-job.model';
-import { Ritual } from '../../core/models/ritual.model';
+import { Ritual, RITUAL_SKILL_FIELD_DEFAULTS } from '../../core/models/ritual.model';
 import { AgentJobService } from '../../core/services/agent-job.service';
 import { AuthService } from '../../core/services/auth.service';
 import { ChatService } from '../../core/services/chat.service';
@@ -50,6 +50,7 @@ describe('JobDetailPageComponent', () => {
     };
 
     const ritual: Ritual = {
+        ...RITUAL_SKILL_FIELD_DEFAULTS,
         id: 'ritual-1',
         name: 'Daily brief',
         description: 'Prepare a brief',

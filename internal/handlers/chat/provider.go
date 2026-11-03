@@ -38,6 +38,10 @@ type Store interface {
 	SetFileAttachmentS3Key(ctx context.Context, userID, id uuid.UUID, s3Key string) error
 	GetAvailableRituals(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.RitualFilters) (*models.PaginatedResponse, error)
 	ListChatMCPServers(ctx context.Context, userID, chatID uuid.UUID) ([]*models.MCPServer, error)
+	// Loaded skills (ADR 0x035 §4): the skills the agent loaded in a thread with load_skill.
+	ListChatLoadedSkillIDs(ctx context.Context, userID, chatID uuid.UUID) ([]uuid.UUID, error)
+	RemoveChatLoadedSkills(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) ([]uuid.UUID, error)
+	GetRitualsByIDs(ctx context.Context, userID uuid.UUID, ritualIDs []uuid.UUID) ([]*models.Ritual, error)
 	ListAvailableChatMCPServers(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.MCPServerFilters) (*models.PaginatedResponse, error)
 	AddMCPServerToChat(ctx context.Context, userID, chatID, mcpServerID uuid.UUID) error
 	RemoveMCPServerFromChat(ctx context.Context, userID, chatID, mcpServerID uuid.UUID) error

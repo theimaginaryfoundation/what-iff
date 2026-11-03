@@ -56,7 +56,24 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			base_credits_per_slab integer NOT NULL DEFAULT 1,
 			subscription_tier text NOT NULL DEFAULT 'high',
 			deleted bool NOT NULL DEFAULT false,
-			is_default bool NOT NULL DEFAULT false
+			is_default bool NOT NULL DEFAULT false,
+			-- The provider connection serving the model (ADR 0x027); these tests
+			-- use only catalog models, so it stays NULL and needs no foreign key.
+			connection_id uuid NULL
+		)`,
+		`CREATE TABLE provider_connections (
+			id uuid PRIMARY KEY,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL,
+			user_id uuid NULL,
+			preset text NOT NULL,
+			flavor text NOT NULL DEFAULT '',
+			name text NOT NULL,
+			base_url text NOT NULL DEFAULT '',
+			key text NOT NULL DEFAULT '',
+			hint text NOT NULL DEFAULT '',
+			source text NOT NULL DEFAULT '',
+			builtin text NULL
 		)`,
 		`CREATE TABLE user_preferences (
 			id uuid PRIMARY KEY,
@@ -66,7 +83,7 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			favorite_model_ids json NOT NULL DEFAULT '[]',
 			image_generation_provider text,
 			user_preferences uuid NOT NULL UNIQUE,
-			default_model uuid NOT NULL,
+			default_model uuid NULL,
 			default_personality uuid,
 			reasoning_effort text,
 			agent_loop text
@@ -79,10 +96,26 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			description text NOT NULL,
 			content text NOT NULL,
 			hotkeys text NOT NULL,
-			agent_job_rituals uuid,
-			mood_rituals uuid,
+			slug text NOT NULL DEFAULT '',
+			license text NOT NULL DEFAULT '',
+			compatibility text NOT NULL DEFAULT '',
+			metadata json,
+			allowed_tools json,
+			disable_model_invocation bool NOT NULL DEFAULT false,
+			user_invocable bool NOT NULL DEFAULT true,
 			ritual_personality uuid,
 			user_rituals uuid NOT NULL
+		)`,
+		`CREATE UNIQUE INDEX ritual_slug_user_rituals ON rituals (slug, user_rituals) WHERE slug <> ''`,
+		`CREATE TABLE mood_rituals (
+			mood_id uuid NOT NULL,
+			ritual_id uuid NOT NULL,
+			PRIMARY KEY (mood_id, ritual_id)
+		)`,
+		`CREATE TABLE agent_job_rituals (
+			agent_job_id uuid NOT NULL,
+			ritual_id uuid NOT NULL,
+			PRIMARY KEY (agent_job_id, ritual_id)
 		)`,
 		`CREATE TABLE chat_messages (
 			id uuid PRIMARY KEY,
@@ -619,6 +652,23 @@ func TestReadBackupJSONL_MissingFileReturnsNoError(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, invalid)
 	require.Nil(t, records)
+}
+
+// No default model is an ordinary state since accounts choose their own models:
+// the import goes on, and a chat whose model the account lacks is restored
+// without one.
+func TestDefaultModelIDForUser_NoDefaultIsNotAnError(t *testing.T) {
+	ds, cleanup := newAccountBackupTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := uuid.New()
+	createAccountBackupTestUser(t, ds, userID)
+	_, err := ds.dbClient.UserPreference.Create().SetUserID(userID).Save(ctx)
+	require.NoError(t, err)
+
+	got, err := ds.defaultModelIDForUser(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, uuid.Nil, got)
 }
 
 func TestDefaultModelIDForUser(t *testing.T) {

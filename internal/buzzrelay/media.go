@@ -58,9 +58,10 @@ func (b *Blob) Imeta(filename string) []string {
 	return tag
 }
 
-// PrepareMedia readies a file for a Buzz media store: images are re-encoded as PNG (scaled to
-// the app's upload size), because Buzz refuses images that carry metadata (EXIF, PNG text
-// chunks) and stripping it is what the Buzz app does too. Anything else is returned as is.
+// PrepareMedia readies a file for a Buzz media store: images are re-encoded the way uploads are
+// (JPEG, or PNG when transparent; scaled to the app's upload size), because Buzz refuses images
+// that carry metadata (EXIF, PNG text chunks) and stripping it is what the Buzz app does too.
+// Anything else is returned as is.
 func PrepareMedia(name, contentType string, data []byte) (string, string, []byte) {
 	if !strings.HasPrefix(contentType, "image/") {
 		contentType = http.DetectContentType(data)
@@ -71,11 +72,11 @@ func PrepareMedia(name, contentType string, data []byte) (string, string, []byte
 		return name, contentType, data
 	}
 	var out bytes.Buffer
-	pngName, err := imageutil.NormalizeForUpload(bytes.NewReader(data), &out, name, imageutil.DefaultUploadImageMaxPx)
+	normalizedName, normalizedType, err := imageutil.NormalizeForUpload(bytes.NewReader(data), &out, name, imageutil.DefaultUploadImageMaxPx)
 	if err != nil {
 		return name, contentType, data // not decodable: let the relay judge it
 	}
-	return pngName, imageutil.NormalizedUploadContentType, out.Bytes()
+	return normalizedName, normalizedType, out.Bytes()
 }
 
 // Upload stores a file in the community's media store (PUT /upload) as s. Images are passed

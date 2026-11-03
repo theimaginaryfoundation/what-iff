@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { AbstractControl, FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -32,6 +32,8 @@ import { PersonalityService } from '../../core/services/personality.service';
 import { ProviderKeysService } from '../../core/services/provider-keys.service';
 import { ThemeMode, ThemeService } from '../../core/services/theme.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
+import { hasDefaultModel } from '../../core/utils/default-model';
+import { isConnectionGroup } from '../chat/helpers/model-picker.helpers';
 import { TIMEZONE_MAX_LENGTH, detectBrowserTimezone, listTimezones, timezoneValidator } from '../../core/utils/timezone.helpers';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { ShieldIconComponent, UserIconComponent } from '../../shared/ui/icons/icons';
@@ -108,8 +110,18 @@ export class ProfileSettingsModalComponent {
   readonly defaultModelUnlisted = computed(() => {
     const id = this.preferences()?.default_model_id;
     const models = this.models();
-    return !!id && models.length > 0 && !models.some((model) => model.id === id);
+    return this.hasDefaultModel() && models.length > 0 && !models.some((model) => model.id === id);
   });
+  /**
+   * False until the account has a default model: on an install without a model catalog that is
+   * until it enables a model on one of its connections (ADR 0x027).
+   */
+  readonly hasDefaultModel = computed(() => hasDefaultModel(this.preferences()));
+
+  /** A model as the default-model list shows it: with the connection serving it, as the picker does. */
+  modelOptionLabel(model: Model): string {
+    return isConnectionGroup(model) && model.connection_name ? `${model.display_name} · ${model.connection_name}` : model.display_name;
+  }
   readonly personalities = signal<readonly Personality[]>([]);
   readonly themeMode = signal<ThemeMode>('system');
   /**
@@ -153,6 +165,19 @@ export class ProfileSettingsModalComponent {
   });
 
   constructor() {
+    // Choosing models elsewhere (the Providers tab's chooser) re-fetches the
+    // account's models and preferences; follow them, so the Profile tab never
+    // shows "None yet", or a default list missing the models just enabled.
+    this.modelService.models$.pipe(takeUntilDestroyed()).subscribe(models => {
+      if (this.hasLoadedForOpen) {
+        this.models.set(models);
+      }
+    });
+    this.preferencesService.preferences$.pipe(takeUntilDestroyed()).subscribe(preferences => {
+      if (preferences && this.hasLoadedForOpen) {
+        this.preferences.set(preferences);
+      }
+    });
     effect(() => {
       if (this.modal.openState()) {
         if (!this.hasLoadedForOpen) {

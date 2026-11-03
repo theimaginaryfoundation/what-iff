@@ -25,6 +25,13 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
       Rows that fail to embed are logged by ID and passed over, so they cannot stall the rows behind them; when a whole page fails, a probe input decides between bad input (skip) and an unavailable provider (stop).
     `memory_merge.go`'s `ListMemoryMergeEvents` takes a `models.MemoryMergeEventFilters` (query/survivor-memory/date-range/exclude-reverted) for both the merge-audit HTTP endpoint and `find_context`'s `mode=lifecycle_events`.
   - Files: `fileattachment.go`, `fileattachment_folders.go`, `filechunk.go` (chunk storage + search).
+    `agentfile.go` backs the agent file tools (ADR 0x034): `FindFileAttachmentsAtPath` (folder + case-insensitive name, gallery rows only), `SwapAgentFileObject` (compare-and-swap of an agent-authored row's `s3_key`) and `CountAgentFiles`.
+    `file_attachments.origin` is a string enum (`user`, `agent`, `skill`); `FileAttachmentFilters.Origin` narrows listings to one origin, and `toFileAttachmentModel` carries `chunk_status` as `FileAttachment.ChunkStatus`.
+  - Entity wiki: `agententity.go` (ADR 0x034) — `GetAgentEntity`, `CreateAgentEntity`, `UpdateAgentEntity` (compare-and-swap on the body, retried), `ListAgentEntities`, `SetAgentEntityBody`, `DeleteAgentEntity`.
+    Visibility follows memories: global entities plus those pinned to the active personality, the pinned one winning; a new entity is pinned when the writing personality has `auto_pin_memories` on.
+    `ListVisibleAgentEntities` lists what a conversation sees by key prefix (one row per key, the pinned one), without bodies.
+    `ArchiveAgentEntity` is the agent's delete: it sets `archived_at` and the writer, and every live query skips archived rows (`liveAgentEntities`); the unique indexes ignore them.
+    `ListAgentEntities` with `Archived` lists them for the Memories panel, `RestoreAgentEntity` brings one back (`ErrAgentEntityExists` when a live page has taken the name), and the UI's `DeleteAgentEntity` removes a row for good.
     **Gallery folders** are a normalized path string on `file_attachments.folder` (a label; the `s3_key` never changes), indexed with the owner.
     `FileAttachmentFilters.Folder` matches one folder exactly and `FolderPrefix` matches a folder and everything beneath it (the trailing `/` keeps `charts` from matching `charts-old`).
     `fileattachment_folders.go` holds `ListGalleryFolders` (files of one `models.GalleryKind` directly in each folder), `MoveFileAttachmentsToFolder` and `MoveGalleryFolder` (a rename that carries every folder beneath it).
@@ -35,6 +42,16 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     `fileattachment_objects.go` backs object-store cleanup: `List{Chat,Personality,User}FileAttachmentObjectRefs` read the rows a cascade is about to delete, `ReferencedFileAttachmentKeys` reports which keys any remaining row (of any owner) still uses, and `FileAttachmentProviderFileShared` guards the provider file reference copies share.
     **`FileAttachmentFilters.ExcludeReferenceCopies`** (image gallery) drops `CreateFileAttachmentReference` clones in SQL — keeps the earliest row per `(owner, s3_key)`, backed by an `(s3_key, owner)` index — so counts/pagination and classification follow the original row.
   - Personalities & rituals: `personality.go`, `personality_gen_flow.go`, `ritual.go`.
+    A ritual's mode and job links are many-to-many (`mood_rituals`, `agent_job_rituals` join tables, ADR 0x035 §11), so one skill can sit on any number of modes and jobs; before that the edges were FK columns on `rituals` and a second attach silently detached the first.
+    Rituals carry the Agent Skills fields (ADR 0x035 §1): `slug` (unique per owner through a partial index that lets pre-migration rows share `""` until `database.BackfillRitualSlugs` names them), `license`, `compatibility`, `metadata`, `allowed_tools`, `disable_model_invocation`, `user_invocable`.
+    `CreateRitual` derives a missing slug and returns `ErrRitualSlugTaken` on a clash; `UpdateRitual` keeps the stored slug and pointer fields when the request omits them.
+    `GetRitualBySlug` and `RitualSlugTaken` back `load_skill` and import; `GetAvailableRituals` (the /skill picker and hotkeys) leaves out `user_invocable = false` skills, while `ListRituals` shows them and filters by `Slug`.
+    `skillfiles.go` holds a skill's bundle files (ADR 0x035 §3): `file_attachments` rows with `origin = skill` and a `skill_id` (cascades with the skill), filed under `skills/<slug>/<subdir>` (`SkillFileFolder` builds the folder without `path.Join` so a `..` is refused rather than resolved); `ListSkillFiles`, `CountSkillFiles`, `FindSkillFile`, `PutSkillFile` (with `CreateSkillFile` and `ReplaceSkillFileObject` over it), `ReplaceSkillFiles` (a whole bundle in one transaction), `DeleteSkillFiles`, `DeleteRitualWithFiles`, and `UpdateRitual` refiles them when the slug changes.
+    Every bundle write locks the skill's row (`lockSkillForFiles`), checks the 200-file and 30 MB limits against `size_bytes`, and relies on the unique index on (`skill_id`, `folder`, `name`) for one file per path; `SkillFileFolder` refuses the bundle root's `SKILL.md`, which is rendered, not stored.
+    `CreateFileAttachment`, `MoveFileAttachmentsToFolder` and `MoveGalleryFolder` refuse the reserved `skills/` folder (`models.ErrReservedFolder`) for anything but a skill's own files, so every writer is covered.
+    Skill files are read-only to the gallery: `galleryMutableFiles` keeps them out of folder listings, moves and renames, and `ListFileAttachments` leaves them out unless the listing asks for `Origin = skill` or looks under the reserved `skills/` folder; `FindFileAttachmentsAtPath` still finds them, so `agent_file_read` can read them.
+    `database.BackfillFileOrigins` carries the legacy `agent_authored` flag into `origin` on deployments that had it.
+    `chat_skill_state.go` holds the skills the agent loaded in a chat (`chat_skill_states`, ADR 0x035 §4): `ListChatLoadedSkillIDs`, `AddChatLoadedSkills`, `RemoveChatLoadedSkills`, `RetainChatLoadedSkills` (the checkpoint sweep), `ListChatSkillIDsEverLoaded` (unloading stamps `unloaded_at` and keeps the row, so this is the index's "used earlier" read), plus `ListRitualsInChatScope` (a personality's skills and the global ones, by slug) and `ListChatMessageRitualIDs` (skills a message of the chat invoked) for the skills index; `ChatToolInputsSince` (`toolcall.go`) reads a segment's `load_skill` calls.
     `personality_card.go` holds the imported SillyTavern card blob in its own `PersonalityCard` table (`GetPersonalityCard`); it is deliberately not loaded by `GetPersonality`/`ListPersonalities`, which sit on hot paths, and `CreatePersonality` writes it in the same transaction from `models.Personality.CharacterCard`.
   - Jobs: `job.go` (CRUD + **`UpdateJobProgress`** — a single scoped UPDATE for the opaque `progress` JSON, safe to call frequently from long-running jobs; **`FindLatestActiveChatJob`** finds a chat's running turn by matching recent non-terminal `chat_message` job references against that chat's messages, and **`FindLatestActiveChatMessageJob`** uses `First` so a stranded duplicate job never makes the lookup fail), `agentjob.go`, `scheduler_lock.go` (distributed scheduler lock).
   - Usage: `usagestats.go`.
@@ -44,6 +61,12 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     Per-chat loaded tools live in `chat_mcp_tool_states`: one row per connector, plus the built-in tools' row under the nil connector ID (`ListChatLoadedBuiltinTools` / `SetChatLoadedBuiltinTools`), which `ListChatMCPLoadedTools` leaves out.
     `RetainChatLoadedTools` prunes every row of a chat to a kept set in one transaction (the checkpoint's unload step), and `ChatToolNamesUsedSince` (`toolcall.go`) lists the tools a chat's messages called since a time.
   - Models: `model.go`.
+    `ListModels` is the deployment's own catalog (models with no `connection_id`); `ListModelsForUser` adds the models the user enabled on their own provider connections (ADR 0x027), each with its connection's name (`connection_name`).
+    An account may enable a model with a catalog model's name, so lookups by name that mean the catalog (`GetModelByName`, a new account's default, the admin create and rename checks, and boot's seeding) look only at models with no connection.
+    `GetDisabledConnectionModel` and `ModelRowExists` let a chat or job tell a model turned off, or gone with its connection, from a retired catalog model.
+    An account's default model (`user_preferences.default_model`) is optional: a new account gets the catalog's default (`resolveDefaultModelTx`: the admin-marked one, then `DEFAULT_MODEL_NAME`, then any catalog model, never a connection's), and none on an install without a catalog, until it enables a model.
+    `CreateChat` without a model and with no default stores none; the chat's turns use the account's default once it has one.
+    `assertUserCanUseModelTx` treats a connection's model as nonexistent to anyone but the connection's owner, so it can't be set on another account's chat, job or preference.
   - Safety violations: `safety_violation_event.go`.
   - Tool call persistence: `toolcall.go`.
 - **`CheckUserPassword`** reports whether a password is the account's current one (false for identity-provider accounts); it backs `reauth`'s default confirmation.
@@ -80,6 +103,9 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   The descending views fetch one row past the page so `NextCursor` is set only when older rows remain (an empty cursor means the end).
   The exact `TotalCount` costs a pass over every message in the chat, so callers that only need the page set `ChatMessageFilters.SkipTotal` (the agent's context build, mood and recall scans, and the web UI via `include_total=false`).
   `ChatHasMessages` is the `EXISTS` form of `GetChatMessageCount` for "is there any?" checks.
+- **Imported timestamps:** `ImportChats` treats an archive time JSON can't encode (a year outside [0, 9999]) as missing.
+  A bad chat creation time becomes the import time, a bad first message time takes the chat's creation time, and a later one follows its predecessor.
+  One such stored `sent_at` would otherwise fail every response that includes it, such as the admin user list's last-message column.
 - **FK-first indexes:** ent orders an index's plain fields before its edge columns, so `index.Edges("chat").Fields("sent_at")` is `(sent_at, chat_messages)` and cannot seek by chat.
   `chat_messages`, `chats` and `memories` therefore also carry a single-column index on their parent FK (`index.Edges(...)` alone); add one wherever queries filter by an edge without its leading field.
 - **Context X-ray column:** `chat_message.context_breakdown` is a typed **`jsonb`** column (`field.JSON` over `*models.ContextBreakdown`); ent handles (un)marshalling, so `toChatMessageModel` just surfaces it (guarding empty snapshots) and `SetChatMessageContextBreakdown` sets the pointer (assistant rows only; best-effort).
@@ -119,7 +145,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Checkpoint window:** `UpdateChatCheckpointStateAndClearResponseID` takes the `last_checkpoint_at` to store (the agent passes just after the checkpointed reply, #268; zero means now).
   `ClaimChatCheckpoint` / `ReleaseChatCheckpoint` (`chat_checkpoint_claim.go`) take and drop `chats.checkpoint_started_at` with one conditional update each, so only one checkpoint runs per chat at a time across instances; a claim older than the stale bound is taken over.
   `FirstChatMessageSentAtSince` finds the earliest message in a chat since a time, leaving out given ids, so the agent can tell whether a message arrived mid-turn.
-- **`SetAgentJobOverrides`:** `personality_id` must belong to the job owner; `model_id` must exist in the global model catalog.
+- **`SetAgentJobOverrides`:** `personality_id` must belong to the job owner; `model_id` must be a model the owner can use (the catalog, or one of its own connections' models).
   Partial updates use `models.SetAgentJobOverridesPatch` so omitted JSON fields are not overwritten.
   Invalid IDs return `ErrInvalidRequestBody`.
 - **Model soft-delete query contract:** model reads should default to active rows (`deleted=false`).
@@ -223,6 +249,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 ## Testing
 
 - `chat_checkpoint_test.go`, `chatmessage_test.go`, `chatmessage_mark_read_test.go` — message and checkpoint behavior.
+- `model_connection_test.go` — the catalog excludes connection models, a user sees only their own, and the usage check refuses another account's.
 - `turnsettings_test.go` — threads store only explicit values, `InheritedTurnSettings` reads the personality and account default, explicit-only chat writes, and preference update semantics for the turn settings.
 - `memory_test.go`, `memory2_test.go`, `filechunk_test.go` — retrieval (including **`ListMemories`** excluding Summary unless `level=summary`), ZIP export/import helpers, full import count/persist coverage, and chunks.
 - `memory_embedding_test.go` — stale-embedding drop on content edits (not for Summary), missing-embedding queries, the `SetMemoryEmbedding` content guard and replace, non-content patches on untrimmed legacy rows, the dialect-gated row lock, and backfill batching, per-item retry, skipping a page of bad input, and early stop.

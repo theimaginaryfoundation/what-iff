@@ -129,6 +129,9 @@ func (t *MoveFilesTool) Move(ctx context.Context, chat *models.Chat, args []byte
 		if folder, err = models.NormalizeFolder(*a.Folder); err != nil {
 			return fail(fmt.Sprintf("invalid folder: %v", err))
 		}
+		if models.IsReservedFolder(folder) {
+			return fail(models.ErrReservedFolder.Error())
+		}
 	}
 	// The rename goes first, so a name the store refuses (it alone knows the extension the name
 	// inherits) stops the call before anything moves.

@@ -113,14 +113,14 @@ func TestProcessUploadBuffersAFileWithoutHTTP(t *testing.T) {
 	require.Equal(t, []byte("hello"), onDisk, "the caller gets the buffered file to store and chunk")
 }
 
-func TestProcessUploadNormalizesImagesToPNG(t *testing.T) {
+func TestProcessUploadNormalizesImages(t *testing.T) {
 	attachment, tempPath, err := ProcessUpload(context.Background(), uuid.New(), bytes.NewReader(pngBytes(t)), "pic.png")
 	require.NoError(t, err)
 	defer os.Remove(tempPath)
 	require.True(t, strings.HasPrefix(attachment.FileType, models.ImageMIMEPrefix))
 }
 
-func TestProcessUploadAcceptsWebPAndStoresItAsPNG(t *testing.T) {
+func TestProcessUploadAcceptsWebPAndStoresItAsJPEG(t *testing.T) {
 	webp, err := os.ReadFile(filepath.Join("..", "..", "imageutil", "testdata", "lossy.webp"))
 	require.NoError(t, err)
 
@@ -128,11 +128,11 @@ func TestProcessUploadAcceptsWebPAndStoresItAsPNG(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(tempPath)
 
-	require.Equal(t, "sunset.png", attachment.Name)
-	require.Equal(t, "image/png", attachment.FileType)
+	require.Equal(t, "sunset.jpg", attachment.Name)
+	require.Equal(t, "image/jpeg", attachment.FileType)
 	stored, err := os.ReadFile(tempPath)
 	require.NoError(t, err)
-	require.Equal(t, "image/png", http.DetectContentType(stored), "the bytes are re-encoded, not just renamed")
+	require.Equal(t, "image/jpeg", http.DetectContentType(stored), "the bytes are re-encoded, not just renamed")
 }
 
 func TestProcessUploadRejectsAnUnsupportedTypeAndCountsIt(t *testing.T) {

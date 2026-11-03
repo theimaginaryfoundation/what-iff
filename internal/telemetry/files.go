@@ -79,3 +79,35 @@ func (m *Metrics) RecordFileItems(ctx context.Context, operation, kind, outcome 
 func (m *Metrics) RecordFileUpload(ctx context.Context, contentType, outcome string) {
 	m.Add(ctx, FileUploads, 1, AttrKind.String(FileKind(contentType)), AttrOutcome.String(outcome))
 }
+
+// Variants and sources for ImageResolves. A source names the object key that answered; none
+// means every key missed.
+const (
+	ImageVariantThumbnail = "thumbnail"
+	ImageVariantFull      = "full"
+
+	ImageSourceThumbnail = "thumbnail" // the attachment's own thumbnail key
+	ImageSourceCanonical = "canonical" // the gallery key for the attachment's id
+	ImageSourceS3Key     = "s3_key"    // the key stored on the row (shared by reference copies)
+	ImageSourceChat      = "chat"      // the legacy chat-scoped key
+	ImageSourceNone      = "none"
+)
+
+// Outcomes for ThumbnailBackfills. dropped means the backfill pool was full; skipped means the
+// image recently failed to thumbnail and is not retried yet.
+const (
+	ThumbnailBackfillWritten = "written"
+	ThumbnailBackfillFailed  = "failed"
+	ThumbnailBackfillDropped = "dropped"
+	ThumbnailBackfillSkipped = "skipped"
+)
+
+// RecordImageResolve counts one attachment image read by the key that answered it.
+func (m *Metrics) RecordImageResolve(ctx context.Context, variant, source string) {
+	m.Add(ctx, ImageResolves, 1, AttrVariant.String(variant), AttrSource.String(source))
+}
+
+// RecordThumbnailBackfill counts one thumbnail backfill by outcome.
+func (m *Metrics) RecordThumbnailBackfill(ctx context.Context, outcome string) {
+	m.Add(ctx, ThumbnailBackfills, 1, AttrOutcome.String(outcome))
+}

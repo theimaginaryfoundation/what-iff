@@ -86,8 +86,8 @@ func TestFormatMoodContextBlock_AutoWithTools(t *testing.T) {
 	require.Contains(t, got, "change_mode")
 	require.Contains(t, got, "This mode adds the following context:")
 	require.Contains(t, got, "Write in a warm tone.")
-	require.Contains(t, got, "Attached skills for this mode:\n")
-	require.Contains(t, got, "- Style Guide: Use Oxford commas.")
+	require.Contains(t, got, "Skills preloaded by this mode (their instructions are in the active skills block): Style Guide")
+	require.NotContains(t, got, "Use Oxford commas.", "instructions live in the skills segment, not the mode block")
 	idxTools := strings.Index(got, "list_modes")
 	idxContext := strings.Index(got, "This mode adds the following context:")
 	require.Greater(t, idxContext, idxTools, "tool guidance should precede mode context header")
@@ -117,8 +117,8 @@ func TestFormatMoodContextBlock_RitualsOnly(t *testing.T) {
 	got := formatMoodContextBlock(mood, rituals, moodContextOptions{IsAutoMood: true})
 
 	require.Contains(t, got, `You are currently in "Skills Only" mode`)
-	require.Contains(t, got, "Attached skills for this mode:\n")
-	require.Contains(t, got, "- Checklist: Step one.")
+	require.Contains(t, got, "Skills preloaded by this mode (their instructions are in the active skills block): Checklist")
+	require.NotContains(t, got, "Step one.")
 	require.NotContains(t, got, "This mode adds the following context:")
 }
 
@@ -136,7 +136,7 @@ func TestFormatMoodRitualsForContext_BulletList(t *testing.T) {
 		{Name: "Test Skill", Content: "This is a test skill instruction."},
 		{Name: "Second", Content: "Another line."},
 	})
-	require.Equal(t, "- Test Skill: This is a test skill instruction.\n- Second: Another line.", got)
+	require.Equal(t, "Test Skill, Second", got, "the mode block names its skills; their instructions live in the skills segment")
 }
 
 func TestMessageContextBuilder_Build_ModeRitualsNotInUserMessage(t *testing.T) {
@@ -166,23 +166,34 @@ func TestMessageContextBuilder_Build_ModeRitualsNotInUserMessage(t *testing.T) {
 		UserPrompt:         "hello there",
 		ActiveMood:         mood,
 		ActiveMoodRituals:  moodRituals,
+		ActiveSkills:       moodRituals, // what prepareTurnSkills resolves for a mode's skills
+		SkillsIndex:        "Skills available: ...",
 		IsAutoMood:         true,
 		MoodToolsAvailable: true,
 	})
 	require.NoError(t, err)
 
-	var moodSeg, userSeg *provider.ModelContextSegment
+	var moodSeg, skillsSeg, indexSeg, userSeg *provider.ModelContextSegment
 	for i := range mc.Segments {
 		switch mc.Segments[i].Kind {
 		case provider.SegmentKindMood:
 			moodSeg = &mc.Segments[i]
+		case provider.SegmentKindSkills:
+			skillsSeg = &mc.Segments[i]
+		case provider.SegmentKindSkillsIndex:
+			indexSeg = &mc.Segments[i]
 		case provider.SegmentKindUserMessage:
 			userSeg = &mc.Segments[i]
 		}
 	}
 	require.NotNil(t, moodSeg)
 	require.Contains(t, moodSeg.Content, "Be concise.")
-	require.Contains(t, moodSeg.Content, "- Rubric: Grade on clarity.")
+	require.Contains(t, moodSeg.Content, "Rubric")
+	require.NotContains(t, moodSeg.Content, "Grade on clarity.", "the body is injected once, in the skills segment")
+	require.NotNil(t, skillsSeg)
+	require.Contains(t, skillsSeg.Content, "<skill name=\"rubric\">\nGrade on clarity.\n</skill>")
+	require.NotNil(t, indexSeg)
+	require.Equal(t, provider.RoleDeveloper, indexSeg.Role)
 	require.NotNil(t, userSeg)
 	require.Equal(t, "hello there", userSeg.Content)
 }

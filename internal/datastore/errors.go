@@ -70,6 +70,8 @@ var (
 
 	// Ritual-related errors
 	ErrRitualNotFound = errors.New("ritual not found")
+	// ErrRitualSlugTaken means another of the owner's skills already has the requested slug.
+	ErrRitualSlugTaken = errors.New("ritual slug already in use")
 
 	// MCP server-related errors
 	ErrMCPServerNotFound         = errors.New("mcp server not found")

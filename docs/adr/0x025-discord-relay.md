@@ -32,13 +32,14 @@ So the relay must not, by default, hand strangers the owner's memories, other th
 There is one Gateway connection per bot, and with more than one API instance exactly one must hold each bot's connection, or every instance would answer every mention.
 
 - The supervisor (`internal/discordrelay/gateway`) leads through a Postgres advisory lock on its own key, `80920032` (the agent-job scheduler uses `80920031`), overridable with `DISCORD_GATEWAY_LOCK_KEY`. Followers retry about every 15 s; the leader re-reads the active bots about every 30 s and opens, reopens (new token or intents) or closes connections to match.
+- A connection Discord refuses for good is recorded on the bot instead of being redialled every 30 s: close 4004 (authentication failed) marks it `invalid_token`, and 4014 (disallowed intents, when the owner switched Message Content off in the Developer Portal after adding the bot) marks it `intent_disabled`. Both show the owner what to fix, and a new token or a refresh puts the bot back to active.
 - On shutdown the leader closes its connections and releases the lock, so another instance takes over within one retry. A brief overlap is harmless: inbound messages are deduplicated on the Discord message id (§3).
 - `DISCORD_GATEWAY_SINGLE_INSTANCE=true` skips the lock for one-process local runs (and databases without advisory locks).
 - `Run(ctx, locker, source, sink)` does not depend on running inside the API server, so moving the gateway into its own process later is a deploy change, not a rewrite.
 
 ### 3. Data
 
-- **`discord_bot`**: owner, persona (`personality_id`), `application_id`, `bot_user_id`, `bot_username`, encrypted `token`, `message_content`, `status` (active, invalid_token, disabled), `last_error`.
+- **`discord_bot`**: owner, persona (`personality_id`), `application_id`, `bot_user_id`, `bot_username`, encrypted `token`, `message_content`, `status` (active, invalid_token, intent_disabled, disabled), `last_error`.
 - **`discord_binding`**: a channel bound to a relay thread: bot, `chat_id`, guild and channel ids and cached names, `inbound_enabled`, `allow_user_ids`, `deny_user_ids`, `allow_unrestricted` (§6), `status` (active, broken), `last_error`, `last_activity_at`. Unique on (bot, channel). A thread can have several bindings.
 - **`discord_message_link`**: one row per message that crossed the boundary: the What Iff message, the binding, `direction`, the Discord message ids, and for inbound messages the author id and display name. Unique on (binding, inbound Discord message id): the dedupe key for retries and leader handover. It is also the inbound message's provenance (who said it), and the outbound delivery record.
 - **`discord_pending_post`**: "post the next reply in this thread to this binding", set by the composer toggle or the `post_to_discord` tool and consumed by the reply hook. It expires after 30 minutes.
