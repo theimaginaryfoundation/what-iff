@@ -177,14 +177,25 @@ func (s *Store) Builtins(ctx context.Context, userID uuid.UUID) ([]Connection, e
 
 // DeleteBuiltin removes the account's connection to a built-in provider.
 func (s *Store) DeleteBuiltin(ctx context.Context, userID uuid.UUID, provider models.ModelProvider) error {
-	n, err := s.client.ProviderConnection.Delete().
+	row, err := s.client.ProviderConnection.Query().
 		Where(providerconnection.UserID(userID), providerconnection.Builtin(string(provider))).
-		Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("delete provider key: %w", err)
-	}
-	if n == 0 {
+		Only(ctx)
+	if ent.IsNotFound(err) {
 		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read provider key: %w", err)
+	}
+	// As with removing any connection, the default model can't go with it.
+	inUse, err := s.defaultModelOn(ctx, userID, row.ID)
+	if err != nil {
+		return err
+	}
+	if inUse {
+		return ErrDefaultModelInUse
+	}
+	if err := s.client.ProviderConnection.DeleteOneID(row.ID).Exec(ctx); err != nil {
+		return fmt.Errorf("delete provider key: %w", err)
 	}
 	return nil
 }

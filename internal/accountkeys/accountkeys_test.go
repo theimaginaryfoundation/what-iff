@@ -82,6 +82,18 @@ func newFixture(t *testing.T, sealer Sealer) fixture {
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE UNIQUE INDEX providerconnection_builtin ON provider_connections (builtin) WHERE user_id IS NULL`,
+		// Only the columns the default-model check reads.
+		`CREATE TABLE models (
+			id uuid PRIMARY KEY,
+			name text NOT NULL,
+			deleted bool NOT NULL DEFAULT false,
+			connection_id uuid NULL REFERENCES provider_connections(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE user_preferences (
+			id uuid PRIMARY KEY,
+			user_preferences uuid UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+			default_model uuid NULL REFERENCES models(id)
+		)`,
 	} {
 		_, err := db.Exec(stmt)
 		require.NoError(t, err)
@@ -201,6 +213,27 @@ func TestDelete(t *testing.T) {
 	require.NoError(t, f.keys.Delete(ctx, f.alice, models.ModelProviderAnthropic))
 	require.Empty(t, f.keys.Key(asUser(f.alice), models.ModelProviderAnthropic))
 	require.ErrorIs(t, f.keys.Delete(ctx, f.alice, models.ModelProviderAnthropic), ErrKeyNotFound)
+}
+
+// A key whose connection holds the account's default model can't be removed,
+// as with removing the connection itself, rather than failing on the foreign key.
+func TestRoutes_DeleteRefusesTheDefaultModelsKey(t *testing.T) {
+	f := newFixture(t, prefixSealer{})
+	ctx := context.Background()
+	_, err := f.keys.Set(ctx, f.alice, models.ModelProviderOpenAI, "sk-test-abcd1234")
+	require.NoError(t, err)
+	var connID uuid.UUID
+	require.NoError(t, f.db.QueryRowContext(ctx, `SELECT id FROM provider_connections WHERE user_id = ?`, f.alice).Scan(&connID))
+	modelID := uuid.New()
+	_, err = f.db.ExecContext(ctx, `INSERT INTO models (id, name, connection_id) VALUES (?, 'gpt-5.4', ?)`, modelID, connID)
+	require.NoError(t, err)
+	_, err = f.db.ExecContext(ctx, `INSERT INTO user_preferences (id, user_preferences, default_model) VALUES (?, ?, ?)`, uuid.New(), f.alice, modelID)
+	require.NoError(t, err)
+
+	rec := serve(t, f, &f.alice, http.MethodDelete, "/provider-keys/openai", "")
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), models.ErrCodeDefaultModelInUse)
+	require.Equal(t, "sk-test-abcd1234", f.keys.Key(asUser(f.alice), models.ModelProviderOpenAI), "the key stays")
 }
 
 // Deleting an account deletes its keys. The cascade is on this table's own
