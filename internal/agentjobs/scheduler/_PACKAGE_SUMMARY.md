@@ -32,8 +32,7 @@
   `ErrSchedulerNotActive` means the manager is not running on this instance (not started, start failed, or stopped).
   The per-user window is checked before the run is accepted: over it, a `*RunLimitError` (`errors.Is` `ErrRunLimitReached`) carries the limit, the window and, when the datastore can list execution times, `RetryAt`.
   A manual run that still meets the limit when it executes is skipped with a chat message, never deferred.
-- **Execution window:** 10 runs per user per sliding 30 minutes, counted by `CountRecentSuccessfulAgentJobExecutions` (the user's `job_run` usage events; zero in the open-source build).
-  Those events are billing records, not runs, so the count can exceed the user's agent-job runs (Advanced steps, `run_subagent`, webhook runs; issue #427).
+- **Execution window:** 10 runs per user per sliding 30 minutes, counted by `CountRecentSuccessfulAgentJobExecutions` (one per run, not per `job_run` billing event; zero in the open-source build).
 - **MVP note:** `Config.EnableAgentJobsScheduler` gates whether the scheduler runs at all.
 
 ## Testing

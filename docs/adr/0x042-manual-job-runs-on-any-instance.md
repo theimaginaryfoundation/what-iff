@@ -60,11 +60,17 @@ It is not deferred: deferring needs quartz, which a follower lacks, and would re
 - The limit is read twice for a manual run (once to accept, once when it executes); the second read only matters in the race above.
 - `ErrorCode` gains the specific code `job_run_limit_reached`.
 
+## Counting runs, not billing rows
+
+The window used to count the user's `job_run` usage events, which are billing rows, not runs.
+An Advanced-loop job run records one per step plus its final one, and `run_subagent` records one from any turn, ordinary chat included.
+So the limit could trip with visibly fewer than 10 job runs, which is what users saw alongside the follower 503s.
+
+`CountRecentSuccessfulAgentJobExecutions` now promises one per run, and the reset-time hook (`ListRecentAgentJobExecutionTimes`) one start time per run.
+The private overlay implements both by grouping `job_run` events by `metadata.turn_id` (an event without one is its own run) and leaving out `metadata.job_type = 'subagent'`.
+A webhook-started run and a failed run that made model calls still count: each is a run.
+A dedicated run log would be exact; grouping billing rows is close enough and needs no migration.
+
 ## Not done yet
 
-- **The limiter overcounts.** It counts the user's `job_run` usage events (the private overlay's `countRecentSuccessfulAgentJobExecutions`), which are billing rows, not runs.
-  An Advanced-loop job run records one per step plus its final one, `run_subagent` records one from any turn (ordinary chat included), webhook-started runs record one, and failed runs that made model calls record one.
-  So the limit can trip with visibly fewer than 10 job runs.
-  Counting distinct `metadata.turn_id` and excluding `metadata.job_type = 'subagent'` would bring it close to runs; a dedicated run log would be exact.
-- **The reset-time hook has no implementation yet.** The overlay needs a `listRecentAgentJobExecutionTimes` alongside its counter, with the same filters, ordered oldest first.
 - The job detail page still replaces the job view with any Run now error (pre-existing); the jobs list now shows it above the cards.

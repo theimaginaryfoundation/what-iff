@@ -32,9 +32,8 @@ const (
 	schedulerLockHealthInterval = 5 * time.Second
 	// schedulerExecutionWindow is the sliding window used for per-user execution limiting.
 	schedulerExecutionWindow = 30 * time.Minute
-	// schedulerMaxExecutionsPerWindow is the max executions allowed per user per window. What is
-	// counted is the user's job_run usage events (datastore.CountRecentSuccessfulAgentJobExecutions),
-	// which can exceed their agent-job runs (issue #427).
+	// schedulerMaxExecutionsPerWindow is the max agent-job runs allowed per user per window
+	// (datastore.CountRecentSuccessfulAgentJobExecutions).
 	schedulerMaxExecutionsPerWindow = 10
 	// schedulerShortRecurrenceThreshold skips immediately when over limit.
 	schedulerShortRecurrenceThreshold = 10 * time.Minute
