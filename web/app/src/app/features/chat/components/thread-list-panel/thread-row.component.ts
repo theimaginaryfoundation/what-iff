@@ -16,11 +16,12 @@ import { RouterLink } from '@angular/router';
 import { ThreadJobSummary, jobDisplayName } from '../../helpers/thread-jobs.helpers';
 import { ThreadAutomation } from '../../../../core/services/thread-automation-source';
 import { jobStatusDescription, jobStatusLabel, jobStatusTone, scheduleFailureReason, statusLabel } from '../../../agent-job/helpers/job-status.helpers';
+import { CheckboxComponent } from '../../../../shared/ui/checkbox/checkbox.component';
 
 @Component({
   selector: 'app-thread-row',
   standalone: true,
-  imports: [CommonModule, AsyncPipe, AuthImagePipe, RouterLink, StarIconComponent, TrashIconComponent, TooltipDirective],
+  imports: [CheckboxComponent, CommonModule, AsyncPipe, AuthImagePipe, RouterLink, StarIconComponent, TrashIconComponent, TooltipDirective],
   template: `
     <tr
       class="thread-row"
@@ -31,12 +32,11 @@ import { jobStatusDescription, jobStatusLabel, jobStatusTone, scheduleFailureRea
       (click)="onRowClick($event)"
     >
       <td class="thread-row__select-cell" (click)="$event.stopPropagation()">
-        <input
-          type="checkbox"
-          class="thread-row__select"
+        <ui-checkbox
+          inputClass="thread-row__select"
           [checked]="checked()"
           (change)="toggleSelect.emit(thread().id)"
-          [attr.aria-label]="'Select thread ' + thread().name"
+          [ariaLabel]="'Select thread ' + thread().name"
         />
       </td>
       <td class="thread-row__star-cell">
@@ -345,13 +345,6 @@ import { jobStatusDescription, jobStatusLabel, jobStatusTone, scheduleFailureRea
 
     .thread-row__select-cell {
       text-align: center;
-    }
-
-    .thread-row__select {
-      accent-color: var(--color-accent);
-      cursor: pointer;
-      height: 1rem;
-      width: 1rem;
     }
 
     .thread-row__star,

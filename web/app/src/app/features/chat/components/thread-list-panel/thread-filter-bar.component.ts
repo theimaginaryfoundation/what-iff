@@ -1,9 +1,11 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 import { PersonalityOption, ThreadSort } from '../../helpers/thread-list.helpers';
+import { CheckboxComponent } from '../../../../shared/ui/checkbox/checkbox.component';
 
 @Component({
   selector: 'app-thread-filter-bar',
   standalone: true,
+  imports: [CheckboxComponent],
   template: `
     <section class="filters" aria-label="Thread filters">
       <label>
@@ -36,7 +38,7 @@ import { PersonalityOption, ThreadSort } from '../../helpers/thread-list.helpers
       </label>
 
       <label class="filters__toggle">
-        <input type="checkbox" [checked]="pinnedOnly()" (change)="pinnedOnlyChange.emit($any($event.target).checked)" />
+        <ui-checkbox [checked]="pinnedOnly()" (checkedChange)="pinnedOnlyChange.emit($event)" />
         Pinned only
       </label>
     </section>

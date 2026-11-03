@@ -6,11 +6,12 @@ import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { WebhookTokenService } from '../../core/services/webhook-token.service';
 import { WEBHOOK_SCOPE_OPTIONS, WebhookScope, WebhookToken } from '../../core/models/webhook-token.model';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 @Component({
   selector: 'app-integrations-webhooks-tab',
   standalone: true,
-  imports: [CommonModule, FormsModule, HelpHintComponent, TooltipDirective],
+  imports: [CheckboxComponent, CommonModule, FormsModule, HelpHintComponent, TooltipDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './integrations-webhooks-tab.component.html'
 })

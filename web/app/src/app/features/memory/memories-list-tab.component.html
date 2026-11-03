@@ -194,11 +194,10 @@
       @if (selectedCount() > 0 && !isSummariesView()) {
         <div class="memories-list__bulk" role="toolbar" aria-label="Bulk memory actions">
           <label class="memories-list__bulk-select">
-            <input
-              type="checkbox"
-              class="memories-list__checkbox"
+            <ui-checkbox
+              inputClass="memories-list__checkbox"
               [checked]="allSelected()"
-              (change)="setAllSelected($any($event.target).checked)"
+              (checkedChange)="setAllSelected($event)"
             />
             Select all
           </label>

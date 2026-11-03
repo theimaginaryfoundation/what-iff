@@ -6,6 +6,7 @@ import { isSandboxed } from '../../core/models/chat.model';
 import { apiErrorMessage } from '../../core/utils/api-error.helpers';
 import { saveCheckbox } from '../../core/utils/checkbox.helpers';
 import { ContextPanelService } from '../chat/services/context-panel.service';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 /** The part of a relay binding the composer toggle reads. */
 export interface RelayComposerBinding {
@@ -50,7 +51,7 @@ export interface RelayComposerSource<B extends RelayComposerBinding> {
 @Component({
   selector: 'app-relay-composer-toggle',
   standalone: true,
-  imports: [RouterLink],
+  imports: [CheckboxComponent, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let s = source();
@@ -70,13 +71,7 @@ export interface RelayComposerSource<B extends RelayComposerBinding> {
       <div class="toggle" [attr.data-testid]="s.tab + '-composer-toggle'">
         @for (b of bindings(); track b.id) {
           <label class="toggle__option" [class.toggle__option--on]="pending().has(b.id)" [class.toggle__option--disabled]="saving()">
-            <input
-              type="checkbox"
-              class="toggle__box"
-              [checked]="pending().has(b.id)"
-              [disabled]="saving()"
-              (change)="toggle(b, $any($event.target))"
-            />
+            <ui-checkbox [checked]="pending().has(b.id)" [disabled]="saving()" (change)="toggle(b, $any($event.target))" />
             <span class="toggle__text"
               >Post the next reply to <strong>{{ s.label(b) }}</strong
               >{{ s.toggleSuffix ?? '' }}</span
@@ -145,46 +140,6 @@ export interface RelayComposerSource<B extends RelayComposerBinding> {
       }
       .toggle__text strong {
         font-weight: 600;
-      }
-      .toggle__box {
-        appearance: none;
-        background: var(--color-surface-input);
-        border: 1.5px solid color-mix(in srgb, var(--color-accent) 45%, var(--color-border-base));
-        border-radius: 0.3rem;
-        cursor: inherit;
-        display: grid;
-        flex: none;
-        height: 1rem;
-        margin: 0;
-        place-content: center;
-        transition:
-          background 120ms ease,
-          border-color 120ms ease;
-        width: 1rem;
-      }
-
-      .toggle__box::before {
-        box-shadow: inset 1rem 1rem #fff;
-        clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0, 43% 62%);
-        content: '';
-        height: 0.45rem;
-        transform: scale(0);
-        transition: transform 100ms ease;
-        width: 0.45rem;
-      }
-
-      .toggle__box:checked {
-        background: var(--color-accent);
-        border-color: var(--color-accent);
-      }
-
-      .toggle__box:checked::before {
-        transform: scale(1);
-      }
-
-      .toggle__box:focus-visible {
-        outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
-        outline-offset: 2px;
       }
     `,
   ],

@@ -25,6 +25,7 @@ import {
 } from './discord.service';
 import { DiscordBindingThreadComponent } from './discord-binding-thread.component';
 import { RelayIdChipsComponent } from '../relay/relay-id-chips.component';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 /** Per-bot "connect a channel" form state. */
 interface ConnectForm {
@@ -57,7 +58,7 @@ interface AccessDraft {
 @Component({
   selector: 'app-discord-tab',
   standalone: true,
-  imports: [DatePipe, FormsModule, RouterLink, DiscordBindingThreadComponent, RelayIdChipsComponent],
+  imports: [CheckboxComponent, DatePipe, FormsModule, RouterLink, DiscordBindingThreadComponent, RelayIdChipsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6" data-testid="discord-tab">
@@ -249,12 +250,11 @@ interface AccessDraft {
                     }
                     @if (b.chat_sandboxed === false) {
                       <label class="mt-2 flex max-w-xl items-start gap-2 text-xs text-amber-900 dark:text-amber-200">
-                        <input
-                          type="checkbox"
+                        <ui-checkbox
                           class="mt-0.5"
                           [checked]="b.allow_unrestricted"
                           (change)="setAcknowledged(b, $any($event.target))"
-                          data-testid="discord-binding-ack"
+                          testId="discord-binding-ack"
                         />
                         <span>
                           This thread is not sandboxed. {{ unrestrictedWarning }}
@@ -265,11 +265,10 @@ interface AccessDraft {
                   </div>
                   <div class="flex flex-wrap items-center gap-2">
                     <label class="inline-flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
-                      <input
-                        type="checkbox"
+                      <ui-checkbox
                         [checked]="b.inbound_enabled"
                         (change)="setInbound(b, $any($event.target))"
-                        data-testid="discord-binding-inbound"
+                        testId="discord-binding-inbound"
                       />
                       Answer when tagged
                     </label>
@@ -277,11 +276,10 @@ interface AccessDraft {
                       class="inline-flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300"
                       title="Off by default. Bots may tag the persona a few times in a row, then a person has to speak again."
                     >
-                      <input
-                        type="checkbox"
+                      <ui-checkbox
                         [checked]="b.answer_agents"
                         (change)="setAnswerAgents(b, $any($event.target))"
-                        data-testid="discord-binding-agents"
+                        testId="discord-binding-agents"
                       />
                       Answer other bots
                     </label>
@@ -427,12 +425,11 @@ interface AccessDraft {
                       where other people can read them. Sandboxing the thread first is safer.
                     </p>
                     <label class="mt-2 flex items-start gap-2">
-                      <input
-                        type="checkbox"
+                      <ui-checkbox
                         class="mt-0.5"
                         [ngModel]="form.ackUnrestricted"
                         (ngModelChange)="patchForm(bot.id, { ackUnrestricted: $event })"
-                        data-testid="discord-ack-unrestricted"
+                        testId="discord-ack-unrestricted"
                       />
                       <span>I understand: {{ unrestrictedWarning }}</span>
                     </label>

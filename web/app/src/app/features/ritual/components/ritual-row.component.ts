@@ -3,11 +3,12 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 
 import { parseHotkeyKeys, formatKeyForDisplay } from '../../../core/utils/hotkey.utils';
 import { RitualRowVm } from '../helpers/ritual-vm.helpers';
+import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 
 @Component({
   selector: 'app-ritual-row',
   standalone: true,
-  imports: [DatePipe],
+  imports: [CheckboxComponent, DatePipe],
   templateUrl: './ritual-row.component.html',
   styleUrl: './ritual-row.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

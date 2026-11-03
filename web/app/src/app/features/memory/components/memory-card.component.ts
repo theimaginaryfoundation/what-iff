@@ -18,11 +18,13 @@ import { GlobeIconComponent, StarIconComponent } from '../../../shared/ui/icons/
 import { PersonaAccentScopeComponent } from '../../personality/picker/persona-accent-scope.component';
 import { PersonaCoverComponent } from '../../personality/picker/persona-cover.component';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
+import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 
 @Component({
   selector: 'app-memory-card',
   standalone: true,
   imports: [
+    CheckboxComponent,
     DatePipe,
     FormsModule,
     GlobeIconComponent,
