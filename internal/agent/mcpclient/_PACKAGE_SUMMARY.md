@@ -33,12 +33,22 @@ In-process MCP runtime client for connector tool discovery and invocation.
 - Eligibility filtering is state-driven (`active` and `refresh_failed` allowed by default).
 - Detailed calls return tool-level errors in `CallToolResult.IsError`; their Go error value is reserved for transport or protocol failures.
   String-returning calls and agent dispatch convert tool-level failures through `CallToolResult.Err()`.
+  Non-empty output can accompany a non-nil error from either string-returning method, so callers must always check the error.
 - Model-visible output is the result's text. Labeled structured JSON is used only when there is no text: the spec has servers repeat structured data as text, so appending it doubles tokens (2x to 9x measured on real replies). It is always kept on `CallToolResult.StructuredContent`.
+  JSON `null` is treated as absent structured content; error rendering trims whitespace without changing the complete stored output.
 
 ## Testing
 
 - `client_test.go` covers discovery, full-name parsing, and tool invocation using an HTTP test server.
 - `tool_result_test.go` covers structured output (text wins, structured fallback), tool-level errors, raw fallback, and detailed versus string-returning calls.
+- `connector_roundtrip_test.go` exercises discovery, session headers, create/read/update/read, rejection, and verified cleanup over JSON and SSE, including legacy JSON-in-text results.
+  Fault cases detect stale writes, unflagged errors, mutations after rejection, wrong targets, missing capabilities, ownership changes, and failed cleanup.
+- `connector_scenario_test.go` supplies the shared scenario runner; `connector_plan_test.go` loads plans and validates each field before connecting.
+  `connector_scenario_validation_test.go` verifies preflight checks, JSON-safe variables, and the whole-report privacy contract.
+- `connector_diagnostics_test.go` retains underlying errors while rendering safe categories, status codes and JSON offsets.
+  `connector_diagnostics_validation_test.go` verifies useful diagnostics without exposing file paths, malformed values, endpoints or response bodies.
+- `connector_live_test.go` is excluded unless built with `mcp_live` and additionally requires explicit environment configuration for writes.
+  See [connector verification](../../../docs/mcp-connector-verification.md) for Make targets, plan format, local receipts, and scope.
 
 ## Related
 

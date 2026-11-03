@@ -144,6 +144,7 @@ crash.log
 crash.*.log
 
 # AI working files (private workspace for session continuity)
+/mcp-smoke.local.json
 .ghost/
 .claude/*
 # ...but track shared, versioned Claude Code skills

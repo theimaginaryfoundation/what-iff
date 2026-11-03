@@ -192,6 +192,11 @@ func (c *Client) discoverConnectorTools(ctx context.Context, userID uuid.UUID, s
 	return out, nil
 }
 
+// CallToolByFullName invokes a tool and returns its model-visible output.
+// A tool-level failure can return non-empty output together with a non-nil error;
+// callers must check the error even when output is present. Transport or protocol
+// failures return empty output. Use CallToolByFullNameDetailed to inspect status,
+// structured content and attachments separately.
 func (c *Client) CallToolByFullName(ctx context.Context, servers []*models.MCPServer, fullName string, rawArgs json.RawMessage) (string, error) {
 	result, err := c.CallToolByFullNameDetailed(ctx, servers, fullName, rawArgs)
 	if err != nil {
@@ -200,6 +205,9 @@ func (c *Client) CallToolByFullName(ctx context.Context, servers []*models.MCPSe
 	return result.Output, result.Err()
 }
 
+// CallToolByFullNameWithSessionState invokes a tool using the supplied session map.
+// Like CallToolByFullName, non-empty output can accompany a non-nil tool error;
+// callers must check the error. Transport or protocol failures return empty output.
 func (c *Client) CallToolByFullNameWithSessionState(ctx context.Context, servers []*models.MCPServer, fullName string, rawArgs json.RawMessage, sessions SessionState) (string, error) {
 	result, err := c.CallToolByFullNameWithSessionStateDetailed(ctx, servers, fullName, rawArgs, sessions)
 	if err != nil {
