@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
+
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
@@ -121,6 +123,8 @@ func (h *Handler) ReferenceImage(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// Thumbnails are stored per attachment id, so the copy needs its own.
+	imageutil.CopyThumbnail(h.fileStore, h.logger, userID, srcID, ref.ID)
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusCreated, ref)
 }

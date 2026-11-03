@@ -15618,8 +15618,11 @@ export interface components {
             bot_username: string;
             /** @description Whether the application has the privileged Message Content intent on */
             message_content: boolean;
-            /** @enum {string} */
-            status: "active" | "invalid_token" | "disabled";
+            /**
+             * @description invalid_token means Discord rejected the token; intent_disabled means the Gateway refused the Message Content intent (switched off in the Developer Portal). Both stop the bot connecting until a new token or a refresh, and last_error says what to fix.
+             * @enum {string}
+             */
+            status: "active" | "invalid_token" | "intent_disabled" | "disabled";
             last_error?: string;
             /** @description Link that adds the bot to a server with the permissions the relay needs */
             invite_url: string;

@@ -191,7 +191,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   **`generation_expression_reasoning`** is persisted when set; continuity echoes it.
   Minimal standalone prompt when context is nil.
 - **User images:** Chat turns call **`loadImageBytesForVision`** before building `ModelContext` so **`UserMessageImage.RawBytes`** can be set for the current turn (full size); every renderer then sends the bytes inline.
-  For vision models, history turns replay images too, but only the newest **`maxHistoryImages`** (5) across history and carry-over (**`selectHistoryImages`**), and as their stored thumbnails, falling back to the original when none exists (`history_images.go`, [ADR 0x038](../../docs/adr/0x038-bounded-history-images.md)).
+  For vision models, history turns replay images too, but only the newest **`maxHistoryImages`** (5) across history and carry-over (**`selectHistoryImages`**), and as their stored thumbnails, falling back to the original when none exists and then back-filling the thumbnail (`imageutil.BackfillThumbnail`) (`history_images.go`, [ADR 0x038](../../docs/adr/0x038-bounded-history-images.md)).
   Each replayed image is re-encoded into every request, and the SDKs' JSON marshal holds about ten times the image bytes, so full-size history images could OOM a small host (what-iff#419).
   Within a turn, `generate_image` attaches each image's thumbnail (`FileAttachment.Thumbnail`); `toolResultImagesFromAttachments` shows the model that, and the save stores it as the gallery thumbnail.
   Tool images without one (MCP screenshots, `find_context` fetches) still go at full size.

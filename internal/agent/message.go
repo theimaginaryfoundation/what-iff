@@ -2699,11 +2699,17 @@ func (a *Agent) linkContextAttachment(ctx context.Context, userID, replyID uuid.
 		return
 	}
 	shown[att.ID] = true
-	if _, err := a.ds.CreateContextReference(ctx, userID, att.ID, replyID); err != nil {
+	ref, err := a.ds.CreateContextReference(ctx, userID, att.ID, replyID)
+	if err != nil {
 		a.logger.Warn("failed to show a fetched file on the reply",
 			zap.String("chat_message_id", replyID.String()),
 			zap.String("source_attachment_id", att.ID.String()),
 			zap.Error(err))
+		return
+	}
+	if ref != nil && strings.HasPrefix(att.FileType, models.ImageMIMEPrefix) {
+		// Thumbnails are stored per attachment id, so the reference needs its own.
+		imageutil.CopyThumbnail(a.fileStore, a.logger, userID, att.ID, ref.ID)
 	}
 }
 

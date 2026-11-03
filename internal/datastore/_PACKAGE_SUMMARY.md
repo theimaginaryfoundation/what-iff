@@ -97,6 +97,9 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   The descending views fetch one row past the page so `NextCursor` is set only when older rows remain (an empty cursor means the end).
   The exact `TotalCount` costs a pass over every message in the chat, so callers that only need the page set `ChatMessageFilters.SkipTotal` (the agent's context build, mood and recall scans, and the web UI via `include_total=false`).
   `ChatHasMessages` is the `EXISTS` form of `GetChatMessageCount` for "is there any?" checks.
+- **Imported timestamps:** `ImportChats` treats an archive time JSON can't encode (a year outside [0, 9999]) as missing.
+  A bad chat creation time becomes the import time, a bad first message time takes the chat's creation time, and a later one follows its predecessor.
+  One such stored `sent_at` would otherwise fail every response that includes it, such as the admin user list's last-message column.
 - **FK-first indexes:** ent orders an index's plain fields before its edge columns, so `index.Edges("chat").Fields("sent_at")` is `(sent_at, chat_messages)` and cannot seek by chat.
   `chat_messages`, `chats` and `memories` therefore also carry a single-column index on their parent FK (`index.Edges(...)` alone); add one wherever queries filter by an edge without its leading field.
 - **Context X-ray column:** `chat_message.context_breakdown` is a typed **`jsonb`** column (`field.JSON` over `*models.ContextBreakdown`); ent handles (un)marshalling, so `toChatMessageModel` just surfaces it (guarding empty snapshots) and `SetChatMessageContextBreakdown` sets the pointer (assistant rows only; best-effort).

@@ -9,7 +9,7 @@ import { RelayIdKind } from '../relay/relay-id-chips.component';
 
 /** Discord relay. Shapes mirror internal/models/discord.go. */
 
-export type DiscordBotStatus = 'active' | 'invalid_token' | 'disabled';
+export type DiscordBotStatus = 'active' | 'invalid_token' | 'intent_disabled' | 'disabled';
 export type DiscordBindingStatus = 'active' | 'broken';
 
 export interface DiscordBot {

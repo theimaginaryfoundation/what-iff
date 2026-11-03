@@ -41,7 +41,7 @@ func (DiscordBot) Fields() []ent.Field {
 		// Whether the application has the privileged Message Content intent on, so
 		// the gateway may request it (needed only for triggers other than mentions).
 		field.Bool("message_content").Default(false),
-		field.Enum("status").Values("active", "invalid_token", "disabled").Default("active"),
+		field.Enum("status").Values("active", "invalid_token", "intent_disabled", "disabled").Default("active"),
 		field.String("last_error").Optional().Nillable(),
 	}
 }

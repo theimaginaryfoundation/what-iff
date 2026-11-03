@@ -43,6 +43,9 @@ const (
 	AttrTool    = attribute.Key("tool")
 	AttrSegment = attribute.Key("segment")
 	AttrKind    = attribute.Key("kind")
+	// AttrVariant and AttrSource label image reads (ImageResolves); see files.go for their values.
+	AttrVariant = attribute.Key("variant")
+	AttrSource  = attribute.Key("source")
 )
 
 // Dependency names for AttrDependency. Add new ones here so dashboards can rely on the set.

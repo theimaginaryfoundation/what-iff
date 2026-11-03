@@ -877,13 +877,10 @@ func (d *Datastore) ListMemories(ctx context.Context, userID uuid.UUID, pageNum,
 	}()
 
 	// Build query with user authorization (no eager-load edges here: WithChat() before
-	// Count() can skew totals for User-scoped rows that have no chat edge).
+	// Count() can skew totals for User-scoped rows that have no chat edge). The owner is
+	// matched on the column itself so the (owner, status, created_at|updated_at) indexes apply.
 	query := tx.Memory.Query().
-		Where(
-			memory.HasOwnerWith(
-				user.ID(userID),
-			),
-		)
+		Where(memory.OwnerID(userID))
 
 	if filters.Status != nil {
 		query = query.Where(memory.StatusEQ(memory.Status(*filters.Status)))

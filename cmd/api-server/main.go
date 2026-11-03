@@ -185,6 +185,11 @@ func init() {
 	}
 
 	if autoMigrate {
+		// Indexes new to existing tables are built concurrently first, so the migration below
+		// doesn't block writes to those tables while it builds them.
+		if _, err := database.PrebuildIndexes(context.Background(), sqlDB, logger); err != nil {
+			logger.Fatal("Failed to prepare new indexes ahead of the migration", zap.Error(err))
+		}
 		// Run Ent schema migration.
 		// The historical role backfill migration is intentionally disabled because it was one-time only.
 		if err := client.Schema.Create(context.Background()); err != nil {
