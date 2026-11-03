@@ -341,6 +341,7 @@ export class AssistantTurn {
         if (!this.isActiveThread(threadId)) return;
         this.startPolling(jobId, threadId);
         if (this._activeChatJobId() !== jobId) return;
+        // An empty thread has no anchor (null): then any assistant message is the run's reply.
         this._jobRun.set({ afterMessageId: messages[messages.length - 1]?.id ?? null });
       }),
     );

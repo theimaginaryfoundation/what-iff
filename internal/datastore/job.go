@@ -1045,32 +1045,44 @@ func (d *Datastore) FindLatestActiveChatMessageJob(ctx context.Context, userID, 
 // watching one, finds a running turn whoever started it: the user, a scheduled job (keyed by the
 // chat id), a webhook. A chat_message job's Reference is the user message id.
 func (d *Datastore) FindActiveTurnJobForChat(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
-	// Every non-terminal turn job of the user, oldest first, as the turn gate orders them. The
-	// status filter keeps the read on the status index; turnJobsInChat then keeps this chat's,
-	// preserving the order, so the first pending or processing one is the turn generating now.
+	// The generating turn is found the way the turn gate finds the turns ahead of a new one
+	// (ListPendingTurnJobsForChat): oldest first, over the same scan, so the two agree on it.
+	generating, err := d.activeTurnJobsInChat(ctx, userID, chatID, true)
+	if err != nil {
+		return nil, err
+	}
+	if len(generating) > 0 {
+		return toJobModel(generating[0]), nil
+	}
+	// Post-inference turns are scanned newest first, so ones a dead worker left behind age out of
+	// the scan instead of crowding out the turn that just replied.
+	replied, err := d.activeTurnJobsInChat(ctx, userID, chatID, false)
+	if err != nil || len(replied) == 0 {
+		return nil, err
+	}
+	return toJobModel(replied[0]), nil
+}
+
+// activeTurnJobsInChat returns chatID's turn jobs among the user's turnJobScanLimit non-terminal
+// ones: those before their reply (pending or processing) oldest first, or those in their
+// post-inference phases newest first. The status filter keeps the read on the status index.
+func (d *Datastore) activeTurnJobsInChat(ctx context.Context, userID, chatID uuid.UUID, beforeReply bool) ([]*ent.Job, error) {
+	statuses := []job.Status{job.StatusInferenceComplete, job.StatusExpressionComplete, job.StatusCompactionComplete}
+	order := []job.OrderOption{job.ByCreatedAt(sql.OrderDesc()), job.ByID(sql.OrderDesc())}
+	if beforeReply {
+		statuses = []job.Status{job.StatusPending, job.StatusProcessing}
+		order = []job.OrderOption{job.ByCreatedAt(), job.ByID()}
+	}
 	candidates, err := d.dbClient.Job.Query().
-		Where(
-			job.StatusIn(job.StatusPending, job.StatusProcessing, job.StatusInferenceComplete, job.StatusExpressionComplete, job.StatusCompactionComplete),
-			job.JobTypeIn(turnJobTypes...),
-			ownedByUser(userID),
-		).
-		Order(job.ByCreatedAt(), job.ByID()).
+		Where(job.StatusIn(statuses...), job.JobTypeIn(turnJobTypes...), ownedByUser(userID)).
+		Order(order...).
 		Limit(turnJobScanLimit).
 		WithOwner().
 		All(ctx)
 	if err != nil || len(candidates) == 0 {
 		return nil, err
 	}
-	jobs, err := d.turnJobsInChat(ctx, userID, chatID, candidates)
-	if err != nil || len(jobs) == 0 {
-		return nil, err
-	}
-	for _, j := range jobs {
-		if j.Status == job.StatusPending || j.Status == job.StatusProcessing {
-			return toJobModel(j), nil
-		}
-	}
-	return toJobModel(jobs[len(jobs)-1]), nil
+	return d.turnJobsInChat(ctx, userID, chatID, candidates)
 }
 
 // ListActiveChatJobIDsForChat returns the ids of every non-terminal turn job in chatID (chat_message

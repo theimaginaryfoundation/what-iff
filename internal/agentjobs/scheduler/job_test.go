@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 )
@@ -107,10 +108,11 @@ func TestDeriveStatusAndErrorText_MissingKeyIsStatedPlainly(t *testing.T) {
 	}
 }
 
-// A run stopped from its thread records that it was stopped, not the cancellation error.
+// A run stopped from its thread records that it was stopped, not the cancellation error. A run
+// cancelled for another reason (a worker shutting down) is still a failure.
 func TestDeriveStatusAndErrorText_StoppedRun(t *testing.T) {
 	job := models.AgentJob{ScheduleType: models.AgentJobScheduleTypeCron, Status: models.AgentJobStatusActive}
-	runErr := fmt.Errorf("%w: OpenAI API call failed", context.Canceled)
+	runErr := fmt.Errorf("%w: OpenAI API call failed", agent.ErrTurnStopped)
 
 	status, errText := deriveStatusAndErrorText(&job, runErr, "")
 	if status != nil {
@@ -118,5 +120,10 @@ func TestDeriveStatusAndErrorText_StoppedRun(t *testing.T) {
 	}
 	if errText != StoppedRunText {
 		t.Fatalf("expected the stop recorded plainly, got %q", errText)
+	}
+
+	_, errText = deriveStatusAndErrorText(&job, fmt.Errorf("OpenAI API call failed: %w", context.Canceled), "")
+	if errText == StoppedRunText {
+		t.Fatal("a run cancelled without a Stop must not be recorded as stopped")
 	}
 }

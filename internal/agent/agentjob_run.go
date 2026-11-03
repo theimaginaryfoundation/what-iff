@@ -275,13 +275,11 @@ func (a *Agent) handleEphemeralPrompt(
 	}
 	// The thread's Stop reaches a scheduled run through its ticket (ADR 0x039).
 	// A scheduled run releases the Stop and ends its ticket early, once its reply is saved (below);
-	// releaseStop and endTurn are idempotent, so this cleanup covers every other exit. stopRun only
-	// runs here, as the turn returns: the post-processing below is synchronous and already done.
-	ctx, releaseStop, stopRun := a.stoppableTurnTicket(ctx, userID, ticket)
+	// releaseStop and endTurn are idempotent, so this cleanup covers every other exit.
+	ctx, releaseStop, endRun := a.stoppableTurnTicket(ctx, userID, ticket)
 	defer func() {
 		retErr = stoppedTurnError(ctx, retErr)
-		releaseStop()
-		stopRun()
+		endRun()
 		endTurn(retErr)
 	}()
 	// The job the turn streams its draft, reasoning and tool timeline on, and an Advanced run
@@ -459,37 +457,51 @@ func (a *Agent) handleEphemeralPrompt(
 	return agentMessage, nil
 }
 
+// ErrTurnStopped is the error of a scheduled run stopped from its thread (ADR 0x039). It wraps
+// context.Canceled, so the run's ticket ends cancelled like any cancelled turn, but only a Stop
+// produces it: a run cut short because its caller's context ended (a worker shutting down) carries
+// plain context.Canceled, and the scheduler records that as a failure, not as a stop.
+var ErrTurnStopped = fmt.Errorf("stopped from its thread: %w", context.Canceled)
+
 // stoppableTurnTicket makes a scheduled run's queue ticket stoppable like a user turn's job: the
 // thread's Stop (CancelJob) cancels it directly when it runs in this process, and a Stop handled by
-// another instance reaches it through the ticket's status (watchChatJobCancel). It returns the
-// run's context; release, which may be called more than once, ends both paths once the reply is
-// saved, so a late Stop no longer cuts the run's post-processing short; stop cancels the context
-// once the turn is over (and so ends the watch too, if release was never reached). A turn with no
-// ticket (a tracked job, which its own worker registers, or no turn gate) gets ctx back with
-// no-op functions.
-func (a *Agent) stoppableTurnTicket(ctx context.Context, userID uuid.UUID, ticket *models.Job) (_ context.Context, release, stop func()) {
+// another instance reaches it through the ticket's status (watchChatJobCancel). Either cancels the
+// returned context with ErrTurnStopped as its cause (see stoppedTurnError).
+//
+// release ends both paths once the reply is saved, so a late Stop no longer cuts the run's
+// post-processing short. end is for the turn's return only: it releases first, then frees the
+// context, so the context's own cancellation is never reported as a stop. Both may be called more
+// than once. A turn with no ticket (a tracked job, which its own worker registers, or no turn gate)
+// gets ctx back with no-op functions.
+func (a *Agent) stoppableTurnTicket(ctx context.Context, userID uuid.UUID, ticket *models.Job) (_ context.Context, release, end func()) {
 	if ticket == nil {
 		return ctx, func() {}, func() {}
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancelCause(ctx)
+	stop := func() { cancel(ErrTurnStopped) }
 	watchCtx, endWatch := context.WithCancel(runCtx)
-	a.registerRunningJobCancel(ticket.ID, userID, cancel)
-	go a.watchChatJobCancel(watchCtx, userID, ticket.ID, cancel)
+	a.registerRunningJobCancel(ticket.ID, userID, stop)
+	go a.watchChatJobCancel(watchCtx, userID, ticket.ID, stop)
 	release = func() {
 		a.unregisterRunningJobCancel(ticket.ID)
 		endWatch()
 	}
-	return runCtx, release, cancel
+	end = func() {
+		release()
+		cancel(nil)
+	}
+	return runCtx, release, end
 }
 
-// stoppedTurnError reports a turn whose context was cancelled as cancelled. A Stop that lands
-// mid-call can surface as the provider's or datastore's error instead of context.Canceled, and
-// the ticket and the scheduler must still record a stop, not a failure.
+// stoppedTurnError reports a turn that was stopped as stopped (ErrTurnStopped). A Stop that lands
+// mid-call can surface as context.Canceled, or as the provider's or datastore's error, and the
+// ticket and the scheduler must still record a stop, not a failure. A context cancelled for any
+// other reason leaves err as it is.
 func stoppedTurnError(ctx context.Context, err error) error {
-	if err == nil || errors.Is(err, context.Canceled) || !errors.Is(ctx.Err(), context.Canceled) {
+	if err == nil || errors.Is(err, ErrTurnStopped) || !errors.Is(context.Cause(ctx), ErrTurnStopped) {
 		return err
 	}
-	return fmt.Errorf("%w: %w", context.Canceled, err)
+	return fmt.Errorf("%w: %w", ErrTurnStopped, err)
 }
 
 // finalizeEphemeralAdvancedDraft saves a failed or stopped agent-job Advanced run (ADR 0x026) as a

@@ -28,7 +28,8 @@
 - **Run failure text:** `last_error` and the assistant message posted on a failed run use `providerkeys.FailureText`, so a missing provider key reads "No OpenAI API key is set." rather than the transport error.
   There is no separate status value or column; keep the marker and the helper in sync.
 - **Stopped runs:** the thread's Stop cancels a scheduled run's turn (ADR 0x039).
-  The run returns an error wrapping `context.Canceled`, which `runStopped` tells apart: `last_error` reads `StoppedRunText` and no failure message is posted to the thread.
+  The run returns an error wrapping `agent.ErrTurnStopped`, which `runStopped` tells apart: `last_error` reads `StoppedRunText` and no failure message is posted to the thread.
+  A run cancelled for any other reason (a worker shutting down) carries plain `context.Canceled` and is recorded as a failure.
   A stopped one-off job still ends `failed`, and the run counts as `failed` in the metrics.
 - **MVP note:** `Config.EnableAgentJobsScheduler` gates whether the scheduler runs at all.
 

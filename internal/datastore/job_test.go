@@ -1313,6 +1313,37 @@ func TestFindActiveTurnJobForChat(t *testing.T) {
 	require.Nil(t, got)
 }
 
+// Post-inference turns a dead worker left behind in other threads must not crowd the thread's
+// own replied turn out of the scan.
+func TestFindActiveTurnJobForChat_StaleRepliedTurnsAgeOut(t *testing.T) {
+	ds, cleanup := newFinalizeChatJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createJobTestUser(t, ds)
+	chatA, chatB := uuid.New(), uuid.New()
+	createTestChat(t, ds, chatA, userID)
+	createTestChat(t, ds, chatB, userID)
+	turnA := createJobTestUserMessage(t, ds, chatA)
+	turnB := createJobTestUserMessage(t, ds, chatB)
+
+	for i := 0; i < turnJobScanLimit; i++ {
+		jobModel := baseJobModel()
+		jobModel.JobType = "chat_message"
+		jobModel.Reference = turnB.String()
+		jobModel.Status = models.JobStatusInferenceComplete
+		_, err := ds.CreateJob(ctx, userID, jobModel)
+		require.NoError(t, err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	replied := createActiveChatMessageJob(t, ds, userID, turnA.String(), models.JobStatusExpressionComplete)
+
+	got, err := ds.FindActiveTurnJobForChat(ctx, userID, chatA)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, replied.ID, got.ID)
+}
+
 func TestStopHelpers_ClearEveryActiveChatJobInThread(t *testing.T) {
 	ds, cleanup := newFinalizeChatJobTestDatastore(t)
 	defer cleanup()

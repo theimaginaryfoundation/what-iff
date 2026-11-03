@@ -43,7 +43,9 @@ Webhook background runs already had a tracking job and are unchanged.
 `GET /chat/{chatId}/active-job` now considers every turn job (`chat_message` and `agent_job_run`) and says which kind it found (`job_type`).
 It no longer returns the newest job.
 It returns the oldest turn still before its reply (`pending` or `processing`), which is the one generating now, since the gate runs a chat's turns in job order.
-When every live turn has replied, it returns the newest one still in its post-inference phases, as before.
+It finds that one over the same scan as the turn gate (`ListPendingTurnJobsForChat`: oldest first, the same limit), so the two agree on which turn is running.
+When every live turn has replied, it returns the newest one still in its post-inference phases, as before, from a second scan ordered newest first.
+That keeps post-inference jobs a dead worker left behind from crowding the thread's own turn out of the scan.
 A run keyed by the chat answers no saved message, so `message_id` is absent for it.
 
 This is the existing endpoint widened rather than a second one.
@@ -68,7 +70,9 @@ A run picked up only after it replied is polled as a plain turn, with no bubble.
 While a run generates, the composer holds sends as it does during the user's own reply, and says so: "A job is replying in this thread. You can send once it finishes, or stop it."
 Stop works on a scheduled run.
 The run registers its ticket as a running job and watches the ticket's status (`stoppableTurnTicket`), the same two paths a user turn's job uses for a Stop handled by this instance or by another.
-A run stopped mid-call is reported as cancelled, even when the error that surfaced was the provider's (`stoppedTurnError`).
+A Stop cancels the run's context with its own cause, `ErrTurnStopped`, which wraps `context.Canceled` so the ticket still ends cancelled.
+A run stopped mid-call is reported with that error, even when the error that surfaced was the provider's (`stoppedTurnError`).
+A run cancelled for any other reason, such as a worker shutting down, keeps plain `context.Canceled` and is still recorded as a failure, so the thread never claims a stop nobody made.
 The scheduler records "Stopped from its thread before it finished." as the run's last error, and does not post its "I tried to run your scheduled job, but it failed" message.
 The registration ends once the reply is saved, so a late Stop no longer cuts the run's memory and checkpoint work short.
 

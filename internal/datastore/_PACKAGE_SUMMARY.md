@@ -126,7 +126,9 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   A failed (rather than cancelled) chat job retains its error for the user-turn failure banner.
 - **Stopping a thread:** `ListActiveChatJobIDsForChat`, `ChatIDForChatJob`, `MarkChatJobCancelled`, and `JobStatus` back the agent's thread-wide Stop.
 - **The turn to follow:** `FindActiveTurnJobForChat` returns the oldest pending or processing turn job in the chat rather than the newest, because the turn gate runs a chat's turns in job order, so that is the one generating and a newer one is queued behind it (ADR 0x039).
-  `job_test.go` (`TestFindActiveTurnJobForChat`) covers a scheduled run ahead of a queued user turn, the post-inference fallback, other threads and other users.
+  It scans those the way `ListPendingTurnJobsForChat` does (oldest first, same limit), so it agrees with the gate.
+  Only when none is found does it scan post-inference turns, newest first, so ones a dead worker left behind age out of the scan rather than crowding out the turn that just replied.
+  `job_test.go` (`TestFindActiveTurnJobForChat`, `TestFindActiveTurnJobForChat_StaleRepliedTurnsAgeOut`) covers a scheduled run ahead of a queued user turn, the post-inference fallback, stale post-inference turns, other threads and other users.
   They cover every turn job type (`turnJobTypes`: `chat_message` and `agent_job_run`, whose reference is the chat id or a user message id).
   `MarkChatJobCancelled` only moves a non-terminal turn job to cancelled (clearing both drafts); a terminal job is left alone.
   `FailInterruptedJobs` also runs for `chat_message` and `agent_job_run` at startup (30m staleness bound), so a turn orphaned by a restart is failed instead of resumed forever.
