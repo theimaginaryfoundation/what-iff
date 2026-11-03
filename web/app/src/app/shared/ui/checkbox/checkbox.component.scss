@@ -1,0 +1,65 @@
+/*
+ * The Memory Manager checkbox (issue #370): a native input with `appearance: none`, an accent fill
+ * when checked and a clip-path checkmark drawn by ::before. Colors come from the theme tokens, so
+ * light and dark (and a persona-scoped --color-accent) need nothing extra here.
+ */
+:host {
+  display: inline-flex;
+  flex: none;
+  vertical-align: middle;
+}
+
+.ui-checkbox {
+  appearance: none;
+  background: var(--color-surface-input);
+  border: 1.5px solid color-mix(in srgb, var(--color-accent) 45%, var(--color-border-base));
+  border-radius: 0.3rem;
+  cursor: pointer;
+  display: grid;
+  flex: none;
+  height: 1rem;
+  margin: 0;
+  place-content: center;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+  width: 1rem;
+}
+
+.ui-checkbox::before {
+  box-shadow: inset 1rem 1rem var(--cta-text, #fff);
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0, 43% 62%);
+  content: "";
+  height: 0.45rem;
+  transform: scale(0);
+  transition: transform 100ms ease;
+  width: 0.45rem;
+}
+
+.ui-checkbox:checked,
+.ui-checkbox:indeterminate {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.ui-checkbox:checked::before {
+  transform: scale(1);
+}
+
+/* "Some selected": a dash in place of the tick. */
+.ui-checkbox:indeterminate::before {
+  clip-path: none;
+  height: 2px;
+  transform: scale(1);
+  width: 0.5rem;
+}
+
+.ui-checkbox:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.ui-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

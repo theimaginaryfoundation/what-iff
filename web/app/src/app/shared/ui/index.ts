@@ -3,6 +3,7 @@ export * from './badge/badge.component';
 export * from './bulk-action-bar/bulk-action-bar.component';
 export * from './button/button.component';
 export * from './card/card.component';
+export * from './checkbox/checkbox.component';
 export * from './data-table/data-table.component';
 export * from './empty-state/empty-state.component';
 export * from './help-hint/help-hint.component';

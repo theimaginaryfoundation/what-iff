@@ -1,0 +1,16 @@
+<input
+  #box
+  type="checkbox"
+  class="ui-checkbox"
+  [class]="inputClass()"
+  [checked]="isChecked()"
+  [indeterminate]="indeterminate()"
+  [disabled]="isDisabled()"
+  [attr.id]="inputId()"
+  [attr.name]="name()"
+  [attr.aria-label]="ariaLabel()"
+  [attr.data-testid]="testId()"
+  [uiTooltip]="tooltip()"
+  (change)="onChange($event)"
+  (blur)="onBlur()"
+/>
