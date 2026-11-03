@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { AbstractControl, FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -159,6 +159,19 @@ export class ProfileSettingsModalComponent {
   });
 
   constructor() {
+    // Choosing models elsewhere (the Providers tab's chooser) re-fetches the
+    // account's models and preferences; follow them, so the Profile tab never
+    // shows "None yet", or a default list missing the models just enabled.
+    this.modelService.models$.pipe(takeUntilDestroyed()).subscribe(models => {
+      if (this.hasLoadedForOpen) {
+        this.models.set(models);
+      }
+    });
+    this.preferencesService.preferences$.pipe(takeUntilDestroyed()).subscribe(preferences => {
+      if (preferences && this.hasLoadedForOpen) {
+        this.preferences.set(preferences);
+      }
+    });
     effect(() => {
       if (this.modal.openState()) {
         if (!this.hasLoadedForOpen) {
