@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -528,4 +529,40 @@ func TestModels_RejectBadChoicesAndOtherAccounts(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: strings.Repeat("m", maxModelIDLen+1), Enabled: true}).Code)
 	require.Equal(t, http.StatusNotFound, f.enableModels(t, f.bob, conn.ID, ModelChoice{ID: "alpha", Enabled: true}).Code)
 	require.Zero(t, f.store.client.Model.Query().CountX(context.Background()))
+}
+
+// A model enabled for the first time must be one the provider lists; turning
+// models already on the connection off and on needs no listing.
+func TestModels_NewModelsMustBeListed(t *testing.T) {
+	f := newFixture(t)
+	url, s := localServer(t)
+	conn := decode[connected](t, f.call(t, f.alice, http.MethodPost, "/provider-connections", map[string]string{
+		"preset": PresetOllama, "base_url": url, "current_password": "right",
+	})).Connection
+
+	rec := f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "made-up", Enabled: true})
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "made-up isn't one of this connection's models")
+	require.Zero(t, f.store.client.Model.Query().CountX(context.Background()), "nothing is saved")
+
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true}).Code)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: false}).Code)
+	listings := len(s.requests)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true}).Code)
+	require.Len(t, s.requests, listings, "a model the connection already has is not listed again")
+}
+
+// A connection can't have more than maxEnabledModels models on at once.
+func TestSetModels_CapsEnabledModels(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	row, err := f.store.client.ProviderConnection.Get(context.Background(), conn.ID)
+	require.NoError(t, err)
+	choices := make([]ModelChoice, maxEnabledModels+1)
+	for i := range choices {
+		choices[i] = ModelChoice{ID: fmt.Sprintf("model-%03d", i), Enabled: true}
+	}
+	require.ErrorIs(t, f.store.SetModels(context.Background(), f.alice, row, choices), ErrTooManyModels)
+	require.Zero(t, f.store.client.Model.Query().CountX(context.Background()), "nothing is saved")
+	require.NoError(t, f.store.SetModels(context.Background(), f.alice, row, choices[:maxEnabledModels]))
 }

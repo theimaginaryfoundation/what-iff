@@ -511,14 +511,15 @@ type setModelsRequest struct {
 	Models []ModelChoice `json:"models"`
 }
 
-// handleSetModels enables and disables models on a connection. It reaches no
-// address and changes no key, so it needs no password.
+// handleSetModels enables and disables models on a connection. It changes no
+// key, so it needs no password. A model enabled for the first time must be in
+// the connection's listing, so this lists the provider only when there is one.
 func (h *Handler) handleSetModels(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.requireAccount(w, r)
 	if !ok {
 		return
 	}
-	row, _, ok := h.connectionFor(w, r, userID)
+	row, preset, ok := h.connectionFor(w, r, userID)
 	if !ok {
 		return
 	}
@@ -527,10 +528,22 @@ func (h *Handler) handleSetModels(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, h.logger, "Send the models to enable or disable")
 		return
 	}
-	err := h.store.SetModels(r.Context(), userID, row, req.Models)
+	fresh, err := h.store.NewModelIDs(r.Context(), row.ID, req.Models)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the connection's models", err)
+		return
+	}
+	if len(fresh) > 0 && !h.inListing(w, r, row, preset, fresh) {
+		return
+	}
+	err = h.store.SetModels(r.Context(), userID, row, req.Models)
+	var unknown *UnknownModelError
 	switch {
-	case errors.Is(err, ErrInvalidModelID):
+	case errors.Is(err, ErrInvalidModelID), errors.Is(err, ErrTooManyModels), errors.As(err, &unknown):
 		badRequest(w, h.logger, err.Error())
+		return
+	case errors.Is(err, ErrModelsChanged):
+		handlerutils.RespondWithError(w, h.logger, http.StatusConflict, handlerutils.CodeNotSet, err.Error(), nil)
 		return
 	case errors.Is(err, ErrDefaultModelInUse):
 		h.respondDefaultInUse(w)
@@ -545,6 +558,35 @@ func (h *Handler) handleSetModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, enabled)
+}
+
+// inListing checks that every id is one the connection's provider lists, and
+// answers the request when one isn't or the provider can't be reached.
+func (h *Handler) inListing(w http.ResponseWriter, r *http.Request, row *ent.ProviderConnection, preset Preset, ids []string) bool {
+	if !h.addressAllowed(w, preset) {
+		return false
+	}
+	key, err := h.store.keyOf(row)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the provider connection", err)
+		return false
+	}
+	listed, err := h.lister.List(r.Context(), preset.target(flavorOf(row, preset), addressOf(row, preset), key))
+	if err != nil {
+		h.respondConnectError(w, preset.ID, err)
+		return false
+	}
+	offered := make(map[string]bool, len(listed))
+	for _, m := range listed {
+		offered[m.ID] = true
+	}
+	for _, id := range ids {
+		if !offered[id] {
+			badRequest(w, h.logger, (&UnknownModelError{ID: id}).Error())
+			return false
+		}
+	}
+	return true
 }
 
 // respondDefaultInUse answers a change that would take away the account's

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"entgo.io/ent/dialect"
+	"entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
@@ -19,13 +21,29 @@ import (
 // shorter.
 const maxModelIDLen = 200
 
+// maxEnabledModels bounds how many models an account enables on one
+// connection. Choosing models is for the handful an account chats with.
+const maxEnabledModels = 200
+
 var (
 	// ErrDefaultModelInUse is returned when a change would take away the
 	// account's default model: disabling it, or removing its connection. The
 	// account chooses another default first.
 	ErrDefaultModelInUse = errors.New("that is your default model; choose another default first")
 	ErrInvalidModelID    = errors.New("model id must be 1 to 200 characters")
+	ErrTooManyModels     = fmt.Errorf("a connection can have at most %d models enabled", maxEnabledModels)
+	// ErrModelsChanged is returned when another change to the same models won
+	// the race; the account reloads and tries again.
+	ErrModelsChanged = errors.New("these models were changed at the same time; reload and try again")
 )
+
+// UnknownModelError is returned when a model to enable isn't in the
+// connection's listing.
+type UnknownModelError struct{ ID string }
+
+func (e *UnknownModelError) Error() string {
+	return fmt.Sprintf("%s isn't one of this connection's models", e.ID)
+}
 
 // ConnectionModel is one of a connection's models as the account sees it: what
 // the provider lists, whether the account enabled it, and its capabilities
@@ -125,8 +143,22 @@ func (s *Store) SetModels(ctx context.Context, userID uuid.UUID, conn *ent.Provi
 			disable = append(disable, c.ID)
 		}
 	}
+
+	tx, err := s.client.Tx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin changing a connection's models: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 	if len(disable) > 0 {
-		inUse, err := s.defaultModelOn(ctx, userID, conn.ID, disable...)
+		// Under a lock on the account's preferences, so a default set at the same
+		// time can't land on a model being turned off.
+		inUse, err := tx.UserPreference.Query().
+			Where(
+				userpreference.HasUserWith(user.ID(userID)),
+				userpreference.HasModelWith(entmodel.ConnectionID(conn.ID), entmodel.NameIn(disable...)),
+			).
+			Modify(lockRowsForUpdate).
+			Exist(ctx)
 		if err != nil {
 			return fmt.Errorf("check the default model: %w", err)
 		}
@@ -134,12 +166,6 @@ func (s *Store) SetModels(ctx context.Context, userID uuid.UUID, conn *ent.Provi
 			return ErrDefaultModelInUse
 		}
 	}
-
-	tx, err := s.client.Tx(ctx)
-	if err != nil {
-		return fmt.Errorf("begin changing a connection's models: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	for _, c := range choices {
 		if !c.Enabled {
 			if _, err := tx.Model.Update().
@@ -151,13 +177,64 @@ func (s *Store) SetModels(ctx context.Context, userID uuid.UUID, conn *ent.Provi
 			continue
 		}
 		if err := enableModel(ctx, tx, conn, c); err != nil {
+			if ent.IsConstraintError(err) {
+				return ErrModelsChanged
+			}
 			return err
 		}
+	}
+	enabled, err := tx.Model.Query().Where(entmodel.ConnectionID(conn.ID), entmodel.Deleted(false)).Count(ctx)
+	if err != nil {
+		return fmt.Errorf("count a connection's models: %w", err)
+	}
+	if enabled > maxEnabledModels {
+		return ErrTooManyModels
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit a connection's models: %w", err)
 	}
 	return nil
+}
+
+// NewModelIDs returns the ids among choices to enable that have no row on the
+// connection yet, which are the ones to check against its listing.
+func (s *Store) NewModelIDs(ctx context.Context, connectionID uuid.UUID, choices []ModelChoice) ([]string, error) {
+	var ids []string
+	for _, c := range choices {
+		if c.Enabled {
+			ids = append(ids, strings.TrimSpace(c.ID))
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	known, err := s.client.Model.Query().
+		Where(entmodel.ConnectionID(connectionID), entmodel.NameIn(ids...)).
+		Select(entmodel.FieldName).
+		Strings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read a connection's models: %w", err)
+	}
+	have := make(map[string]bool, len(known))
+	for _, n := range known {
+		have[n] = true
+	}
+	var fresh []string
+	for _, id := range ids {
+		if !have[id] {
+			fresh = append(fresh, id)
+		}
+	}
+	return fresh, nil
+}
+
+// lockRowsForUpdate locks the selected rows until the transaction ends. Only
+// Postgres gets the clause: SQLite, which the tests run on, has no row locks
+// and serializes writers anyway.
+func lockRowsForUpdate(s *sql.Selector) {
+	if s.Dialect() == dialect.Postgres {
+		s.ForUpdate()
+	}
 }
 
 func enableModel(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConnection, c ModelChoice) error {
