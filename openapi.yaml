@@ -1896,7 +1896,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: The account already has a connection to that built-in provider; `code` is `provider_connection_exists`
+          description: >-
+            The account already has a connection to that built-in provider (`code` is
+            `provider_connection_exists`), or one with that name, ignoring case (`code` is
+            `connection_name_taken`). Without a name, a connection named after its preset
+            takes the next free number instead ("Ollama 2").
           content:
             application/json:
               schema:
@@ -1998,6 +2002,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: No such connection on this account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Another of the account's connections has that name, ignoring case; `code` is `connection_name_taken`
           content:
             application/json:
               schema:
@@ -14070,6 +14080,7 @@ components:
         - custom_address_not_allowed
         - provider_connection_exists
         - default_model_in_use
+        - connection_name_taken
 
     # Cross-resource search schemas (GET /search)
     SearchResult:

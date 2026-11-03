@@ -367,3 +367,40 @@ func (s *Store) Delete(ctx context.Context, userID, id uuid.UUID) error {
 func (s *Store) keyOf(row *ent.ProviderConnection) (string, error) {
 	return s.open(row.Key)
 }
+
+// connectionNames returns the names of the account's connections other than
+// except, to keep each connection's name its own.
+func (s *Store) connectionNames(ctx context.Context, userID, except uuid.UUID) ([]string, error) {
+	names, err := s.client.ProviderConnection.Query().
+		Where(providerconnection.UserID(userID), providerconnection.IDNEQ(except)).
+		Select(providerconnection.FieldName).
+		Strings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read provider connection names: %w", err)
+	}
+	return names, nil
+}
+
+// nameTaken reports whether name is among names, ignoring case: the model
+// picker groups other connections by name, so two the same can't be told apart.
+func nameTaken(names []string, name string) bool {
+	for _, n := range names {
+		if strings.EqualFold(n, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// freeName is base, or base with the first free number after it ("Ollama 2"),
+// for a connection named after its preset.
+func freeName(names []string, base string) string {
+	if !nameTaken(names, base) {
+		return base
+	}
+	for i := 2; ; i++ {
+		if name := fmt.Sprintf("%s %d", base, i); !nameTaken(names, name) {
+			return name
+		}
+	}
+}

@@ -2,6 +2,7 @@ package providerconnections
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -200,6 +201,17 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if !h.confirmOwner(w, r, userID, req.CurrentPassword) {
 		return
 	}
+	names, err := h.store.connectionNames(r.Context(), userID, uuid.Nil)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to add the provider connection", err)
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		nc.Name = freeName(names, nc.Name)
+	} else if nameTaken(names, nc.Name) {
+		h.respondNameTaken(w, nc.Name)
+		return
+	}
 	if preset.Builtin {
 		exists, err := h.store.hasBuiltin(r.Context(), userID, preset.ID)
 		if err != nil {
@@ -364,6 +376,15 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimSpace(*req.Name)
 		if name == "" || len(name) > maxNameLen {
 			badRequest(w, h.logger, "Name must be 1 to 100 characters")
+			return
+		}
+		names, err := h.store.connectionNames(r.Context(), userID, row.ID)
+		if err != nil {
+			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to update the provider connection", err)
+			return
+		}
+		if nameTaken(names, name) {
+			h.respondNameTaken(w, name)
 			return
 		}
 		changes.Name = &name
@@ -587,6 +608,13 @@ func (h *Handler) inListing(w http.ResponseWriter, r *http.Request, row *ent.Pro
 		}
 	}
 	return true
+}
+
+// respondNameTaken answers a name the account already uses for another
+// connection.
+func (h *Handler) respondNameTaken(w http.ResponseWriter, name string) {
+	handlerutils.RespondWithError(w, h.logger, http.StatusConflict, models.ErrCodeConnectionNameTaken,
+		fmt.Sprintf("You already have a provider called %s; choose another name", name), nil)
 }
 
 // respondDefaultInUse answers a change that would take away the account's

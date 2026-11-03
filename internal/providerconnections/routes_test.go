@@ -566,3 +566,31 @@ func TestSetModels_CapsEnabledModels(t *testing.T) {
 	require.Zero(t, f.store.client.Model.Query().CountX(context.Background()), "nothing is saved")
 	require.NoError(t, f.store.SetModels(context.Background(), f.alice, row, choices[:maxEnabledModels]))
 }
+
+// Each of an account's connections has its own name, ignoring case: a second
+// server named after its preset gets the next number, and a name chosen twice
+// is refused, on adding and on renaming.
+func TestConnectionNames_AreUniquePerAccount(t *testing.T) {
+	f := newFixture(t)
+	first := addLocal(t, f)
+	second := addLocal(t, f)
+	require.Equal(t, "Ollama", first.Name)
+	require.Equal(t, "Ollama 2", second.Name)
+
+	url, _ := localServer(t)
+	rec := f.call(t, f.alice, http.MethodPost, "/provider-connections", map[string]string{
+		"preset": PresetOllama, "base_url": url, "name": "ollama", "current_password": "right",
+	})
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), models.ErrCodeConnectionNameTaken)
+
+	path := "/provider-connections/" + second.ID.String()
+	rec = f.call(t, f.alice, http.MethodPatch, path, map[string]string{"name": "OLLAMA"})
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	require.Equal(t, http.StatusOK, f.call(t, f.alice, http.MethodPatch, path, map[string]string{"name": "ollama 2"}).Code, "its own name, recased")
+
+	bobs := f.call(t, f.bob, http.MethodPost, "/provider-connections", map[string]string{
+		"preset": PresetOllama, "base_url": url, "current_password": "right",
+	})
+	require.Equal(t, "Ollama", decode[connected](t, bobs).Connection.Name, "another account's names don't count")
+}

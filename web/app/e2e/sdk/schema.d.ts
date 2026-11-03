@@ -3500,7 +3500,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The account already has a connection to that built-in provider; `code` is `provider_connection_exists` */
+                /** @description The account already has a connection to that built-in provider (`code` is `provider_connection_exists`), or one with that name, ignoring case (`code` is `connection_name_taken`). Without a name, a connection named after its preset takes the next free number instead ("Ollama 2"). */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -3717,6 +3717,15 @@ export interface paths {
                 };
                 /** @description No such connection on this account */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Another of the account's connections has that name, ignoring case; `code` is `connection_name_taken` */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -16588,7 +16597,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "connection_name_taken";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**

@@ -88,6 +88,9 @@ const (
 	// model (disabling it, or removing its connection); it chooses another
 	// default first.
 	ErrCodeDefaultModelInUse = "default_model_in_use"
+	// ErrCodeConnectionNameTaken: the account already has a provider connection
+	// by that name (ignoring case); it picks another.
+	ErrCodeConnectionNameTaken = "connection_name_taken"
 )
 
 // AllErrorCodes is every code this API can emit. It is the source the
@@ -126,6 +129,7 @@ var AllErrorCodes = []string{
 	ErrCodeCustomAddressNotAllowed,
 	ErrCodeProviderConnectionExists,
 	ErrCodeDefaultModelInUse,
+	ErrCodeConnectionNameTaken,
 }
 
 // genericErrorCodes maps HTTP statuses to their generic code.
