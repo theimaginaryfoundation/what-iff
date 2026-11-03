@@ -683,7 +683,7 @@ func TestModels_NamesAreDistinct(t *testing.T) {
 func TestKeepDistinctNames(t *testing.T) {
 	listed := []ListedModel{
 		{ID: "hf.co/a/Qwen3-0.6B-GGUF:latest", DisplayName: "Qwen3-0.6B-GGUF"},
-		{ID: "hf.co/b/Qwen3-0.6B-GGUF:latest", DisplayName: "qwen3-0.6b-gguf"},
+		{ID: "hf.co/b/Qwen3-0.6B-GGUF:latest", DisplayName: "QWEN3-0.6B-GGUF"},
 		{ID: "llama3.2:3b"},
 	}
 	keepDistinctNames(listed)
