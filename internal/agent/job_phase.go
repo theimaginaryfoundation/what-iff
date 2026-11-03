@@ -69,10 +69,17 @@ func (a *Agent) persistInferencePhase(ctx context.Context, chatJob *models.Job, 
 // carries everything the run did (tool results, notes) that the thread's next turn will not, so
 // its first call is used: otherwise a long run would checkpoint a thread that is not long.
 func turnContextTokens(chatCtx *chatContext, result *provider.GenerateResponse) int64 {
+	return turnContextTokensFrom(chatCtx, result.InputTokens)
+}
+
+// turnContextTokensFrom is turnContextTokens given the final call's input. The Context X-ray
+// reports the same figure (ContextBreakdown.CheckpointInputTokens), so its checkpoint gauge reads
+// what checkpointing reads.
+func turnContextTokensFrom(chatCtx *chatContext, finalInputTokens int64) int64 {
 	if chatCtx != nil && chatCtx.turnSettings.Advanced() && len(chatCtx.calls) > 0 && chatCtx.calls[0].InputTokens > 0 {
 		return chatCtx.calls[0].InputTokens
 	}
-	return result.InputTokens
+	return finalInputTokens
 }
 
 // persistUserTurnAndChatAfterInference updates user-turn tokens/context and chat continuity after inference.

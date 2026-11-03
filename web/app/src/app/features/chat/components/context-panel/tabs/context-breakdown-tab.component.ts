@@ -4,6 +4,7 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
 import { ContextBreakdown, ContextSegmentStat } from '../../../../../core/models/message.model';
 import { ContextCostOutletComponent } from '../../../../../extensions/context-cost-outlet.component';
 import { estimateInputAPICost } from '../../../helpers/api-pricing.helpers';
+import { ContextBudgetView, contextBudgetView } from '../../../helpers/context-budget.helpers';
 import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../../../../shared/ui/tooltip/tooltip.directive';
 
@@ -60,20 +61,18 @@ interface BreakdownRow {
               <span class="xray-head__label">Turn context</span>
               <ui-help-hint label="What is turn context?" heading="Turn context" guide="context">
                 Everything sent to the model for this reply, split by source. When a turn passes the checkpoint budget,
-                older turns are compressed into the thread summary at the next checkpoint.
+                older turns are compressed into the thread summary at the next checkpoint. An Advanced run is read against
+                its own limit instead: past it, the run compacts its earlier steps before the next one.
               </ui-help-hint>
             </span>
             @if (b.captured_at) {
               <time class="xray-head__time" [attr.datetime]="b.captured_at">{{ b.captured_at | date: 'MMM d, h:mm a' }}</time>
             }
           </header>
-          <div class="gauge">
+          <div class="gauge" [class.gauge--over]="overBudget()">
             <div class="gauge__top">
               <span class="gauge__total">{{ format(total()) }}</span>
-              <span
-                class="gauge__budget"
-                uiTooltip="Checkpoint budget: past this, older turns get summarized"
-              >/ {{ format(displayBudget()) }} tokens</span>
+              <span class="gauge__budget" [uiTooltip]="budgetTooltip()">{{ hasCeiling() ? '/ ' + format(displayBudget()) + ' tokens' : 'tokens' }}</span>
               @if (inputCost() || messageId()) {
                 <app-context-cost-outlet [cost]="inputCost()" [messageId]="messageId()" />
               }
@@ -92,15 +91,48 @@ interface BreakdownRow {
                   [uiTooltip]="row.label + ': ' + format(row.tokens) + ' tokens'"
                 ></span>
               }
+              @if (ceilingMarkPct(); as mark) {
+                <span class="gauge__past" [style.left.%]="mark" aria-hidden="true"></span>
+                <span class="gauge__ceiling" [style.left.%]="mark" aria-hidden="true"></span>
+              }
             </div>
             <div class="gauge__scale">
-              <span>{{ fillPct() }}% full</span>
+              <span [class.gauge__warn]="overBudget()">{{ fillLabel() }}</span>
               @if (overBudget()) {
-                <span class="gauge__warn">Heavy turns can exceed this budget until the next compaction.</span>
-              } @else {
+                <span class="gauge__warn">{{ format(view()?.main?.overBy ?? 0) }} over</span>
+              } @else if (hasCeiling()) {
                 <span>{{ format(remaining()) }} free</span>
               }
             </div>
+            @if (overBudget()) {
+              <p class="gauge__notice" role="note">
+                @if (view()?.kind === 'run') {
+                  The run’s last call went past its own limit. A step can overshoot it; between steps, a run past it
+                  compacts: its earlier steps are replaced by a work log of its plan, notes and newest tool calls, and the
+                  oldest calls are dropped.
+                } @else {
+                  Over the checkpoint budget. Heavy turns can exceed this budget until the next compaction. At the next
+                  checkpoint, older turns are compressed into the thread summary.
+                }
+              </p>
+            }
+            @if (view()?.checkpoint; as cp) {
+              <div class="gauge__checkpoint" [class.gauge__checkpoint--over]="cp.over">
+                <span
+                  class="gauge__checkpoint-label"
+                  uiTooltip="Checkpointing measures the run’s first call, not the work the run adds: past this budget, older turns get summarized"
+                >Thread checkpoint</span>
+                <span class="gauge__checkpoint-value">
+                  {{ format(cp.used) }} / {{ format(cp.ceiling) }} at turn start{{ cp.over ? ' · older turns get summarized at the next checkpoint' : '' }}
+                </span>
+              </div>
+            }
+            @if (compactions() > 0) {
+              <p class="gauge__note">
+                Compacted {{ compactions() === 1 ? 'once' : compactions() + ' times' }} during this run. Tool results above
+                count every call the run made, including ones compacted away, so the rows can add up to more than the total.
+              </p>
+            }
           </div>
 
           <ul class="legend">
@@ -209,9 +241,53 @@ interface BreakdownRow {
       display: flex;
       height: 0.85rem;
       overflow: hidden;
+      position: relative;
       width: 100%;
     }
-    .gauge__track--over { box-shadow: 0 0 0 1px var(--color-warning, #d97706) inset; }
+    .gauge__track--over { border-color: var(--color-warning, #d97706); box-shadow: 0 0 0 1px var(--color-warning, #d97706) inset; }
+    /* Past the ceiling: hatched over the slices so the overflow reads at a glance, in either theme. */
+    .gauge__past {
+      background: repeating-linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--color-warning, #d97706) 55%, transparent) 0 3px,
+        transparent 3px 6px
+      );
+      bottom: 0;
+      position: absolute;
+      right: 0;
+      top: 0;
+    }
+    .gauge__ceiling {
+      background: var(--color-warning, #d97706);
+      bottom: 0;
+      position: absolute;
+      top: 0;
+      transform: translateX(-1px);
+      width: 2px;
+    }
+    .gauge--over .gauge__total { color: var(--color-warning, #d97706); }
+    .gauge__notice {
+      background: color-mix(in srgb, var(--color-warning, #d97706) 12%, transparent);
+      border-left: 3px solid var(--color-warning, #d97706);
+      border-radius: 0.35rem;
+      color: var(--color-text-secondary);
+      font-size: 0.74rem;
+      margin: 0;
+      padding: 0.4rem 0.55rem;
+    }
+    .gauge__checkpoint {
+      align-items: baseline;
+      color: var(--color-text-muted);
+      display: flex;
+      flex-wrap: wrap;
+      font-size: 0.72rem;
+      gap: 0.25rem 0.5rem;
+      justify-content: space-between;
+    }
+    .gauge__checkpoint-label { font-weight: 600; }
+    .gauge__checkpoint-value { font-variant-numeric: tabular-nums; }
+    .gauge__checkpoint--over .gauge__checkpoint-value { color: var(--color-warning, #d97706); font-weight: 600; }
+    .gauge__note { color: var(--color-text-muted); font-size: 0.72rem; margin: 0; }
     .gauge__slice { display: block; height: 100%; }
     .gauge__slice:not(:last-child) { border-right: 1px solid color-mix(in srgb, var(--color-surface-base) 55%, transparent); }
 
@@ -281,20 +357,42 @@ export class ContextBreakdownTabComponent {
     return this.sumSegments(b.segments);
   });
 
-  readonly budget = computed(() => {
+  /** The limits this snapshot is read against, as the server recorded them (#397). */
+  readonly view = computed<ContextBudgetView | null>(() => {
     const b = this.breakdown();
-    const declared = b?.budget_tokens ?? 0;
-    return Math.max(declared, this.total(), 1);
+    return b ? contextBudgetView(b, this.total()) : null;
   });
 
-  readonly displayBudget = computed(() => {
-    const declared = this.breakdown()?.budget_tokens ?? 0;
-    return declared > 0 ? declared : this.budget();
-  });
+  /** The gauge's ceiling: the checkpoint budget, or an Advanced run's own limit (0 when none). */
+  private readonly ceiling = computed(() => this.view()?.main.ceiling ?? 0);
+  readonly hasCeiling = computed(() => this.ceiling() > 0);
+  readonly compactions = computed(() => this.view()?.compactions ?? 0);
+
+  /** The track's scale: the ceiling, or the total when it is past it. */
+  readonly budget = computed(() => Math.max(this.ceiling(), this.total(), 1));
+
+  readonly displayBudget = computed(() => (this.ceiling() > 0 ? this.ceiling() : this.budget()));
 
   readonly remaining = computed(() => Math.max(this.budget() - this.total(), 0));
-  readonly overBudget = computed(() => this.total() > (this.breakdown()?.budget_tokens ?? Infinity));
+  readonly overBudget = computed(() => this.view()?.main.over ?? false);
   readonly fillPct = computed(() => Math.round(Math.min(this.total() / this.budget(), 1) * 100));
+
+  /** Where the ceiling falls on an over-budget track, as a percentage of its width; null within budget. */
+  readonly ceilingMarkPct = computed(() => (this.overBudget() ? (this.ceiling() / this.total()) * 100 : null));
+
+  readonly fillLabel = computed(() => {
+    const view = this.view();
+    if (!view || !this.hasCeiling()) return 'No limit recorded';
+    const limit = view.kind === 'run' ? 'run limit' : 'checkpoint budget';
+    return `${view.main.usedPct}% of ${limit}`;
+  });
+
+  readonly budgetTooltip = computed(() => {
+    if (this.view()?.kind !== 'run') return 'Checkpoint budget: past this, older turns get summarized';
+    return this.hasCeiling()
+      ? 'Advanced run limit: past this, the run compacts its earlier steps into a work log before the next step'
+      : 'This Advanced run recorded no limit of its own';
+  });
 
   readonly rows = computed<BreakdownRow[]>(() => {
     const b = this.breakdown();
@@ -322,7 +420,8 @@ export class ContextBreakdownTabComponent {
 
   ariaSummary(): string {
     const parts = this.rows().map(r => `${r.label} ${r.sharePct.toFixed(0)}%`);
-    return `Context is ${this.fillPct()}% of budget: ${parts.join(', ')}.`;
+    const over = this.overBudget() ? `, ${this.format(this.view()?.main.overBy ?? 0)} tokens over` : '';
+    return `Context is ${this.fillLabel()}${over}: ${parts.join(', ')}.`;
   }
 
   format(n: number): string {

@@ -29,7 +29,22 @@ export interface ContextBreakdown {
   version?: number;
   segments: ContextSegmentStat[];
   total_tokens: number;
+  /** The thread's checkpoint ceiling: past it (measured by checkpoint_input_tokens), older turns get summarized. */
   budget_tokens: number;
+  /**
+   * What the checkpoint compares to budget_tokens: total_tokens on a Standard turn, the first
+   * call's input on an Advanced one. Absent on older snapshots.
+   */
+  checkpoint_input_tokens?: number;
+  /** The loop the turn ran. Absent on older snapshots. */
+  agent_loop?: 'standard' | 'advanced' | (string & {});
+  /**
+   * Advanced turns: the run's own ceiling. A call past it makes the run compact its earlier steps
+   * before the next one. total_tokens (the final call) is read against this, not budget_tokens.
+   */
+  run_budget_tokens?: number;
+  /** Advanced turns: how many times the run compacted its context. */
+  run_compactions?: number;
   model?: string;
   provider?: string;
   captured_at: string;
