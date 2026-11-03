@@ -47,7 +47,7 @@ func TestMarshalSubagentToolResult_MarshalErrorIsReturned(t *testing.T) {
 func TestFindModelByID_NilDatastoreReturnsError(t *testing.T) {
 	t.Parallel()
 	a := &Agent{}
-	_, err := a.findModelByID(context.Background(), uuid.New())
+	_, err := a.findModelByID(context.Background(), uuid.Nil, uuid.New())
 	require.Error(t, err)
 }
 

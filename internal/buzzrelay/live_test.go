@@ -274,6 +274,6 @@ func TestLiveUploadStripsImageMetadata(t *testing.T) {
 
 	blob, err := c.Upload(ctx, ep, owner, "photo.jpg", "image/png", tagged)
 	require.NoError(t, err)
-	assert.Equal(t, "photo.png", blob.Name, "re-encoded images are PNGs")
+	assert.Equal(t, "photo.png", blob.Name, "re-encoded; its alpha keeps it a PNG")
 	assert.Equal(t, "image/png", blob.Type)
 }

@@ -54,6 +54,16 @@ type Preset struct {
 	listURL      string
 	keyCheckURL  string
 	badKeyStatus int
+	// ollamaDetails asks Ollama's native API about each model after listing:
+	// its OpenAI-compatible list reports only ids, while /api/show reports the
+	// model's capabilities.
+	ollamaDetails bool
+	// lmStudioDetails reads LM Studio's native model list after listing: its
+	// OpenAI-compatible list reports only ids, and includes embedding models.
+	lmStudioDetails bool
+	// cannotChat, when set, recognises models in the listing that can't chat
+	// (speech, images, embeddings and the like), which are not offered.
+	cannotChat func(id string) bool
 }
 
 // Where a provider's model list does not check the key, or reports a bad key
@@ -80,12 +90,21 @@ type Target struct {
 	// BadKeyStatus, when set, is a status the provider answers a bad key with
 	// besides 401 and 403.
 	BadKeyStatus int
+	// OllamaDetails, when set, reads each model's capabilities from Ollama's
+	// native /api/show after listing.
+	OllamaDetails bool
+	// LMStudioDetails, when set, reads every model's name, type and capabilities
+	// from LM Studio's native model list after listing.
+	LMStudioDetails bool
+	// CannotChat, when set, recognises listed models that can't chat; they are
+	// dropped from the listing.
+	CannotChat func(id string) bool
 }
 
 // target is the check for a connection made from p, speaking flavor at
 // address with key.
 func (p Preset) target(flavor Flavor, address, key string) Target {
-	t := Target{Flavor: flavor, BaseURL: address, Key: key, KeyCheckURL: p.keyCheckURL, BadKeyStatus: p.badKeyStatus}
+	t := Target{Flavor: flavor, BaseURL: address, Key: key, KeyCheckURL: p.keyCheckURL, BadKeyStatus: p.badKeyStatus, OllamaDetails: p.ollamaDetails, LMStudioDetails: p.lmStudioDetails, CannotChat: p.cannotChat}
 	if p.listURL != "" {
 		t.Flavor, t.BaseURL = p.listFlavor, p.listURL
 	}
@@ -130,6 +149,7 @@ func Presets(builtinURLs map[models.ModelProvider]string, localHost string) []Pr
 			}
 		case models.ModelProviderOpenAI:
 			preset.KeysURL = "https://platform.openai.com/api-keys"
+			preset.cannotChat = openAICannotChat
 		case models.ModelProviderGoogle:
 			// Google answers a key it does not know with 400, "API key not valid".
 			preset.badKeyStatus = 400
@@ -153,6 +173,7 @@ func Presets(builtinURLs map[models.ModelProvider]string, localHost string) []Pr
 			BaseURL:         "http://" + localHost + ":11434/v1",
 			AddressEditable: true,
 			Local:           true,
+			ollamaDetails:   true,
 		},
 		Preset{
 			ID:              PresetLMStudio,
@@ -161,6 +182,7 @@ func Presets(builtinURLs map[models.ModelProvider]string, localHost string) []Pr
 			BaseURL:         "http://" + localHost + ":1234/v1",
 			AddressEditable: true,
 			Local:           true,
+			lmStudioDetails: true,
 		},
 		Preset{
 			ID:              PresetCustom,
@@ -178,4 +200,47 @@ func findPreset(presets []Preset, id string) (Preset, bool) {
 		}
 	}
 	return Preset{}, false
+}
+
+// presetOf is the preset a stored connection was made from, or Custom for a
+// preset this build no longer offers.
+func presetOf(presets []Preset, id string) Preset {
+	if p, ok := findPreset(presets, id); ok {
+		return p
+	}
+	p, _ := findPreset(presets, PresetCustom)
+	return p
+}
+
+// OpenAI lists every model an account can reach, chat or not: about 140 in
+// October 2026, some 55 of them for speech, transcription, images, video,
+// embeddings or moderation, or completions-only. These name patterns are what
+// that listing showed; a model they miss is still offered, and one they drop
+// wrongly can't be chosen, so they stay narrow. Slow or costly chat models
+// (deep research, pro) are offered: whether they are worth it is the account's
+// call.
+var (
+	openAINonChatPrefixes = []string{
+		"babbage-", "davinci-", "text-embedding-", "omni-moderation-", "text-moderation-",
+		"tts-", "whisper-", "dall-e-", "gpt-image-", "chatgpt-image-", "sora-",
+		"gpt-audio", "gpt-realtime", "gpt-live-", "gpt-transcribe",
+	}
+	// "-search-preview" models answer over Chat Completions only, and the OpenAI
+	// provider calls the Responses API.
+	openAINonChatParts = []string{"-transcribe", "-tts", "-realtime", "-instruct", "-search-preview"}
+)
+
+func openAICannotChat(id string) bool {
+	id = strings.ToLower(id)
+	for _, p := range openAINonChatPrefixes {
+		if strings.HasPrefix(id, p) {
+			return true
+		}
+	}
+	for _, p := range openAINonChatParts {
+		if strings.Contains(id, p) {
+			return true
+		}
+	}
+	return false
 }

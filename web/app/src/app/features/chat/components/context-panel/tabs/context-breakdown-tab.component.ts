@@ -19,6 +19,8 @@ const KIND_META: Record<string, KindMeta> = {
   scratchpad: { label: 'Scratchpad', description: 'This personality’s working notes about you', color: 'hsl(48 85% 55%)' },
   memory_context: { label: 'Memories', description: 'Long-term memories retrieved for this turn', color: 'hsl(280 60% 62%)' },
   mood: { label: 'Mode', description: 'Instructions from the thread’s active mode', color: 'hsl(330 70% 62%)' },
+  skills: { label: 'Skills', description: 'Instructions of the skills active this turn (loaded, mode or message)', color: 'hsl(160 55% 48%)' },
+  skills_index: { label: 'Skills index', description: 'The list of skills the agent may load', color: 'hsl(160 35% 62%)' },
   history_turn: { label: 'History', description: 'Recent verbatim conversation turns', color: 'hsl(162 62% 45%)' },
   attachment_context: { label: 'Attachments', description: 'Labels + content from attached files', color: 'hsl(24 80% 56%)' },
   tool_result: { label: 'Tool results', description: 'Tool calls and outputs carried in context', color: 'hsl(14 72% 58%)' },

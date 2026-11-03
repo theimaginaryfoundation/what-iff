@@ -61,12 +61,32 @@ func (t *ListTool) listPersonalities(ctx context.Context, chat *models.Chat, a l
 	return t.okPaged(listKindPersonalities, items, listTruncationNote("personalities", meta, len(items)), meta)
 }
 
-func (t *ListTool) listSkills(ctx context.Context, chat *models.Chat, a listArgs) (string, error) {
+// listSkills lists the owner's skills with the slug load_skill takes and whether each is loaded
+// in this chat; filter matches slug, name, description and instructions (ADR 0x035).
+func (t *ListTool) listSkills(ctx context.Context, chat *models.Chat, a listArgs, loadedIDs []uuid.UUID) (string, error) {
 	limit := clampLimit(a.Limit, listDiscoveryLimit)
 	pageNum := clampPage(a.Page)
-	page, err := t.store.ListRituals(ctx, chat.UserID, pageNum, limit, models.RitualFilters{})
+	filters := models.RitualFilters{}
+	if q, ok := validateNonEmptyString(a.Filter); ok {
+		filters.Query = &q
+	}
+	page, err := t.store.ListRituals(ctx, chat.UserID, pageNum, limit, filters)
 	if err != nil {
 		return t.fail(listKindSkills, fmt.Sprintf("failed to list skills: %v", err))
+	}
+	loaded := make(map[uuid.UUID]struct{}, len(loadedIDs))
+	for _, id := range loadedIDs {
+		loaded[id] = struct{}{}
+	}
+	var ids []uuid.UUID
+	for _, r := range page.Results {
+		if ritual, ok := r.(*models.Ritual); ok && ritual != nil {
+			ids = append(ids, ritual.ID)
+		}
+	}
+	fileCounts, err := t.store.CountSkillFiles(ctx, chat.UserID, ids)
+	if err != nil {
+		return t.fail(listKindSkills, fmt.Sprintf("failed to count skill files: %v", err))
 	}
 	items := make([]listItem, 0, len(page.Results))
 	for _, r := range page.Results {
@@ -74,14 +94,21 @@ func (t *ListTool) listSkills(ctx context.Context, chat *models.Chat, a listArgs
 		if !ok || ritual == nil {
 			continue
 		}
+		_, isLoaded := loaded[ritual.ID]
+		hasFiles := fileCounts[ritual.ID] > 0
 		items = append(items, listItem{
 			ID:          ritual.ID.String(),
+			Slug:        ritual.Slug,
 			Name:        ritual.Name,
 			Description: ritual.Description,
+			Loaded:      &isLoaded,
+			HasFiles:    &hasFiles,
 		})
 	}
 	meta := listPageMeta{Page: pageNum, Limit: limit, TotalCount: page.TotalCount}
-	return t.okPaged(listKindSkills, items, listTruncationNote("skills", meta, len(items)), meta)
+	note := listTruncationNote("skills", meta, len(items))
+	note = joinNotes(note, "Load a skill's instructions with load_skill and its slug; loaded is whether this chat has it loaded now; has_files means the bundle has reference files or scripts under skills/<slug>/.")
+	return t.okPaged(listKindSkills, items, note, meta)
 }
 
 // listSandboxFiles lists the files uploaded to this conversation: the only files a sandboxed chat
@@ -127,7 +154,17 @@ func (t *ListTool) listSandboxFiles(ctx context.Context, chat *models.Chat, a li
 }
 
 func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs) (string, error) {
-	limit := clampLimit(a.Limit, listDefaultLimit)
+	view := strings.ToLower(strings.TrimSpace(a.View))
+	if view != "" && view != listFileViewList && view != listFileViewTree {
+		return t.fail(listKindFiles, fmt.Sprintf("unknown view %q; use \"list\" or \"tree\"", a.View))
+	}
+	// A tree is drawn from one page, so it defaults to the largest page: one folder's whole tree
+	// in most libraries.
+	defLimit := listDefaultLimit
+	if view == listFileViewTree {
+		defLimit = listMaxLimit
+	}
+	limit := clampLimit(a.Limit, defLimit)
 	pageNum := clampPage(a.Page)
 	if chat.IsSandboxed() {
 		return t.listSandboxFiles(ctx, chat, a, limit, pageNum)
@@ -147,6 +184,14 @@ func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs)
 		if folder != "" { // "/" or "" would mean the top level, which is "no folder filter" here
 			filters.FolderPrefix = &folder
 		}
+	}
+
+	switch origin := models.FileOrigin(strings.ToLower(strings.TrimSpace(a.Origin))); origin {
+	case "":
+	case models.FileOriginAgent, models.FileOriginUser, models.FileOriginSkill:
+		filters.Origin = origin
+	default:
+		return t.fail(listKindFiles, fmt.Sprintf("unknown origin %q; use \"agent\", \"user\" or \"skill\"", a.Origin))
 	}
 
 	switch normalizeFileScope(a.Scope) {
@@ -171,14 +216,24 @@ func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs)
 		if !ok || fa == nil {
 			continue
 		}
-		items = append(items, listItem{
+		item := listItem{
 			ID:       fa.ID.String(),
 			Name:     fa.Name,
 			FileType: fa.FileType,
 			Folder:   fa.Folder,
-		})
+		}
+		if fa.Origin != "" && fa.Origin != models.FileOriginUser {
+			item.Origin = string(fa.Origin)
+		}
+		items = append(items, item)
 	}
 	meta := listPageMeta{Page: pageNum, Limit: limit, TotalCount: page.TotalCount}
+	if view == listFileViewTree {
+		res := pagedListResult(listKindFiles, items, listTruncationNote("files", meta, len(items)), meta)
+		res.Tree = renderFileTree(items)
+		res.Items = []listItem{}
+		return marshalToolResult(res, listToolName)
+	}
 	return t.okPaged(listKindFiles, items, listTruncationNote("files", meta, len(items)), meta)
 }
 

@@ -199,7 +199,8 @@ func ProcessUpload(ctx context.Context, userID uuid.UUID, src io.Reader, fileNam
 		// The upload cap bounds disk usage; stream image data between temp files
 		// so the raw upload is not also buffered in application memory.
 		doneNormalize := metrics.TimeFileStage(ctx, telemetry.FileOpUpload, telemetry.FileStageNormalize)
-		fileName, err = imageutil.NormalizeForUpload(imageFile, normalizedTempFile, fileName, imageutil.DefaultUploadImageMaxPx)
+		var normalizedType string
+		fileName, normalizedType, err = imageutil.NormalizeForUpload(imageFile, normalizedTempFile, fileName, imageutil.DefaultUploadImageMaxPx)
 		doneNormalize(err)
 		if closeErr := imageFile.Close(); closeErr != nil && err == nil {
 			err = closeErr
@@ -219,8 +220,8 @@ func ProcessUpload(ctx context.Context, userID uuid.UUID, src io.Reader, fileNam
 		}
 
 		fileTypeInfo = utils.FileTypeInfo{
-			ContentType: imageutil.NormalizedUploadContentType,
-			Extension:   ".png",
+			ContentType: normalizedType,
+			Extension:   filepath.Ext(fileName),
 		}
 	}
 

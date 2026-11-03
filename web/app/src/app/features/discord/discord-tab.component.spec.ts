@@ -46,15 +46,16 @@ async function settle(): Promise<void> {
 describe('DiscordTabComponent', () => {
   let discord: Record<string, ReturnType<typeof vi.fn>>;
 
-  async function create(bindings: DiscordBinding[] = [binding]) {
+  async function create(bindings: DiscordBinding[] = [binding], bots: DiscordBot[] = [bot]) {
     discord = {
-      listBots: vi.fn(() => of([bot])),
+      listBots: vi.fn(() => of(bots)),
       listBindings: vi.fn(() => of(bindings)),
       addBot: vi.fn(() => of({ ...bot, id: 'bot2', personality_id: 'p2', bot_username: 'Echo' })),
       listGuilds: vi.fn(() => of([{ id: 'g', name: 'Home' }])),
       listChannels: vi.fn(() => of([{ id: 'c', name: 'general' }])),
       addBinding: vi.fn(() => of({ ...binding, id: 'b-new' })),
       updateBinding: vi.fn((_id: string, body: Partial<DiscordBinding>) => of({ ...bindings[0], ...body })),
+      updateBot: vi.fn(() => of({ ...bot, last_error: null })),
     };
     TestBed.configureTestingModule({
       imports: [DiscordTabComponent],
@@ -108,6 +109,27 @@ describe('DiscordTabComponent', () => {
     expect(el.textContent).toContain('as Vix');
     expect(el.querySelector('a[href^="https://discord.com/oauth2/authorize"]')).toBeTruthy();
     expect(el.querySelector('[data-testid=discord-binding]')?.textContent).toContain('#general · Home');
+  });
+
+  it('shows a bot Discord refused the Message Content intent for, and checks it again', async () => {
+    const reason = 'Discord refused the Message Content intent.';
+    const fixture = await create([binding], [{ ...bot, status: 'intent_disabled', last_error: reason }]);
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.textContent).toContain('Message Content off');
+    expect(el.textContent).toContain(reason);
+
+    (el.querySelector('[data-testid=discord-bot-check-again]') as HTMLButtonElement).click();
+    await settle();
+    fixture.detectChanges();
+
+    expect(discord['updateBot']).toHaveBeenCalledWith('bot1', { refresh: true });
+    expect(el.textContent).toContain('Active');
+    expect(el.querySelector('[data-testid=discord-bot-check-again]')).toBeNull();
+  });
+
+  it('offers Check again only for a refused intent', async () => {
+    const fixture = await create();
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid=discord-bot-check-again]')).toBeNull();
   });
 
   it('only offers personas that have no bot yet, and adds a bot', async () => {

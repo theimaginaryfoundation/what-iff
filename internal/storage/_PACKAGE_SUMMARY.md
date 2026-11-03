@@ -18,6 +18,9 @@
   S3 uploads it in 8 MiB multipart parts (one part's buffer in memory; a single-part object is a plain `PutObject`) and aborts the multipart upload on any failure, on its own context so a timed-out job still cleans up.
   The local store writes a temp file and renames it into place.
   Like `ObjectLister`, it is an optional interface so `FileStore` mocks stay unchanged; `UploadStream` falls back to `io.ReadAll` + `UploadFile` for them.
+- **Attachment image reads** (`attachment_image_bytes.go`): `ResolveAttachmentImage` tries an attachment's keys in order (thumbnail, `s3_key`, canonical gallery key, legacy chat key for a thumbnail; canonical, `s3_key`, chat for a full image), never fetching the same key twice, and reports which key answered.
+  Every read counts on `whatiff.file.image_resolve` (`variant`, `source`); a thumbnail read answered by any other key served the full image, which callers hand to `imageutil.BackfillThumbnail`.
+  `ResolveAttachmentImageBytes` is the same read without the source.
 - **`Instrument`** (`instrumented.go`): decorator recording `whatiff.dependency.duration` (dependency `s3` or `local_fs`, operation `put_object`/`get_object`/`delete_object`/`list_objects`) through `telemetry.Global()`; `internal/server` wraps the store at construction.
 
 ## Dependencies
@@ -43,6 +46,7 @@
 - `filestore_test.go` — behavior with mocks or localstack-style setups (see file).
 - `stream_test.go` — multipart part splitting, abort on reader/part failure (even after the caller's context ends), and the local and fallback paths.
 - `instrumented_test.go` — dependency metrics, the not-found contract, and optional-interface preservation.
+- `attachment_image_bytes_test.go` — key order, the reported source, no repeated fetch of a key, and the read counter.
 - `attachment_cleanup_test.go` — release reference counting and legacy keys, account purge, against the local store.
 
 ## Related documentation

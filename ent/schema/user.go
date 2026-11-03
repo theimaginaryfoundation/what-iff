@@ -112,6 +112,9 @@ func (User) Edges() []ent.Edge {
 		// through it, the thread and message links. See ent/schema/remotesync.go.
 		edge.To("remote_syncs", RemoteSync.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
+		// Entity wiki pages written by agents (ADR 0x034). Cascade with the account.
+		edge.To("agent_entities", AgentEntity.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}, userPrivateEdges()...)
 }
 

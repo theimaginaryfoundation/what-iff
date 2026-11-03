@@ -9,7 +9,7 @@ import { RitualService } from '../../core/services/ritual.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MCPServerService } from '../../core/services/mcp-server.service';
-import { Ritual, UpdateRitualRequest } from '../../core/models/ritual.model';
+import { Ritual, UpdateRitualRequest, RITUAL_SKILL_FIELD_DEFAULTS } from '../../core/models/ritual.model';
 import { Personality } from '../../core/models/personality.model';
 import { NULL_PERSONALITY_ID } from '../../core/constants/app.constants';
 
@@ -24,6 +24,7 @@ describe('RitualDetailComponent', () => {
     let mockActivatedRoute: any;
 
     const mockRitual: Ritual = {
+        ...RITUAL_SKILL_FIELD_DEFAULTS,
         id: '123',
         name: 'Test Ritual',
         description: 'Test Description',

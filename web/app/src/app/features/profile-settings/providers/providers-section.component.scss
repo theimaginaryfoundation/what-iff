@@ -90,6 +90,11 @@ small {
   font-size: 0.8rem;
 }
 
+// A connection none of whose models are in use yet.
+.providers__models--none {
+  color: #d97706;
+}
+
 .providers__actions {
   align-items: center;
   display: flex;

@@ -185,6 +185,8 @@ and deferred retries are excluded.
 | `whatiff.file.size` | histogram, By | bytes (1 KiB–256 MiB) | `operation`, `kind` |
 | `whatiff.file.operation.duration` | histogram, s | job | `operation`, `stage`, `error.type` |
 | `whatiff.file.operation.items` | histogram | counts | `operation`, `kind`, `outcome` (imported, skipped, failed, exported) |
+| `whatiff.file.image_resolve` | counter | — | `variant` (thumbnail, full), `source` (thumbnail, canonical, s3_key, chat, none) |
+| `whatiff.file.thumbnail_backfill` | counter | — | `outcome` (written, failed, dropped, skipped) |
 
 The operation and stage sets are defined in
 [`internal/telemetry/files.go`](../internal/telemetry/files.go):
@@ -192,6 +194,18 @@ The operation and stage sets are defined in
   `account_export`.
 - **Upload counting:** uploads are counted once per upload across the chat, personality and gallery
   paths.
+- **Image reads:** `image_resolve` counts each attachment image read
+  (`storage.ResolveAttachmentImage`) by the object key that answered.
+  Keys are tried in order (thumbnail, s3_key, canonical, chat for a thumbnail; canonical, s3_key,
+  chat for a full image), so every key ahead of `source` was a storage miss.
+  `variant=thumbnail` answered by anything other than `source=thumbnail` served the full image,
+  and the gallery and context builder then queue a backfill.
+  At most 10 series.
+- **Thumbnail backfill:** `thumbnail_backfill` counts those out-of-band writes
+  (`imageutil.BackfillThumbnail`, `imageutil.CopyThumbnail`).
+  `dropped` means the per-process pool was full; the next read offers the image again.
+  `skipped` means the image failed within the last hour and is not retried yet.
+  At most 10,000 recent failures are remembered per process: past that, a new failure is not recorded and that image is retried on its next read (the pool still bounds the work).
 
 ### App
 
@@ -214,7 +228,7 @@ combinations:
 | Outbound: DB, HTTP client, dependencies, pool | ~3,250 |
 | LLM calls and tokens | ~4,100 |
 | Jobs, chat stages, tools, scheduler | ~2,200 |
-| Files, imports and exports | ~960 |
+| Files, imports and exports | ~975 |
 | **Total** | **~13,600** |
 
 That comes to about 119M samples a month, or roughly $11 per instance-month, if histograms are

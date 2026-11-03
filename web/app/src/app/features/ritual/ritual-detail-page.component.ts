@@ -5,7 +5,8 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { forkJoin, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 
-import { Ritual } from '../../core/models/ritual.model';
+import { copySkillSlug, Ritual } from '../../core/models/ritual.model';
+import { apiErrorMessage } from '../../core/utils/api-error.helpers';
 import { ChatService } from '../../core/services/chat.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { MCPServerService } from '../../core/services/mcp-server.service';
@@ -92,7 +93,8 @@ export class RitualDetailPageComponent implements OnInit {
           this.loading.set(false);
           return;
         }
-        this.ritual.set(fromCopy ? { ...found, id: '' } : found);
+        // A copy needs its own slug: the source's is taken, so saving it unchanged always conflicts.
+        this.ritual.set(fromCopy ? { ...found, id: '', slug: copySkillSlug(found.slug ?? '') } : found);
         this.loading.set(false);
       },
       error: error => {
@@ -117,7 +119,7 @@ export class RitualDetailPageComponent implements OnInit {
         },
         error: error => {
           this.saving.set(false);
-          this.error.set(error instanceof Error ? error.message : 'Failed to create skill');
+          this.error.set(apiErrorMessage(error, 'Failed to create skill'));
         },
       });
       return;
@@ -135,7 +137,7 @@ export class RitualDetailPageComponent implements OnInit {
       },
       error: error => {
         this.saving.set(false);
-        this.error.set(error instanceof Error ? error.message : 'Failed to save skill');
+        this.error.set(apiErrorMessage(error, 'Failed to save skill'));
       },
     });
   }

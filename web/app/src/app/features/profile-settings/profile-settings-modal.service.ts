@@ -20,9 +20,23 @@ export class ProfileSettingsModalService {
    */
   readonly billingTabClosedRevision = signal(0);
 
+  /**
+   * A request to open the model chooser on the Providers tab: a connection id,
+   * or a preset id (such as 'openai') for the account's connection made from it,
+   * or '' for its first connection. The Providers tab takes it once it has
+   * loaded its connections, and clears it.
+   */
+  readonly modelChooserRequest = signal<string | null>(null);
+
   open(tab: ProfileSettingsTab = 'profile'): void {
     this.activeTab.set(tab);
     this.openState.set(true);
+  }
+
+  /** Opens settings on the Providers tab with a connection's model chooser open (see modelChooserRequest). */
+  openModelChooser(connectionOrPreset = ''): void {
+    this.modelChooserRequest.set(connectionOrPreset);
+    this.open('providers');
   }
 
   close(): void {

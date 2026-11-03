@@ -10,8 +10,11 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
+	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -194,10 +197,15 @@ func (h *Handler) GetImageContent(w http.ResponseWriter, r *http.Request) {
 	size := r.URL.Query().Get("size")
 	wantThumb := size != "full"
 
-	data, contentType := h.resolveImageBytes(r, userID, attachment, wantThumb)
+	data, contentType, source := storage.ResolveAttachmentImage(r.Context(), h.logger, h.fileStore, userID, attachment, wantThumb)
 	if len(data) == 0 {
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Image data not available", nil)
 		return
+	}
+
+	if wantThumb && source != telemetry.ImageSourceThumbnail {
+		// Served the full image for want of a thumbnail; write one so the next read is small.
+		imageutil.BackfillThumbnail(h.fileStore, h.logger, userID, attachment.ID, data)
 	}
 
 	w.Header().Set("Content-Type", contentType)
@@ -205,9 +213,4 @@ func (h *Handler) GetImageContent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
-}
-
-// resolveImageBytes fetches bytes for an attachment from canonical and derived object keys.
-func (h *Handler) resolveImageBytes(r *http.Request, userID uuid.UUID, att *models.FileAttachment, wantThumb bool) ([]byte, string) {
-	return handlerutils.ResolveImageBytes(r.Context(), h.logger, h.fileStore, userID, att, wantThumb)
 }

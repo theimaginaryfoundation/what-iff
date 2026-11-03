@@ -3500,7 +3500,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The account already has a connection to that built-in provider; `code` is `provider_connection_exists` */
+                /** @description The account already has a connection to that built-in provider (`code` is `provider_connection_exists`), or one with that name, ignoring case (`code` is `connection_name_taken`). Without a name, a connection named after its preset takes the next free number instead ("Ollama 2"). */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -3596,7 +3596,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Remove a provider connection */
+        /**
+         * Remove a provider connection
+         * @description Its models go with it: a chat on one falls back to the default model, and a job on one fails with a clear error. Refused while one of them is the account's default model.
+         */
         delete: {
             parameters: {
                 query?: never;
@@ -3627,6 +3630,15 @@ export interface paths {
                 };
                 /** @description No such connection on this account */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description One of its models is the account's default; `code` is `default_model_in_use` */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -3712,6 +3724,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Another of the account's connections has that name, ignoring case; `code` is `connection_name_taken` */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Listing with the new key or address failed, as for adding one */
                 422: {
                     headers: {
@@ -3745,8 +3766,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the models a connection's provider offers
-         * @description Asks the provider now, with the connection's stored key; nothing is cached.
+         * List the models a connection's provider offers, and which are enabled
+         * @description Asks the provider now, with the connection's stored key; nothing is cached. Each model says whether the account enabled it, and its tool and image support: the account's confirmed values for an enabled model, otherwise what the provider reports (or what is known about its API), absent when unknown. An enabled model the provider no longer lists still appears, so it can be turned off.
          */
         get: {
             parameters: {
@@ -3760,13 +3781,13 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Models, sorted by id */
+                /** @description Models, sorted by id, then any enabled ones the provider no longer lists */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ListedModel"][];
+                        "application/json": components["schemas"]["ConnectionModel"][];
                     };
                 };
                 /** @description Unauthorized */
@@ -3807,7 +3828,82 @@ export interface paths {
                 };
             };
         };
-        put?: never;
+        /**
+         * Enable or disable a connection's models
+         * @description Enabled models are offered in the account's model picker. Disabling one keeps its row, so a chat or job naming it fails clearly, and enabling it again brings it back. Changes nothing about where requests go, so it needs no password.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The connection */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SetConnectionModelsRequest"];
+                };
+            };
+            responses: {
+                /** @description The connection's enabled models */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConnectionModel"][];
+                    };
+                };
+                /** @description No models given, or a model id that is empty or over 200 characters */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such connection on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Disabling the account's default model (`code` is `default_model_in_use`), or a model named like another of the connection's, ignoring case, or like the deployment's own model of that provider (`code` is `model_name_taken`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -5301,6 +5397,128 @@ export interface paths {
             };
         };
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-job/{id}/rituals/{ritualId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach a skill to an agent job
+         * @description Links a skill (ritual) the user owns to the job. A skill can be attached to any number of jobs and modes at once.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description AgentJob ID */
+                    id: string;
+                    /** @description Skill (ritual) ID */
+                    ritualId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Skill attached (or already attached) */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid job or skill ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description AgentJob or skill not found for this user */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /**
+         * Detach a skill from an agent job
+         * @description Removes the link between the job and the skill. Other jobs and modes that use the skill are unaffected.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description AgentJob ID */
+                    id: string;
+                    /** @description Skill (ritual) ID */
+                    ritualId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Skill detached (or was not attached) */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid job or skill ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description AgentJob or skill not found for this user */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -6859,6 +7077,259 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/entities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List entity wiki pages
+         * @description Lists the user's entity pages (ADR 0x034), most recently changed first. Agents write these short pages about people, places and projects with the entity_write tool; global ones are shared by every personality, and pinned ones (written by a personality with auto_pin_memories on) by that personality only.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    page?: number;
+                    limit?: number;
+                    /** @description Case-insensitive match on the name or text. */
+                    query?: string;
+                    /** @description Only entities pinned to this personality. */
+                    personality_id?: string;
+                    /** @description Only global entities. */
+                    global_only?: boolean;
+                    /** @description List the entities an agent deleted (archived) instead of the live ones. Archived entities are hidden from agents and can be restored. */
+                    archived?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Entities retrieved successfully */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaginatedResponse"] & {
+                            results?: components["schemas"]["AgentEntity"][];
+                        };
+                    };
+                };
+                /** @description Invalid personality_id */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/entities/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete an entity
+         * @description Removes a live or archived entity for good.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Entity deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Entity not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Edit an entity's text
+         * @description Replaces the entity's text. The edit is the user's, so the agent provenance is cleared.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        body: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Entity updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentEntity"];
+                    };
+                };
+                /** @description Missing body, or text over 5000 characters */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Entity not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/memory/entities/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore an archived entity
+         * @description Brings back an entity an agent deleted (archived). The restore is the user's, so the agent provenance is cleared.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Entity restored */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentEntity"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No archived entity with this id */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A live entity in the same scope has taken the name since it was archived */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/compaction-events": {
         parameters: {
             query?: never;
@@ -8081,6 +8552,8 @@ export interface paths {
                          * @description ID of the personality this ritual is associated with (optional)
                          */
                         personality_id?: string;
+                        /** @description Connectors (MCP servers) whose tools this ritual brings along. Replaces the existing links. */
+                        mcp_server_ids?: string[];
                     };
                 };
             };
@@ -8112,9 +8585,408 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Another of the account's skills already uses the requested slug */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a skill from an Agent Skills bundle
+         * @description Creates a skill from an Agent Skills bundle (ADR 0x035 §7), or with `ritual_id` replaces an existing skill's contents. Send a multipart form with either `file` (a zip with SKILL.md at its root or inside one top-level folder, or a lone SKILL.md) or several `files` parts whose filenames are paths inside the skill directory. Frontmatter is parsed leniently: a missing or invalid `name` is derived with a warning, unknown keys are kept in `metadata`, and only a missing `description` or body is an error. A slug the account already uses gets a numeric suffix. The bundle's other files are stored under `skills/<slug>/` and replace the skill's previous files; a re-import that sends only a SKILL.md keeps them (`files_kept`). Two paths that differ only in case are refused.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description A skill zip or a SKILL.md
+                         */
+                        file?: string;
+                        /** @description The skill directory's files, named by their relative paths */
+                        files?: string[];
+                        /**
+                         * Format: uuid
+                         * @description Bind the imported skill to this personality
+                         */
+                        personality_id?: string;
+                        /**
+                         * Format: uuid
+                         * @description Re-import into this skill, which keeps its slug, personality and connectors
+                         */
+                        ritual_id?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Existing skill re-imported */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RitualImportResult"];
+                    };
+                };
+                /** @description Skill imported */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RitualImportResult"];
+                    };
+                };
+                /** @description Not a bundle, no SKILL.md, or SKILL.md without a description or body; `message` says which */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No skill with `ritual_id` */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Another skill took every slug tried, in concurrent imports of the same skill */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Bundle larger than 30 MB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/{id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export a skill as an Agent Skills bundle
+         * @description A zip holding `<slug>/SKILL.md`, rendered from the skill's fields: `name` (the slug), `description`, `license`, `compatibility`, `allowed-tools`, and `metadata` with `display_name`, `whatiff-hotkeys`, `whatiff-connectors` (connector names) and the invocation flags. Imports unchanged into any Agent Skills harness.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ritual ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The bundle */
+                200: {
+                    headers: {
+                        /** @description attachment; filename="<slug>.zip" */
+                        "Content-Disposition"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/zip": string;
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The skill's files total more than the 30 MB bundle limit */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a skill's bundle files
+         * @description The skill's reference documents, scripts and assets (ADR 0x035 §3), filed in the gallery under `skills/<slug>/` and read-only to agents.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The bundle's files, by folder then name */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SkillFile"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Add or replace a skill bundle file
+         * @description Stores one file in the skill's bundle at `path`, replacing a file already there. Any content
+         *     type; at most 10 MB a file, 200 files and 30 MB a skill. `SKILL.md` at the bundle root is
+         *     rendered from the skill and cannot be uploaded.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /** Format: binary */
+                        file: string;
+                        /** @description The file's place in the bundle, e.g. `references/FORMS.md`. Defaults to `references/<filename>`. */
+                        path?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The stored file */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SkillFile"];
+                    };
+                };
+                /** @description Invalid path, the reserved SKILL.md, or over the bundle's file or byte limit */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file is larger than 10 MB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description This deployment has no file storage for skill files */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ritual/{id}/files/{fileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a skill bundle file */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    fileId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Ritual or file not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -8202,6 +9074,8 @@ export interface paths {
                          * @description ID of the personality this ritual is associated with (optional, set to null to make it global)
                          */
                         personality_id?: string;
+                        /** @description Connectors (MCP servers) whose tools this ritual brings along. Replaces the existing links when present; omit to leave them unchanged. */
+                        mcp_server_ids?: string[];
                     };
                 };
             };
@@ -8235,6 +9109,15 @@ export interface paths {
                 };
                 /** @description Ritual not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Another of the account's skills already uses the requested slug */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -8464,7 +9347,7 @@ export interface paths {
         put?: never;
         /**
          * Create chat
-         * @description Creates a new chat session. Optional `personality_id` and `model_id` let callers start a thread with a specific persona/model in one round trip; both must be owned by the authenticated user (model must be active). When omitted, the user's default preferences are used.
+         * @description Creates a new chat session. Optional `personality_id` and `model_id` let callers start a thread with a specific persona/model in one round trip; both must be owned by the authenticated user (model must be active). When omitted, the user's default preferences are used. An account with no default model gets a chat with no model, whose turns use the account's default once it has one; until then a turn fails with `no_model_selected`.
          */
         post: {
             parameters: {
@@ -10943,6 +11826,132 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/{chatId}/loaded-skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the skills the agent loaded in a thread
+         * @description The skills the agent loaded with `load_skill` (ADR 0x035), oldest load first. Skills a mode or a message preloads are active for their turn only and are not listed. Loaded skills stay until unloaded here, by the agent, or by a checkpoint that found them unused.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Loaded skills */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LoadedSkill"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{chatId}/loaded-skills/{ritualId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unload a skill the agent loaded in a thread
+         * @description Forgets the skill as loaded; its instructions leave the thread's context from the next turn.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                    ritualId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Unloaded (or was not loaded) */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid skill ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mcp-servers": {
         parameters: {
             query?: never;
@@ -12948,7 +13957,10 @@ export interface components {
             user_id: string;
             /**
              * Format: uuid
-             * @description ID of the user's preferred default AI model
+             * @description ID of the user's default model for new chats. Returned as the nil UUID
+             *     (00000000-0000-0000-0000-000000000000) when the account has none, as on an install
+             *     without a model catalog before the account enables a model; the first model it
+             *     enables then becomes its default.
              */
             default_model_id: string;
             /**
@@ -13107,10 +14119,10 @@ export interface components {
             /** @description Description of the model's capabilities */
             description: string;
             /**
-             * @description Provider backend used for this model
+             * @description Provider backend used for this model: a built-in provider, or for a model from a provider connection, the preset the connection was made from.
              * @enum {string}
              */
-            provider: "openai" | "anthropic" | "zai" | "google" | "mistral" | "deepseek" | "qwen" | "xiaomi";
+            provider: "openai" | "anthropic" | "zai" | "google" | "mistral" | "deepseek" | "qwen" | "xiaomi" | "openrouter" | "ollama" | "lmstudio" | "custom";
             /** @description Whether the model supports tool/function calling */
             tool_support: boolean;
             /** @description Whether the model accepts image input. Images are stripped from the context sent to models without it. */
@@ -13129,6 +14141,13 @@ export interface components {
             deleted: boolean;
             /** @description Whether this is the application-wide default model (at most one active model) */
             is_default: boolean;
+            /**
+             * Format: uuid
+             * @description The provider connection serving the model (ADR 0x027). Absent for the deployment's own catalog; present only on the account's own models.
+             */
+            connection_id?: string;
+            /** @description That connection's name, as the account named it (e.g. "Desk Ollama"), in the account's model list; absent where connection_id is. */
+            connection_name?: string;
         };
         /**
          * @example pending
@@ -13819,6 +14838,27 @@ export interface components {
             id: string;
             /** @description The provider's own name for it, when it gives one. */
             display_name?: string;
+            /** @description Whether it takes tools, as the provider reports; absent when unknown. */
+            tool_support?: boolean;
+            /** @description Whether it takes images, as the provider reports; absent when unknown. */
+            vision_support?: boolean;
+        };
+        /** @description One of a connection's models as the account sees it. */
+        ConnectionModel: components["schemas"]["ListedModel"] & {
+            enabled: boolean;
+            /** @description The name the listing offers the model under, which a name the account clears goes back to. `display_name` is the account's own name for it, kept while the model is off too. */
+            default_name?: string;
+        };
+        SetConnectionModelsRequest: {
+            models: {
+                id: string;
+                enabled: boolean;
+                display_name?: string;
+                /** @description Left out, an enabled model keeps its value, and a new one starts off. */
+                tool_support?: boolean;
+                /** @description Left out, an enabled model keeps its value, and a new one starts off. */
+                vision_support?: boolean;
+            }[];
         };
         ProviderConnected: {
             connection: components["schemas"]["ProviderConnection"];
@@ -14103,10 +15143,40 @@ export interface components {
              */
             created_at: string;
             /**
-             * @description Server-derived origin class used by the gallery's Generated/Imported filter. `generated` = attached to an assistant message or produced by a generation pipeline (expression grid, portrait); `imported` = uploaded by the user (gallery import, personality upload, user chat message). Omitted when the server could not determine it.
+             * @description Server-derived origin class used by the gallery's Generated/Imported filter. `generated` = attached to an assistant message or produced by a generation pipeline (expression grid, portrait); `imported` = uploaded by the user (gallery import, personality upload, user chat message). Agent-authored files are `generated`. Omitted when the server could not determine it.
              * @enum {string}
              */
             source?: "generated" | "imported";
+            /**
+             * @description Who wrote the file (ADR 0x034, 0x035). `user` = uploads, imports and reply outputs; `agent` = written by an agent's file tools; `skill` = a skill bundle's file under `skills/<slug>/`, read-only and managed in the skill editor. Only `agent` files can be changed by an agent, and only by the personality (or, with none, the thread) that created them. More values may be added, so treat an unknown one like `user`.
+             * @enum {string}
+             */
+            origin?: "user" | "agent" | "skill";
+            /**
+             * Format: uuid
+             * @description For origin "skill", the skill whose bundle the file belongs to.
+             */
+            skill_id?: string;
+            /**
+             * Format: int64
+             * @description Bytes in the stored object, for origin "skill" (counted against the bundle's 30 MB limit).
+             */
+            size_bytes?: number;
+            /**
+             * Format: uuid
+             * @description Personality whose agent created the file (agent-authored files only).
+             */
+            created_by_personality_id?: string;
+            /**
+             * Format: uuid
+             * @description Thread the agent created the file in, when it had no personality (agent-authored files only).
+             */
+            created_by_chat_id?: string;
+            /**
+             * Format: date-time
+             * @description When an agent last changed the file's content. Omitted for files never changed.
+             */
+            updated_at?: string;
         };
         FileAttachmentPersonality: {
             /** Format: uuid */
@@ -14396,6 +15466,21 @@ export interface components {
             message: string;
             active: components["schemas"]["ActivePersonalityMediaJob"];
         };
+        /** @description A file of a skill's bundle (ADR 0x035 §3). */
+        SkillFile: {
+            /** Format: uuid */
+            id: string;
+            /** @description The file's place in the bundle, e.g. `scripts/fill.py`. */
+            path: string;
+            file_type: string;
+            /** @description Its gallery folder, `skills/<slug>/<subdir>`, the path agents read it at. */
+            folder: string;
+            name: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /** Format: date-time */
+            created_at: string;
+        };
         /**
          * @example {
          *       "id": "123e4567-e89b-12d3-a456-426614174000",
@@ -14426,10 +15511,90 @@ export interface components {
             personality_id?: string;
             /** @description MCP servers to enable when this ritual is triggered (omit on update to leave links unchanged). */
             mcp_server_ids?: string[];
+            /** @description The skill's name in the Agent Skills sense (ADR 0x035): 1-64 chars of [a-z0-9-], unique among the account's skills. Omit on create to derive it from `name`; omit on update to keep the stored slug. Taken slugs answer 409. */
+            slug?: string;
+            /** @description SKILL.md `license`. Omit on update to leave unchanged. */
+            license?: string;
+            /** @description SKILL.md `compatibility`, what the skill needs from its environment. Omit on update to leave unchanged. */
+            compatibility?: string;
+            /** @description SKILL.md `metadata`, string to string. Keys starting with `whatiff-` are reserved. Omit on update to leave unchanged. */
+            metadata?: {
+                [key: string]: string;
+            };
+            /** @description SKILL.md `allowed-tools`: tools loaded with the skill when it is activated. Never a permission grant; the thread's disabled tools still win. Omit on update to leave unchanged. */
+            allowed_tools?: string[];
+            /**
+             * @description When true the skill is left out of the model's skills index; only the user, a mode or a job can activate it.
+             * @default false
+             */
+            disable_model_invocation: boolean;
+            /**
+             * @description When false the skill is hidden from the /skill picker and hotkeys (and from `available-rituals`); the model may still load it.
+             * @default true
+             */
+            user_invocable: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description A skill the agent loaded in a thread with load_skill (ADR 0x035). */
+        LoadedSkill: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+            description: string;
+        };
+        RitualImportResult: {
+            ritual: components["schemas"]["Ritual"];
+            /** @description Lenient-parse repairs and import-time substitutions to show the user */
+            warnings: string[];
+            /** @description Bundle files stored under skills/<slug>/ */
+            files_imported: number;
+            /** @description True when a re-import sent only a SKILL.md and the skill's files were left as they were */
+            files_kept: boolean;
+            /** @description Exporter connector names matched to this account's connectors */
+            connectors_linked: string[];
+            /** @description Exporter connector names with no match here */
+            connectors_missing: string[];
+        };
+        /** @description One entity wiki page (ADR 0x034). */
+        AgentEntity: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** @description Normalized lookup key (lowercase, single spaces). */
+            key: string;
+            /** @description The name as first written. */
+            title: string;
+            body: string;
+            /**
+             * Format: uuid
+             * @description Set when only this personality sees the entity; absent for a global entity.
+             */
+            pinned_personality_id?: string;
+            pinned_personality_name?: string;
+            /**
+             * Format: uuid
+             * @description Personality whose agent last wrote it; absent when the user last edited it.
+             */
+            last_personality_id?: string;
+            /**
+             * Format: uuid
+             * @description Conversation that last wrote it; absent when the user last edited it.
+             */
+            last_chat_id?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /**
+             * Format: date-time
+             * @description When an agent deleted (archived) the entity; absent for a live entity.
+             */
+            archived_at?: string;
         };
         /**
          * @example {
@@ -14580,8 +15745,11 @@ export interface components {
             bot_username: string;
             /** @description Whether the application has the privileged Message Content intent on */
             message_content: boolean;
-            /** @enum {string} */
-            status: "active" | "invalid_token" | "disabled";
+            /**
+             * @description invalid_token means Discord rejected the token; intent_disabled means the Gateway refused the Message Content intent (switched off in the Developer Portal). Both stop the bot connecting until a new token or a refresh, and last_error says what to fix.
+             * @enum {string}
+             */
+            status: "active" | "invalid_token" | "intent_disabled" | "disabled";
             last_error?: string;
             /** @description Link that adds the bot to a server with the permissions the relay needs */
             invite_url: string;
@@ -15436,7 +16604,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "connection_name_taken" | "model_name_taken" | "no_model_selected";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**

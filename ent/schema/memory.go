@@ -29,6 +29,10 @@ func (Memory) Fields() []ent.Field {
 		field.UUID("id", uuid.UUID{}).
 			Default(uuid.New).
 			Immutable(),
+		// Backs the owner edge so indexes can lead with it (ent puts plain fields before edge
+		// columns). StorageKey keeps the column ent created for the edge.
+		field.UUID("owner_id", uuid.UUID{}).
+			StorageKey("user_memories"),
 		field.Text("content").
 			NotEmpty().
 			Comment("The actual memory content"),
@@ -85,6 +89,7 @@ func (Memory) Edges() []ent.Edge {
 	return []ent.Edge{
 		edge.From("owner", User.Type).
 			Ref("memories").
+			Field("owner_id").
 			Unique().
 			Required(),
 		edge.From("chat", Chat.Type).
@@ -103,6 +108,12 @@ func (Memory) Indexes() []ent.Index {
 		// can't seek by owner.
 		index.Edges("owner"),
 		index.Edges("owner").Fields("scope"),
+		// Memory list pages: one owner's rows by status, newest first (or recently updated).
+		// The count and the other filters ride on the same range.
+		index.Fields("owner_id", "status", "created_at"),
+		index.Fields("owner_id", "status", "updated_at"),
+		// The chat FK: per-chat listings and chat deletes would otherwise scan the table.
+		index.Edges("chat"),
 		index.Fields("pinned_personality_id"),
 		index.Fields("link_group_id"),
 	}

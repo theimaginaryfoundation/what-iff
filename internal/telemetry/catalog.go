@@ -196,3 +196,12 @@ var FileOperationDuration = Histogram{"whatiff.file.operation.duration", unitSec
 // FileOperationItems is the number of items a heavy operation handled (conversations,
 // memories, chunks...). Attributes: operation, kind, outcome (imported, skipped, failed).
 var FileOperationItems = Histogram{"whatiff.file.operation.items", "{item}", "Items handled per heavy file operation.", BucketsCount}
+
+// ImageResolves counts attachment image reads by the object key that answered. Each key before
+// the one that answered was a storage miss, so source shows how many round trips a read cost.
+// Attributes: variant (thumbnail, full), source (thumbnail, canonical, s3_key, chat, none).
+var ImageResolves = Counter{"whatiff.file.image_resolve", "{read}", "Attachment image reads by the object key that answered."}
+
+// ThumbnailBackfills counts thumbnails written out of band for images found without one.
+// Attributes: outcome (written, failed, dropped, skipped).
+var ThumbnailBackfills = Counter{"whatiff.file.thumbnail_backfill", "{thumbnail}", "Thumbnails backfilled for images that had none."}

@@ -96,6 +96,7 @@ func apply(d plugins.Deps) {
 		Sink:   sink{svc: svc},
 		Dial:   gateway.DiscordgoDialer(logger),
 		Logger: logger,
+		Status: d.DataStore,
 	}
 	go sup.Run(d.Lifecycle)
 	logger.Info("discord relay: routes registered, gateway supervisor started")

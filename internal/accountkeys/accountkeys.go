@@ -203,6 +203,8 @@ func (k *Keys) handleDelete(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, ErrKeyNotFound):
 		handlerutils.RespondWithError(w, k.logger, http.StatusNotFound, handlerutils.CodeNotSet, "No key stored for this provider", nil)
+	case errors.Is(err, providerconnections.ErrDefaultModelInUse):
+		handlerutils.RespondWithError(w, k.logger, http.StatusConflict, models.ErrCodeDefaultModelInUse, err.Error(), nil)
 	case err != nil:
 		handlerutils.RespondWithError(w, k.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to delete provider key", err)
 	default:
