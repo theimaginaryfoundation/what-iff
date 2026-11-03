@@ -21,19 +21,19 @@ The live "Job running" label also could not say which job was running, because t
 
 ## Decision
 
-### 1. A display-only `run_job` tool call opens a job's turn
+### 1. The reply records its job in a saved `run_job` entry
 
-A scheduled run's turn starts with a pseudo tool call, `run_job`, built the way "Load Memory" already is (`memoryEnrichmentToolCallName`).
-It is not a real tool, and the model never sees it.
+A scheduled run's reply carries one extra saved tool-call entry, `run_job`, as the record of where it came from.
 Its input names the job (`agent_job_id`, `title`) and its output is the job's prompt.
+It is not a real tool: the model never calls it or sees it, and the web client never shows it as a tool row (§4).
 
-It is shown live: it is the first row of the turn's tool timeline from the moment the run starts (the ticket's progress), ahead of the memory load.
+It is in the run's live progress from the first write (the ticket's progress), so the chip can name the job from the moment the run starts.
 It is saved with the reply, first among its tool calls (`leadToolCallsForChatContext`).
-So the prompt can be read in the thread, in the same place and form as everything else the turn did.
+Storing it as a tool-call entry needs no schema change, and reuses how a reply's tool calls are already saved, loaded and sent to the client.
 
 ### 2. The prompt still stays out of the thread's history
 
-`toolContextPolicyFor` never carries a `run_job` result into a later turn's context, as for "Load Memory".
+`toolContextPolicyFor` never carries a `run_job` entry into a later turn's context.
 The prompt is in the thread for the user to read, and nowhere the model reads it, so the reasons for keeping it out of history still hold.
 
 ### 3. The job reaches the agent on the run's context
