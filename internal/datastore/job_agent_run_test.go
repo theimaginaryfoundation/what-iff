@@ -184,3 +184,44 @@ func TestGetJob_OmitsAdvancedDraft(t *testing.T) {
 	require.Equal(t, models.JobStatusProcessing, got.Status)
 	require.NotContains(t, jobReadColumns, entjob.FieldDraftAgentRun)
 }
+
+// A scheduled run's partial reply, made from its ticket's Advanced draft, records the job the
+// ticket ran for (ADR 0x040).
+func TestFinalizeFailedChatJobWithPartial_AdvancedDraftKeepsTheJobRun(t *testing.T) {
+	ds, cleanup := newFinalizeChatJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := createJobTestUser(t, ds)
+	chatID := createJobTestChat(t, ds, userID, createJobTestModel(t, ds))
+	created, _ := advancedDraftJob(t, ds, userID)
+	run := modeltypes.JobRun{AgentJobID: uuid.New(), Title: "Weekly meal planning", Prompt: "Plan."}
+	ds.dbClient.Job.UpdateOneID(created.ID).SetJobRun(&run).ExecX(ctx)
+
+	_, resultID, err := ds.FinalizeFailedChatJobWithPartial(ctx, userID, created.ID, chatID, "", "", "Stopped", "", nil)
+	require.NoError(t, err)
+	require.NotNil(t, resultID)
+	msg, err := ds.dbClient.ChatMessage.Get(ctx, *resultID)
+	require.NoError(t, err)
+	require.NotNil(t, msg.JobRun)
+	require.Equal(t, run, *msg.JobRun)
+}
+
+// A scheduled run's ticket keeps its job_run (ADR 0x040).
+func TestCreateJob_JobRunRoundTrips(t *testing.T) {
+	ds, cleanup := newFinalizeChatJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := createJobTestUser(t, ds)
+	run := modeltypes.JobRun{AgentJobID: uuid.New(), Title: "Weekly meal planning", Prompt: "Plan."}
+
+	jobModel := baseJobModel()
+	jobModel.JobType = "agent_job_run"
+	jobModel.JobRun = &run
+	created, err := ds.CreateJob(ctx, userID, jobModel)
+	require.NoError(t, err)
+	got, err := ds.GetJob(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.JobRun)
+	require.Equal(t, run, *got.JobRun)
+
+}

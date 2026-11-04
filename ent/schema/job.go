@@ -51,6 +51,9 @@ func (Job) Fields() []ent.Field {
 		field.JSON("draft_agent_run", &modeltypes.AgentRunDraft{}).
 			Optional().
 			Comment("An Advanced run in progress (ADR 0x026), written at every step boundary so a failed, stopped or interrupted run still becomes a partial message; cleared with the drafts."),
+		field.JSON("job_run", &modeltypes.JobRun{}).
+			Optional().
+			Comment("The agent job a scheduled run's queue ticket (agent_job_run) runs for, with its prompt (ADR 0x040), so a client following the run can name it. NULL on every other job."),
 		field.Text("progress").
 			Optional().
 			Comment("Optional JSON-encoded progress payload for long-running jobs (e.g. chat import imported/skipped/total counts)"),

@@ -650,6 +650,28 @@ func TestBeginEphemeralChatTurn_UntrackedTurnHoldsATicket(t *testing.T) {
 	}
 }
 
+// A scheduled run's ticket records the job it runs for (ADR 0x040), so a client following it can
+// name the job; any other ephemeral turn's ticket names none.
+func TestBeginEphemeralChatTurn_TicketRecordsTheJobRun(t *testing.T) {
+	t.Parallel()
+	store := newFakeChatTurnStore()
+	a := &Agent{logger: zap.NewNop()}
+	a.testHooks.ChatTurnStore = store
+	userID := uuid.New()
+	run := models.JobRun{AgentJobID: uuid.New(), Title: "Weekly meal planning", Prompt: "Plan."}
+
+	end, ticket, err := a.beginEphemeralChatTurn(models.WithJobRun(context.Background(), run), userID, uuid.New(), nil)
+	require.NoError(t, err)
+	defer end(nil)
+	require.NotNil(t, ticket.JobRun)
+	require.Equal(t, run, *ticket.JobRun)
+
+	end2, other, err := a.beginEphemeralChatTurn(context.Background(), userID, uuid.New(), nil)
+	require.NoError(t, err)
+	defer end2(nil)
+	require.Nil(t, other.JobRun)
+}
+
 // A scheduled run has no job row to advance, so it ends its ticket as soon as its reply is saved:
 // the next turn then starts while this run's checkpoint is still going, and the deferred end the
 // run also makes does nothing.

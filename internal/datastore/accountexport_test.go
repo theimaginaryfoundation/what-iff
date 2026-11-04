@@ -45,6 +45,7 @@ func newAccountExportTestDatastore(t *testing.T) *Datastore {
 			generation_expression_reasoning text,
 			model_reasoning text,
 			agent_run json,
+			job_run json,
 			last_error_message text,
 			last_error_code text,
 			checkpoint_completed_at datetime,

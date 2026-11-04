@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/reugn/go-quartz/quartz"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
@@ -95,18 +96,33 @@ func (m *Manager) resolveAgentJobChat(ctx context.Context, userID, agentJobID uu
 // keep the two in sync.
 const ScheduleErrorMarker = "failed to compute next_run_at:"
 
+// StoppedRunText is the last error a run stopped from its thread records.
+const StoppedRunText = "Stopped from its thread before it finished."
+
+// runStopped reports whether a run ended because it was stopped from its thread (ADR 0x039) rather
+// than because it failed. Only the thread's Stop yields agent.ErrTurnStopped; a run cancelled for
+// another reason (a worker shutting down) carries plain context.Canceled and counts as a failure.
+func runStopped(runErr error) bool {
+	return errors.Is(runErr, agent.ErrTurnStopped)
+}
+
 func deriveStatusAndErrorText(job *models.AgentJob, runErr error, scheduleErrText string) (*models.AgentJobStatus, string) {
 	errText := ""
-	if runErr != nil {
+	switch {
+	case runStopped(runErr):
+		errText = StoppedRunText
+	case runErr != nil:
 		errText = providerkeys.FailureText(runErr)
 	}
 
+	// A one-off job is done once it has run. A run the user stopped ends it complete too (there is
+	// no cancelled job status): they chose to stop it, and the jobs page must not call it a failure.
 	var statusUpdate *models.AgentJobStatus
-	if runErr != nil && job != nil && job.ScheduleType == models.AgentJobScheduleTypeAt {
+	if runErr != nil && !runStopped(runErr) && job != nil && job.ScheduleType == models.AgentJobScheduleTypeAt {
 		failed := models.AgentJobStatusFailed
 		statusUpdate = &failed
 	}
-	if runErr == nil && job != nil && job.ScheduleType == models.AgentJobScheduleTypeAt {
+	if (runErr == nil || runStopped(runErr)) && job != nil && job.ScheduleType == models.AgentJobScheduleTypeAt {
 		complete := models.AgentJobStatusComplete
 		statusUpdate = &complete
 	}
@@ -307,17 +323,28 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 	}
 	// The job's reasoning effort and agent loop override the thread and mode for this run (ADR 0x026).
 	execCtx = models.WithJobTurnSettings(execCtx, job.TurnSettingValues)
+	// The reply records which job it came from, and the job's prompt (ADR 0x040).
+	title := ""
+	if job.Title != nil {
+		title = strings.TrimSpace(*job.Title)
+	}
+	execCtx = models.WithJobRun(execCtx, models.JobRun{AgentJobID: agentJobID, Title: title, Prompt: job.Prompt})
 	runStart := time.Now()
 	_, runErr := m.agent.HandleAgentJobPrompt(execCtx, *chatID, job.Prompt, job.ModelID, job.PersonalityID, ritualIDs, nil)
 	runOutcome := runOutcomeRan
-	if runErr != nil {
+	switch {
+	case runStopped(runErr):
+		runOutcome = runOutcomeStopped
+	case runErr != nil:
 		runOutcome = runOutcomeFailed
 	}
 	recordRun(ctx, runOutcome)
 	recordRunDuration(ctx, runOutcome, time.Since(runStart))
 	statusUpdate, errText := deriveStatusAndErrorText(job, runErr, scheduleErrText)
 
-	if runErr != nil {
+	// A run stopped from its thread (ADR 0x039) was the user's choice; the thread already shows
+	// what it got to, and "failed: context canceled" would only mislead.
+	if runErr != nil && !runStopped(runErr) {
 		// Ensure at least one assistant message exists in the job chat.
 		_, _ = m.ds.CreateChatMessage(execCtx, userID, models.ChatMessage{
 			ChatID:  *chatID,

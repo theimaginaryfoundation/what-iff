@@ -12,7 +12,7 @@ import { DraftMessageService } from '../../core/services/draft-message.service';
 import { JobService } from '../../core/services/job.service';
 import { MessageService } from '../../core/services/message.service';
 import { ChatSendGate } from './services/chat-send-gate';
-import { CHAT_JOB_POLL_INTERVAL_MS } from './chat.constants';
+import { CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS, CHAT_JOB_POLL_INTERVAL_MS } from './chat.constants';
 import { Chat } from '../../core/models/chat.model';
 import { ChatMessage } from '../../core/models/message.model';
 import { environment } from '../../../environments/environment';
@@ -305,5 +305,133 @@ describe('ChatSessionService — returning to a thread with a running turn', () 
         noActiveJob('chat-B');
         expect(service.assistantJobPending()).toBe(false);
         http.expectNone(r => r.url.includes('/job/'));
+    });
+
+    describe('a scheduled job\'s run in the open thread (ADR 0x039)', () => {
+        const openWithHistory = () => {
+            service.setActive('chat-B');
+            flushList('chat-B', [
+                userMsg('user-1', 'chat-B', '2026-09-23T10:00:00Z'),
+                assistantMsg('asst-1', 'chat-B', '2026-09-23T10:00:05Z'),
+            ]);
+            noActiveJob('chat-B');
+        };
+        const job = { agent_job_id: 'agent-job-1', title: 'Morning brief', prompt: 'Brief me.' };
+        // The lookup names the agent job a scheduled run is for (ADR 0x040); other chat-keyed runs
+        // (a webhook background run, the welcome) have none.
+        const runLookup = (status = 'processing', jobRun: typeof job | null = job) =>
+            activeJobLookup('chat-B').flush({ job_id: 'run-1', status, job_type: 'agent_job_run', job_run: jobRun });
+        const runSnapshot = (extra: Record<string, unknown>) =>
+            http.expectOne(`${api}/job/run-1`).flush({ id: 'run-1', job_type: 'agent_job_run', reference: 'chat-B', ...extra });
+
+        it('notices a run that starts while the thread is open and streams it as a job', async () => {
+            const messages = TestBed.inject(MessageService);
+            const streaming = TestBed.inject(ChatStreamingService) as unknown as { completeStreaming: ReturnType<typeof vi.fn> };
+            openWithHistory();
+            expect(service.jobRun()).toBeNull();
+
+            // Nothing started yet on the first watch tick; the run starts before the second.
+            await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS);
+            noActiveJob('chat-B');
+            await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS);
+            runLookup();
+
+            expect(service.jobRun()).toEqual({ afterMessageId: 'asst-1', job });
+            expect(service.jobRunActive()).toBe(true);
+            expect(service.composerBusy()).toBe(true);
+            await vi.advanceTimersByTimeAsync(0);
+            runSnapshot({
+                status: 'processing',
+                draft_deltas: ['Good ', 'morning'],
+                progress: JSON.stringify({ tool_calls: [{ id: 'c1', name: 'web_search', status: 'running', round: 0, started_at: 't0' }] }),
+                job_run: job,
+            });
+            expect(service.pendingAssistantDraftText()).toBe('Good morning');
+            expect(service.jobRun()).toEqual({ afterMessageId: 'asst-1', job });
+            expect(service.liveToolCalls().map(c => c.name)).toEqual(['web_search']);
+
+            // The earlier reply is still the newest message: it must not end the run's draft.
+            messages.markAssistantMessagesRead('chat-B');
+            expect(streaming.completeStreaming).not.toHaveBeenCalled();
+            expect(service.pendingAssistantDraftText()).toBe('Good morning');
+
+            // While the run generates, the watch leaves it alone.
+            await vi.advanceTimersByTimeAsync(CHAT_JOB_POLL_INTERVAL_MS);
+            runSnapshot({ status: 'processing', draft_deltas: ['Good ', 'morning'] });
+            http.expectNone(`${api}/chat/chat-B/active-job`);
+
+            // The ticket points at the reply once it is saved, as a user turn's job does.
+            await vi.advanceTimersByTimeAsync(CHAT_JOB_POLL_INTERVAL_MS);
+            runSnapshot({ status: 'complete', result_id: 'asst-2' });
+            http.expectOne(`${api}/chat/chat-message/asst-2`).flush(assistantMsg('asst-2', 'chat-B', '2026-09-23T11:00:00Z'));
+            TestBed.tick();
+
+            expect(messages.getMessages().map(m => m.id)).toEqual(['user-1', 'asst-1', 'asst-2']);
+            expect(streaming.completeStreaming).toHaveBeenCalled();
+            expect(service.jobRun()).toBeNull();
+            expect(service.jobRunActive()).toBe(false);
+            expect(service.assistantJobPending()).toBe(false);
+            expect(service.error()).toBeNull();
+        });
+
+        it('picks a running job up when the thread is opened mid-run', async () => {
+            service.setActive('chat-B');
+            flushList('chat-B', [userMsg('user-1', 'chat-B', '2026-09-23T10:00:00Z')]);
+            runLookup();
+            expect(service.jobRun()).toEqual({ afterMessageId: 'user-1', job });
+            await vi.advanceTimersByTimeAsync(0);
+            runSnapshot({ status: 'processing', draft_deltas: ['On it'] });
+            expect(service.pendingAssistantDraftText()).toBe('On it');
+            expect(service.jobRunActive()).toBe(true);
+        });
+
+        it('follows a run that is no job\'s (a webhook\'s, the welcome) as a plain pending reply', async () => {
+            const messages = TestBed.inject(MessageService);
+            openWithHistory();
+            await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS);
+            runLookup('processing', null);
+
+            // Placed by position like a job's run, but not presented as one.
+            expect(service.jobRun()).toEqual({ afterMessageId: 'asst-1', job: null });
+            expect(service.jobRunActive()).toBe(false);
+            await vi.advanceTimersByTimeAsync(0);
+            runSnapshot({ status: 'processing', draft_deltas: ['Welcome'] });
+            expect(service.pendingAssistantDraftText()).toBe('Welcome');
+
+            await vi.advanceTimersByTimeAsync(CHAT_JOB_POLL_INTERVAL_MS);
+            runSnapshot({ status: 'complete', result_id: 'asst-2' });
+            http.expectOne(`${api}/chat/chat-message/asst-2`).flush(assistantMsg('asst-2', 'chat-B', '2026-09-23T11:00:00Z'));
+            TestBed.tick();
+            expect(messages.getMessages().map(m => m.id)).toEqual(['user-1', 'asst-1', 'asst-2']);
+            expect(service.jobRun()).toBeNull();
+        });
+
+        it('polls a run picked up after it replied as a plain turn', async () => {
+            openWithHistory();
+            await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS);
+            runLookup('inference_complete');
+            expect(service.jobRun()).toBeNull();
+            expect(service.jobRunActive()).toBe(false);
+            await vi.advanceTimersByTimeAsync(0);
+            runSnapshot({ status: 'inference_complete', result_id: 'asst-1' });
+        });
+
+        it('stops watching once the session is destroyed', async () => {
+            openWithHistory();
+            service.ngOnDestroy();
+            await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS * 2);
+            http.expectNone(`${api}/chat/chat-B/active-job`);
+        });
+
+        it('does not watch while the tab is hidden', async () => {
+            openWithHistory();
+            const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+            try {
+                await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS * 2);
+                http.expectNone(`${api}/chat/chat-B/active-job`);
+            } finally {
+                visibility.mockRestore();
+            }
+        });
     });
 });

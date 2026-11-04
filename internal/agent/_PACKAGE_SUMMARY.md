@@ -100,10 +100,16 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
   Waiting polls with backoff (250ms to 2s); a turn in this process finishing (`noteTurnJobStatus`, from the job phase helpers, or the turn's release) wakes that chat's waiters at once (`chatTurnTracker`, keyed per chat).
   Nothing is held while a turn runs: no advisory lock or pinned connection.
   Every queued or running turn heartbeats its job (`TouchJob`, every 30s) until it is released, after its post-processing.
-  A pending or processing job without a write for `chatTurnStaleAfter` (2m) is treated as dead and does not block.
+  A pending or processing job without a write for `chatTurnStaleAfter` (`datastore.TurnJobStaleAfter`, 2m) is treated as dead and does not block; the active-job lookup skips it by the same bound.
   A turn that queues longer than `chatTurnWaitTimeout` (10m, enough for a few long replies; queued turns heartbeat too, so it need not stay below the stale bound) fails with `ErrChatTurnWaitTimeout` instead of running concurrently.
   A queued turn whose job was cancelled meanwhile (Stop on another instance) does not run (`errQueuedTurnCancelled`), and a cancelled queued chat turn is marked cancelled.
   A scheduled run has no job row, so `beginEphemeralChatTurn` creates an `agent_job_run` ticket job (reference = chat id) to hold its place and ends it as soon as the run's reply is saved (`end` is idempotent, so the run's deferred end is a no-op).
+  The ticket stands in for the job a user turn has (ADR 0x039): the run streams its draft, reasoning and tool timeline onto it, and records its reply as the ticket's `result_id` (`inference_complete`, then `complete`), so the web client follows a scheduled run in the open thread like a reply.
+  The thread's Stop reaches the run through its ticket (`stoppableTurnTicket` registers it as a running job and watches its status), until the reply is saved (released before the continuity write); a run stopped mid-call ends cancelled, not failed (`stoppedTurnError`).
+  Only a Stop cancels the run's context with `ErrTurnStopped` as its cause, so a run cut short by its caller's context is never reported as stopped.
+  A scheduled run's context carries its job (`models.JobRun`, set by the scheduler; ADR 0x040).
+  The run's queue ticket and its saved reply both record it (`job_run`, read with `models.JobRunFromContext`), so the web client can name the job, show its prompt and link to it.
+  The context builder never reads it, so the prompt, which is never saved as a message, stays out of later turns.
   `handleUserMessage` owns its job's status, so its release also finishes a job the turn left non-terminal (a lost final status write): complete if it saved a reply (per the worker or the row), else failed, via the conditional `FinishTurnJobIfActive` so a status Stop or the reaper wrote meanwhile is kept.
   On shutdown, `FailInFlightTurns` (called by `server.Shutdown`) finishes this process's in-flight turn jobs: complete if past their reply, else failed.
   `finalizeChat` renames a new chat without writing `response_id`, so the rename never touches the response chain.
@@ -187,7 +193,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   **Live reasoning:** when the adapter implements `provider.ReasoningStreamer`, `runGeneration` wires a second `jobDraftDeltaBuffer` (`newJobDraftReasoningBuffer`) into `Job.draft_reasoning`; its `ResetReasoning` is the stream's `OnReset`, and each text delta flushes the reasoning tail first (buffers flush on the next delta, not a timer).
 - **Stop (thread-wide, multi-instance):** `CancelJob` on a chat job stops every non-terminal chat job in that thread.
   A job whose worker is in this process is cancelled in-process; any other is marked cancelled in the DB, because the API runs more than one instance and a job may be orphaned by a restart.
-  Each chat worker runs `watchChatJobCancel`, polling its status every `chatJobCancelPollInterval` (2s), so a Stop handled by another instance still stops it.
+  Each chat worker runs `watchChatJobCancel`, polling its status every `chatJobCancelPollInterval` (2s), so a Stop handled by another instance still stops it; so do the async `agent_job_run` worker (webhook background runs, the welcome) and a scheduled run's ticket (`stoppableTurnTicket`).
   Other job types keep the in-process-only cancel.
 - **Custom expression candidates:** `EnqueueExpressionCandidatesJob` / `GenerateExpressionCandidates` (`expression_candidates.go`) — same pipeline (`generateExpressionGridCells`) for nine caller-chosen row-major keys (the canvas prompt is built from the keys), but cells are only uploaded as personality-pinned gallery images, **never assigned**; the completed `expression_grid` job's `Progress` (`ExpressionCandidatesProgress`, `mode: "candidates"`) lists `{expression_key, image_id}` and the client assigns keepers via the regular upsert.
   An optional reference image grounds the likeness pass **and** is sent to the image model via `OpenAIProvider.EditImagePNGBase64WithQuality` (images edit endpoint, no mask); a rejected edit falls back to prompt-only generation.
@@ -285,6 +291,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - `message_context_builder_expression_test.go` — prior-turn expression snapshot selection for continuity text.
 - `conversation_summary_test.go`, `scratchpad_test.go`, `memory_test.go`, `postprocessing_policy_test.go` — maintenance prompts and checkpoints.
 - `thread_rehydration_test.go` — imported-thread split at n-5 turns, assistant counting, char-budget chunking, and transcript rendering.
+- `agentjob_run_test.go` — agent-job entry points, plus a scheduled run's ticket being stoppable until its reply is saved (`TestStoppableTurnTicket`) and a stopped run reporting the stop (`TestStoppedTurnError`).
 - `chat_turn_gate_test.go` — turn gate on an in-memory `chatTurnStore` (`agentTestHooks.ChatTurnStore`): waits until the older turn has replied (a turn past `inference_complete` does not block), terminal/stale/newer/other-chat jobs don't block, heartbeats, timeout, cancel (context and job cancelled while queued), per-chat wake, job-order serialization, the waiting note, shutdown finishing, scheduled-run tickets (including ending one at its reply).
 - `checkpoint_claim_test.go` — the per-chat checkpoint claim: skipped while another runs or when the claim fails, released even if the turn's context ended.
 - `checkpoint_window_test.go` — the post-checkpoint history window start (#268): after the reply, before the user message when another message arrived mid-turn, and the fallbacks.

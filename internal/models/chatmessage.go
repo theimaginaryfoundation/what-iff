@@ -95,6 +95,9 @@ type ChatMessage struct {
 	// AgentRun is the structured record of an Advanced-loop turn (steps, plan, end reason; ADR
 	// 0x026). Nil on Standard turns, which keep their reasoning in ModelReasoning.
 	AgentRun *modeltypes.AgentRun `json:"agent_run,omitempty"`
+	// JobRun is the agent job a scheduled run's reply was written for, with the prompt it ran (ADR
+	// 0x040). Display only, like ModelReasoning; nil on every other message.
+	JobRun *modeltypes.JobRun `json:"job_run,omitempty"`
 	// LastErrorMessage is set when async generation failed for this user turn; cleared on successful delivery.
 	LastErrorMessage *string `json:"last_error_message,omitempty"`
 	// LastErrorCode is a stable code for LastErrorMessage when it has one (for
@@ -154,13 +157,22 @@ type ChatMessageResponse struct {
 	Type  string    `json:"type"`
 }
 
-// ActiveChatMessageJobResponse is returned when a non-terminal chat_message job exists for a user turn.
+// ActiveChatMessageJobResponse is returned when a non-terminal turn job exists for a user turn
+// or, from the thread-level lookup, for a chat.
 type ActiveChatMessageJobResponse struct {
 	JobID  uuid.UUID `json:"job_id"`
 	Status JobStatus `json:"status"`
+	// JobType is the kind of turn: chat_message (a user's message) or agent_job_run (a scheduled
+	// job or webhook run). Set by the thread-level lookup (GET /chat/{chatId}/active-job).
+	JobType string `json:"job_type,omitempty"`
 	// MessageID is the user turn the job answers; set by the thread-level lookup
-	// (GET /chat/{chatId}/active-job), where the caller does not already know it.
+	// (GET /chat/{chatId}/active-job), where the caller does not already know it. Absent for a
+	// run with no saved user message (a scheduled job's prompt is never saved).
 	MessageID *uuid.UUID `json:"message_id,omitempty"`
+	// JobRun is the agent job a scheduled run is for (ADR 0x040), from its queue ticket. Only a
+	// scheduled run has one: a webhook background run or the onboarding welcome is a chat-keyed
+	// agent_job_run too, but no job's run, so the client tells them apart by it.
+	JobRun *JobRun `json:"job_run,omitempty"`
 }
 
 // ChatMessageExport is the user-facing export of a chat message

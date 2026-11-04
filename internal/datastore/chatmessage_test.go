@@ -202,6 +202,30 @@ func TestCreateChatMessage_ModelReasoningRoundTrips(t *testing.T) {
 	require.Nil(t, got.ModelReasoning)
 }
 
+// A scheduled run's reply keeps the job it ran for (ADR 0x040); other replies have none.
+func TestCreateChatMessage_JobRunRoundTrips(t *testing.T) {
+	ds, cleanup := newChatMessageTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createCMTestUser(t, ds)
+	chatID := createCMTestChat(t, ds, userID, createCMTestModel(t, ds))
+	run := models.JobRun{AgentJobID: uuid.New(), Title: "Weekly meal planning", Prompt: "Plan."}
+
+	created, err := ds.CreateChatMessage(ctx, userID, models.ChatMessage{ChatID: chatID, Message: "reply", Origin: models.MessageOriginAssistant, JobRun: &run})
+	require.NoError(t, err)
+	got, err := ds.GetChatMessage(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.JobRun)
+	require.Equal(t, run, *got.JobRun)
+
+	plain, err := ds.CreateChatMessage(ctx, userID, models.ChatMessage{ChatID: chatID, Message: "reply", Origin: models.MessageOriginAssistant})
+	require.NoError(t, err)
+	got, err = ds.GetChatMessage(ctx, userID, plain.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.JobRun)
+}
+
 func TestCreateChatMessage_ChatNotFound(t *testing.T) {
 	ds, cleanup := newChatMessageTestDatastore(t)
 	defer cleanup()

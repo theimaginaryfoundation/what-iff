@@ -150,6 +150,10 @@ let nextPreviewId = 0;
         <div class="composer__thread-notice" role="status">{{ notice }}</div>
       }
 
+      @if (busyNotice(); as notice) {
+        <div class="composer__thread-notice composer__busy-notice" role="status">{{ notice }}</div>
+      }
+
       <app-thread-ref-chips
         [threads]="threadReferences()"
         (removed)="threadReferenceRemoved.emit($event)"
@@ -756,6 +760,11 @@ let nextPreviewId = 0;
       font-weight: 600;
       padding: 0.25rem 0.625rem;
       width: fit-content;
+    }
+
+    .composer__busy-notice {
+      font-weight: 500;
+      max-width: 100%;
     }
 
     .composer__skill-chip-remove {
@@ -1382,6 +1391,8 @@ export class ChatComposerComponent {
    * composed ahead, but sending and every other control stay locked until it clears.
    */
   readonly busy = input(false);
+  /** Why the composer is busy when the reply in flight is not one to the user (a job's run). */
+  readonly busyNotice = input<string | null>(null);
   /** When false while {@link disabled} is true, user can still change model (e.g. switch to a free-tier model). */
   readonly modelPickerDisabled = input(false);
   readonly threadArchived = input(false);

@@ -10934,8 +10934,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Active job for a chat
-         * @description Returns the newest non-terminal chat_message job for any user turn in this chat, if any, with the user message it answers. Lets a client returning to a thread resume a running turn without first deciding which user message is unanswered.
+         * Active turn job for a chat
+         * @description Returns the turn job a client showing this chat should follow, if any: a user's turn (chat_message) or a scheduled job's or webhook's run (agent_job_run). That is the oldest turn still before its reply (the one generating now; later turns queue behind it), or, once every live turn has replied, the newest still in its post-inference phases. Lets a client returning to or watching a thread resume a running turn without first deciding which user message is unanswered. Poll the job (GET /job/{id}) for its live draft and tool timeline. See ADR 0x039.
          */
         get: {
             parameters: {
@@ -14197,6 +14197,8 @@ export interface components {
             draft_deltas?: string[];
             /** @description Incremental model reasoning chunks emitted while inference is in progress (z.ai GLM, Xiaomi MiMo, and OpenAI/Anthropic when a reasoning effort is selected). On an Advanced turn it carries everything the model writes before its final reply, with step headers, and the final reply streams here too until it is saved as the message (whose agent_run then holds the notes by step). Display-only. Unlike draft_deltas this can be reset (emptied and re-sent) when a truncated call is retried, so clients should render the whole array on each poll rather than appending by cursor. */
             draft_reasoning?: string[];
+            /** @description On a scheduled run's queue ticket (`agent_job_run` keyed by the chat), the agent job it runs for and its prompt (ADR 0x040). Absent on every other job. */
+            job_run?: components["schemas"]["JobRun"] | null;
             /**
              * @description Optional JSON-encoded progress payload for long-running jobs. Opaque to clients except per
              *     job_type. For `chat_import` it is `{phase, source, total, imported, skipped}`; for
@@ -14631,6 +14633,8 @@ export interface components {
             model_reasoning?: string | null;
             /** @description The Advanced run (ADR 0x026) that produced this assistant message: its working notes per step, its plan and why it ended. The message text is the run's final reply. Absent on Standard turns. */
             agent_run?: components["schemas"]["AgentRun"] | null;
+            /** @description The agent job a scheduled run's reply was written for, with the prompt it ran (ADR 0x040). Display-only; never replayed to the model. Absent on every other message. */
+            job_run?: components["schemas"]["JobRun"] | null;
             /** @description User-visible async generation failure for this user turn; cleared after a successful reply */
             last_error_message?: string | null;
             /** @description Stable code for last_error_message when it has one (a specific ErrorCode such as `provider_not_configured`); set and cleared with it. */
@@ -14657,6 +14661,15 @@ export interface components {
             cacheable: boolean;
             /** @description Image payloads carried by this kind (token estimates do not account for images). */
             images?: number;
+        };
+        /** @description The agent job a scheduled run is for (ADR 0x040), recorded on its reply and, while it runs, on its queue ticket. */
+        JobRun: {
+            /** Format: uuid */
+            agent_job_id: string;
+            /** @description The job's title when it ran; absent for an untitled job. */
+            title?: string;
+            /** @description The job's prompt as it ran. It is never saved as a message. */
+            prompt?: string;
         };
         /** @description A saved Advanced run (ADR 0x026). Readers branch on version and must skip event kinds and render other enum-like values they do not know, rather than reject the message. */
         AgentRun: {
@@ -14766,10 +14779,17 @@ export interface components {
             /** @enum {string} */
             status?: "pending" | "processing" | "inference_complete" | "expression_complete" | "compaction_complete" | "complete" | "cancelled" | "failed";
             /**
+             * @description The kind of turn. chat_message answers a user's message; agent_job_run is a scheduled job's or webhook's run. Set by GET /chat/{chatId}/active-job.
+             * @enum {string}
+             */
+            job_type?: "chat_message" | "agent_job_run";
+            /**
              * Format: uuid
-             * @description The user turn this job answers. Set by GET /chat/{chatId}/active-job.
+             * @description The user turn this job answers. Set by GET /chat/{chatId}/active-job; absent for a run that answers no saved message (a scheduled job's prompt is never saved).
              */
             message_id?: string;
+            /** @description The agent job a scheduled run is for (ADR 0x040). Set by GET /chat/{chatId}/active-job for a scheduled run only: a webhook background run or the onboarding welcome is an agent_job_run with no message_id too, but has none. */
+            job_run?: components["schemas"]["JobRun"];
         };
         /**
          * @description A model provider.

@@ -63,5 +63,5 @@ type Store interface {
 	GetUserByID(ctx context.Context, userID uuid.UUID) (*models.UserResponse, error)
 
 	FindLatestActiveChatMessageJob(ctx context.Context, userID, userMessageID uuid.UUID) (*models.Job, error)
-	FindLatestActiveChatJob(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error)
+	FindActiveTurnJobForChat(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error)
 }

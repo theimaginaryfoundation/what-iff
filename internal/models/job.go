@@ -41,7 +41,10 @@ type Job struct {
 	DraftReasoning []string `json:"draft_reasoning,omitempty"`
 	// Progress is an optional JSON-encoded payload for long-running jobs (e.g. chat import counts).
 	// Clients should treat it as opaque and parse per job_type.
-	Progress  string    `json:"progress,omitempty"`
+	Progress string `json:"progress,omitempty"`
+	// JobRun is the agent job a scheduled run's queue ticket runs for, with its prompt (ADR 0x040);
+	// nil on every other job.
+	JobRun    *JobRun   `json:"job_run,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

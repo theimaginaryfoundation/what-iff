@@ -444,6 +444,9 @@ func (a *Agent) registerRunningJobCancel(jobID, userID uuid.UUID, cancel context
 		return
 	}
 	a.runningJobCancelsMu.Lock()
+	if a.runningJobCancels == nil { // an Agent built without New (tests)
+		a.runningJobCancels = make(map[uuid.UUID]runningJobCancel)
+	}
 	a.runningJobCancels[jobID] = runningJobCancel{userID: userID, cancel: cancel}
 	a.runningJobCancelsMu.Unlock()
 }
@@ -2700,13 +2703,15 @@ func isTruncationStopReason(stopReason string) bool {
 // result.Reasoning).
 func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID, result *provider.GenerateResponse, toolCalls []*models.ToolCall, generatedAttachments []*models.FileAttachment, generationModel string, generationPersonality string, generationMoodID *uuid.UUID, agentRun *models.AgentRun) (*models.ChatMessage, error) {
 	agentMessage, err := a.ds.CreateChatMessage(ctx, userID, models.ChatMessage{
-		ChatID:                chatID,
-		Message:               result.Text,
-		Origin:                models.MessageOriginAssistant,
-		ResponseID:            &result.ID,
-		Tokens:                result.OutputTokens,
-		ModelReasoning:        nonEmptyStringPtr(result.Reasoning),
-		AgentRun:              agentRun,
+		ChatID:         chatID,
+		Message:        result.Text,
+		Origin:         models.MessageOriginAssistant,
+		ResponseID:     &result.ID,
+		Tokens:         result.OutputTokens,
+		ModelReasoning: nonEmptyStringPtr(result.Reasoning),
+		AgentRun:       agentRun,
+		// A scheduled run's reply records its job (ADR 0x040); nil on every other turn.
+		JobRun:                models.JobRunFromContext(ctx),
 		GenerationModel:       generationModel,
 		GenerationPersonality: generationPersonality,
 		GenerationMoodID:      generationMoodID,

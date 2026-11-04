@@ -1,3 +1,4 @@
+import { DOCUMENT } from '@angular/common';
 import { Injectable, OnDestroy, Signal, WritableSignal, computed, effect, inject, isDevMode, signal, untracked } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Subscription, finalize } from 'rxjs';
@@ -18,6 +19,7 @@ import { AgentLoop, ReasoningEffort, TurnSettingValues, TurnSettingsPatch } from
 import { apiErrorMessage } from '../../core/utils/api-error.helpers';
 import {
   AUTOSAVE_DEBOUNCE_MS,
+  CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS,
   CODE_BLOCK_CHUNK_SIZE,
   MESSAGE_JUMP_PAGE_SIZE,
   MESSAGE_LIST_PAGE_SIZE,
@@ -40,6 +42,7 @@ export class ChatSessionService implements OnDestroy {
   private readonly draftService = inject(DraftMessageService);
   private readonly jobService = inject(JobService);
   private readonly sendGate = inject(ChatSendGate);
+  private readonly document = inject(DOCUMENT);
 
   private readonly _thread = signal<Chat | null>(null);
   private readonly _model = signal<Model | null>(null);
@@ -72,6 +75,8 @@ export class ChatSessionService implements OnDestroy {
     activeThreadId: () => this.activeThreadId,
     reportError: message => this._error.set(message),
     onJobSettled: chatId => this.refreshThread(chatId),
+    watchIntervalMs: CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS,
+    canWatch: () => this.document.visibilityState !== 'hidden' && !this._loading(),
   });
   /**
    * A tab-return sync that arrived while this tab's reply was still landing. Replayed once that
@@ -103,6 +108,10 @@ export class ChatSessionService implements OnDestroy {
   readonly composerBusy = computed(() => this.isGenerating());
   /** True while a chat_message job is in flight (after send) but not yet finished. */
   readonly assistantJobPending = this.turn.jobPending;
+  /** The scheduled job's (or webhook's) run being followed in this thread, or null (ADR 0x039). */
+  readonly jobRun = this.turn.jobRun;
+  /** True while that run is generating: the composer says so instead of just holding the send. */
+  readonly jobRunActive = this.turn.jobRunActive;
   readonly hasMoreOlderMessages = signal(false);
   readonly loadingOlderMessages = signal(false);
   private readonly _contextCheckpointToken = signal(0);

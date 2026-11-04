@@ -442,6 +442,16 @@ describe('ChatComposerComponent', () => {
             fixture.detectChanges();
         });
 
+        it('says why it is busy when told, and nothing otherwise', () => {
+            expect(fixture.nativeElement.querySelector('.composer__busy-notice')).toBeNull();
+            fixture.componentRef.setInput('busyNotice', 'A job is replying in this thread.');
+            fixture.detectChanges();
+            const notice: HTMLElement = fixture.nativeElement.querySelector('.composer__busy-notice');
+            expect(notice.textContent).toContain('A job is replying in this thread.');
+            expect(notice.getAttribute('role')).toBe('status');
+            expect(fixture.nativeElement.querySelector('.composer__stop')).not.toBeNull();
+        });
+
         it('keeps the textarea focusable and editable', () => {
             expect(textarea().disabled).toBe(false);
             textarea().focus();

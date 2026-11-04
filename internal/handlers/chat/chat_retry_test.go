@@ -124,7 +124,7 @@ type activeChatJobStoreStub struct {
 	gotUser uuid.UUID
 }
 
-func (s *activeChatJobStoreStub) FindLatestActiveChatJob(_ context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
+func (s *activeChatJobStoreStub) FindActiveTurnJobForChat(_ context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
 	s.gotUser, s.gotChat = userID, chatID
 	return s.job, s.err
 }
@@ -147,14 +147,41 @@ func TestGetActiveChatJob(t *testing.T) {
 	t.Run("running turn returns job and its user message", func(t *testing.T) {
 		t.Parallel()
 		userID, chatID, jobID, msgID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
-		store := &activeChatJobStoreStub{job: &models.Job{ID: jobID, Status: models.JobStatusProcessing, Reference: msgID.String()}}
+		store := &activeChatJobStoreStub{job: &models.Job{ID: jobID, JobType: "chat_message", Status: models.JobStatusProcessing, Reference: msgID.String()}}
 
 		rec := serveActiveChatJob(t, store, chatID.String(), userID)
 
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		require.Equal(t, chatID, store.gotChat)
 		require.Equal(t, userID, store.gotUser)
-		require.JSONEq(t, `{"job_id":"`+jobID.String()+`","status":"processing","message_id":"`+msgID.String()+`"}`, rec.Body.String())
+		require.JSONEq(t, `{"job_id":"`+jobID.String()+`","status":"processing","job_type":"chat_message","message_id":"`+msgID.String()+`"}`, rec.Body.String())
+	})
+
+	t.Run("scheduled run keyed by the chat answers no message and names its job", func(t *testing.T) {
+		t.Parallel()
+		userID, chatID, jobID, agentJobID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		store := &activeChatJobStoreStub{job: &models.Job{
+			ID: jobID, JobType: "agent_job_run", Status: models.JobStatusProcessing, Reference: chatID.String(),
+			JobRun: &models.JobRun{AgentJobID: agentJobID, Title: "Morning tea", Prompt: "Suggest a tea."},
+		}}
+
+		rec := serveActiveChatJob(t, store, chatID.String(), userID)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.JSONEq(t, `{"job_id":"`+jobID.String()+`","status":"processing","job_type":"agent_job_run",`+
+			`"job_run":{"agent_job_id":"`+agentJobID.String()+`","title":"Morning tea","prompt":"Suggest a tea."}}`, rec.Body.String())
+	})
+
+	// A webhook background run or the welcome is keyed by the chat too, but is no job's run.
+	t.Run("chat-keyed run with no job has no job_run", func(t *testing.T) {
+		t.Parallel()
+		userID, chatID, jobID := uuid.New(), uuid.New(), uuid.New()
+		store := &activeChatJobStoreStub{job: &models.Job{ID: jobID, JobType: "agent_job_run", Status: models.JobStatusProcessing, Reference: chatID.String()}}
+
+		rec := serveActiveChatJob(t, store, chatID.String(), userID)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.JSONEq(t, `{"job_id":"`+jobID.String()+`","status":"processing","job_type":"agent_job_run"}`, rec.Body.String())
 	})
 
 	t.Run("nothing in flight is 204", func(t *testing.T) {

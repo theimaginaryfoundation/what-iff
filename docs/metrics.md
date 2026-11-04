@@ -170,7 +170,7 @@ Notes on these metrics:
 
 | Metric | Type | Buckets | Attributes |
 |---|---|---|---|
-| `whatiff.scheduler.runs` | counter | — | `outcome` (ran, failed, skipped_overlap, skipped_inactive, skipped_congestion, deferred, load_failed, chat_resolve_failed, misfire) |
+| `whatiff.scheduler.runs` | counter | — | `outcome` (ran, failed, stopped, skipped_overlap, skipped_inactive, skipped_congestion, deferred, load_failed, chat_resolve_failed, misfire) |
 | `whatiff.scheduler.run.duration` | histogram, s | job | `outcome` (ran, failed) |
 | `whatiff.scheduler.lateness` | histogram, s | job | |
 

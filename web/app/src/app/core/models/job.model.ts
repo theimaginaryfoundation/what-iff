@@ -1,3 +1,5 @@
+import { JobRun } from './message.model';
+
 export type JobStatus =
   | 'pending'
   | 'processing'
@@ -26,6 +28,8 @@ export interface Job {
    * For `chat_import` this decodes to {@link ChatImportProgress}.
    */
   progress?: string;
+  /** On a scheduled run's queue ticket, the agent job it runs for and its prompt (ADR 0x040). */
+  job_run?: JobRun | null;
   /**
    * Incremental assistant text chunks emitted while inference is still in progress.
    */
@@ -107,6 +111,16 @@ export interface JobFilters {
 export interface ActiveChatMessageJob {
   job_id: string;
   status: JobStatus;
-  /** The user turn the job answers (set by the thread-level lookup). */
+  /**
+   * The kind of turn (set by the thread-level lookup): `chat_message` answers a user's message,
+   * `agent_job_run` is a scheduled job's or webhook's run (ADR 0x039).
+   */
+  job_type?: 'chat_message' | 'agent_job_run';
+  /** The user turn the job answers (set by the thread-level lookup); absent for a job's run. */
   message_id?: string;
+  /**
+   * The agent job a scheduled run is for (ADR 0x040). Only a scheduled run has one: a webhook
+   * background run or the onboarding welcome is a chat-keyed `agent_job_run` too.
+   */
+  job_run?: JobRun | null;
 }

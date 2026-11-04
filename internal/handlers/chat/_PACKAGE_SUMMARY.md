@@ -33,8 +33,9 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
   `POST /chat/{id}/rehydrate` (`RehydrateChat`) starts it explicitly for the post-import picker.
   The claim is atomic, so repeated opens start one job.
   The frontend's post-import picker reuses this path: selecting threads simply PATCHes `archived=false` on each, so no dedicated "prepare" endpoint exists.
-- **Resuming a running turn:** `GET /chat/{chatId}/active-job` (`GetActiveChatJob`) returns the newest non-terminal `chat_message` job for any user turn in the chat, plus the `message_id` it answers (204 when idle).
-  The web client calls it whenever it (re)enters a thread, since job polls are scoped to the active thread and this is how a turn that kept running while the user was elsewhere gets its typing placeholder back.
+- **Resuming a running turn:** `GET /chat/{chatId}/active-job` (`GetActiveChatJob`) returns the turn job to follow in the chat (`datastore.FindActiveTurnJobForChat`), with its `job_type`, the `message_id` it answers, and for a scheduled run its `job_run` (ADR 0x040; a webhook background run or the welcome has none) (204 when idle).
+  That is a user's turn (`chat_message`) or a scheduled job's or webhook's run (`agent_job_run`); a run keyed by the chat id answers no saved message, so it has no `message_id` (ADR 0x039).
+  The web client calls it whenever it (re)enters a thread and every few seconds while an idle thread is open, since job polls are scoped to the active thread and nothing pushes a new turn to the client.
   The older per-message `.../chat-message/{messageId}/active-job` remains for callers that already know the turn.
 - **`MessageAgent` interface:** Decouples `CreateChatMessage` from concrete `*agent.Agent` for tests.
 - **`WelcomeMessageAgent` interface:** Decouples welcome-message async prompt enqueueing from concrete `*agent.Agent`.
@@ -64,6 +65,7 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 ## Testing
 
 - `update_patch_test.go`, `mark_read_test.go`, `export_test.go`, `free_tier_quota_test.go`, `chatmessage_quota_test.go` — HTTP and quota behavior (including list `archived` query parsing and PATCH `archived`).
+- `chat_retry_test.go` covers `GetActiveChatJob`: a user turn with its message, a scheduled run with no message and its `job_run`, a chat-keyed run with no `job_run`, 204, 400 and 500.
 - `welcome_message_test.go` covers onboarding welcome endpoint eligibility and job enqueue behavior.
 - `import_metrics_test.go` checks the chat import job outcome (including a timed-out run), stage timings, payload size and item counts.
 - `import_test.go` exercises the async import pipeline end-to-end (202 handoff, OpenAI + Anthropic happy paths, terminal job status on datastore failure); `import_unit_test.go` and `anthropic_import_test.go` cover the parsers and format detection.

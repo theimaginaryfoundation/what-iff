@@ -7132,11 +7132,15 @@ paths:
 
   /chat/{chatId}/active-job:
     get:
-      summary: Active job for a chat
+      summary: Active turn job for a chat
       description: >-
-        Returns the newest non-terminal chat_message job for any user turn in this chat, if
-        any, with the user message it answers. Lets a client returning to a thread resume a
-        running turn without first deciding which user message is unanswered.
+        Returns the turn job a client showing this chat should follow, if any: a user's turn
+        (chat_message) or a scheduled job's or webhook's run (agent_job_run). That is the
+        oldest turn still before its reply (the one generating now; later turns queue behind
+        it), or, once every live turn has replied, the newest still in its post-inference
+        phases. Lets a client returning to or watching a thread resume a running turn without
+        first deciding which user message is unanswered. Poll the job (GET /job/{id}) for its
+        live draft and tool timeline. See ADR 0x039.
       tags: [Chat Messages]
       parameters:
         - name: chatId
@@ -9980,6 +9984,13 @@ components:
             array on each poll rather than appending by cursor.
           items:
             type: string
+        job_run:
+          allOf:
+            - $ref: '#/components/schemas/JobRun'
+          nullable: true
+          description: >-
+            On a scheduled run's queue ticket (`agent_job_run` keyed by the chat), the agent job it
+            runs for and its prompt (ADR 0x040). Absent on every other job.
         progress:
           type: string
           description: |
@@ -10729,6 +10740,13 @@ components:
             The Advanced run (ADR 0x026) that produced this assistant message: its working notes per
             step, its plan and why it ended. The message text is the run's final reply. Absent on
             Standard turns.
+        job_run:
+          allOf:
+            - $ref: '#/components/schemas/JobRun'
+          nullable: true
+          description: >-
+            The agent job a scheduled run's reply was written for, with the prompt it ran (ADR 0x040).
+            Display-only; never replayed to the model. Absent on every other message.
         last_error_message:
           type: string
           nullable: true
@@ -10792,6 +10810,22 @@ components:
           description: Image payloads carried by this kind (token estimates do not account for images).
       required: [kind, segments, tokens, cacheable]
 
+    JobRun:
+      type: object
+      description: >-
+        The agent job a scheduled run is for (ADR 0x040), recorded on its reply and, while it runs,
+        on its queue ticket.
+      required: [agent_job_id]
+      properties:
+        agent_job_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          description: The job's title when it ran; absent for an untitled job.
+        prompt:
+          type: string
+          description: The job's prompt as it ran. It is never saved as a message.
     AgentRun:
       type: object
       description: >-
@@ -10969,10 +11003,25 @@ components:
         status:
           type: string
           enum: [pending, processing, inference_complete, expression_complete, compaction_complete, complete, cancelled, failed]
+        job_type:
+          type: string
+          enum: [chat_message, agent_job_run]
+          description: >-
+            The kind of turn. chat_message answers a user's message; agent_job_run is a
+            scheduled job's or webhook's run. Set by GET /chat/{chatId}/active-job.
         message_id:
           type: string
           format: uuid
-          description: The user turn this job answers. Set by GET /chat/{chatId}/active-job.
+          description: >-
+            The user turn this job answers. Set by GET /chat/{chatId}/active-job; absent for a
+            run that answers no saved message (a scheduled job's prompt is never saved).
+        job_run:
+          allOf:
+            - $ref: '#/components/schemas/JobRun'
+          description: >-
+            The agent job a scheduled run is for (ADR 0x040). Set by GET /chat/{chatId}/active-job
+            for a scheduled run only: a webhook background run or the onboarding welcome is an
+            agent_job_run with no message_id too, but has none.
 
     ModelProvider:
       type: string

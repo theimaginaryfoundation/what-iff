@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 )
@@ -103,5 +105,39 @@ func TestDeriveStatusAndErrorText_MissingKeyIsStatedPlainly(t *testing.T) {
 	_, errText := deriveStatusAndErrorText(&job, runErr, "")
 	if errText != "No OpenAI API key is set." {
 		t.Fatalf("expected the missing key stated plainly, got %q", errText)
+	}
+}
+
+// A run stopped from its thread records that it was stopped, not the cancellation error. A run
+// cancelled for another reason (a worker shutting down) is still a failure.
+func TestDeriveStatusAndErrorText_StoppedRun(t *testing.T) {
+	job := models.AgentJob{ScheduleType: models.AgentJobScheduleTypeCron, Status: models.AgentJobStatusActive}
+	runErr := fmt.Errorf("%w: OpenAI API call failed", agent.ErrTurnStopped)
+
+	status, errText := deriveStatusAndErrorText(&job, runErr, "")
+	if status != nil {
+		t.Fatalf("expected a recurring job's status unchanged, got %v", *status)
+	}
+	if errText != StoppedRunText {
+		t.Fatalf("expected the stop recorded plainly, got %q", errText)
+	}
+
+	_, errText = deriveStatusAndErrorText(&job, fmt.Errorf("OpenAI API call failed: %w", context.Canceled), "")
+	if errText == StoppedRunText {
+		t.Fatal("a run cancelled without a Stop must not be recorded as stopped")
+	}
+
+	// A stopped one-off job is done, not failed; one cancelled without a Stop still fails.
+	oneOff := models.AgentJob{ScheduleType: models.AgentJobScheduleTypeAt, Status: models.AgentJobStatusActive}
+	status, errText = deriveStatusAndErrorText(&oneOff, runErr, "")
+	if status == nil || *status != models.AgentJobStatusComplete {
+		t.Fatalf("expected a stopped one-off job complete, got %v", status)
+	}
+	if errText != StoppedRunText {
+		t.Fatalf("expected the stop recorded plainly, got %q", errText)
+	}
+	status, _ = deriveStatusAndErrorText(&oneOff, fmt.Errorf("OpenAI API call failed: %w", context.Canceled), "")
+	if status == nil || *status != models.AgentJobStatusFailed {
+		t.Fatalf("expected a one-off job cancelled without a Stop failed, got %v", status)
 	}
 }

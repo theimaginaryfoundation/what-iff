@@ -38,6 +38,7 @@ import {
   appendPendingAssistantGroup,
   groupMessages,
   lastUserTurnWithGenerationError,
+  needsJobRunPlaceholder,
   needsPendingAssistantPlaceholder,
   pendingAssistantPlaceholderMessage,
 } from './helpers/message-grouping.helpers';
@@ -61,7 +62,7 @@ import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { BrainIconComponent, ChevDownIconComponent, EditIconComponent, FileIconComponent, LayersIconComponent, NoteIconComponent, WrenchIconComponent, XIconComponent } from '../../shared/ui/icons/icons';
 import { thumbnailCircleToCirclePreviewTransform } from '../../shared/ui/avatar/avatar-thumbnail.helpers';
 import { personalityAccent, personalityAccentSurface } from '../personality/helpers/personality-vm.helpers';
-import { chatTurnWaitingLabel } from './assistant-turn';
+import { JOB_RUN_COMPOSER_NOTICE, JOB_RUN_PENDING_LABEL, chatTurnWaitingLabel } from './assistant-turn';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from './chat.constants';
 import { HOTKEY_RITUALS_LIMIT, HOTKEY_SEQUENCE_TIMEOUT } from '../../core/constants/app.constants';
 import { parseHotkey, normalizeKey } from '../../core/utils/hotkey.utils';
@@ -127,13 +128,19 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   private readonly scratchpad = inject(ScratchpadService);
 
   readonly models = toSignal(this.modelService.models$, { initialValue: [] });
+  /** What the composer says while a scheduled job's run holds the thread (ADR 0x039), else null. */
+  readonly composerBusyNotice = computed(() => (this.session.jobRunActive() ? JOB_RUN_COMPOSER_NOTICE : null));
   readonly groups = computed(() => {
     const messages = this.session.messages();
     let grouped = groupMessages(messages);
     const threadId = this.session.thread()?.id;
+    const jobRun = this.session.jobRun();
+    const jobPending = this.session.assistantJobPending();
     if (
       threadId &&
-      needsPendingAssistantPlaceholder(messages, this.session.assistantJobPending())
+      (jobRun
+        ? needsJobRunPlaceholder(messages, jobPending, jobRun.afterMessageId)
+        : needsPendingAssistantPlaceholder(messages, jobPending))
     ) {
       const name =
         this.selectedPersonalityName()?.trim() || this.session.thread()?.personality_name?.trim() || 'Assistant';
@@ -143,6 +150,8 @@ export class ChatPageComponent implements OnInit, OnDestroy {
         draftText: this.session.pendingAssistantDraftText(),
         draftReasoning: this.session.pendingAssistantDraftReasoning(),
         pendingStatus: waiting ? chatTurnWaitingLabel(waiting) : undefined,
+        pendingLabel: jobRun?.job ? JOB_RUN_PENDING_LABEL : undefined,
+        jobRun: jobRun?.job ?? null,
         generationPersonality: name,
         thinkingImageUrl: this.selectedPersonality()?.expressions_enabled === false
           ? null

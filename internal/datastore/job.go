@@ -43,6 +43,7 @@ func toJobModel(e *ent.Job) *models.Job {
 		DraftDeltas:    append([]string(nil), e.DraftDeltas...),
 		DraftReasoning: append([]string(nil), e.DraftReasoning...),
 		Progress:       e.Progress,
+		JobRun:         e.JobRun,
 		CreatedAt:      e.CreatedAt,
 		UpdatedAt:      e.UpdatedAt,
 	}
@@ -86,6 +87,10 @@ func (d *Datastore) CreateJob(ctx context.Context, userID uuid.UUID, jobModel mo
 
 	if jobModel.Progress != "" {
 		jobCreate.SetProgress(jobModel.Progress)
+	}
+
+	if jobModel.JobRun != nil {
+		jobCreate.SetJobRun(jobModel.JobRun)
 	}
 
 	entJob, err := jobCreate.Save(ctx)
@@ -673,7 +678,7 @@ func (d *Datastore) finalizeChatJobWithPartial(
 	if entJob.DraftAgentRun != nil {
 		// An Advanced run (ADR 0x026) keeps everything it wrote in its structured draft.
 		resultID, err = d.consumeDraftAgentRunToMessageTx(ctx, tx, chatID, jobID, entJob.DraftAgentRun, terminalStatus,
-			generationModel, generationPersonality, generationMoodID)
+			generationModel, generationPersonality, generationMoodID, entJob.JobRun)
 	} else {
 		resultID, err = d.consumeDraftDeltasToMessageTx(
 			ctx, tx, chatID, partialText, partialReasoning, generationModel, generationPersonality, generationMoodID,
@@ -735,7 +740,7 @@ func (d *Datastore) finalizeTerminalPartialIdempotentTx(ctx context.Context, tx 
 	resultID := entJob.ResultID
 	if resultID == nil && entJob.DraftAgentRun != nil {
 		id, err := d.consumeDraftAgentRunToMessageTx(ctx, tx, chatID, entJob.ID, entJob.DraftAgentRun, entJob.Status,
-			generationModel, generationPersonality, generationMoodID)
+			generationModel, generationPersonality, generationMoodID, entJob.JobRun)
 		if err != nil {
 			return nil, err
 		}
@@ -1036,20 +1041,60 @@ func (d *Datastore) FindLatestActiveChatMessageJob(ctx context.Context, userID, 
 	return toJobModel(j), nil
 }
 
-// activeChatJobScanLimit bounds how many of a user's in-flight chat_message jobs
-// FindLatestActiveChatJob inspects; a user rarely has more than a handful at once.
-const activeChatJobScanLimit = 50
-
-// FindLatestActiveChatJob returns the newest non-terminal chat_message job whose user turn
-// belongs to chatID, if any. Unlike FindLatestActiveChatMessageJob it needs no message id, so a
-// client returning to a thread can find a running turn without first deciding which user
-// message is "unanswered". The job's Reference is the user message id.
-func (d *Datastore) FindLatestActiveChatJob(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
-	jobs, err := d.activeChatJobsForChat(ctx, userID, chatID)
-	if err != nil || len(jobs) == 0 {
+// FindActiveTurnJobForChat returns the turn job (chat_message or agent_job_run, see turnJobTypes)
+// a client showing chatID should follow, or nil when none is in flight. That is the oldest live
+// turn still before its reply (pending or processing): the one generating now, since the turn gate
+// runs a chat's turns in job order, with any later ones queued behind it. A turn without a write
+// for TurnJobStaleAfter is skipped, as the gate skips it: its worker died, and a ticket it left
+// behind must not pin the thread. When every live turn has replied, it is the newest one still in
+// its post-inference phases. Unlike
+// FindLatestActiveChatMessageJob it needs no message id, so a client returning to a thread, or
+// watching one, finds a running turn whoever started it: the user, a scheduled job (keyed by the
+// chat id), a webhook. A chat_message job's Reference is the user message id.
+func (d *Datastore) FindActiveTurnJobForChat(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
+	// The generating turn is found the way the turn gate finds the turns ahead of a new one
+	// (ListPendingTurnJobsForChat, then blockingTurnJobs): oldest first, skipping stale ones, so
+	// the two agree on it.
+	generating, err := d.activeTurnJobsInChat(ctx, userID, chatID, true)
+	if err != nil {
 		return nil, err
 	}
-	return toJobModel(jobs[0]), nil
+	if len(generating) > 0 {
+		return toJobModel(generating[0]), nil
+	}
+	// Post-inference turns are scanned newest first, so ones a dead worker left behind age out of
+	// the scan instead of crowding out the turn that just replied.
+	replied, err := d.activeTurnJobsInChat(ctx, userID, chatID, false)
+	if err != nil || len(replied) == 0 {
+		return nil, err
+	}
+	return toJobModel(replied[0]), nil
+}
+
+// activeTurnJobsInChat returns chatID's turn jobs among the user's turnJobScanLimit non-terminal
+// ones: those before their reply (pending or processing) and written within TurnJobStaleAfter,
+// oldest first, or those in their post-inference phases newest first. The status filter keeps the
+// read on the status index.
+func (d *Datastore) activeTurnJobsInChat(ctx context.Context, userID, chatID uuid.UUID, beforeReply bool) ([]*ent.Job, error) {
+	where := []predicate.Job{job.JobTypeIn(turnJobTypes...), ownedByUser(userID)}
+	order := []job.OrderOption{job.ByCreatedAt(sql.OrderDesc()), job.ByID(sql.OrderDesc())}
+	if beforeReply {
+		where = append(where, job.StatusIn(job.StatusPending, job.StatusProcessing),
+			job.UpdatedAtGTE(time.Now().Add(-TurnJobStaleAfter)))
+		order = []job.OrderOption{job.ByCreatedAt(), job.ByID()}
+	} else {
+		where = append(where, job.StatusIn(job.StatusInferenceComplete, job.StatusExpressionComplete, job.StatusCompactionComplete))
+	}
+	candidates, err := d.dbClient.Job.Query().
+		Where(where...).
+		Order(order...).
+		Limit(turnJobScanLimit).
+		WithOwner().
+		All(ctx)
+	if err != nil || len(candidates) == 0 {
+		return nil, err
+	}
+	return d.turnJobsInChat(ctx, userID, chatID, candidates)
 }
 
 // ListActiveChatJobIDsForChat returns the ids of every non-terminal turn job in chatID (chat_message
@@ -1080,57 +1125,6 @@ func (d *Datastore) ListActiveChatJobIDsForChat(ctx context.Context, userID, cha
 	return ids, nil
 }
 
-// activeChatJobsForChat returns the user's non-terminal chat_message jobs whose user turn is in
-// chatID, newest first. The job's Reference is the user message id.
-func (d *Datastore) activeChatJobsForChat(ctx context.Context, userID, chatID uuid.UUID) ([]*ent.Job, error) {
-	jobs, err := d.dbClient.Job.Query().
-		Where(
-			job.HasOwnerWith(user.ID(userID)),
-			job.JobTypeEQ("chat_message"),
-			job.StatusNotIn(job.StatusComplete, job.StatusCancelled, job.StatusFailed),
-		).
-		Order(job.ByCreatedAt(sql.OrderDesc())).
-		Limit(activeChatJobScanLimit).
-		WithOwner().
-		All(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if len(jobs) == 0 {
-		return nil, nil
-	}
-
-	refs := make([]uuid.UUID, 0, len(jobs))
-	for _, j := range jobs {
-		if id, err := uuid.Parse(j.Reference); err == nil {
-			refs = append(refs, id)
-		}
-	}
-	if len(refs) == 0 {
-		return nil, nil
-	}
-	inChat, err := d.dbClient.ChatMessage.Query().
-		Where(
-			entchatmessage.IDIn(refs...),
-			entchatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))),
-		).
-		IDs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	inChatSet := make(map[string]struct{}, len(inChat))
-	for _, id := range inChat {
-		inChatSet[id.String()] = struct{}{}
-	}
-	out := make([]*ent.Job, 0, len(inChat))
-	for _, j := range jobs {
-		if _, ok := inChatSet[j.Reference]; ok {
-			out = append(out, j)
-		}
-	}
-	return out, nil
-}
-
 // Turn jobs are the jobs that run a chat turn: chat_message (Reference = the user message id) and
 // agent_job_run (Reference = the chat id for webhook background and scheduled runs, or the user
 // message id for the sync path).
@@ -1138,6 +1132,12 @@ var turnJobTypes = []string{"chat_message", "agent_job_run"}
 
 // turnJobScanLimit bounds how many of a user's turn jobs one turn-job query inspects.
 const turnJobScanLimit = 100
+
+// TurnJobStaleAfter is how long a pending or processing turn job may go without a write before
+// its worker is taken as dead: four missed heartbeats (every live turn heartbeats its job row,
+// queued or running). The chat turn gate stops waiting on such a job, and FindActiveTurnJobForChat
+// skips it.
+const TurnJobStaleAfter = 2 * time.Minute
 
 // ownedByUser filters jobs on the owner foreign key column directly, rather than through the
 // users-table subquery HasOwnerWith builds.

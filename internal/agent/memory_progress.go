@@ -26,7 +26,8 @@ const (
 // Retrieval that finds nothing removes the row again, matching the saved reply, which has none.
 //
 // Writes are synchronous but bounded and best-effort: progress is cosmetic and never fails the
-// turn. Nil-safe: paths without a chat job (agent-job runs, tests) pass nil and record nothing.
+// turn. Nil-safe: paths without a job to report to (tests, a turn with no turn gate) pass nil and
+// record nothing.
 type memoryLoadProgress struct {
 	ds     jobProgressWriter
 	logger *zap.Logger

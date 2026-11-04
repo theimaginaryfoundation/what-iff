@@ -61,6 +61,9 @@ func (ChatMessage) Fields() []ent.Field {
 		field.JSON("agent_run", &modeltypes.AgentRun{}).
 			Optional().
 			Comment("Structured record of an Advanced-loop turn (ADR 0x026): its steps, plan and end reason. Display and continuation only; NULL on Standard turns."),
+		field.JSON("job_run", &modeltypes.JobRun{}).
+			Optional().
+			Comment("The agent job a scheduled run's reply was written for, with the prompt it ran (ADR 0x040). Display only: never replayed into model context. NULL on every other message."),
 		field.Text("last_error_message").
 			Optional().
 			Nillable().

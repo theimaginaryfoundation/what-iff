@@ -1,5 +1,5 @@
 import { ChatMessage } from '../../../core/models/message.model';
-import { appendLiveToolCallGroup, appendPendingAssistantGroup, groupMessages, lastUserTurnWithGenerationError, needsPendingAssistantPlaceholder, pendingAssistantPlaceholderMessage, } from './message-grouping.helpers';
+import { appendLiveToolCallGroup, appendPendingAssistantGroup, groupMessages, lastUserTurnWithGenerationError, needsJobRunPlaceholder, needsPendingAssistantPlaceholder, pendingAssistantPlaceholderMessage, } from './message-grouping.helpers';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../chat.constants';
 
 describe('groupMessages', () => {
@@ -161,6 +161,26 @@ describe('needsPendingAssistantPlaceholder', () => {
     });
 });
 
+describe('needsJobRunPlaceholder', () => {
+    const history = [message('1', 'User'), message('2', 'Assistant')];
+
+    it('shows a run after an earlier reply, which the user-turn rule would hide', () => {
+        expect(needsPendingAssistantPlaceholder(history, true)).toBe(false);
+        expect(needsJobRunPlaceholder(history, true, '2')).toBe(true);
+    });
+
+    it('is false once the run\'s reply lands after the anchor, or when nothing is pending', () => {
+        expect(needsJobRunPlaceholder([...history, message('3', 'Assistant')], true, '2')).toBe(false);
+        expect(needsJobRunPlaceholder(history, false, '2')).toBe(false);
+    });
+
+    it('treats an empty thread or an anchor no longer loaded as "any reply"', () => {
+        expect(needsJobRunPlaceholder([], true, null)).toBe(true);
+        expect(needsJobRunPlaceholder(history, true, null)).toBe(false);
+        expect(needsJobRunPlaceholder(history, true, 'gone')).toBe(false);
+    });
+});
+
 describe('appendPendingAssistantGroup', () => {
     it('appends a single-assistant message group', () => {
         const pending = pendingAssistantPlaceholderMessage({
@@ -191,6 +211,18 @@ describe('appendPendingAssistantGroup', () => {
         });
         expect(queued.pending_status).toBe('Waiting for the previous reply…');
         expect(pending.pending_status).toBeUndefined();
+
+        const run = { agent_job_id: 'job-1', title: 'Weekly meal planning', prompt: 'Plan.' };
+        const jobRun = pendingAssistantPlaceholderMessage({
+            chatId: 'chat-1',
+            draftText: '',
+            pendingLabel: 'Job running',
+            jobRun: run,
+            generationPersonality: 'Kai',
+            thinkingImageUrl: null,
+        });
+        expect(jobRun.job_run).toEqual(run);
+        expect(pending.job_run).toBeUndefined();
 
         const extended = appendPendingAssistantGroup([], pending);
         expect(extended.length).toBe(1);
