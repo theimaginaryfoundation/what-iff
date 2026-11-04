@@ -7,6 +7,7 @@ import { BulkAction, BulkActionBarComponent } from '../../../shared/ui/bulk-acti
 import { isGalleryDrag } from '../helpers/gallery-dnd.helpers';
 import { moveDestinations } from '../helpers/gallery-folder.helpers';
 import { GalleryMoveModalComponent } from './gallery-move-modal.component';
+import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 
 /**
  * The folder controls above the gallery grid or list: where you are, a new-folder form, the flat
@@ -16,7 +17,7 @@ import { GalleryMoveModalComponent } from './gallery-move-modal.component';
 @Component({
   selector: 'app-gallery-folder-tools',
   standalone: true,
-  imports: [BulkActionBarComponent, FormsModule, GalleryMoveModalComponent],
+  imports: [CheckboxComponent, BulkActionBarComponent, FormsModule, GalleryMoveModalComponent],
   templateUrl: './gallery-folder-tools.component.html',
   styleUrl: './gallery-folder-tools.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

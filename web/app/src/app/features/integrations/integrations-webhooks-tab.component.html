@@ -110,12 +110,11 @@
         <div class="space-y-2">
           @for (option of scopeOptions; track option.scope) {
             <label class="flex items-start gap-2 text-sm text-gray-900 dark:text-white">
-              <input
-                type="checkbox"
-                class="mt-0.5 rounded border-gray-300 dark:border-gray-600"
-                [attr.data-testid]="'webhook-scope-' + option.scope"
+              <ui-checkbox
+                class="mt-0.5"
+                [testId]="'webhook-scope-' + option.scope"
                 [checked]="isScopeSelected(option.scope)"
-                (change)="toggleScope(option.scope, $any($event.target).checked)" />
+                (checkedChange)="toggleScope(option.scope, $event)" />
               <span>
                 <span class="font-medium">{{ option.label }}</span>
                 <span class="block text-xs text-gray-600 dark:text-gray-400">{{ option.description }}</span>

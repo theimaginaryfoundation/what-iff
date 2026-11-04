@@ -5,6 +5,11 @@ alwaysApply: false
 ---
 # Personal Assistant UI Guidelines
 
+> **Read first: [`web/app/docs/ui-style-standards.md`](../../web/app/docs/ui-style-standards.md).**
+> It overrides the generic Tailwind/Flowbite examples below. Use the `shared/ui` primitives and theme tokens:
+> `ui-checkbox` for every checkbox (never a bare or Tailwind-styled `<input type="checkbox">`),
+> `ui-data-table` + `ui-bulk-action-bar` for tables with selection, and the other `ui-*` components before rolling your own.
+
 ## Project Overview
 The Personal Assistant UI is built with Angular and follows modern best practices for scalable frontend applications. It interfaces with the Personal Assistant API to provide a user-friendly interface for content creation and management.
 

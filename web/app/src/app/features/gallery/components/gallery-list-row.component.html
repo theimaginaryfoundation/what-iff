@@ -26,12 +26,11 @@
 } @else if (tile(); as tile) {
   <tr class="list-row" [class.list-row--selected]="checked()">
     <td class="list-row__select-cell">
-      <input
-        type="checkbox"
-        class="list-row__select"
+      <ui-checkbox
+        inputClass="list-row__select"
         [checked]="checked()"
         (change)="toggleSelect.emit(tile.id)"
-        [attr.aria-label]="'Select ' + noun() + ' ' + tile.name"
+        [ariaLabel]="'Select ' + noun() + ' ' + tile.name"
       />
     </td>
     <td class="list-row__name-cell">

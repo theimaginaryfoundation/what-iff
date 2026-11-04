@@ -719,6 +719,17 @@ describe('MemoriesListTabComponent selection and bulk toolbar', () => {
     expect(view.setAllSelected).toHaveBeenCalledWith(false);
   });
 
+  it('shows the select-all checkbox as mixed while only some memories are selected', async () => {
+    const view = makeViewService({
+      selectedIds: ['m-1'],
+      memories: [SAMPLE_MEMORY, { ...SAMPLE_MEMORY, id: 'm-2' }],
+    });
+    const { fixture } = await createComponent({ view });
+    const checkbox = (fixture.nativeElement as HTMLElement).querySelector('.memories-list__checkbox') as HTMLInputElement;
+    expect(checkbox.indeterminate).toBe(true);
+    expect(checkbox.checked).toBe(false);
+  });
+
   it('hides the bulk toolbar when nothing is selected', async () => {
     const { fixture } = await createComponent();
     expect((fixture.nativeElement as HTMLElement).querySelector('.memories-list__bulk')).toBeNull();

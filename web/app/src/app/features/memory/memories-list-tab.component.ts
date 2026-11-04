@@ -28,6 +28,7 @@ import { EntityListComponent } from './components/entity-list.component';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { CalendarIconComponent, ChevDownIconComponent, SearchIconComponent } from '../../shared/ui/icons/icons';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 /** Matches memories-list-tab SCSS: rail beside list at >960px, modal below. */
 const DESKTOP_FOCUS_QUERY = '(min-width: 961px)';
@@ -36,6 +37,7 @@ const DESKTOP_FOCUS_QUERY = '(min-width: 961px)';
   selector: 'app-memories-list-tab',
   standalone: true,
   imports: [
+    CheckboxComponent,
     FormsModule,
     MemoryCardGridComponent,
     MemoryFocusPanelComponent,

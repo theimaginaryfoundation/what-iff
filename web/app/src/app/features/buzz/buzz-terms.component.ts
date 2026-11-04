@@ -4,6 +4,7 @@ import { MarkdownModule } from 'ngx-markdown';
 
 import { BuzzJoinPolicy, BuzzTermsAcceptance } from './buzz.service';
 import { BUZZ_UI } from './buzz-ui';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 /**
  * A community's join terms, shown when claiming an invite needs them accepted for the persona
@@ -13,7 +14,7 @@ import { BUZZ_UI } from './buzz-ui';
 @Component({
   selector: 'app-buzz-terms',
   standalone: true,
-  imports: [FormsModule, MarkdownModule],
+  imports: [CheckboxComponent, FormsModule, MarkdownModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -44,24 +45,12 @@ import { BUZZ_UI } from './buzz-ui';
         </details>
       }
       <label class="mt-3 flex items-start gap-2 text-gray-800 dark:text-gray-200">
-        <input
-          type="checkbox"
-          class="mt-0.5"
-          [ngModel]="accepted()"
-          (ngModelChange)="accepted.set($event)"
-          data-testid="buzz-terms-accept"
-        />
+        <ui-checkbox class="mt-0.5" [ngModel]="accepted()" (ngModelChange)="accepted.set($event)" testId="buzz-terms-accept" />
         <span>I accept these terms on behalf of {{ personaName() }}</span>
       </label>
       @if (policy().age_attestation_required) {
         <label class="mt-2 flex items-start gap-2 text-gray-800 dark:text-gray-200">
-          <input
-            type="checkbox"
-            class="mt-0.5"
-            [ngModel]="ageConfirmed()"
-            (ngModelChange)="ageConfirmed.set($event)"
-            data-testid="buzz-terms-age"
-          />
+          <ui-checkbox class="mt-0.5" [ngModel]="ageConfirmed()" (ngModelChange)="ageConfirmed.set($event)" testId="buzz-terms-age" />
           <span>I confirm I meet this community's age requirement</span>
         </label>
       }

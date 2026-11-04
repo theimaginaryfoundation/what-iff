@@ -13,11 +13,12 @@ import { MCPServer } from '../../core/models/mcp-server.model';
 import { NULL_PERSONALITY_ID } from '../../core/constants/app.constants';
 import { parseHotkeyKeys, formatKeyForDisplay } from '../../core/utils/hotkey.utils';
 import { filenameFromContentDisposition, saveBlobAsFile } from '../../core/utils/download.helpers';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 @Component({
   selector: 'app-ritual-detail',
   standalone: true,
-  imports: [FormsModule, HotkeyInputComponent],
+  imports: [CheckboxComponent, FormsModule, HotkeyInputComponent],
   templateUrl: './ritual-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./ritual-detail.component.scss']

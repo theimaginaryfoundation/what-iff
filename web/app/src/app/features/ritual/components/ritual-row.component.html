@@ -1,11 +1,10 @@
 <article class="rounded-xl border border-border-base bg-surface-card p-3 md:p-4">
   <div class="flex items-start justify-between gap-3">
     <div class="flex items-start gap-2">
-      <input
+      <ui-checkbox
         class="mt-1"
-        type="checkbox"
         [checked]="selected()"
-        [attr.aria-label]="'Select ' + ritual().name"
+        [ariaLabel]="'Select ' + ritual().name"
         (change)="toggleSelected.emit(ritual().id)" />
       <div class="space-y-1">
         <div class="flex flex-wrap items-center gap-2">

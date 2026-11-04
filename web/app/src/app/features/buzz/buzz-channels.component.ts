@@ -9,6 +9,7 @@ import { RelayIdChipsComponent } from '../relay/relay-id-chips.component';
 import { BUZZ_EMPTY_ALLOW_NOTE, BUZZ_PUBKEYS, BUZZ_UNRESTRICTED_WARNING, BuzzChannel, BuzzCommunity, BuzzService } from './buzz.service';
 import { BuzzTabState } from './buzz-tab.state';
 import { BUZZ_UI } from './buzz-ui';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 /**
  * A community's channels, to connect one to a relay thread: channels the persona is in can be
@@ -18,7 +19,7 @@ import { BUZZ_UI } from './buzz-ui';
 @Component({
   selector: 'app-buzz-channels',
   standalone: true,
-  imports: [FormsModule, RelayIdChipsComponent],
+  imports: [CheckboxComponent, FormsModule, RelayIdChipsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (!open()) {
@@ -117,13 +118,7 @@ import { BUZZ_UI } from './buzz-ui';
                         other people can read them. Sandboxing the thread first is safer.
                       </p>
                       <label class="mt-2 flex items-start gap-2">
-                        <input
-                          type="checkbox"
-                          class="mt-0.5"
-                          [ngModel]="ack()"
-                          (ngModelChange)="ack.set($event)"
-                          data-testid="buzz-ack-unrestricted"
-                        />
+                        <ui-checkbox class="mt-0.5" [ngModel]="ack()" (ngModelChange)="ack.set($event)" testId="buzz-ack-unrestricted" />
                         <span>I understand: {{ unrestrictedWarning }}</span>
                       </label>
                     </div>

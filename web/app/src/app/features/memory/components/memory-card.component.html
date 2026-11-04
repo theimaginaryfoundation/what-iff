@@ -8,12 +8,11 @@
 >
   @if (!readOnly()) {
     <label class="memory-card__check" (click)="$event.stopPropagation()">
-      <input
-        type="checkbox"
-        class="memory-card__checkbox"
+      <ui-checkbox
+        inputClass="memory-card__checkbox"
         [checked]="selected()"
         (change)="onToggleSelect($event)"
-        [attr.aria-label]="'Select memory'"
+        ariaLabel="Select memory"
       />
     </label>
   }

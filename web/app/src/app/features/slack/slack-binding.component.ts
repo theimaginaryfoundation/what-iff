@@ -11,6 +11,7 @@ import { RELAY_TONE_CLASS, RELAY_UI } from '../relay/relay-ui';
 import { SLACK_USER_IDS, SlackBinding, SlackService, UpdateSlackBindingRequest, slackBindingLabel } from './slack.service';
 import { SlackTabState } from './slack-tab.state';
 import { slackStatusClass } from './slack-ui';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 /** Editable access lists (Slack member ids) for one binding, until saved. */
 interface AccessDraft {
@@ -27,7 +28,7 @@ type BindingFlag = 'allow_unrestricted' | 'inbound_enabled' | 'answer_agents';
 @Component({
   selector: 'app-slack-binding',
   standalone: true,
-  imports: [DatePipe, RouterLink, RelayIdChipsComponent],
+  imports: [CheckboxComponent, DatePipe, RouterLink, RelayIdChipsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let b = binding();
@@ -64,13 +65,12 @@ type BindingFlag = 'allow_unrestricted' | 'inbound_enabled' | 'answer_agents';
           }
           @if (b.chat_sandboxed === false) {
             <label class="mt-2 flex max-w-xl items-start gap-2 text-xs text-amber-900 dark:text-amber-200">
-              <input
-                type="checkbox"
+              <ui-checkbox
                 class="mt-0.5"
                 [checked]="b.allow_unrestricted"
                 [disabled]="state.busy()"
                 (change)="setFlag('allow_unrestricted', $any($event.target))"
-                data-testid="slack-binding-ack"
+                testId="slack-binding-ack"
               />
               <span>This thread is not sandboxed. {{ unrestrictedWarning }} Until this is ticked, mentions here are not answered.</span>
             </label>
@@ -78,12 +78,11 @@ type BindingFlag = 'allow_unrestricted' | 'inbound_enabled' | 'answer_agents';
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <label class="inline-flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
-            <input
-              type="checkbox"
+            <ui-checkbox
               [checked]="b.inbound_enabled"
               [disabled]="state.busy()"
               (change)="setFlag('inbound_enabled', $any($event.target))"
-              data-testid="slack-binding-inbound"
+              testId="slack-binding-inbound"
             />
             Answer when mentioned
           </label>
@@ -104,13 +103,12 @@ type BindingFlag = 'allow_unrestricted' | 'inbound_enabled' | 'answer_agents';
         </div>
       </div>
       <label class="mt-2 flex max-w-xl items-start gap-2 text-xs text-gray-700 dark:text-gray-300">
-        <input
-          type="checkbox"
+        <ui-checkbox
           class="mt-0.5"
           [checked]="b.answer_agents"
           [disabled]="state.busy()"
           (change)="setFlag('answer_agents', $any($event.target))"
-          data-testid="slack-binding-agents"
+          testId="slack-binding-agents"
         />
         <span>
           Answer other apps' bots
@@ -198,7 +196,11 @@ export class SlackBindingComponent {
     this.edited.set({ ...this.draft(), [key]: ids });
   }
 
-  /** Saves one of the binding's switches, putting the box back when the save fails (saveCheckbox). */
+  /**
+   * Saves one of the binding's switches, putting the box back when the save fails (saveCheckbox).
+   * box is the `<ui-checkbox>`'s inner input: its (change) re-emits the native event, so
+   * `$event.target` is that input, not the component.
+   */
   async setFlag(key: BindingFlag, box: HTMLInputElement): Promise<void> {
     await saveCheckbox(box, on => this.update({ [key]: on }));
   }

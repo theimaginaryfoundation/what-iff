@@ -1,7 +1,9 @@
 import { Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 
 import { SelectionState } from '../helpers/selection-model';
+import { CheckboxComponent } from '../checkbox/checkbox.component';
 import { DataTableComponent } from './data-table.component';
 
 @Component({
@@ -13,6 +15,7 @@ import { DataTableComponent } from './data-table.component';
       [messageTone]="tone()"
       [selectAllState]="state()"
       selectAllLabel="Select all rows"
+      selectAllTooltip="Select every row shown"
       bodyLabel="Rows"
       (selectAllChange)="toggles = toggles + 1"
     >
@@ -67,6 +70,12 @@ describe('DataTableComponent', () => {
 
     box.click();
     expect(host.toggles).toBe(1);
+  });
+
+  it('passes the select-all tooltip to the shared checkbox', () => {
+    const { fixture } = setup();
+    const checkbox = fixture.debugElement.query(By.directive(CheckboxComponent)).componentInstance as CheckboxComponent;
+    expect(checkbox.tooltip()).toBe('Select every row shown');
   });
 
   it('shows a message instead of the table, as an alert when it is an error', () => {

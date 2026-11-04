@@ -279,7 +279,7 @@
       }
       <div class="flex items-center gap-1">
         <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-          <input [ngModel]="formDefaultEnabled()" (ngModelChange)="formDefaultEnabled.set($event)" type="checkbox" class="rounded border-gray-300 dark:border-gray-600" />
+          <ui-checkbox [ngModel]="formDefaultEnabled()" (ngModelChange)="formDefaultEnabled.set($event)" />
           Enabled by default in new threads
         </label>
         <ui-help-hint label="What does enabled by default do?" heading="Enabled by default" guide="connectors" guideLabel="Read the connectors guide" align="end">
@@ -297,12 +297,10 @@
           <div class="max-h-40 overflow-y-auto space-y-1 rounded-lg border border-gray-200 dark:border-gray-600 p-2 bg-gray-50 dark:bg-gray-900/40">
             @for (r of rituals(); track r) {
               <label class="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  class="rounded border-gray-300 dark:border-gray-600"
+                <ui-checkbox
                   [checked]="isRitualSelected(r.id)"
-                  (change)="toggleRitual(r.id, $any($event.target).checked)"
-                  />
+                  (checkedChange)="toggleRitual(r.id, $event)"
+                />
                 <span>{{ r.name }}</span>
               </label>
             }

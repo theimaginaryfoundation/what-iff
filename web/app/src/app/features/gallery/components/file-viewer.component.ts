@@ -41,6 +41,7 @@ import {
 import { galleryDisplayBaseName, galleryFilenameFromBaseName } from '../helpers/gallery-filename.helpers';
 import { folderLabel } from '../helpers/gallery-folder.helpers';
 import { formatSource, sourceForImage } from '../helpers/image-source.helpers';
+import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -54,6 +55,7 @@ type LoadState = 'idle' | 'loading' | 'ready' | 'error';
   selector: 'app-file-viewer',
   standalone: true,
   imports: [
+    CheckboxComponent,
     DatePipe,
     RouterLink,
     MarkdownModule,

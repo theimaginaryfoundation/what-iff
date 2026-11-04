@@ -6,6 +6,7 @@ import { TrashIconComponent } from '../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import { FolderTileVm } from '../helpers/gallery-folder.helpers';
 import { GalleryTileVm } from '../helpers/gallery-vm.helpers';
+import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 
 /**
  * One row of the gallery's list view, in the shared data table (the Thread Manager's): a file with
@@ -15,7 +16,7 @@ import { GalleryTileVm } from '../helpers/gallery-vm.helpers';
 @Component({
   selector: 'app-gallery-list-row',
   standalone: true,
-  imports: [AsyncPipe, AuthImagePipe, DatePipe, TooltipDirective, TrashIconComponent],
+  imports: [CheckboxComponent, AsyncPipe, AuthImagePipe, DatePipe, TooltipDirective, TrashIconComponent],
   templateUrl: './gallery-list-row.component.html',
   styleUrl: './gallery-list-row.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

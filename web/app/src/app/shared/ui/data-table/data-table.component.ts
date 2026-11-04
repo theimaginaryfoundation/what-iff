@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 
 import { SelectionState } from '../helpers/selection-model';
-import { TooltipDirective } from '../tooltip/tooltip.directive';
+import { CheckboxComponent } from '../checkbox/checkbox.component';
 
 /**
  * The bordered table the Thread Manager and the gallery list view share: a select-all checkbox
@@ -15,7 +15,7 @@ import { TooltipDirective } from '../tooltip/tooltip.directive';
 @Component({
   selector: 'ui-data-table',
   standalone: true,
-  imports: [TooltipDirective],
+  imports: [CheckboxComponent],
   templateUrl: './data-table.component.html',
   styleUrl: './data-table.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -3,11 +3,12 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 
 import { Chat } from '../../../../core/models/chat.model';
 import { relativeTimeCompact } from './chat-import-modal.utils';
+import { CheckboxComponent } from '../../../../shared/ui/checkbox/checkbox.component';
 
 @Component({
   selector: 'app-chat-import-picker',
   standalone: true,
-  imports: [],
+  imports: [CheckboxComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="import__picker">
@@ -27,9 +28,8 @@ import { relativeTimeCompact } from './chat-import-modal.utils';
           @for (chat of candidates(); track chat.id; let i = $index) {
             <li>
               <label class="import__picker-row" [class.import__picker-row--on]="isSelected(chat.id)" [class.import__picker-row--disabled]="!isSelected(chat.id) && atSelectionLimit()">
-                <input
-                  type="checkbox"
-                  class="import__picker-check"
+                <ui-checkbox
+                  inputClass="import__picker-check"
                   [checked]="isSelected(chat.id)"
                   [disabled]="!isSelected(chat.id) && atSelectionLimit()"
                   (change)="toggle.emit(chat.id)"
@@ -68,7 +68,6 @@ import { relativeTimeCompact } from './chat-import-modal.utils';
     .import__picker-row:hover { border-color: var(--color-border-base); }
     .import__picker-row--on { background: color-mix(in srgb, var(--color-accent) 12%, transparent); border-color: var(--color-accent); }
     .import__picker-row--disabled { cursor: not-allowed; opacity: 0.5; }
-    .import__picker-check { accent-color: var(--color-accent); flex: none; height: 1rem; width: 1rem; }
     .import__picker-info { display: flex; flex-direction: column; gap: 0.0625rem; min-width: 0; flex: 1; }
     .import__picker-name { color: var(--color-text-primary); font-size: 0.8125rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .import__picker-meta { color: var(--color-text-muted); font-size: 0.6875rem; }

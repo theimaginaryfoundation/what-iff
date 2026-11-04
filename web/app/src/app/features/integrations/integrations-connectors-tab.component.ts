@@ -16,11 +16,12 @@ import {
 } from '../../core/models/mcp-server.model';
 import { Ritual } from '../../core/models/ritual.model';
 import { EntityMarketplaceOutletComponent } from '../../extensions/entity-marketplace-outlet.component';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 @Component({
   selector: 'app-integrations-connectors-tab',
   standalone: true,
-  imports: [CommonModule, FormsModule, HelpHintComponent, TooltipDirective, EntityMarketplaceOutletComponent],
+  imports: [CheckboxComponent, CommonModule, FormsModule, HelpHintComponent, TooltipDirective, EntityMarketplaceOutletComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './integrations-connectors-tab.component.html'
 })
