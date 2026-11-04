@@ -1,10 +1,12 @@
 /*
  * Design note: this component deliberately implements a lightweight popover by hand rather than
  * using an overlay library (e.g. CDK Overlay). The panel is an absolutely positioned child of the
- * trigger's wrapper; `document:click` outside the host and `document:keydown.escape` close it
- * (Escape also returns focus to the trigger); each instance gets a random `panelId` so
- * `aria-controls` and the radio-group names stay unique when several pickers render; and the panel
- * is a `role="dialog"` the trigger announces via `aria-haspopup="dialog"` / `aria-expanded`.
+ * trigger's wrapper; a click outside the host (seen in the capture phase by `listenForOutsideClick`,
+ * so the composer's `stopPropagation()` on its textarea and controls row can't hide it) and
+ * `document:keydown.escape` close it (Escape also returns focus to the trigger); each instance gets
+ * a random `panelId` so `aria-controls` and the radio-group names stay unique when several pickers
+ * render; and the panel is a `role="dialog"` the trigger announces via `aria-haspopup="dialog"` /
+ * `aria-expanded`.
  * It keeps the composer free of an overlay dependency for one small menu. If this ever needs
  * viewport-aware repositioning, scroll handling or a focus trap, move it onto CDK Overlay and keep
  * these behaviours (outside click, Escape + focus return, unique ids, dialog semantics).
@@ -27,6 +29,7 @@ import {
   reasoningEffortOptions,
   resolveEffectiveTurnSettings,
 } from '../../../../core/models/turn-settings.model';
+import { listenForOutsideClick } from '../../../../shared/ui/helpers/outside-click.helpers';
 import { BrainIconComponent } from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 import { MODE_SINGULAR } from '../../../mood/mode-ui.labels';
@@ -295,6 +298,10 @@ export type TurnSettingsMode = TurnSettingValues & { name: string };
 export class TurnSettingsPickerComponent {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
+  constructor() {
+    listenForOutsideClick(() => this.open.set(false));
+  }
+
   /** The thread's own values (what the popover edits). */
   readonly threadReasoningEffort = input<ReasoningEffort | null>(null);
   readonly threadAgentLoop = input<AgentLoop | null>(null);
@@ -416,12 +423,6 @@ export class TurnSettingsPickerComponent {
 
   pickLoop(loop: AgentLoop | null): void {
     this.agentLoopChange.emit(loop);
-  }
-
-  @HostListener('document:click', ['$event'])
-  onDocumentClick(event: Event): void {
-    const target = event.target;
-    if (target instanceof Node && !this.host.nativeElement.contains(target)) this.open.set(false);
   }
 
   @HostListener('document:keydown.escape')

@@ -11,6 +11,7 @@ export * from './helpers/body-scroll-lock.helpers';
 export * from './helpers/focus-trap.helpers';
 export * from './helpers/initials.helpers';
 export * from './helpers/keyboard.helpers';
+export * from './helpers/outside-click.helpers';
 export * from './helpers/selection-model';
 export * from './icon-button/icon-button.component';
 export * from './icons';

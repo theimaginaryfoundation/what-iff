@@ -592,6 +592,29 @@ describe('ChatComposerComponent', () => {
         expect(fixture.componentInstance.slashOpen()).toBe(false);
     });
 
+    it('closes the thread settings popover on clicks in the textarea or on the model picker (#398)', () => {
+        const host = fixture.nativeElement as HTMLElement;
+        document.body.appendChild(host);
+        fixture.detectChanges();
+        const panel = () => host.querySelector('.turn-settings__panel');
+        const openPanel = () => {
+            host.querySelector<HTMLButtonElement>('.turn-settings__trigger')!.click();
+            fixture.detectChanges();
+            expect(panel()).not.toBeNull();
+        };
+
+        openPanel();
+        host.querySelector<HTMLTextAreaElement>('#chat-composer-input')!.click();
+        fixture.detectChanges();
+        expect(panel()).toBeNull();
+
+        openPanel();
+        host.querySelector<HTMLButtonElement>('.model-picker__trigger')!.click();
+        fixture.detectChanges();
+        expect(panel()).toBeNull();
+        host.remove();
+    });
+
     it('closes an open submenu when plus is clicked without reopening the plus menu', () => {
         fixture.componentInstance.openEmojiPicker();
         fixture.detectChanges();

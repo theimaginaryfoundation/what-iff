@@ -162,6 +162,22 @@ describe('ModelPickerComponent', () => {
         expect(fixture.componentInstance.open()).toBe(false);
     });
 
+    it('closes on an outside click that is stopped before it reaches the document (#398)', () => {
+        const composer = document.createElement('div');
+        composer.addEventListener('click', event => event.stopPropagation());
+        const textarea = document.createElement('textarea');
+        composer.append(fixture.nativeElement, textarea);
+        document.body.appendChild(composer);
+        fixture.componentInstance.toggle();
+        fixture.detectChanges();
+
+        textarea.click();
+        fixture.detectChanges();
+
+        expect(fixture.componentInstance.open()).toBe(false);
+        composer.remove();
+    });
+
     it('toggles a favorite from the star without selecting the model', () => {
         const spy = vi.fn().mockName('selected');
         fixture.componentInstance.selected.subscribe(spy);

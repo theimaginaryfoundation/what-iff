@@ -116,6 +116,8 @@ describe('TurnSettingsPickerComponent', () => {
     });
 
     it('closes on an outside click but not on a click inside the panel', () => {
+        // Attached, so the click inside the panel really reaches the document listener.
+        document.body.appendChild(host);
         fixture.detectChanges();
         open();
         expect(host.querySelector('[role=dialog]')).not.toBeNull();
@@ -133,6 +135,35 @@ describe('TurnSettingsPickerComponent', () => {
         outside.remove();
         expect(host.querySelector('[role=dialog]')).toBeNull();
         expect(trigger().getAttribute('aria-controls')).toBeNull();
+        host.remove();
+    });
+
+    it('closes on an outside click that is stopped before it reaches the document (#398)', () => {
+        // The chat composer stops clicks on its textarea and controls row from bubbling.
+        const composer = document.createElement('div');
+        composer.addEventListener('click', event => event.stopPropagation());
+        const textarea = document.createElement('textarea');
+        composer.append(host, textarea);
+        document.body.appendChild(composer);
+        fixture.detectChanges();
+        open();
+
+        host.querySelector<HTMLElement>('[role=dialog]')!.click();
+        fixture.detectChanges();
+        expect(host.querySelector('[role=dialog]')).not.toBeNull();
+
+        textarea.click();
+        fixture.detectChanges();
+        expect(host.querySelector('[role=dialog]')).toBeNull();
+        composer.remove();
+    });
+
+    it('stops listening for outside clicks once destroyed', () => {
+        const remove = vi.spyOn(document, 'removeEventListener');
+        fixture.detectChanges();
+        fixture.destroy();
+        expect(remove).toHaveBeenCalledWith('click', expect.any(Function), true);
+        remove.mockRestore();
     });
 
     it('closes on Escape and returns focus to the trigger', () => {

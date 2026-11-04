@@ -1,4 +1,5 @@
-import { Injectable, computed, signal } from '@angular/core';
+import { DOCUMENT } from '@angular/common';
+import { Injectable, computed, inject, signal } from '@angular/core';
 
 import { Chat } from '../../../core/models/chat.model';
 import { ContextBreakdown } from '../../../core/models/message.model';
@@ -9,6 +10,14 @@ import { formatThreadReferences } from '../helpers/thread-reference.helpers';
 export type ContextPanelTab = 'scratchpad' | 'memories' | 'tools' | 'context';
 
 const TAB_STORAGE_KEY = 'contextPanel.tabsByChat.v1';
+/**
+ * Whether the docked (desktop) panel was last left open or closed (#300). Only the docked panel
+ * is remembered: below the desktop breakpoint the panel is a sheet over the chat, which always
+ * starts closed and whose open/close does not touch this value.
+ */
+export const DESKTOP_OPEN_STORAGE_KEY = 'contextPanel.desktopOpen.v1';
+/** Below this the layout shows the panel as a sheet, not docked (AppLayoutComponent's 1024px). */
+const MOBILE_VIEWPORT_QUERY = '(max-width: 1023px)';
 
 @Injectable({ providedIn: 'root' })
 export class ContextPanelService {
@@ -52,6 +61,8 @@ export class ContextPanelService {
     if (!chatId) return 'scratchpad';
     return this.tabsByChat()[chatId] ?? 'scratchpad';
   });
+
+  private readonly document = inject(DOCUMENT);
 
   constructor(private readonly rightPanel: RightPanelService) {}
 
@@ -157,8 +168,24 @@ export class ContextPanelService {
     this._mobileOpen.set(false);
   }
 
+  /**
+   * Shows or hides the docked panel as the user's choice. On a desktop-width viewport the choice is
+   * remembered for the next page load (see restoreDesktopVisible); on a narrower one the docked
+   * panel isn't shown, so the sheet flows calling this leave the remembered value alone.
+   */
   setDesktopVisible(visible: boolean): void {
     this.rightPanel.setVisible(visible);
+    if (!this.isMobileViewport()) writeStored(DESKTOP_OPEN_STORAGE_KEY, visible);
+  }
+
+  /** Shows the docked panel as the user last left it (open when nothing is stored). */
+  restoreDesktopVisible(): void {
+    this.rightPanel.setVisible(readStored(DESKTOP_OPEN_STORAGE_KEY) !== false);
+  }
+
+  /** Hides the docked panel when the chat page goes away, keeping the remembered choice. */
+  hideOnPageExit(): void {
+    this.rightPanel.setVisible(false);
   }
 
   requestComposerInsert(text: string): void {
@@ -170,22 +197,38 @@ export class ContextPanelService {
     this._composerInsert.set(null);
     return value;
   }
-}
 
-function readTabsFromStorage(): Record<string, ContextPanelTab> {
-  try {
-    const raw = localStorage.getItem(TAB_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, ContextPanelTab>;
-    return parsed ?? {};
-  } catch {
-    return {};
+  /**
+   * Whether the layout shows the panel as a sheet rather than docked. The one place that decides
+   * it, so the sheet flows (ChatPageComponent) and what is remembered agree on the breakpoint.
+   */
+  isMobileViewport(): boolean {
+    return !!this.document.defaultView?.matchMedia?.(MOBILE_VIEWPORT_QUERY).matches;
   }
 }
 
+function readTabsFromStorage(): Record<string, ContextPanelTab> {
+  const parsed = readStored(TAB_STORAGE_KEY);
+  return parsed && typeof parsed === 'object' ? (parsed as Record<string, ContextPanelTab>) : {};
+}
+
 function writeTabsToStorage(tabs: Record<string, ContextPanelTab>): void {
+  writeStored(TAB_STORAGE_KEY, tabs);
+}
+
+/** The parsed JSON stored under `key`; undefined when missing, unreadable or storage is unavailable. */
+function readStored(key: string): unknown {
   try {
-    localStorage.setItem(TAB_STORAGE_KEY, JSON.stringify(tabs));
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeStored(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // Ignore storage failures (private mode/quota).
   }
