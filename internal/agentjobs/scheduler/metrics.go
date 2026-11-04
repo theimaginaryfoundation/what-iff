@@ -11,6 +11,7 @@ import (
 const (
 	runOutcomeRan               = "ran"
 	runOutcomeFailed            = "failed"
+	runOutcomeStopped           = "stopped" // stopped from its thread (ADR 0x039)
 	runOutcomeSkippedOverlap    = "skipped_overlap"
 	runOutcomeSkippedInactive   = "skipped_inactive"
 	runOutcomeSkippedCongestion = "skipped_congestion"
@@ -26,7 +27,7 @@ func recordRun(ctx context.Context, outcome string) {
 	telemetry.Global().Add(ctx, telemetry.SchedulerRuns, 1, telemetry.AttrOutcome.String(outcome))
 }
 
-// recordRunDuration records how long a scheduled job that actually ran took (ran or failed).
+// recordRunDuration records how long a scheduled job that actually ran took (ran, failed or stopped).
 func recordRunDuration(ctx context.Context, outcome string, d time.Duration) {
 	telemetry.Global().RecordDuration(ctx, telemetry.SchedulerRunDuration, d, telemetry.AttrOutcome.String(outcome))
 }

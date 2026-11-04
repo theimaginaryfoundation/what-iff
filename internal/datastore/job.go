@@ -1037,16 +1037,19 @@ func (d *Datastore) FindLatestActiveChatMessageJob(ctx context.Context, userID, 
 }
 
 // FindActiveTurnJobForChat returns the turn job (chat_message or agent_job_run, see turnJobTypes)
-// a client showing chatID should follow, or nil when none is in flight. That is the oldest turn
-// still before its reply (pending or processing): the one generating now, since the turn gate
-// runs a chat's turns in job order, with any later ones queued behind it. When every live turn
-// has replied, it is the newest one still in its post-inference phases. Unlike
+// a client showing chatID should follow, or nil when none is in flight. That is the oldest live
+// turn still before its reply (pending or processing): the one generating now, since the turn gate
+// runs a chat's turns in job order, with any later ones queued behind it. A turn without a write
+// for TurnJobStaleAfter is skipped, as the gate skips it: its worker died, and a ticket it left
+// behind must not pin the thread. When every live turn has replied, it is the newest one still in
+// its post-inference phases. Unlike
 // FindLatestActiveChatMessageJob it needs no message id, so a client returning to a thread, or
 // watching one, finds a running turn whoever started it: the user, a scheduled job (keyed by the
 // chat id), a webhook. A chat_message job's Reference is the user message id.
 func (d *Datastore) FindActiveTurnJobForChat(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
 	// The generating turn is found the way the turn gate finds the turns ahead of a new one
-	// (ListPendingTurnJobsForChat): oldest first, over the same scan, so the two agree on it.
+	// (ListPendingTurnJobsForChat, then blockingTurnJobs): oldest first, skipping stale ones, so
+	// the two agree on it.
 	generating, err := d.activeTurnJobsInChat(ctx, userID, chatID, true)
 	if err != nil {
 		return nil, err
@@ -1064,17 +1067,21 @@ func (d *Datastore) FindActiveTurnJobForChat(ctx context.Context, userID, chatID
 }
 
 // activeTurnJobsInChat returns chatID's turn jobs among the user's turnJobScanLimit non-terminal
-// ones: those before their reply (pending or processing) oldest first, or those in their
-// post-inference phases newest first. The status filter keeps the read on the status index.
+// ones: those before their reply (pending or processing) and written within TurnJobStaleAfter,
+// oldest first, or those in their post-inference phases newest first. The status filter keeps the
+// read on the status index.
 func (d *Datastore) activeTurnJobsInChat(ctx context.Context, userID, chatID uuid.UUID, beforeReply bool) ([]*ent.Job, error) {
-	statuses := []job.Status{job.StatusInferenceComplete, job.StatusExpressionComplete, job.StatusCompactionComplete}
+	where := []predicate.Job{job.JobTypeIn(turnJobTypes...), ownedByUser(userID)}
 	order := []job.OrderOption{job.ByCreatedAt(sql.OrderDesc()), job.ByID(sql.OrderDesc())}
 	if beforeReply {
-		statuses = []job.Status{job.StatusPending, job.StatusProcessing}
+		where = append(where, job.StatusIn(job.StatusPending, job.StatusProcessing),
+			job.UpdatedAtGTE(time.Now().Add(-TurnJobStaleAfter)))
 		order = []job.OrderOption{job.ByCreatedAt(), job.ByID()}
+	} else {
+		where = append(where, job.StatusIn(job.StatusInferenceComplete, job.StatusExpressionComplete, job.StatusCompactionComplete))
 	}
 	candidates, err := d.dbClient.Job.Query().
-		Where(job.StatusIn(statuses...), job.JobTypeIn(turnJobTypes...), ownedByUser(userID)).
+		Where(where...).
 		Order(order...).
 		Limit(turnJobScanLimit).
 		WithOwner().
@@ -1120,6 +1127,12 @@ var turnJobTypes = []string{"chat_message", "agent_job_run"}
 
 // turnJobScanLimit bounds how many of a user's turn jobs one turn-job query inspects.
 const turnJobScanLimit = 100
+
+// TurnJobStaleAfter is how long a pending or processing turn job may go without a write before
+// its worker is taken as dead: four missed heartbeats (every live turn heartbeats its job row,
+// queued or running). The chat turn gate stops waiting on such a job, and FindActiveTurnJobForChat
+// skips it.
+const TurnJobStaleAfter = 2 * time.Minute
 
 // ownedByUser filters jobs on the owner foreign key column directly, rather than through the
 // users-table subquery HasOwnerWith builds.

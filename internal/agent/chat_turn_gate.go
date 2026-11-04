@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -50,8 +51,9 @@ var (
 	// chatTurnHeartbeatInterval is how often a live turn refreshes its job's updated_at.
 	chatTurnHeartbeatInterval = 30 * time.Second
 	// chatTurnStaleAfter is how long a pending/processing job may go without a write before the
-	// gate treats its worker as dead: four missed heartbeats.
-	chatTurnStaleAfter = 2 * time.Minute
+	// gate treats its worker as dead (datastore.TurnJobStaleAfter, which the active-job lookup
+	// shares, so the two agree on which turn is running).
+	chatTurnStaleAfter = datastore.TurnJobStaleAfter
 	// chatTurnWaitTimeout bounds how long a turn queues behind live earlier turns (a dead one stops
 	// blocking after chatTurnStaleAfter). Queued turns heartbeat too, so this need not stay below
 	// the stale bound; it only has to cover a few long inferences ahead in the queue.

@@ -43,7 +43,9 @@ Webhook background runs already had a tracking job and are unchanged.
 `GET /chat/{chatId}/active-job` now considers every turn job (`chat_message` and `agent_job_run`) and says which kind it found (`job_type`).
 It no longer returns the newest job.
 It returns the oldest turn still before its reply (`pending` or `processing`), which is the one generating now, since the gate runs a chat's turns in job order.
-It finds that one over the same scan as the turn gate (`ListPendingTurnJobsForChat`: oldest first, the same limit), so the two agree on which turn is running.
+It finds that one the way the turn gate finds the turns ahead of a new one (`ListPendingTurnJobsForChat`, then `blockingTurnJobs`), so the two agree on which turn is running.
+That means the same order and limit, and the same staleness rule: a turn with no write for `TurnJobStaleAfter` (two minutes, four missed heartbeats) is skipped.
+Its worker died, and with oldest-first lookup a ticket it left in `processing` would otherwise pin the thread until the startup reaper failed it: a "Job running" bubble that never moves, a locked composer, and a newer turn that never streams.
 When every live turn has replied, it returns the newest one still in its post-inference phases, as before, from a second scan ordered newest first.
 That keeps post-inference jobs a dead worker left behind from crowding the thread's own turn out of the scan.
 A run keyed by the chat answers no saved message, so `message_id` is absent for it.
@@ -74,7 +76,11 @@ A Stop cancels the run's context with its own cause, `ErrTurnStopped`, which wra
 A run stopped mid-call is reported with that error, even when the error that surfaced was the provider's (`stoppedTurnError`).
 A run cancelled for any other reason, such as a worker shutting down, keeps plain `context.Canceled` and is still recorded as a failure, so the thread never claims a stop nobody made.
 The scheduler records "Stopped from its thread before it finished." as the run's last error, and does not post its "I tried to run your scheduled job, but it failed" message.
-The registration ends once the reply is saved, so a late Stop no longer cuts the run's memory and checkpoint work short.
+The registration ends as soon as the reply is saved, before the run's continuity write, so a late Stop no longer cancels the bookkeeping for a reply that is already in the thread.
+A stopped one-off job ends `complete`, not `failed` (there is no cancelled job status), and the scheduler counts the run as `stopped`, not `failed`.
+
+A webhook background run or the onboarding welcome is also an `agent_job_run` keyed by the chat, so the client follows it the same way.
+Its worker now watches its job's status for a cancel (`watchChatJobCancel`), as a user turn's worker does, so a Stop handled by another API instance reaches it rather than only marking the row cancelled.
 
 ## Alternatives considered
 
@@ -89,10 +95,12 @@ The registration ends once the reply is saved, so a late Stop no longer cuts the
 - An open, visible, idle thread makes one `GET /chat/{chatId}/active-job` every 5 seconds.
 - With two live turns in a thread, the client now follows the one generating, not the newest one queued behind it. The queued one is picked up by the next watch tick once the first has replied.
 - A scheduled run's ticket now carries draft deltas and a tool timeline while it runs, and a `result_id` afterwards.
-- Stopping a Standard scheduled run saves nothing; an Advanced one keeps its partial reply, as on the chat path. A stopped one-off job ends `failed`, with the stop as its last error.
+- Stopping a Standard scheduled run saves nothing; an Advanced one keeps its partial reply, as on the chat path. A stopped one-off job ends `complete`, with the stop as its last error.
+- `whatiff.scheduler.runs` has a `stopped` outcome.
 
 ## Not done yet
 
 - The label says "Job running", not which job.
+- The client cannot yet tell a scheduled run from a webhook background run or the welcome, which are also chat-keyed `agent_job_run` jobs, so those get the "Job running" label too. ADR 0x040 adds what tells them apart.
 - The bubble uses the thread's personality, not a job's personality override.
 - A run's expression pick lands after its ticket completes, so the reply's expression shows on the next sync rather than live.

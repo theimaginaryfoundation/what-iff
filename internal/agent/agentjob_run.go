@@ -68,6 +68,10 @@ func (a *Agent) handleEphemeralPromptAsync(ctx context.Context, chatID uuid.UUID
 
 	runCtx, cancel := context.WithCancel(detachedCtx)
 	a.registerRunningJobCancel(backgroundJob.ID, userID, cancel)
+	// A Stop handled by another API instance reaches the run through the job's status, as for a
+	// user's turn: without the watch it would only mark the row cancelled, and the run's own status
+	// writes would later overwrite that.
+	go a.watchChatJobCancel(runCtx, userID, backgroundJob.ID, cancel)
 	go func(jobID uuid.UUID, runCtx context.Context) {
 		defer cancel()
 		defer a.unregisterRunningJobCancel(jobID)
@@ -375,6 +379,10 @@ func (a *Agent) handleEphemeralPrompt(
 	if resp == nil {
 		return nil, fmt.Errorf("unexpected nil response")
 	}
+	// The reply is saved: a Stop from here on would cancel only the bookkeeping for a reply already
+	// in the thread (its continuity write, the ticket's result, post-processing), so it no longer
+	// reaches the run.
+	releaseStop()
 	ephemeralUserMessage.Tokens = resp.InputTokens
 
 	// Update chat metadata for thread continuity + sorting.
@@ -399,7 +407,6 @@ func (a *Agent) handleEphemeralPrompt(
 				a.logger.Warn("failed to record the reply on the turn ticket", zap.String("job_id", ticket.ID.String()), zap.Error(err))
 			}
 		}
-		releaseStop()
 		endTurn(nil)
 	}
 	if err := a.advanceJobInferenceComplete(ctx, trackingJob, agentMessage.ID); err != nil {
