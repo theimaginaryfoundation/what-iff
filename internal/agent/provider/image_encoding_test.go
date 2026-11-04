@@ -20,7 +20,9 @@ func TestImageEncodingMatchesStdlibInOneCopy(t *testing.T) {
 	require.Equal(t, "data:image/png;base64,"+want, imageDataURL("image/png", raw))
 	require.Empty(t, encodeImageBase64(nil))
 
-	oneCopy := float64(len(want) + 4<<10)
+	// testing.Benchmark counts every allocation in the process, so other tests' goroutines
+	// add noise. Half a copy of headroom absorbs that and still fails on a second copy.
+	oneCopy := float64(len(want) + len(want)/2)
 	require.LessOrEqual(t, allocatedBytes(func() { _ = encodeImageBase64(raw) }), oneCopy)
 	require.LessOrEqual(t, allocatedBytes(func() { _ = imageDataURL("image/png", raw) }), oneCopy)
 }
