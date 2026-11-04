@@ -111,8 +111,8 @@ interface BreakdownRow {
                   compacts: its earlier steps are replaced by a work log of its plan, notes and newest tool calls, and the
                   oldest calls are dropped.
                 } @else {
-                  Over the checkpoint budget. Heavy turns can exceed this budget until the next compaction. At the next
-                  checkpoint, older turns are compressed into the thread summary.
+                  Heavy turns can exceed this budget until the next compaction. This is normal: the thread will be compacted
+                  soon.
                 }
               </p>
             }

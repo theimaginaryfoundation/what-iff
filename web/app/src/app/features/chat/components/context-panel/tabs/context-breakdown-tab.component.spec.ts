@@ -119,7 +119,7 @@ describe('ContextBreakdownTabComponent', () => {
         const scale = el.querySelector('.gauge__scale')?.textContent ?? '';
         expect(scale).toContain('140% of checkpoint budget');
         expect(scale).toContain('12,000 over');
-        expect(el.querySelector('.gauge__notice')?.textContent ?? '').toContain('compressed into the thread summary');
+        expect(el.querySelector('.gauge__notice')?.textContent ?? '').toContain('This is normal: the thread will be compacted soon.');
         expect(el.querySelector('.gauge__track')?.getAttribute('aria-label') ?? '').toContain('12,000 tokens over');
     });
 

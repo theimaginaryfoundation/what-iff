@@ -47,7 +47,7 @@ The frontend only reads the snapshot (`contextBudgetView`); it does not recomput
 
 ### 4. Over budget is visibly different
 
-Past its limit, the gauge marks where the limit falls on the track, hatches the part past it, colors the total, shows the percentage of the limit and the tokens over, and says what happens next: older turns are summarized at the next checkpoint, or the run compacts its earlier steps.
+Past its limit, the gauge marks where the limit falls on the track, hatches the part past it, colors the total, shows the percentage of the limit and the tokens over, and says what happens next: for a thread, that this is normal and it will be compacted soon (it reads as part of the regular cycle, not an error); for a run, that it compacts its earlier steps.
 The existing sentence "Heavy turns can exceed this budget until the next compaction." is kept; the private overlay's spec asserts it.
 
 ## Alternatives considered
