@@ -212,6 +212,11 @@ var errToolPanicked = errors.New("tool panicked")
 // stored on the tool call's ToolError, which is how the person sees what happened.)
 //
 // Every other failure (dispatch refusals, handler errors, transport errors) is unchanged.
+//
+// err is the call's toolErr from executeToolUseWithRecovery, which is dispatchToolUse's error. For
+// an MCP tool that reported a failure, that is the *mcpclient.ToolReportedError from
+// CallToolResult.Err() (dispatchMCPToolUse), so errors.As finds it here
+// (TestToolReportedFailureIsLoggedAsWarnWithoutItsText drives that path end to end).
 func (a *Agent) logToolFailure(chatCtx *chatContext, round int, use provider.ToolUse, r provider.ToolResult, err error) {
 	var reported *mcpclient.ToolReportedError
 	if !errors.As(err, &reported) {
@@ -239,7 +244,9 @@ func (a *Agent) logToolFailure(chatCtx *chatContext, round int, use provider.Too
 
 // executeToolUseWithRecovery executes a single tool use with panic recovery, timing it on
 // telemetry.ToolDuration under a bounded tool label (see toolMetricName). toolErr is why the call
-// failed (nil on success); the result carries the model-facing text.
+// failed (nil on success): dispatchToolUse's error as returned, so its type survives (an MCP
+// tool's own failure stays a *mcpclient.ToolReportedError), or errToolPanicked. The result carries
+// the model-facing text.
 func (a *Agent) executeToolUseWithRecovery(ctx context.Context, chatCtx *chatContext, use provider.ToolUse) (result provider.ToolResult, attachments []*models.FileAttachment, toolErr error) {
 	result.ID = use.ID
 	done := a.metrics().Time(ctx, telemetry.ToolDuration, telemetry.AttrTool.String(toolMetricName(use.Name)))
