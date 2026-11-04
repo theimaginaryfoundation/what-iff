@@ -94,6 +94,12 @@ func toolContextPolicyFor(toolName string) toolContextPolicy {
 		return toolContextPolicy{persist: false}
 	case tools.UnloadSkillToolSpec.Name:
 		return toolContextPolicy{persist: false}
+	case discordPostToolName, slackPostToolName, buzzPostToolName:
+		// Relay post acks: kept so the model knows which earlier replies it posted (and does not
+		// post one twice), but replayed in the past tense (relayPostReplay), because the result
+		// as returned speaks of "the reply you are writing now" and a later turn read it as
+		// applying to its own reply (#389).
+		return toolContextPolicy{persist: true, ttlTurns: noTTL}
 	case tools.ToolNameWebSearch, tools.ToolNameFetchPage:
 		// Web search snapshots and fetched pages go stale; keep for a handful of turns. Pages can
 		// be long (up to ~20k chars), so they must not fall through to the no-expiry default.

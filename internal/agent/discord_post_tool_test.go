@@ -89,6 +89,9 @@ func TestDiscordPostMarksTheChosenChannel(t *testing.T) {
 		require.NoError(t, err, arg)
 		assert.Equal(t, []uuid.UUID{ops.ID}, store.pending, arg)
 		assert.Contains(t, out, "#ops")
+		// The result names the one reply it covers (#389).
+		assert.Contains(t, out, "This covers only this one reply")
+		assert.Contains(t, out, "call post_to_discord again")
 	}
 }
 

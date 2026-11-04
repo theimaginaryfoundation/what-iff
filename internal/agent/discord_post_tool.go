@@ -68,6 +68,45 @@ func relayScoped(ctx context.Context, store relayChecker, chat *models.Chat) boo
 	return external || err != nil
 }
 
+// relayPostResult is what a post_to_* tool (Discord, Slack, Buzz) returns on the turn it is
+// called. It names the one reply it covers, so that it cannot be read as a standing
+// instruction about later replies (#389).
+func relayPostResult(toolName, where string) string {
+	return fmt.Sprintf("The reply you are writing now will be posted to %s when you finish it. Write it now, as it should appear there. "+
+		"This covers only this one reply: to post a later reply, call %s again on that turn.", where, toolName)
+}
+
+// relayPostPlatforms names the platform of each post_to_* tool.
+var relayPostPlatforms = map[string]string{
+	discordPostToolName: "Discord",
+	slackPostToolName:   "Slack",
+	buzzPostToolName:    "Buzz",
+}
+
+// relayPostReplay is what a later turn sees in place of a post_to_* result carried forward
+// from an earlier turn (formatPersistedToolResult). The result as stored speaks of "the reply
+// you are writing now", which on a later turn reads as if the current reply were bound for
+// the channel (#389), so it is restated in the past tense. It is built from the call's input
+// rather than its output so that results stored before the rewording read the same way.
+// ok is false for any other tool.
+func relayPostReplay(tc *models.ToolCall) (string, bool) {
+	platform, ok := relayPostPlatforms[tc.ToolName]
+	if !ok {
+		return "", false
+	}
+	var args struct {
+		Channel string `json:"channel"`
+	}
+	_ = json.Unmarshal([]byte(tc.ToolInput), &args)
+	where := platform
+	if ch := strings.TrimSpace(args.Channel); ch != "" {
+		where = ch + " on " + platform
+	}
+	return fmt.Sprintf("That call marked the reply of its own turn for posting to %s. "+
+		"It does not apply to this turn: the reply you are writing now is not posted by it. "+
+		"Call %s again if this reply should be posted too.", where, tc.ToolName), true
+}
+
 // discordToolStoreFor is how the tool reaches storage; tests replace it.
 var discordToolStoreFor = func(a *Agent) discordToolStore {
 	if a == nil || a.ds == nil {
@@ -271,7 +310,7 @@ func discordPost(ctx context.Context, store discordToolStore, chat *models.Chat,
 	if err := store.SetDiscordPendingPost(ctx, chat.UserID, b.ID, chat.ID, models.DiscordPostFromTool); err != nil {
 		return "", fmt.Errorf("could not schedule the post: %w", err)
 	}
-	return fmt.Sprintf("Your reply will be posted to %s when you finish it. Write it now, as it should appear there.", ls[match[0]]), nil
+	return relayPostResult(discordPostToolName, ls[match[0]]), nil
 }
 
 func normalizeChannel(s string) string {

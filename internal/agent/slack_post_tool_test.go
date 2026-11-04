@@ -113,7 +113,8 @@ func TestSlackPostMarksTheChosenChannel(t *testing.T) {
 		out, err := slackPost(context.Background(), store, chat, []byte(arg))
 		require.NoError(t, err, arg)
 		assert.Equal(t, []uuid.UUID{ops.ID}, store.pending, arg)
-		assert.Contains(t, out, "#ops")
+		assert.Contains(t, out, "#ops on Slack")
+		assert.Contains(t, out, "call post_to_slack again")
 	}
 	_, err := slackPost(context.Background(), store, chat, []byte(`{"channel":"#nope"}`))
 	assert.ErrorContains(t, err, "use one of: #general, #ops")

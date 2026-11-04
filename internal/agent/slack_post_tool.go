@@ -247,5 +247,5 @@ func slackPost(ctx context.Context, store slackToolStore, chat *models.Chat, inp
 	if err := store.SetSlackPendingPost(ctx, chat.UserID, b.ID, chat.ID, models.SlackPostFromTool); err != nil {
 		return "", fmt.Errorf("could not schedule the post: %w", err)
 	}
-	return fmt.Sprintf("Your reply will be posted to %s on Slack when you finish it. Write it now, as it should appear there.", ls[match[0]]), nil
+	return relayPostResult(slackPostToolName, ls[match[0]]+" on Slack"), nil
 }
