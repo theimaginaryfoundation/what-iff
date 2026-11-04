@@ -9,11 +9,19 @@
   vertical-align: middle;
 }
 
+/*
+ * Flowbite's base layer paints every checked/indeterminate `[type="checkbox"]` with
+ * `background-color: currentcolor !important` and `border-color: currentcolor !important`, and adds
+ * its own tick as a background image. A layer's !important beats the rules below, so the box takes
+ * the accent through `color` (making currentcolor the accent) and drops that image; otherwise a
+ * checked box is painted in whatever text color surrounds it.
+ */
 .ui-checkbox {
   appearance: none;
   background: var(--color-surface-input);
   border: 1.5px solid color-mix(in srgb, var(--color-accent) 45%, var(--color-border-base));
   border-radius: 0.3rem;
+  color: var(--color-accent);
   cursor: pointer;
   display: grid;
   flex: none;
@@ -39,6 +47,7 @@
 .ui-checkbox:checked,
 .ui-checkbox:indeterminate {
   background: var(--color-accent);
+  background-image: none;
   border-color: var(--color-accent);
 }
 
