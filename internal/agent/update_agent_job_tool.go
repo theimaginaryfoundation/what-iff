@@ -79,7 +79,7 @@ func (a *Agent) updateAgentJobTool(ctx context.Context, chat *models.Chat, args 
 			return schedule.Parse(ctx, a.OpenAIProvider, userID, input, tz, now)
 		},
 		resolveModel: func(ctx context.Context, ref string) (uuid.UUID, error) {
-			m, err := a.resolveModelByReference(ctx, ref, modelResolverOptions{AllowDisplayName: true, AllowPrefixMatch: true})
+			m, err := a.resolveModelByReference(ctx, ref, modelResolverOptions{AllowDisplayName: true, AllowPrefixMatch: true, UserID: chat.UserID})
 			if err != nil {
 				return uuid.Nil, err
 			}

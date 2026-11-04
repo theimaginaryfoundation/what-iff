@@ -61,6 +61,12 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     Per-chat loaded tools live in `chat_mcp_tool_states`: one row per connector, plus the built-in tools' row under the nil connector ID (`ListChatLoadedBuiltinTools` / `SetChatLoadedBuiltinTools`), which `ListChatMCPLoadedTools` leaves out.
     `RetainChatLoadedTools` prunes every row of a chat to a kept set in one transaction (the checkpoint's unload step), and `ChatToolNamesUsedSince` (`toolcall.go`) lists the tools a chat's messages called since a time.
   - Models: `model.go`.
+    `ListModels` is the deployment's own catalog (models with no `connection_id`); `ListModelsForUser` adds the models the user enabled on their own provider connections (ADR 0x027), each with its connection's name (`connection_name`).
+    An account may enable a model with a catalog model's name, so lookups by name that mean the catalog (`GetModelByName`, a new account's default, the admin create and rename checks, and boot's seeding) look only at models with no connection.
+    `GetDisabledConnectionModel` and `ModelRowExists` let a chat or job tell a model turned off, or gone with its connection, from a retired catalog model.
+    An account's default model (`user_preferences.default_model`) is optional: a new account gets the catalog's default (`resolveDefaultModelTx`: the admin-marked one, then `DEFAULT_MODEL_NAME`, then any catalog model, never a connection's), and none on an install without a catalog, until it enables a model.
+    `CreateChat` without a model and with no default stores none; the chat's turns use the account's default once it has one.
+    `assertUserCanUseModelTx` treats a connection's model as nonexistent to anyone but the connection's owner, so it can't be set on another account's chat, job or preference.
   - Safety violations: `safety_violation_event.go`.
   - Tool call persistence: `toolcall.go`.
 - **`CheckUserPassword`** reports whether a password is the account's current one (false for identity-provider accounts); it backs `reauth`'s default confirmation.
@@ -97,6 +103,9 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   The descending views fetch one row past the page so `NextCursor` is set only when older rows remain (an empty cursor means the end).
   The exact `TotalCount` costs a pass over every message in the chat, so callers that only need the page set `ChatMessageFilters.SkipTotal` (the agent's context build, mood and recall scans, and the web UI via `include_total=false`).
   `ChatHasMessages` is the `EXISTS` form of `GetChatMessageCount` for "is there any?" checks.
+- **Imported timestamps:** `ImportChats` treats an archive time JSON can't encode (a year outside [0, 9999]) as missing.
+  A bad chat creation time becomes the import time, a bad first message time takes the chat's creation time, and a later one follows its predecessor.
+  One such stored `sent_at` would otherwise fail every response that includes it, such as the admin user list's last-message column.
 - **FK-first indexes:** ent orders an index's plain fields before its edge columns, so `index.Edges("chat").Fields("sent_at")` is `(sent_at, chat_messages)` and cannot seek by chat.
   `chat_messages`, `chats` and `memories` therefore also carry a single-column index on their parent FK (`index.Edges(...)` alone); add one wherever queries filter by an edge without its leading field.
 - **Context X-ray column:** `chat_message.context_breakdown` is a typed **`jsonb`** column (`field.JSON` over `*models.ContextBreakdown`); ent handles (un)marshalling, so `toChatMessageModel` just surfaces it (guarding empty snapshots) and `SetChatMessageContextBreakdown` sets the pointer (assistant rows only; best-effort).
@@ -140,7 +149,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Checkpoint window:** `UpdateChatCheckpointStateAndClearResponseID` takes the `last_checkpoint_at` to store (the agent passes just after the checkpointed reply, #268; zero means now).
   `ClaimChatCheckpoint` / `ReleaseChatCheckpoint` (`chat_checkpoint_claim.go`) take and drop `chats.checkpoint_started_at` with one conditional update each, so only one checkpoint runs per chat at a time across instances; a claim older than the stale bound is taken over.
   `FirstChatMessageSentAtSince` finds the earliest message in a chat since a time, leaving out given ids, so the agent can tell whether a message arrived mid-turn.
-- **`SetAgentJobOverrides`:** `personality_id` must belong to the job owner; `model_id` must exist in the global model catalog.
+- **`SetAgentJobOverrides`:** `personality_id` must belong to the job owner; `model_id` must be a model the owner can use (the catalog, or one of its own connections' models).
   Partial updates use `models.SetAgentJobOverridesPatch` so omitted JSON fields are not overwritten.
   Invalid IDs return `ErrInvalidRequestBody`.
 - **Model soft-delete query contract:** model reads should default to active rows (`deleted=false`).
@@ -245,6 +254,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 ## Testing
 
 - `chat_checkpoint_test.go`, `chatmessage_test.go`, `chatmessage_mark_read_test.go` — message and checkpoint behavior.
+- `model_connection_test.go` — the catalog excludes connection models, a user sees only their own, and the usage check refuses another account's.
 - `turnsettings_test.go` — threads store only explicit values, `InheritedTurnSettings` reads the personality and account default, explicit-only chat writes, and preference update semantics for the turn settings.
 - `memory_test.go`, `memory2_test.go`, `filechunk_test.go` — retrieval (including **`ListMemories`** excluding Summary unless `level=summary`), ZIP export/import helpers, full import count/persist coverage, and chunks.
 - `memory_embedding_test.go` — stale-embedding drop on content edits (not for Summary), missing-embedding queries, the `SetMemoryEmbedding` content guard and replace, non-content patches on untrimmed legacy rows, the dialect-gated row lock, and backfill batching, per-item retry, skipping a page of bad input, and early stop.

@@ -32,6 +32,8 @@ The web app's gallery doubles as a read-only file view; other files' bytes come 
 - **Reference copies never carry a folder and are never counted.** Moving by a copy's id moves the original it shares a stored object with.
 - **Moves are scoped in the datastore** to the caller's own rows, so an id that is someone else's is skipped and the response says how many moved.
 - **Moves and bulk deletes take at most 500 ids** (`maxBatchIDs`); the web app sends larger selections in chunks.
+- **Thumbnails are per attachment id**, so `POST /{id}/reference` copies the source's thumbnail to the new copy (`imageutil.CopyThumbnail`, in the background).
+  `GET /{id}` with a thumbnail wanted but only the full image found serves the full image and queues `imageutil.BackfillThumbnail` from those bytes, so images saved before every path wrote a thumbnail heal on first read.
 - **Import takes an optional `folder` form field**, so an image imported while viewing a folder lands in it.
 
 ## Testing

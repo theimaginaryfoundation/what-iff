@@ -491,9 +491,9 @@ export class ChatPage {
   /**
    * Picks a model other than `currentName` and returns its display name. A
    * fresh account has no favorited models, so the picker opens straight to
-   * the Vendor view (`resetPickerStep` in model-picker.component.ts); this
-   * walks each vendor's model list in turn (going "back" to try the next
-   * vendor when a vendor's only model is the current one) until it finds a
+   * the Provider view (`resetPickerStep` in model-picker.component.ts); this
+   * walks each group's model list in turn (going "back" to try the next
+   * group when a group's only model is the current one) until it finds a
    * different model to pick.
    */
   async selectModelOtherThan(currentName: string): Promise<string> {

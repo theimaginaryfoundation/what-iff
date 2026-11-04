@@ -20,7 +20,9 @@ func (UserPreference) Fields() []ent.Field {
 			Default(uuid.New).
 			Immutable(),
 		field.UUID("default_model", uuid.UUID{}).
-			Comment("The default model to use for the user's new chats"),
+			Optional().
+			Nillable().
+			Comment("The default model to use for the user's new chats; unset until the account has a model it can use (ADR 0x027)"),
 		field.UUID("default_personality", uuid.UUID{}).
 			Optional().
 			Nillable().
@@ -57,8 +59,7 @@ func (UserPreference) Edges() []ent.Edge {
 			Required(),
 		edge.To("model", Model.Type).
 			Field("default_model").
-			Unique().
-			Required(),
+			Unique(),
 		edge.To("personality", Personality.Type).
 			Field("default_personality").
 			Unique(),

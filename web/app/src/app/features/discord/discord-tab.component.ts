@@ -189,6 +189,16 @@ interface AccessDraft {
               >
                 Replace token
               </button>
+              @if (bot.status === 'intent_disabled') {
+                <button
+                  class="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                  [disabled]="busy()"
+                  (click)="checkAgain(bot)"
+                  data-testid="discord-bot-check-again"
+                >
+                  Check again
+                </button>
+              }
               <button
                 class="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
                 [disabled]="busy()"
@@ -514,7 +524,16 @@ export class DiscordTabComponent implements OnInit {
   }
 
   botStatusLabel(status: DiscordBot['status']): string {
-    return status === 'active' ? 'Active' : status === 'disabled' ? 'Paused' : 'Token rejected';
+    switch (status) {
+      case 'active':
+        return 'Active';
+      case 'disabled':
+        return 'Paused';
+      case 'intent_disabled':
+        return 'Message Content off';
+      default:
+        return 'Token rejected';
+    }
   }
 
   statusClass(status: string): string {
@@ -548,6 +567,14 @@ export class DiscordTabComponent implements OnInit {
     await this.run(
       async () => this.replaceBot(await firstValueFrom(this.discord.updateBot(bot.id, { token: token.trim() }))),
       'Could not replace the token.',
+    );
+  }
+
+  /** Re-reads the bot from Discord once the owner has fixed its Message Content setting. */
+  async checkAgain(bot: DiscordBot): Promise<void> {
+    await this.run(
+      async () => this.replaceBot(await firstValueFrom(this.discord.updateBot(bot.id, { refresh: true }))),
+      'Could not check the bot again.',
     );
   }
 

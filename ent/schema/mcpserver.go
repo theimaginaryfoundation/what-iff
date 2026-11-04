@@ -2,6 +2,7 @@ package schema
 
 import (
 	"entgo.io/ent"
+	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
@@ -96,7 +97,10 @@ func (MCPServer) Edges() []ent.Edge {
 			Ref("mcp_servers"),
 		edge.From("rituals", Ritual.Type).
 			Ref("mcp_servers"),
-		edge.To("oauth_sessions", MCPOAuthSession.Type),
+		// A server's OAuth sessions (and their tokens) go with it. Without the cascade the FK
+		// refused the delete of any server that had completed OAuth.
+		edge.To("oauth_sessions", MCPOAuthSession.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }
 

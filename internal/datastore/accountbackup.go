@@ -17,8 +17,10 @@ import (
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
 	"github.com/theimaginaryfoundation/what-iff/ent/chatmessagecontextitem"
+	entmodel "github.com/theimaginaryfoundation/what-iff/ent/model"
 	"github.com/theimaginaryfoundation/what-iff/ent/mood"
 	"github.com/theimaginaryfoundation/what-iff/ent/personality"
+	"github.com/theimaginaryfoundation/what-iff/ent/providerconnection"
 	entritual "github.com/theimaginaryfoundation/what-iff/ent/ritual"
 	"github.com/theimaginaryfoundation/what-iff/ent/toolcall"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
@@ -392,24 +394,23 @@ func (d *Datastore) importBackupChats(ctx context.Context, targetUserID uuid.UUI
 			res.Conflict++
 			continue
 		}
+		// A chat whose model the account doesn't have, and that has no default,
+		// is restored without one: it runs on the account's default once it has
+		// one (ADR 0x027).
 		modelID := defaultModelID
 		if rec.ModelName != "" {
-			if m, err := d.GetModelByName(ctx, rec.ModelName); err == nil {
-				modelID = m.ID
-			} else if !errors.Is(err, ErrModelNotFound) {
+			if m, err := d.backupModelByName(ctx, targetUserID, rec.ModelName); err != nil {
 				return err
+			} else if m != nil {
+				modelID = m.ID
 			}
-		}
-		if modelID == uuid.Nil {
-			res.MissingRef++
-			continue
 		}
 
 		create := d.dbClient.Chat.Create().
 			SetID(rec.ID).
 			SetName(rec.Name).
 			SetOwnerID(targetUserID).
-			SetModelID(modelID).
+			SetNillableModelID(nilIfZero(modelID)).
 			SetCheckpointSummary(rec.CheckpointSummary).
 			SetCheckpointUserMessageCount(rec.CheckpointUserMessageCount).
 			SetDisabledTools(append([]string(nil), rec.DisabledTools...)).
@@ -697,10 +698,10 @@ func (d *Datastore) importBackupAgentJobs(ctx context.Context, targetUserID uuid
 			}
 		}
 		if strings.TrimSpace(rec.ModelName) != "" {
-			if m, err := d.GetModelByName(ctx, rec.ModelName); err == nil {
-				create.SetNillableModelID(&m.ID)
-			} else if !errors.Is(err, ErrModelNotFound) {
+			if m, err := d.backupModelByName(ctx, targetUserID, rec.ModelName); err != nil {
 				return err
+			} else if m != nil {
+				create.SetNillableModelID(&m.ID)
 			}
 		}
 		if _, err := create.Save(ctx); err != nil {
@@ -808,9 +809,38 @@ func (d *Datastore) defaultModelIDForUser(ctx context.Context, userID uuid.UUID)
 		return uuid.Nil, err
 	}
 	if prefs.Edges.Model == nil {
-		return uuid.Nil, ErrAccountBackupDefaultModelMissing
+		// No default is an ordinary state since accounts choose their own models
+		// (ADR 0x027).
+		return uuid.Nil, nil
 	}
 	return prefs.Edges.Model.ID, nil
+}
+
+// backupModelByName is the model a backup names, for the account restoring it:
+// one of its own enabled models by that name, else the catalog's, else nil.
+func (d *Datastore) backupModelByName(ctx context.Context, userID uuid.UUID, name string) (*models.Model, error) {
+	own, err := d.dbClient.Model.Query().
+		Where(entmodel.Name(name), entmodel.Deleted(false), entmodel.HasConnectionWith(providerconnection.UserID(userID))).
+		Order(ent.Asc(entmodel.FieldID)).
+		First(ctx)
+	if err == nil {
+		return toModelModel(own), nil
+	}
+	if !ent.IsNotFound(err) {
+		return nil, err
+	}
+	m, err := d.GetModelByName(ctx, name)
+	if errors.Is(err, ErrModelNotFound) {
+		return nil, nil
+	}
+	return m, err
+}
+
+func nilIfZero(id uuid.UUID) *uuid.UUID {
+	if id == uuid.Nil {
+		return nil
+	}
+	return &id
 }
 
 func (d *Datastore) moodBelongsToUser(ctx context.Context, userID, id uuid.UUID) (bool, error) {

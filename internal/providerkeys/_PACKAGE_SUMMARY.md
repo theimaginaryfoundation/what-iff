@@ -16,6 +16,7 @@ Answers which model-provider credential a request uses, in one place.
 - **`New`:** chooses the resolver the server uses, given the deployment resolver and the account resolver (`internal/accountkeys`).
   Its default is `AccountKeys`: each account brings its own keys, and the deployment's configured keys are not used.
   A build that always supplies keys itself sets it in an `init()`, which is why tests check `AccountKeys` rather than `New`.
+  `AccountsSupplyKeys()` reports which way `New` goes, for boot steps that run before the real resolvers exist: the seeded-catalog conversion runs only where it's true, and the catalog-default check only where it's false.
   The server mounts the account key routes only when the chosen resolver's `AccountsSupplyKeys()` is true.
 
 ## Dependencies

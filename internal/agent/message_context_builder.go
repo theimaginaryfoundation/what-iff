@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/memoryutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -399,7 +400,11 @@ func (b *messageContextBuilder) appendPriorTurnExpressionContinuity(ctx context.
 	if len(thumbs) == 0 && src.GenerationExpressionImageID != nil && *src.GenerationExpressionImageID != uuid.Nil && b.fileStore != nil && b.ds != nil {
 		att, err := b.ds.GetFileAttachment(ctx, userID, *src.GenerationExpressionImageID)
 		if err == nil && att != nil && strings.HasPrefix(att.FileType, models.ImageMIMEPrefix) {
-			raw, mt := storage.ResolveAttachmentImageBytes(ctx, b.telemetry.Logger, b.fileStore, userID, att, true)
+			raw, mt, source := storage.ResolveAttachmentImage(ctx, b.telemetry.Logger, b.fileStore, userID, att, true)
+			if len(raw) > 0 && source != telemetry.ImageSourceThumbnail {
+				// Got the full image for want of a thumbnail; write one for later turns.
+				imageutil.BackfillThumbnail(b.fileStore, b.telemetry.Logger, userID, att.ID, raw)
+			}
 			if len(raw) > 0 {
 				if mt == "" {
 					mt = "image/jpeg"

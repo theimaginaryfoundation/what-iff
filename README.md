@@ -80,8 +80,8 @@ The fastest way to run the full stack locally is Docker Compose.
 **Prerequisites:** Docker, and an OpenAI API key, which you add in the app.
 
 ```bash
-# Start the stack. On first run it generates this install's secrets, runs
-# migrations, and seeds the model catalog.
+# Start the stack. On first run it generates this install's secrets and runs
+# migrations.
 docker compose up --build
 ```
 
@@ -106,8 +106,13 @@ container itself, so it reaches a model server on your machine (Ollama, LM Studi
 
 - **The server has to listen beyond loopback.** Ollama listens on `127.0.0.1` by default;
   start it with `OLLAMA_HOST=0.0.0.0`. In LM Studio, turn on serving on the local network.
-- **A host firewall has to let the Docker network in** on that port (11434 for Ollama,
-  1234 for LM Studio). Firewalls such as ufw drop that traffic by default.
+- **A host firewall has to let the Docker network in** on that port. Firewalls such as
+  ufw drop that traffic by default, even for a port Docker itself publishes. With ufw,
+  allow Docker's address range to the one port (11434 for Ollama, 1234 for LM Studio):
+
+  ```bash
+  sudo ufw allow from 172.16.0.0/12 to any port 11434 proto tcp
+  ```
 
 > Compose is for **local development only**. Its defaults (`DESTRUCTIVE_MIGRATION=false`, `DB_SSL_MODE=disable`, no secret fallbacks) are deliberately conservative — every deployed environment must set its own real secrets and connection settings explicitly.
 

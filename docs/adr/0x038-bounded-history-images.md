@@ -103,5 +103,5 @@ Local stack, GPT-5.6 Luna, real `gpt-image` calls at low quality:
   Removing it means keeping image bytes out of the SDK marshal entirely: marshal the request with a small placeholder per image, then stream the body with the base64 spliced in.
   openai-go's `option.WithRequestBody` accepts an `io.Reader`, but it does not retry a plain reader, so retries would need a re-readable body.
 - A turn still holds each generated image's base64 (`FileContent`) until the reply is saved, and the SDK decodes up to 4 Images API responses in parallel.
-- Nothing back-fills thumbnails for old attachments that lack one; those fall back to the original (bounded by the cap).
+- Thumbnails for old attachments that lack one are back-filled lazily: a history image (or gallery read) that falls back to the original queues `imageutil.BackfillThumbnail`, so later turns send the thumbnail. Nothing sweeps attachments that are never read again.
 - The unused `file_attachments.file_content` column is still in the schema and still loaded by `WithFileAttachments()`.

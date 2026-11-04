@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -73,6 +74,29 @@ func newFixture(t *testing.T) fixture {
 			builtin text NULL,
 			UNIQUE (user_id, builtin),
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE models (
+			id uuid PRIMARY KEY,
+			name text NOT NULL,
+			display_name text NOT NULL,
+			description text NOT NULL,
+			provider text NOT NULL DEFAULT 'openai',
+			tool_support bool NOT NULL DEFAULT false,
+			reasoning_support_override text NULL,
+			vision_support bool NULL,
+			base_credits_per_slab integer NOT NULL DEFAULT 1,
+			subscription_tier text NOT NULL DEFAULT 'high',
+			deleted bool NOT NULL DEFAULT false,
+			is_default bool NOT NULL DEFAULT false,
+			connection_id uuid NULL,
+			UNIQUE (connection_id, name),
+			FOREIGN KEY (connection_id) REFERENCES provider_connections(id) ON DELETE CASCADE
+		)`,
+		// Only the columns the default-model check reads.
+		`CREATE TABLE user_preferences (
+			id uuid PRIMARY KEY,
+			user_preferences uuid UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+			default_model uuid NULL REFERENCES models(id)
 		)`,
 	} {
 		_, err := db.Exec(stmt)
@@ -398,4 +422,272 @@ func TestLocalAddressIsStoredOnlyWhenItDiffers(t *testing.T) {
 		"preset": PresetOllama, "base_url": url, "current_password": "right",
 	}))
 	require.Equal(t, url, created.Connection.BaseURL)
+}
+
+// enableModels sends a PUT of model choices for a connection.
+func (f fixture) enableModels(t *testing.T, userID uuid.UUID, connID uuid.UUID, choices ...ModelChoice) *httptest.ResponseRecorder {
+	t.Helper()
+	return f.call(t, userID, http.MethodPut, "/provider-connections/"+connID.String()+"/models", setModelsRequest{Models: choices})
+}
+
+func addLocal(t *testing.T, f fixture) Connection {
+	t.Helper()
+	url, _ := localServer(t)
+	return decode[connected](t, f.call(t, f.alice, http.MethodPost, "/provider-connections", map[string]string{
+		"preset": PresetOllama, "base_url": url, "current_password": "right",
+	})).Connection
+}
+
+func TestModels_EnableShowsInTheListingWithItsCapabilities(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	yes, no := true, false
+
+	rec := f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true, ToolSupport: &yes, VisionSupport: &no})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	enabled := decode[[]ConnectionModel](t, rec)
+	require.Len(t, enabled, 1)
+
+	listed := decode[[]ConnectionModel](t, f.call(t, f.alice, http.MethodGet, "/provider-connections/"+conn.ID.String()+"/models", nil))
+	require.Len(t, listed, 2)
+	byID := map[string]ConnectionModel{}
+	for _, m := range listed {
+		byID[m.ID] = m
+	}
+	require.True(t, byID["alpha"].Enabled)
+	require.True(t, *byID["alpha"].ToolSupport)
+	require.False(t, *byID["alpha"].VisionSupport)
+	require.False(t, byID["zeta"].Enabled)
+
+	row, err := f.store.client.Model.Query().Only(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "ollama", string(row.Provider), "the preset the connection was made from")
+	require.Equal(t, conn.ID, *row.ConnectionID)
+}
+
+// A model enabled under a name of the account's keeps it in the listing, so the
+// chooser shows it and saving again doesn't put the provider's back.
+func TestModels_KeepTheNameTheAccountGaveThem(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID,
+		ModelChoice{ID: "alpha", Enabled: true, DisplayName: "My alpha"},
+		ModelChoice{ID: "zeta", Enabled: true},
+	).Code)
+
+	listed := decode[[]ConnectionModel](t, f.call(t, f.alice, http.MethodGet, "/provider-connections/"+conn.ID.String()+"/models", nil))
+	byID := map[string]ConnectionModel{}
+	for _, m := range listed {
+		byID[m.ID] = m
+	}
+	require.Equal(t, "My alpha", byID["alpha"].DisplayName)
+	require.Empty(t, byID["zeta"].DisplayName, "enabled without a name: the listing's, here none")
+}
+
+// Disabling soft-deletes the row, so anything naming it fails clearly; enabling
+// again brings the same row back.
+func TestModels_DisableThenEnableKeepsTheRow(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true}).Code)
+	first, err := f.store.client.Model.Query().Only(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: false}).Code)
+	row, err := f.store.client.Model.Get(context.Background(), first.ID)
+	require.NoError(t, err)
+	require.True(t, row.Deleted)
+
+	yes := true
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true, ToolSupport: &yes}).Code)
+	row, err = f.store.client.Model.Get(context.Background(), first.ID)
+	require.NoError(t, err)
+	require.False(t, row.Deleted)
+	require.True(t, row.ToolSupport)
+	require.Equal(t, 1, f.store.client.Model.Query().CountX(context.Background()))
+}
+
+// The account's default model can't be taken away: neither disabled nor removed
+// with its connection, until another default is chosen.
+func TestModels_TheDefaultModelIsProtected(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true}).Code)
+	row, err := f.store.client.Model.Query().Only(context.Background())
+	require.NoError(t, err)
+	_, err = f.db.Exec(`INSERT INTO user_preferences (id, user_preferences, default_model) VALUES (?, ?, ?)`, uuid.New(), f.alice, row.ID)
+	require.NoError(t, err)
+
+	rec := f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: false})
+	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Equal(t, models.ErrCodeDefaultModelInUse, errorCode(t, rec))
+
+	rec = f.call(t, f.alice, http.MethodDelete, "/provider-connections/"+conn.ID.String(), nil)
+	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Equal(t, models.ErrCodeDefaultModelInUse, errorCode(t, rec))
+	require.Len(t, decode[[]Connection](t, f.call(t, f.alice, http.MethodGet, "/provider-connections", nil)), 1)
+}
+
+// An account with no default model gets the first model it enables as its
+// default; enabling more leaves it alone (ADR 0x027).
+func TestModels_TheFirstEnabledBecomesTheDefault(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	_, err := f.db.Exec(`INSERT INTO user_preferences (id, user_preferences) VALUES (?, ?)`, uuid.New(), f.alice)
+	require.NoError(t, err)
+	defaultModel := func() string {
+		var name sql.NullString
+		require.NoError(t, f.db.QueryRow(`SELECT m.name FROM user_preferences p LEFT JOIN models m ON m.id = p.default_model WHERE p.user_preferences = ?`, f.alice).Scan(&name))
+		return name.String
+	}
+
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "zeta", Enabled: true}).Code)
+	require.Equal(t, "zeta", defaultModel())
+
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true}).Code)
+	require.Equal(t, "zeta", defaultModel(), "a default already chosen stays")
+}
+
+// Removing a connection takes its models with it.
+func TestModels_GoWithTheirConnection(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID,
+		ModelChoice{ID: "alpha", Enabled: true}, ModelChoice{ID: "zeta", Enabled: true}).Code)
+	require.Equal(t, 2, f.store.client.Model.Query().CountX(context.Background()))
+
+	require.Equal(t, http.StatusNoContent, f.call(t, f.alice, http.MethodDelete, "/provider-connections/"+conn.ID.String(), nil).Code)
+	require.Zero(t, f.store.client.Model.Query().CountX(context.Background()))
+}
+
+func TestModels_RejectBadChoicesAndOtherAccounts(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	require.Equal(t, http.StatusBadRequest, f.enableModels(t, f.alice, conn.ID).Code, "nothing to change")
+	require.Equal(t, http.StatusBadRequest, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "  ", Enabled: true}).Code)
+	require.Equal(t, http.StatusBadRequest, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: strings.Repeat("m", maxModelIDLen+1), Enabled: true}).Code)
+	require.Equal(t, http.StatusNotFound, f.enableModels(t, f.bob, conn.ID, ModelChoice{ID: "alpha", Enabled: true}).Code)
+	require.Zero(t, f.store.client.Model.Query().CountX(context.Background()))
+}
+
+// A model enabled for the first time must be one the provider lists; turning
+// models already on the connection off and on needs no listing.
+func TestModels_NewModelsMustBeListed(t *testing.T) {
+	f := newFixture(t)
+	url, s := localServer(t)
+	conn := decode[connected](t, f.call(t, f.alice, http.MethodPost, "/provider-connections", map[string]string{
+		"preset": PresetOllama, "base_url": url, "current_password": "right",
+	})).Connection
+
+	rec := f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "made-up", Enabled: true})
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "made-up isn't one of this connection's models")
+	require.Zero(t, f.store.client.Model.Query().CountX(context.Background()), "nothing is saved")
+
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true}).Code)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: false}).Code)
+	listings := len(s.requests)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true}).Code)
+	require.Len(t, s.requests, listings, "a model the connection already has is not listed again")
+}
+
+// A connection can't have more than maxEnabledModels models on at once.
+func TestSetModels_CapsEnabledModels(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	row, err := f.store.client.ProviderConnection.Get(context.Background(), conn.ID)
+	require.NoError(t, err)
+	choices := make([]ModelChoice, maxEnabledModels+1)
+	for i := range choices {
+		choices[i] = ModelChoice{ID: fmt.Sprintf("model-%03d", i), Enabled: true}
+	}
+	require.ErrorIs(t, f.store.SetModels(context.Background(), f.alice, row, choices), ErrTooManyModels)
+	require.Zero(t, f.store.client.Model.Query().CountX(context.Background()), "nothing is saved")
+	require.NoError(t, f.store.SetModels(context.Background(), f.alice, row, choices[:maxEnabledModels]))
+}
+
+// Each of an account's connections has its own name, ignoring case: a second
+// server named after its preset gets the next number, and a name chosen twice
+// is refused, on adding and on renaming.
+func TestConnectionNames_AreUniquePerAccount(t *testing.T) {
+	f := newFixture(t)
+	first := addLocal(t, f)
+	second := addLocal(t, f)
+	require.Equal(t, "Ollama", first.Name)
+	require.Equal(t, "Ollama 2", second.Name)
+
+	url, _ := localServer(t)
+	rec := f.call(t, f.alice, http.MethodPost, "/provider-connections", map[string]string{
+		"preset": PresetOllama, "base_url": url, "name": "ollama", "current_password": "right",
+	})
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), models.ErrCodeConnectionNameTaken)
+
+	path := "/provider-connections/" + second.ID.String()
+	rec = f.call(t, f.alice, http.MethodPatch, path, map[string]string{"name": "OLLAMA"})
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	require.Equal(t, http.StatusOK, f.call(t, f.alice, http.MethodPatch, path, map[string]string{"name": "ollama 2"}).Code, "its own name, recased")
+
+	bobs := f.call(t, f.bob, http.MethodPost, "/provider-connections", map[string]string{
+		"preset": PresetOllama, "base_url": url, "current_password": "right",
+	})
+	require.Equal(t, "Ollama", decode[connected](t, bobs).Connection.Name, "another account's names don't count")
+}
+
+// A name the account gave a model stays while the model is off, so turning it
+// on again keeps it; the listing also says what the name goes back to.
+func TestModels_KeepTheirNameWhileOff(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	path := "/provider-connections/" + conn.ID.String() + "/models"
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true, DisplayName: "My alpha"}).Code)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: false}).Code)
+
+	listed := decode[[]ConnectionModel](t, f.call(t, f.alice, http.MethodGet, path, nil))
+	byID := map[string]ConnectionModel{}
+	for _, m := range listed {
+		byID[m.ID] = m
+	}
+	require.False(t, byID["alpha"].Enabled)
+	require.Equal(t, "My alpha", byID["alpha"].DisplayName)
+	require.Equal(t, "alpha", byID["alpha"].DefaultName)
+}
+
+// Two of a connection's models can't share a name, ignoring case, and one on a
+// built-in provider's connection can't take the deployment's own model's name.
+func TestModels_NamesAreDistinct(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	rec := f.enableModels(t, f.alice, conn.ID,
+		ModelChoice{ID: "alpha", Enabled: true, DisplayName: "Same"},
+		ModelChoice{ID: "zeta", Enabled: true, DisplayName: "same"},
+	)
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), models.ErrCodeModelNameTaken)
+	require.Zero(t, f.store.client.Model.Query().CountX(context.Background()), "nothing is saved")
+
+	long := strings.Repeat("x", maxModelNameLen+1)
+	require.Equal(t, http.StatusBadRequest, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true, DisplayName: long}).Code)
+
+	builtin := decode[connected](t, f.call(t, f.alice, http.MethodPost, "/provider-connections", map[string]string{
+		"preset": "openai", "key": aliceOpenAI, "current_password": "right",
+	})).Connection
+	_, err := f.store.client.Model.Create().SetName("gpt-5.4").SetDisplayName("GPT-5.4").SetDescription("").SetProvider("openai").Save(context.Background())
+	require.NoError(t, err)
+	rec = f.enableModels(t, f.alice, builtin.ID, ModelChoice{ID: "alpha", Enabled: true, DisplayName: "gpt-5.4"})
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "already available from this deployment")
+}
+
+// Listed models whose short names would match keep their full ids.
+func TestKeepDistinctNames(t *testing.T) {
+	listed := []ListedModel{
+		{ID: "hf.co/a/Qwen3-0.6B-GGUF:latest", DisplayName: "Qwen3-0.6B-GGUF"},
+		{ID: "hf.co/b/Qwen3-0.6B-GGUF:latest", DisplayName: "QWEN3-0.6B-GGUF"},
+		{ID: "llama3.2:3b"},
+	}
+	keepDistinctNames(listed)
+	require.Empty(t, listed[0].DisplayName)
+	require.Empty(t, listed[1].DisplayName)
+	require.Empty(t, listed[2].DisplayName)
 }

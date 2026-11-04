@@ -1,4 +1,5 @@
 import type { Locator, Page, Response } from '@playwright/test';
+import { AppShell } from './app-shell.page';
 import { ConfirmationModal } from './confirmation.modal';
 import { MUTATION_ACK_TIMEOUT } from '../timeouts';
 
@@ -9,9 +10,11 @@ import { MUTATION_ACK_TIMEOUT } from '../timeouts';
  * `aria-label="Threads"` region except the modals, which portal to the body.
  */
 export class ThreadListPanel {
+  private readonly shell: AppShell;
   readonly confirmation: ConfirmationModal;
 
   constructor(private readonly page: Page) {
+    this.shell = new AppShell(page);
     this.confirmation = new ConfirmationModal(page);
     this.panel = this.page.getByRole('complementary', { name: 'Threads' });
     this.heading = this.page.getByRole('heading', { name: 'Thread Manager' });
@@ -307,12 +310,20 @@ export class ThreadListPanel {
     await this.page.getByRole('button', { name: 'Cancel', exact: true }).click();
   }
 
-  /** Opens the Import & Export screen from the panel header action. */
+  /**
+   * Opens the Import & Export screen from the panel header action. Below
+   * 768px the panel hides that action, so phones use the sidebar's.
+   */
   async openImport(): Promise<void> {
+    await this.panel.waitFor();
     const headerButton = this.panel.getByRole('button', {
       name: 'Import threads',
     });
-    await headerButton.click();
+    if (await headerButton.isVisible()) {
+      await headerButton.click();
+    } else {
+      await this.shell.quickAction('Import threads');
+    }
     await this.page.waitForURL(/\/data$/);
   }
 }

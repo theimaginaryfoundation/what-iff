@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/theimaginaryfoundation/what-iff/ent"
@@ -237,6 +238,9 @@ func (s *Server) setupRoutes() {
 	// instrumentation (ADR 0x027).
 	listingHTTPClient := telemetry.InstrumentHTTPClient(provider.WithCallTimeouts(baseHTTPClient, callTimeouts), s.dependencyHosts()...)
 	providerHTTPClient = telemetry.InstrumentHTTPClient(providerHTTPClient, s.dependencyHosts()...)
+	connectionStore := providerconnections.NewStore(s.db, dataStore)
+	connectionPresets := providerconnections.Presets(s.config.builtinProviderURLs(), s.config.LocalServerHost)
+	connections := providerconnections.NewResolver(connectionStore, connectionPresets)
 
 	agentCfg := agent.AgentConfig{
 		LifecycleContext: s.lifecycleCtx,
@@ -256,6 +260,11 @@ func (s *Server) setupRoutes() {
 		DeepSeekBaseURL:    s.config.DeepSeekBaseURL,
 		QwenBaseURL:        s.config.QwenBaseURL,
 		XiaomiBaseURL:      s.config.XiaomiBaseURL,
+
+		// A connection model's calls go to the address and with the key its
+		// connection holds, so they stay off the credential transport too.
+		Connections:          agent.ConnectionResolverFunc(connectionEndpoint(connections)),
+		ConnectionHTTPClient: listingHTTPClient,
 	}
 	if s.config.LLMBackend == "vendor" {
 		// ErrNotConfigured (no PARALLEL_API_KEY) leaves vendor-native search in place; any
@@ -442,9 +451,9 @@ func (s *Server) setupRoutes() {
 	imageGalleryHandler.RegisterRoutes(authRouter)
 	moodHandler.RegisterRoutes(authRouter)
 	connectionsHandler := providerconnections.NewHandler(
-		providerconnections.NewStore(s.db, dataStore),
+		connectionStore,
 		providerconnections.NewLister(listingHTTPClient, s.config.LLMBackend == "mock"),
-		providerconnections.Presets(s.config.builtinProviderURLs(), s.config.LocalServerHost),
+		connectionPresets,
 		reauth.New(dataStore),
 		s.logger,
 	)
@@ -724,4 +733,33 @@ func (s *Server) recordHTTP(ctx context.Context, method, route string, status in
 		telemetry.AttrHTTPRoute.String(route),
 		telemetry.AttrHTTPStatusClass.String(telemetry.HTTPStatusClass(status)),
 	)
+}
+
+// connectionEndpoint adapts the provider-connection resolver to the agent's
+// view of a connection, so neither package imports the other.
+func connectionEndpoint(r *providerconnections.Resolver) func(ctx context.Context, userID, connectionID uuid.UUID) (agent.ConnectionEndpoint, error) {
+	return func(ctx context.Context, userID, connectionID uuid.UUID) (agent.ConnectionEndpoint, error) {
+		ep, err := r.Endpoint(ctx, userID, connectionID)
+		if err != nil {
+			return agent.ConnectionEndpoint{}, err
+		}
+		flavor, err := agentFlavor(ep.Flavor)
+		if err != nil {
+			return agent.ConnectionEndpoint{}, err
+		}
+		return agent.ConnectionEndpoint{Preset: ep.Preset, Flavor: flavor, BaseURL: ep.BaseURL, Key: ep.Key}, nil
+	}
+}
+
+// agentFlavor maps a connection's flavor to the agent's, one case per flavor,
+// so a flavor added to one package and not the other fails a turn clearly
+// instead of being sent down the wrong API.
+func agentFlavor(f providerconnections.Flavor) (agent.ConnectionFlavor, error) {
+	switch f {
+	case providerconnections.FlavorOpenAI:
+		return agent.ConnectionFlavorOpenAI, nil
+	case providerconnections.FlavorAnthropic:
+		return agent.ConnectionFlavorAnthropic, nil
+	}
+	return "", fmt.Errorf("provider connection speaks an unknown flavor %q", f)
 }

@@ -16,6 +16,9 @@
           <span>It doesn't list any models yet.</span>
         }
       </div>
+      @if (done.models.length > 0 && !editing()) {
+        <p class="provider-form__subtitle">Choose the ones you want in your model picker. You can change this any time from the Providers tab.</p>
+      }
     </div>
   } @else {
     <form class="provider-form__body" id="provider-form" (ngSubmit)="submit()">
@@ -147,8 +150,15 @@
 
   <!-- One footer element, so it is projected into the modal's footer slot; its buttons follow the form's state. -->
   <div modal-footer class="provider-form__actions">
-    @if (result()) {
-      <button class="provider-form__button provider-form__button--primary" type="button" (click)="closed.emit()">Done</button>
+    @if (result(); as done) {
+      @if (done.models.length > 0 && !editing()) {
+        <button class="provider-form__button" type="button" (click)="closed.emit()">Later</button>
+        <button class="provider-form__button provider-form__button--primary" type="button" (click)="chooseModels.emit(done.connection)">
+          Choose models
+        </button>
+      } @else {
+        <button class="provider-form__button provider-form__button--primary" type="button" (click)="closed.emit()">Done</button>
+      }
     } @else {
       <button class="provider-form__button" type="button" (click)="close()" [disabled]="saving()">Cancel</button>
       <button class="provider-form__button provider-form__button--primary" type="submit" form="provider-form" [disabled]="saving() || !preset()">

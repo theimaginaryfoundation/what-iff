@@ -19,6 +19,10 @@ const (
 	SafetyViolationProviderQwen      SafetyViolationProvider = "qwen"
 	SafetyViolationProviderXiaomi    SafetyViolationProvider = "xiaomi"
 	SafetyViolationProviderLocal     SafetyViolationProvider = "local"
+	// A provider connection's (ADR 0x027): OpenRouter, or any compatible server.
+	// A server on this computer reports as local.
+	SafetyViolationProviderOpenRouter SafetyViolationProvider = "openrouter"
+	SafetyViolationProviderCustom     SafetyViolationProvider = "custom"
 )
 
 type SafetyViolationEvent struct {

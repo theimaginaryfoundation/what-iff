@@ -8,6 +8,7 @@ import (
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entmodel "github.com/theimaginaryfoundation/what-iff/ent/model"
+	"github.com/theimaginaryfoundation/what-iff/ent/providerconnection"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -39,6 +40,10 @@ func toModelModel(e *ent.Model) *models.Model {
 		SubscriptionTier:   string(e.SubscriptionTier),
 		Deleted:            e.Deleted,
 		IsDefault:          e.IsDefault,
+		ConnectionID:       e.ConnectionID,
+	}
+	if conn := e.Edges.Connection; conn != nil {
+		m.ConnectionName = conn.Name
 	}
 	if e.ReasoningSupportOverride != nil {
 		o := models.ReasoningSupport(*e.ReasoningSupportOverride)
@@ -122,8 +127,10 @@ func (d *Datastore) ListModels(ctx context.Context) ([]*models.Model, error) {
 		}
 	}()
 
+	// The deployment's own catalog only: models from an account's provider
+	// connections are that account's, and ListModelsForUser adds them.
 	dbModels, err := tx.Model.Query().
-		Where(entmodel.Deleted(false)).
+		Where(entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		All(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T1("query.failed", "Entity", "models"), zap.Error(err))
@@ -167,8 +174,10 @@ func (d *Datastore) ListModelsDefault(ctx context.Context) ([]*models.Model, err
 	return filterVisibleModels(all, false), nil
 }
 
-// ListModelsForUser returns active catalog models visible to the given user.
-// Experimental providers are omitted unless enable_experimental_models is set.
+// ListModelsForUser returns active catalog models visible to the given user,
+// followed by the models the user enabled on their own provider connections
+// (ADR 0x027). Experimental providers are omitted unless
+// enable_experimental_models is set.
 // The gated set lives in models.IsExperimentalModelRecord (currently empty —
 // graduated vendors are generally available; add new dogfood vendors there).
 func (d *Datastore) ListModelsForUser(ctx context.Context, userID uuid.UUID) ([]*models.Model, error) {
@@ -184,10 +193,37 @@ func (d *Datastore) ListModelsForUser(ctx context.Context, userID uuid.UUID) ([]
 		d.logger.Error(i18n.T1("query.failed", "Entity", "user"), zap.Error(err))
 		return nil, err
 	}
-	if u.EnableExperimentalModels {
-		return all, nil
+	visible := all
+	if !u.EnableExperimentalModels {
+		visible = filterVisibleModels(all, false)
 	}
-	return filterVisibleModels(all, false), nil
+	own, err := d.connectionModels(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return append(visible, own...), nil
+}
+
+// connectionModels returns the enabled models on the user's own provider
+// connections.
+func (d *Datastore) connectionModels(ctx context.Context, userID uuid.UUID) ([]*models.Model, error) {
+	rows, err := d.dbClient.Model.Query().
+		Where(
+			entmodel.Deleted(false),
+			entmodel.HasConnectionWith(providerconnection.UserID(userID)),
+		).
+		WithConnection().
+		Order(ent.Asc(entmodel.FieldDisplayName)).
+		All(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T1("query.failed", "Entity", "models"), zap.Error(err))
+		return nil, err
+	}
+	out := make([]*models.Model, len(rows))
+	for i, row := range rows {
+		out[i] = toModelModel(row)
+	}
+	return out, nil
 }
 
 func assertUserCanUseModelTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, modelID uuid.UUID) error {
@@ -202,6 +238,20 @@ func assertUserCanUseModelTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, 
 			return ErrModelNotFound
 		}
 		return err
+	}
+	// A model from a provider connection is usable only by whoever owns the
+	// connection; to anyone else it does not exist.
+	if dbModel.ConnectionID != nil {
+		owned, err := tx.ProviderConnection.Query().
+			Where(providerconnection.ID(*dbModel.ConnectionID), providerconnection.UserID(userID)).
+			Exist(ctx)
+		if err != nil {
+			return err
+		}
+		if !owned {
+			return ErrModelNotFound
+		}
+		return nil
 	}
 	if !models.IsExperimentalModel(toModelModel(dbModel)) {
 		return nil
@@ -339,14 +389,39 @@ func (d *Datastore) GetModel(ctx context.Context, id uuid.UUID) (*models.Model, 
 	return toModelModel(dbModel), nil
 }
 
-// GetModelByName returns a non-deleted model by API name, or ErrModelNotFound.
+// GetDisabledConnectionModel returns a provider connection's model that its
+// account disabled (soft-deleted), or ErrModelNotFound. A chat or job can still
+// name one, and is told it is disabled rather than routed elsewhere (ADR 0x027).
+func (d *Datastore) GetDisabledConnectionModel(ctx context.Context, id uuid.UUID) (*models.Model, error) {
+	row, err := d.dbClient.Model.Query().
+		Where(entmodel.ID(id), entmodel.Deleted(true), entmodel.ConnectionIDNotNil()).
+		Only(ctx)
+	if ent.IsNotFound(err) {
+		return nil, ErrModelNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return toModelModel(row), nil
+}
+
+// ModelRowExists reports whether a model row exists at all, deleted or not. A
+// catalog model is only ever soft-deleted; a provider connection's is deleted
+// with its connection, so a missing row means one of those is gone.
+func (d *Datastore) ModelRowExists(ctx context.Context, id uuid.UUID) (bool, error) {
+	return d.dbClient.Model.Query().Where(entmodel.ID(id)).Exist(ctx)
+}
+
+// GetModelByName returns a non-deleted catalog model by API name, or
+// ErrModelNotFound. Only the deployment's own catalog: a name is not unique
+// across accounts' provider connections (ADR 0x027), so those are found by id.
 func (d *Datastore) GetModelByName(ctx context.Context, name string) (*models.Model, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, ErrModelNotFound
 	}
 	dbModel, err := d.dbClient.Model.Query().
-		Where(entmodel.Name(name), entmodel.Deleted(false)).
+		Where(entmodel.Name(name), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
@@ -358,6 +433,9 @@ func (d *Datastore) GetModelByName(ctx context.Context, name string) (*models.Mo
 	return toModelModel(dbModel), nil
 }
 
+// AdminListModels lists the deployment's catalog. The admin functions here see
+// only the catalog: models on an account's own connections are that account's
+// (ADR 0x027), so an admin can't list, rename, delete or make one the default.
 func (d *Datastore) AdminListModels(ctx context.Context, deleted bool) ([]*models.Model, error) {
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
@@ -373,7 +451,7 @@ func (d *Datastore) AdminListModels(ctx context.Context, deleted bool) ([]*model
 	}()
 
 	dbModels, err := tx.Model.Query().
-		Where(entmodel.Deleted(deleted)).
+		Where(entmodel.Deleted(deleted), entmodel.ConnectionIDIsNil()).
 		Order(ent.Asc(entmodel.FieldDisplayName)).
 		All(ctx)
 	if err != nil {
@@ -412,7 +490,7 @@ func (d *Datastore) AdminGetModel(ctx context.Context, id uuid.UUID) (*models.Mo
 	}()
 
 	dbModel, err := tx.Model.Query().
-		Where(entmodel.ID(id), entmodel.Deleted(false)).
+		Where(entmodel.ID(id), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
@@ -474,7 +552,7 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 	}
 
 	existing, err := tx.Model.Query().
-		Where(entmodel.Name(name)).
+		Where(entmodel.Name(name), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if err == nil {
 		if existing.Deleted {
@@ -578,7 +656,7 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 	}()
 
 	current, err := tx.Model.Query().
-		Where(entmodel.ID(id), entmodel.Deleted(false)).
+		Where(entmodel.ID(id), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
@@ -606,7 +684,7 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 		}
 		if name != current.Name {
 			exists, qerr := tx.Model.Query().
-				Where(entmodel.Name(name), entmodel.Deleted(false)).
+				Where(entmodel.Name(name), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 				Exist(ctx)
 			if qerr != nil {
 				d.logger.Error(i18n.T1("query.failed", "Entity", "model"), zap.Error(qerr))
@@ -721,7 +799,7 @@ func (d *Datastore) AdminDeleteModel(ctx context.Context, id uuid.UUID) error {
 	}()
 
 	affected, err := tx.Model.Update().
-		Where(entmodel.ID(id), entmodel.Deleted(false)).
+		Where(entmodel.ID(id), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		SetDeleted(true).
 		Save(ctx)
 	if err != nil {
@@ -773,7 +851,7 @@ func (d *Datastore) AdminSetDefaultModel(ctx context.Context, id uuid.UUID) (*mo
 
 	// The target must exist and be active (soft-deleted models cannot be the default).
 	if _, err := tx.Model.Query().
-		Where(entmodel.ID(id), entmodel.Deleted(false)).
+		Where(entmodel.ID(id), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		Only(ctx); err != nil {
 		if ent.IsNotFound(err) {
 			if rerr := tx.Rollback(); rerr != nil {
@@ -790,7 +868,7 @@ func (d *Datastore) AdminSetDefaultModel(ctx context.Context, id uuid.UUID) (*mo
 
 	// Clear the flag from any other model currently marked default.
 	if _, err := tx.Model.Update().
-		Where(entmodel.IsDefault(true), entmodel.IDNEQ(id)).
+		Where(entmodel.IsDefault(true), entmodel.IDNEQ(id), entmodel.ConnectionIDIsNil()).
 		SetIsDefault(false).
 		Save(ctx); err != nil {
 		d.logger.Error(i18n.T1("update.failed", "Entity", "model"), zap.Error(err))
@@ -833,7 +911,7 @@ func (d *Datastore) AdminSetDefaultModel(ctx context.Context, id uuid.UUID) (*mo
 // the default model" outside of a user-creation transaction.
 func (d *Datastore) ResolveDefaultModelName(ctx context.Context) string {
 	if m, err := d.dbClient.Model.Query().
-		Where(entmodel.IsDefault(true), entmodel.Deleted(false)).
+		Where(entmodel.IsDefault(true), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		First(ctx); err == nil && m != nil {
 		return m.Name
 	}
@@ -842,21 +920,31 @@ func (d *Datastore) ResolveDefaultModelName(ctx context.Context) string {
 
 // resolveDefaultModelTx resolves the model to seed a new user's preferences with,
 // inside the user-creation transaction. Preference order: admin-configured default,
-// then the env/const named default, then any active model.
+// then the env/const named default, then any active model, all from the
+// deployment's own catalog. With no catalog it returns an ent not-found error,
+// as it always has, so a caller that needs a default still fails cleanly; account
+// creation treats that as "no default yet", until the account enables a model
+// on one of its connections (ADR 0x027).
 func resolveDefaultModelTx(ctx context.Context, tx *ent.Tx) (*ent.Model, error) {
-	if m, err := tx.Model.Query().
-		Where(entmodel.IsDefault(true), entmodel.Deleted(false)).
-		First(ctx); err == nil && m != nil {
-		return m, nil
-	}
-	name := getDefaultModelName()
 	m, err := tx.Model.Query().
-		Where(entmodel.Name(name), entmodel.Deleted(false)).
-		Only(ctx)
-	if ent.IsNotFound(err) {
-		return tx.Model.Query().
-			Where(entmodel.Deleted(false)).
-			First(ctx)
+		Where(entmodel.IsDefault(true), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+		First(ctx)
+	switch {
+	case err == nil:
+		return m, nil
+	case !ent.IsNotFound(err):
+		return nil, err
 	}
-	return m, err
+	m, err = tx.Model.Query().
+		Where(entmodel.Name(getDefaultModelName()), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+		Only(ctx)
+	switch {
+	case err == nil:
+		return m, nil
+	case !ent.IsNotFound(err):
+		return nil, err
+	}
+	return tx.Model.Query().
+		Where(entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+		First(ctx)
 }
