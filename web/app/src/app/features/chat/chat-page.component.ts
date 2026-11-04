@@ -743,7 +743,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     }
     this.contextPanel.setActiveTab(tab);
     this.contextPanel.setDesktopVisible(true);
-    if (this.isMobileViewport()) {
+    if (this.contextPanel.isMobileViewport()) {
       this.contextPanel.openMobile();
     }
   }
@@ -752,7 +752,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   openSandboxSettings(): void {
     this.contextPanel.setActiveTab('memories');
     this.contextPanel.setDesktopVisible(true);
-    if (this.isMobileViewport()) {
+    if (this.contextPanel.isMobileViewport()) {
       this.contextPanel.openMobile();
     }
   }
@@ -765,7 +765,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     this.contextPanel.selectBreakdown(breakdown, message.id);
     this.contextPanel.setActiveTab('context');
     this.contextPanel.setDesktopVisible(true);
-    if (this.isMobileViewport()) {
+    if (this.contextPanel.isMobileViewport()) {
       this.contextPanel.openMobile();
     }
   }
@@ -974,11 +974,6 @@ export class ChatPageComponent implements OnInit, OnDestroy {
       this.copyFeedback.set(null);
       this.clearCopyFeedbackTimer = null;
     }, 1800);
-  }
-
-  private isMobileViewport(): boolean {
-    const view = this.document.defaultView;
-    return !!view?.matchMedia('(max-width: 1023px)').matches;
   }
 
   private async writeToClipboard(text: string): Promise<boolean> {

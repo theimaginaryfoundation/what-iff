@@ -198,7 +198,11 @@ export class ContextPanelService {
     return value;
   }
 
-  private isMobileViewport(): boolean {
+  /**
+   * Whether the layout shows the panel as a sheet rather than docked. The one place that decides
+   * it, so the sheet flows (ChatPageComponent) and what is remembered agree on the breakpoint.
+   */
+  isMobileViewport(): boolean {
     return !!this.document.defaultView?.matchMedia?.(MOBILE_VIEWPORT_QUERY).matches;
   }
 }
