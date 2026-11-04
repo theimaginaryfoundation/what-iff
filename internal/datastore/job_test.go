@@ -1347,6 +1347,45 @@ func TestFindActiveTurnJobForChat_StaleRepliedTurnsAgeOut(t *testing.T) {
 	require.Equal(t, replied.ID, got.ID)
 }
 
+// A turn a dead worker left in processing (no write for TurnJobStaleAfter) must not pin the
+// thread: the lookup skips it, as the turn gate does, and returns the live turn behind it.
+func TestFindActiveTurnJobForChat_SkipsStaleGeneratingTurn(t *testing.T) {
+	ds, cleanup := newFinalizeChatJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createJobTestUser(t, ds)
+	chatID := uuid.New()
+	createTestChat(t, ds, chatID, userID)
+	turn := createJobTestUserMessage(t, ds, chatID)
+
+	orphan := createActiveTurnJob(t, ds, userID, "agent_job_run", chatID.String(), models.JobStatusProcessing)
+	live := createActiveChatMessageJob(t, ds, userID, turn.String(), models.JobStatusProcessing)
+
+	got, err := ds.FindActiveTurnJobForChat(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Equal(t, orphan.ID, got.ID, "while it heartbeats, the older turn is the one generating")
+
+	_, err = ds.dbClient.Job.UpdateOneID(orphan.ID).
+		SetUpdatedAt(time.Now().Add(-TurnJobStaleAfter - time.Minute)).
+		Save(ctx)
+	require.NoError(t, err)
+
+	got, err = ds.FindActiveTurnJobForChat(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, live.ID, got.ID)
+
+	// With the live turn stale too, nothing is generating.
+	_, err = ds.dbClient.Job.UpdateOneID(live.ID).
+		SetUpdatedAt(time.Now().Add(-TurnJobStaleAfter - time.Minute)).
+		Save(ctx)
+	require.NoError(t, err)
+	got, err = ds.FindActiveTurnJobForChat(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
 func TestStopHelpers_ClearEveryActiveChatJobInThread(t *testing.T) {
 	ds, cleanup := newFinalizeChatJobTestDatastore(t)
 	defer cleanup()

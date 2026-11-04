@@ -115,12 +115,14 @@ func deriveStatusAndErrorText(job *models.AgentJob, runErr error, scheduleErrTex
 		errText = providerkeys.FailureText(runErr)
 	}
 
+	// A one-off job is done once it has run. A run the user stopped ends it complete too (there is
+	// no cancelled job status): they chose to stop it, and the jobs page must not call it a failure.
 	var statusUpdate *models.AgentJobStatus
-	if runErr != nil && job != nil && job.ScheduleType == models.AgentJobScheduleTypeAt {
+	if runErr != nil && !runStopped(runErr) && job != nil && job.ScheduleType == models.AgentJobScheduleTypeAt {
 		failed := models.AgentJobStatusFailed
 		statusUpdate = &failed
 	}
-	if runErr == nil && job != nil && job.ScheduleType == models.AgentJobScheduleTypeAt {
+	if (runErr == nil || runStopped(runErr)) && job != nil && job.ScheduleType == models.AgentJobScheduleTypeAt {
 		complete := models.AgentJobStatusComplete
 		statusUpdate = &complete
 	}
@@ -330,7 +332,10 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 	runStart := time.Now()
 	_, runErr := m.agent.HandleAgentJobPrompt(execCtx, *chatID, job.Prompt, job.ModelID, job.PersonalityID, ritualIDs, nil)
 	runOutcome := runOutcomeRan
-	if runErr != nil {
+	switch {
+	case runStopped(runErr):
+		runOutcome = runOutcomeStopped
+	case runErr != nil:
 		runOutcome = runOutcomeFailed
 	}
 	recordRun(ctx, runOutcome)

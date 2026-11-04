@@ -18,8 +18,8 @@
 ## Non-obvious decisions
 
 - Only one instance should execute the scheduler loop in production clusters — server config documents lock key and retry tuning.
-- **Metrics** (`metrics.go`): every firing counts once on `whatiff.scheduler.runs` by outcome (`ran`, `failed`, `skipped_overlap`, `skipped_inactive`, `load_failed`, `chat_resolve_failed`, `skipped_congestion`, `deferred`, `misfire`).
-  Runs that reach the agent also record `whatiff.scheduler.run.duration` (outcome `ran` or `failed`).
+- **Metrics** (`metrics.go`): every firing counts once on `whatiff.scheduler.runs` by outcome (`ran`, `failed`, `stopped`, `skipped_overlap`, `skipped_inactive`, `load_failed`, `chat_resolve_failed`, `skipped_congestion`, `deferred`, `misfire`).
+  Runs that reach the agent also record `whatiff.scheduler.run.duration` (outcome `ran`, `failed` or `stopped`).
   `whatiff.scheduler.lateness` is start time minus the job's stored `next_run_at`, for regular firings only (manual runs and deferred retries have no planned time).
   The manager isn't handed a `*telemetry.Metrics`, so it records through `telemetry.Global()`.
   Scheduled runs create no `jobs` row, so they don't appear in the job-lifecycle metrics.
@@ -28,7 +28,7 @@
 - **Run failure text:** `last_error` and the assistant message posted on a failed run use `providerkeys.FailureText`, so a missing provider key reads "No OpenAI API key is set." rather than the transport error.
   There is no separate status value or column; keep the marker and the helper in sync.
 - **Stopped runs:** the thread's Stop cancels a scheduled run's turn (ADR 0x039).
-  The run returns an error wrapping `agent.ErrTurnStopped`, which `runStopped` tells apart: `last_error` reads `StoppedRunText` and no failure message is posted to the thread.
+  The run returns an error wrapping `agent.ErrTurnStopped`, which `runStopped` tells apart: `last_error` reads `StoppedRunText`, no failure message is posted to the thread, a one-off job ends `complete` rather than `failed`, and the run counts as `stopped`.
   A run cancelled for any other reason (a worker shutting down) carries plain `context.Canceled` and is recorded as a failure.
   A stopped one-off job still ends `failed`, and the run counts as `failed` in the metrics.
 - **Which job a reply came from:** the run's context carries the job's id, title and prompt (`models.WithJobRun`), which the agent records on the run's ticket and its reply as `job_run` (ADR 0x040).
