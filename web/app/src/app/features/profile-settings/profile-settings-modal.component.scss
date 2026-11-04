@@ -166,6 +166,17 @@ small {
   }
 }
 
+// A link inside a field's hint (the default model's "Go to Providers").
+.profile-settings__inline-link {
+  background: none;
+  border: 0;
+  color: var(--accent, #8c87ff);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+  padding: 0;
+}
+
 .profile-settings__timezone-error {
   color: var(--danger);
 }

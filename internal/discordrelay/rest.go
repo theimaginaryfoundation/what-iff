@@ -33,6 +33,16 @@ const BotPermissions = discordgo.PermissionViewChannel |
 // ErrInvalidToken is returned when Discord rejects a bot token.
 var ErrInvalidToken = errors.New("discord rejected the bot token")
 
+// ErrDisallowedIntents is returned when the Gateway refuses an intent the bot asked for:
+// the owner switched the privileged Message Content intent off after the bot was added.
+var ErrDisallowedIntents = errors.New("discord refused the bot's gateway intents")
+
+// What the owner is shown on a bot Discord refused (its last_error).
+const (
+	InvalidTokenReason      = "Discord rejected the bot token. Paste a new one."
+	DisallowedIntentsReason = "Discord refused the Message Content intent. Turn it back on in the Developer Portal (Bot, Privileged Gateway Intents), then check again."
+)
+
 // BotIdentity is what a valid token says about its bot.
 type BotIdentity struct {
 	ApplicationID  string

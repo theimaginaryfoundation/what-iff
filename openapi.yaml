@@ -1896,7 +1896,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: The account already has a connection to that built-in provider; `code` is `provider_connection_exists`
+          description: >-
+            The account already has a connection to that built-in provider (`code` is
+            `provider_connection_exists`), or one with that name, ignoring case (`code` is
+            `connection_name_taken`). Without a name, a connection named after its preset
+            takes the next free number instead ("Ollama 2").
           content:
             application/json:
               schema:
@@ -2002,6 +2006,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '409':
+          description: Another of the account's connections has that name, ignoring case; `code` is `connection_name_taken`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: Listing with the new key or address failed, as for adding one
           content:
@@ -2016,12 +2026,22 @@ paths:
                 $ref: '#/components/schemas/Error'
     delete:
       summary: Remove a provider connection
+      description: >-
+        Its models go with it: a chat on one falls back to the default model, and a job
+        on one fails with a clear error. Refused while one of them is the account's
+        default model.
       tags: [Provider Connections]
       security:
         - bearerAuth: []
       responses:
         '204':
           description: Connection removed
+        '409':
+          description: One of its models is the account's default; `code` is `default_model_in_use`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
           content:
@@ -2051,20 +2071,25 @@ paths:
           type: string
           format: uuid
     get:
-      summary: List the models a connection's provider offers
-      description: Asks the provider now, with the connection's stored key; nothing is cached.
+      summary: List the models a connection's provider offers, and which are enabled
+      description: >-
+        Asks the provider now, with the connection's stored key; nothing is cached. Each
+        model says whether the account enabled it, and its tool and image support: the
+        account's confirmed values for an enabled model, otherwise what the provider
+        reports (or what is known about its API), absent when unknown. An enabled model
+        the provider no longer lists still appears, so it can be turned off.
       tags: [Provider Connections]
       security:
         - bearerAuth: []
       responses:
         '200':
-          description: Models, sorted by id
+          description: Models, sorted by id, then any enabled ones the provider no longer lists
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ListedModel'
+                  $ref: '#/components/schemas/ConnectionModel'
         '401':
           description: Unauthorized
           content:
@@ -2079,6 +2104,63 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           description: Listing failed; `code` as for adding a connection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Enable or disable a connection's models
+      description: >-
+        Enabled models are offered in the account's model picker. Disabling one keeps
+        its row, so a chat or job naming it fails clearly, and enabling it again brings
+        it back. Changes nothing about where requests go, so it needs no password.
+      tags: [Provider Connections]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetConnectionModelsRequest'
+      responses:
+        '200':
+          description: The connection's enabled models
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConnectionModel'
+        '400':
+          description: No models given, or a model id that is empty or over 200 characters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such connection on this account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >-
+            Disabling the account's default model (`code` is `default_model_in_use`), or a
+            model named like another of the connection's, ignoring case, or like the
+            deployment's own model of that provider (`code` is `model_name_taken`)
           content:
             application/json:
               schema:
@@ -5915,7 +5997,7 @@ paths:
 
     post:
       summary: Create chat
-      description: Creates a new chat session. Optional `personality_id` and `model_id` let callers start a thread with a specific persona/model in one round trip; both must be owned by the authenticated user (model must be active). When omitted, the user's default preferences are used.
+      description: Creates a new chat session. Optional `personality_id` and `model_id` let callers start a thread with a specific persona/model in one round trip; both must be owned by the authenticated user (model must be active). When omitted, the user's default preferences are used. An account with no default model gets a chat with no model, whose turns use the account's default once it has one; until then a turn fails with `no_model_selected`.
       tags: [Chat Management]
       requestBody:
         required: true
@@ -9573,7 +9655,11 @@ components:
         default_model_id:
           type: string
           format: uuid
-          description: ID of the user's preferred default AI model
+          description: |
+            ID of the user's default model for new chats. Returned as the nil UUID
+            (00000000-0000-0000-0000-000000000000) when the account has none, as on an install
+            without a model catalog before the account enables a model; the first model it
+            enables then becomes its default.
         default_personality_id:
           type: string
           format: uuid
@@ -9762,8 +9848,10 @@ components:
           description: Description of the model's capabilities
         provider:
           type: string
-          enum: [openai, anthropic, zai, google, mistral, deepseek, qwen, xiaomi]
-          description: Provider backend used for this model
+          enum: [openai, anthropic, zai, google, mistral, deepseek, qwen, xiaomi, openrouter, ollama, lmstudio, custom]
+          description: >-
+            Provider backend used for this model: a built-in provider, or for a model
+            from a provider connection, the preset the connection was made from.
         tool_support:
           type: boolean
           description: Whether the model supports tool/function calling
@@ -9786,6 +9874,17 @@ components:
         is_default:
           type: boolean
           description: Whether this is the application-wide default model (at most one active model)
+        connection_id:
+          type: string
+          format: uuid
+          description: >-
+            The provider connection serving the model (ADR 0x027). Absent for the
+            deployment's own catalog; present only on the account's own models.
+        connection_name:
+          type: string
+          description: >-
+            That connection's name, as the account named it (e.g. "Desk Ollama"),
+            in the account's model list; absent where connection_id is.
       required:
         - id
         - name
@@ -10989,6 +11088,52 @@ components:
         display_name:
           type: string
           description: The provider's own name for it, when it gives one.
+        tool_support:
+          type: boolean
+          description: Whether it takes tools, as the provider reports; absent when unknown.
+        vision_support:
+          type: boolean
+          description: Whether it takes images, as the provider reports; absent when unknown.
+    ConnectionModel:
+      description: One of a connection's models as the account sees it.
+      allOf:
+        - $ref: '#/components/schemas/ListedModel'
+        - type: object
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
+            default_name:
+              type: string
+              description: >-
+                The name the listing offers the model under, which a name the account
+                clears goes back to. `display_name` is the account's own name for it,
+                kept while the model is off too.
+    SetConnectionModelsRequest:
+      type: object
+      required: [models]
+      properties:
+        models:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items:
+            type: object
+            required: [id, enabled]
+            properties:
+              id:
+                type: string
+                maxLength: 200
+              enabled:
+                type: boolean
+              display_name:
+                type: string
+              tool_support:
+                type: boolean
+                description: Left out, an enabled model keeps its value, and a new one starts off.
+              vision_support:
+                type: boolean
+                description: Left out, an enabled model keeps its value, and a new one starts off.
     ProviderConnected:
       type: object
       required: [connection, models]
@@ -12396,7 +12541,11 @@ components:
           description: Whether the application has the privileged Message Content intent on
         status:
           type: string
-          enum: [active, invalid_token, disabled]
+          enum: [active, invalid_token, intent_disabled, disabled]
+          description: >-
+            invalid_token means Discord rejected the token; intent_disabled means the Gateway refused
+            the Message Content intent (switched off in the Developer Portal). Both stop the bot
+            connecting until a new token or a refresh, and last_error says what to fix.
         last_error:
           type: string
         invite_url:
@@ -13960,6 +14109,10 @@ components:
         - provider_unavailable
         - custom_address_not_allowed
         - provider_connection_exists
+        - default_model_in_use
+        - connection_name_taken
+        - model_name_taken
+        - no_model_selected
 
     # Cross-resource search schemas (GET /search)
     SearchResult:

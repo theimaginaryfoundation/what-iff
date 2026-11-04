@@ -18,17 +18,18 @@ import (
 	"go.uber.org/zap"
 )
 
-// SeedModelCatalog reports whether boot seeds the model catalog from
-// models.AvailableModels. A self-hosted install needs it until models are chosen
-// per account. A build whose operator curates the catalog replaces it in an
-// init(), so boot never adds a model the operator did not choose, with whatever
-// pricing and tier the schema defaults happen to give it.
+// SeedModelCatalog reports whether boot seeds the catalog from
+// models.AvailableModels (SeedCatalog) on a real provider backend. It is false:
+// on a self-hosted install each account enables its own models on its
+// connections, and ConvertSeededModels moves an older install's seeded models
+// there (ADR 0x027). The mock and local test backends seed regardless. A build
+// that wants a seeded catalog on a real backend, such as a development
+// database, replaces it in an init().
 //
-// It is a function rather than a value because it is consulted when
-// EnsureSeedData runs, after the server has loaded its configuration. A
-// package init() runs before that, so a replacement that reads configuration
-// sees it only when asked at call time.
-var SeedModelCatalog = func() bool { return true }
+// It is a function rather than a value because it is consulted after the
+// server has loaded its configuration. A package init() runs before that, so a
+// replacement that reads configuration sees it only when asked at call time.
+var SeedModelCatalog = func() bool { return false }
 
 // EnsureSeedData makes sure critical reference data exists before serving requests.
 func EnsureSeedData(ctx context.Context, client *ent.Client, logger *zap.Logger) error {
@@ -38,23 +39,6 @@ func EnsureSeedData(ctx context.Context, client *ent.Client, logger *zap.Logger)
 		return err
 	}
 
-	if SeedModelCatalog() {
-		if err := ensureAllModels(ctx, client, logger); err != nil {
-			return err
-		}
-	}
-
-	// Fail fast if DEFAULT_MODEL_NAME does not name an active model
-	defaultModelName := envOrDefault("DEFAULT_MODEL_NAME", appmodels.DefaultModelName)
-	if _, err := client.Model.Query().
-		Where(
-			model.Name(defaultModelName),
-			model.Deleted(false),
-		).
-		Only(ctx); err != nil {
-		return errors.New("default model not found after seeding: " + defaultModelName)
-	}
-
 	// Store default role IDs for later use (can be accessed via GetDefaultRole)
 	_ = defaultUserRole
 	_ = defaultAdminRole
@@ -62,9 +46,32 @@ func EnsureSeedData(ctx context.Context, client *ent.Client, logger *zap.Logger)
 	return nil
 }
 
-func ensureAllModels(ctx context.Context, client *ent.Client, logger *zap.Logger) error {
+// RequireCatalogDefault fails fast unless DEFAULT_MODEL_NAME names an active
+// catalog model. A deployment that supplies its own keys curates its catalog,
+// which must hold its default; where accounts bring their own keys there may be
+// no catalog at all, and each account has its own default.
+func RequireCatalogDefault(ctx context.Context, client *ent.Client) error {
+	defaultModelName := envOrDefault("DEFAULT_MODEL_NAME", appmodels.DefaultModelName)
+	if _, err := client.Model.Query().
+		Where(
+			model.Name(defaultModelName),
+			model.Deleted(false),
+			model.ConnectionIDIsNil(),
+		).
+		Only(ctx); err != nil {
+		return errors.New("default model not found in the catalog: " + defaultModelName)
+	}
+	return nil
+}
+
+// SeedCatalog seeds the model catalog from models.AvailableModels, as boot did
+// before accounts chose their own models. The test backends (mock and local
+// LLM) always call it: their end-to-end suites and visual baselines start from
+// a fresh database and expect the seeded models. On a real backend it runs only
+// where SeedModelCatalog says so.
+func SeedCatalog(ctx context.Context, client *ent.Client, logger *zap.Logger) error {
 	for _, modelConfig := range appmodels.AvailableModels {
-		existing, err := client.Model.Query().Where(model.Name(modelConfig.Name)).Only(ctx)
+		existing, err := client.Model.Query().Where(model.Name(modelConfig.Name), model.ConnectionIDIsNil()).Only(ctx)
 		if err == nil {
 			if existing.Deleted {
 				logger.Info("Skipping seed for soft-deleted model", zap.String("name", modelConfig.Name))
@@ -228,12 +235,14 @@ func CreateOrPromoteAdmin(ctx context.Context, client *ent.Client, logger *zap.L
 	if err != nil {
 		return AdminProvisionNone, fmt.Errorf("admin role not found; run seeding (EnsureSeedData) first: %w", err)
 	}
+	// The deployment's default model, if it has a catalog; without one the admin,
+	// like any account, has no default until it enables a model (ADR 0x027).
 	defaultModelName := envOrDefault("DEFAULT_MODEL_NAME", appmodels.DefaultModelName)
 	defaultModel, err := client.Model.Query().
-		Where(model.Name(defaultModelName), model.Deleted(false)).
+		Where(model.Name(defaultModelName), model.Deleted(false), model.ConnectionIDIsNil()).
 		Only(ctx)
-	if err != nil {
-		return AdminProvisionNone, fmt.Errorf("default model %q not found; run seeding (EnsureSeedData) first: %w", defaultModelName, err)
+	if err != nil && !ent.IsNotFound(err) {
+		return AdminProvisionNone, fmt.Errorf("read default model %q: %w", defaultModelName, err)
 	}
 	return createOrPromoteAdmin(ctx, client, logger, defaultModel, adminRole, email, password)
 }
@@ -396,11 +405,13 @@ func createOrPromoteAdmin(ctx context.Context, client *ent.Client, logger *zap.L
 	}
 
 	// Create user preferences for admin
-	_, err = tx.UserPreference.Create().
+	prefsCreate := tx.UserPreference.Create().
 		SetUserID(adminUser.ID).
-		SetModelID(defaultModel.ID).
-		SetTheme(userpreference.ThemeDark).
-		Save(ctx)
+		SetTheme(userpreference.ThemeDark)
+	if defaultModel != nil {
+		prefsCreate.SetModelID(defaultModel.ID)
+	}
+	_, err = prefsCreate.Save(ctx)
 	if err != nil {
 		logger.Error("failed to create admin preferences", zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {

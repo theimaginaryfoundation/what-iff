@@ -16,7 +16,7 @@ func TestNormalizeImportedMessageTimesPreservesOrder(t *testing.T) {
 		{Message: "third", Origin: models.MessageOriginUser, SentAt: base.Add(-time.Second)},
 	}
 
-	normalized := normalizeImportedMessageTimes(messages)
+	normalized := normalizeImportedMessageTimes(messages, base)
 
 	require.Equal(t, base, normalized[0].SentAt)
 	require.Equal(t, base.Add(time.Microsecond), normalized[1].SentAt)
@@ -33,7 +33,7 @@ func TestNormalizeImportedMessageTimesEnforcesDatastorePrecisionStep(t *testing.
 		{Message: "third", Origin: models.MessageOriginUser, SentAt: base.Add(750 * time.Nanosecond)},
 	}
 
-	normalized := normalizeImportedMessageTimes(messages)
+	normalized := normalizeImportedMessageTimes(messages, base)
 
 	require.Equal(t, base, normalized[0].SentAt)
 	require.Equal(t, base.Add(time.Microsecond), normalized[1].SentAt)
@@ -48,7 +48,7 @@ func TestNormalizeImportedMessageTimesLeavesPrecisionSafeIncreasingTimesUnchange
 		{Message: "third", Origin: models.MessageOriginUser, SentAt: base.Add(5 * time.Second)},
 	}
 
-	require.Equal(t, messages, normalizeImportedMessageTimes(messages))
+	require.Equal(t, messages, normalizeImportedMessageTimes(messages, base))
 }
 
 func TestNormalizeImportedMessageTimesIsIdempotent(t *testing.T) {
@@ -60,8 +60,24 @@ func TestNormalizeImportedMessageTimesIsIdempotent(t *testing.T) {
 		{Message: "fourth", Origin: models.MessageOriginAssistant, SentAt: base.Add(500 * time.Nanosecond)},
 	}
 
-	once := normalizeImportedMessageTimes(messages)
-	twice := normalizeImportedMessageTimes(once)
+	once := normalizeImportedMessageTimes(messages, base)
+	twice := normalizeImportedMessageTimes(once, base)
 
 	require.Equal(t, once, twice)
+}
+
+func TestNormalizeImportedMessageTimesReplacesUnencodableTimes(t *testing.T) {
+	base := time.Date(2025, 8, 3, 3, 0, 0, 0, time.UTC)
+	farFuture := time.Date(56000, 1, 1, 0, 0, 0, 0, time.UTC)
+	messages := []models.ChatMessage{
+		{Message: "first", Origin: models.MessageOriginUser, SentAt: farFuture},
+		{Message: "second", Origin: models.MessageOriginAssistant, SentAt: base.Add(time.Second)},
+		{Message: "third", Origin: models.MessageOriginUser, SentAt: farFuture},
+	}
+
+	normalized := normalizeImportedMessageTimes(messages, base)
+
+	require.Equal(t, base, normalized[0].SentAt, "a bad first time takes the fallback")
+	require.Equal(t, base.Add(time.Second), normalized[1].SentAt)
+	require.Equal(t, base.Add(time.Second+time.Microsecond), normalized[2].SentAt, "a bad later time follows its predecessor")
 }

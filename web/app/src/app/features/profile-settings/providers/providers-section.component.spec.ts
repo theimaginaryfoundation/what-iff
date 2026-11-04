@@ -4,12 +4,16 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { of, throwError } from 'rxjs';
 
+import { Model } from '../../../core/models/model.model';
 import { ProviderConnection, ProviderPreset } from '../../../core/models/provider-connection.model';
 import { AuthService } from '../../../core/services/auth.service';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
+import { ModelService } from '../../../core/services/model.service';
 import { PersonalityService } from '../../../core/services/personality.service';
 import { ProviderConnectionsService } from '../../../core/services/provider-connections.service';
 import { ProviderKeysService } from '../../../core/services/provider-keys.service';
+import { UserPreferencesService } from '../../../core/services/user-preferences.service';
+import { NIL_UUID } from '../../../core/utils/default-model';
 import { ProfileSettingsModalService } from '../profile-settings-modal.service';
 import { ProvidersSectionComponent } from './providers-section.component';
 
@@ -47,6 +51,8 @@ describe('ProvidersSectionComponent', () => {
   let confirmation: { confirm: ReturnType<typeof vi.fn> };
   let router: { navigate: ReturnType<typeof vi.fn> };
   let modal: ProfileSettingsModalService;
+  let modelService: { getModels: ReturnType<typeof vi.fn> };
+  let preferences: { getUserPreferences: ReturnType<typeof vi.fn> };
   let currentUser: ReturnType<typeof signal<{ id: string } | null>>;
 
   async function render(): Promise<ComponentFixture<ProvidersSectionComponent>> {
@@ -60,6 +66,12 @@ describe('ProvidersSectionComponent', () => {
 
   function row(fixture: ComponentFixture<ProvidersSectionComponent>, preset: string): HTMLElement {
     return fixture.nativeElement.querySelector(`[data-preset="${preset}"]`);
+  }
+
+  function buttonIn(el: HTMLElement, label: string): HTMLButtonElement {
+    const button = [...el.querySelectorAll('button')].find(b => b.textContent?.trim() === label);
+    if (!button) throw new Error(`no ${label} button`);
+    return button;
   }
 
   function byTestId(fixture: ComponentFixture<ProvidersSectionComponent>, id: string): HTMLElement | null {
@@ -78,6 +90,8 @@ describe('ProvidersSectionComponent', () => {
     confirmation = { confirm: vi.fn().mockResolvedValue(true) };
     router = { navigate: vi.fn() };
     currentUser = signal<{ id: string } | null>({ id: 'user-1' });
+    modelService = { getModels: vi.fn().mockReturnValue(of([])) };
+    preferences = { getUserPreferences: vi.fn().mockReturnValue(of({ default_model_id: 'm-default' })) };
 
     await TestBed.configureTestingModule({
       imports: [ProvidersSectionComponent],
@@ -90,6 +104,8 @@ describe('ProvidersSectionComponent', () => {
         { provide: PersonalityService, useValue: personalities },
         { provide: ConfirmationService, useValue: confirmation },
         { provide: Router, useValue: router },
+        { provide: ModelService, useValue: modelService },
+        { provide: UserPreferencesService, useValue: preferences },
       ],
     }).compileComponents();
     modal = TestBed.inject(ProfileSettingsModalService);
@@ -140,8 +156,90 @@ describe('ProvidersSectionComponent', () => {
     expect(fixture.componentInstance.formPreset()).toBeNull();
 
     fixture.componentInstance.closeForm();
-    (row(fixture, 'openai').querySelector('.providers__button') as HTMLButtonElement).click();
+    buttonIn(row(fixture, 'openai'), 'Edit').click();
     expect(fixture.componentInstance.formConnection()).toEqual(OPENAI);
+  });
+
+  describe('models (ADR 0x027)', () => {
+    const model = (id: string, connectionId: string): Model => ({ id, name: id, display_name: id, description: '', tool_support: true, connection_id: connectionId });
+
+    it("counts each connection's models, and opens a connection's chooser", async () => {
+      connections.list.mockReturnValue(of([OPENAI, OLLAMA]));
+      modelService.getModels.mockReturnValue(of([model('a', 'c-openai'), model('b', 'c-openai'), model('catalog', '')]));
+      const fixture = await render();
+
+      expect(row(fixture, 'openai').textContent).toContain('2 models');
+      // The account has a default model, so a connection without models is not urged.
+      expect(row(fixture, 'ollama').textContent).toContain('no models');
+      expect(row(fixture, 'ollama').textContent).not.toContain('no models yet');
+
+      buttonIn(row(fixture, 'ollama'), 'Models').click();
+      expect(fixture.componentInstance.chooserConnection()).toEqual(OLLAMA);
+    });
+
+    it('urges choosing models only while the account has none to chat with', async () => {
+      connections.list.mockReturnValue(of([OPENAI]));
+      preferences.getUserPreferences.mockReturnValue(of({ default_model_id: NIL_UUID }));
+      const fixture = await render();
+      expect(row(fixture, 'openai').textContent).toContain('no models yet');
+      expect(buttonIn(row(fixture, 'openai'), 'Choose models')).toBeTruthy();
+    });
+
+    it('points onboarding at choosing models while the account has no default model', async () => {
+      connections.list.mockReturnValue(of([OLLAMA, OPENAI]));
+      preferences.getUserPreferences.mockReturnValue(of({ default_model_id: NIL_UUID }));
+      const fixture = await render();
+
+      const callout = byTestId(fixture, 'providers-needs-models')!;
+      expect(callout.textContent).toContain('Choose OpenAI models');
+      expect(byTestId(fixture, 'providers-next')).toBeNull();
+      (callout.querySelector('button') as HTMLButtonElement).click();
+      expect(fixture.componentInstance.chooserConnection()).toEqual(OPENAI);
+    });
+
+    it('does not point at models once the account has a default', async () => {
+      connections.list.mockReturnValue(of([OPENAI]));
+      const fixture = await render();
+      expect(byTestId(fixture, 'providers-needs-models')).toBeNull();
+    });
+
+    it('opens the chooser another part of the app asked for, once', async () => {
+      connections.list.mockReturnValue(of([OLLAMA, OPENAI]));
+      modal.openModelChooser('openai');
+      const fixture = await render();
+      expect(fixture.componentInstance.chooserConnection()).toEqual(OPENAI);
+      expect(modal.modelChooserRequest()).toBeNull();
+    });
+
+    it("goes from connecting straight to choosing the connection's models", async () => {
+      connections.list.mockReturnValue(of([OLLAMA]));
+      const fixture = await render();
+      fixture.componentInstance.add();
+      fixture.componentInstance.chooseModels(OLLAMA);
+      expect(fixture.componentInstance.formOpen()).toBe(false);
+      expect(fixture.componentInstance.chooserConnection()).toEqual(OLLAMA);
+    });
+
+    it('says how many models are enabled after saving, and recounts', async () => {
+      connections.list.mockReturnValue(of([OLLAMA]));
+      const fixture = await render();
+      fixture.componentInstance.chooseModels(OLLAMA);
+      modelService.getModels.mockClear();
+      await fixture.componentInstance.onModelsSaved([{ id: 'qwen3:4b', enabled: true }]);
+      expect(fixture.componentInstance.chooserConnection()).toBeNull();
+      expect(fixture.componentInstance.notice()).toBe('Ollama: 1 model enabled.');
+      expect(modelService.getModels).toHaveBeenCalled();
+    });
+
+    it('sends the account to the Profile tab to change its default', async () => {
+      connections.list.mockReturnValue(of([OPENAI]));
+      const fixture = await render();
+      modal.open('providers');
+      fixture.componentInstance.chooseModels(OPENAI);
+      fixture.componentInstance.changeDefault();
+      expect(fixture.componentInstance.chooserConnection()).toBeNull();
+      expect(modal.activeTab()).toBe('profile');
+    });
   });
 
   it('reloads and refreshes access after a connection is saved', async () => {

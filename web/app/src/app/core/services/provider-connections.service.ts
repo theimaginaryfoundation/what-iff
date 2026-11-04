@@ -4,8 +4,9 @@ import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import {
+  ConnectionModel,
+  ConnectionModelChoice,
   CreateProviderConnection,
-  ListedModel,
   ProviderConnected,
   ProviderConnection,
   ProviderPreset,
@@ -44,7 +45,17 @@ export class ProviderConnectionsService {
     return this.http.delete<void>(`${this.baseUrl}/${id}`);
   }
 
-  models(id: string): Observable<ListedModel[]> {
-    return this.http.get<ListedModel[]>(`${this.baseUrl}/${id}/models`);
+  /** The provider's live listing, with which models the account enabled. */
+  models(id: string): Observable<ConnectionModel[]> {
+    return this.http.get<ConnectionModel[]>(`${this.baseUrl}/${id}/models`);
+  }
+
+  /**
+   * Enables and disables models, as one change; answers with the connection's
+   * enabled models. Disabling the account's default model answers 409
+   * default_model_in_use.
+   */
+  setModels(id: string, models: ConnectionModelChoice[]): Observable<ConnectionModel[]> {
+    return this.http.put<ConnectionModel[]>(`${this.baseUrl}/${id}/models`, { models });
   }
 }

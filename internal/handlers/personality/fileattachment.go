@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
+
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
@@ -70,6 +72,10 @@ func (h *Handler) CreateFileAttachment(w http.ResponseWriter, r *http.Request) {
 			zap.String("file_attachment_id", createdAttachment.ID.String()),
 			zap.String("s3_key", s3Key),
 			zap.Error(err))
+	}
+	if strings.HasPrefix(fileAttachment.FileType, models.ImageMIMEPrefix) {
+		// Thumbnail is best-effort — failure never blocks the upload response.
+		handlerutils.UploadThumbnailFromPath(r.Context(), h.agent.FileStore(), h.logger, userID, createdAttachment.ID, tempFilePath)
 	}
 
 	handlerutils.TriggerAsyncFileChunking(

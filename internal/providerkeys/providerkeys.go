@@ -82,6 +82,21 @@ func (DeploymentResolver) AccountsSupplyKeys() bool { return false }
 // supplies keys itself sets New in an init().
 var New = AccountKeys
 
+// AccountsSupplyKeys reports whether this build takes keys from accounts: what
+// New chooses, asked before the server builds its real resolvers, as boot's
+// one-time conversions do.
+func AccountsSupplyKeys() bool {
+	return New(DeploymentResolver{}, accountsProbe{}).AccountsSupplyKeys()
+}
+
+// accountsProbe stands in for the account resolver when asking New which way
+// this build goes; nothing calls its keys.
+type accountsProbe struct{}
+
+func (accountsProbe) Key(context.Context, models.ModelProvider) string { return "" }
+func (accountsProbe) Configured(models.ModelProvider) bool             { return true }
+func (accountsProbe) AccountsSupplyKeys() bool                         { return true }
+
 // AccountKeys is New's default: requests carry the requesting account's own
 // key, and the deployment's configured keys are not used.
 func AccountKeys(_ DeploymentResolver, accounts Resolver) Resolver {

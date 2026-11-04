@@ -372,7 +372,7 @@ func (s *Service) post(ctx context.Context, target models.DiscordBindingTarget, 
 	}
 	switch {
 	case errors.Is(err, ErrInvalidToken):
-		_ = s.Store.SetDiscordBotStatus(ctx, bot.ID, models.DiscordBotInvalidToken, "Discord rejected the bot token. Paste a new one.")
+		_ = s.Store.SetDiscordBotStatus(ctx, bot.ID, models.DiscordBotInvalidToken, InvalidTokenReason)
 	case errors.Is(err, ErrNoAccess) && channelID == b.ChannelID:
 		_ = s.Store.SetDiscordBindingStatus(ctx, b.ID, models.DiscordBindingBroken, "The bot can no longer post in this channel.")
 	case errors.Is(err, ErrNoAccess):

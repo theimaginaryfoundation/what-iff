@@ -84,6 +84,20 @@ const (
 	// ErrCodeProviderConnectionExists: the account already has a connection to
 	// that built-in provider, and has at most one; it edits that one instead.
 	ErrCodeProviderConnectionExists = "provider_connection_exists"
+	// ErrCodeDefaultModelInUse: the change would take away the account's default
+	// model (disabling it, or removing its connection); it chooses another
+	// default first.
+	ErrCodeDefaultModelInUse = "default_model_in_use"
+	// ErrCodeConnectionNameTaken: the account already has a provider connection
+	// by that name (ignoring case); it picks another.
+	ErrCodeConnectionNameTaken = "connection_name_taken"
+	// ErrCodeModelNameTaken: another of the connection's models, or the
+	// deployment's own model of that provider, has that name (ignoring case).
+	ErrCodeModelNameTaken = "model_name_taken"
+	// ErrCodeNoModelSelected: the account has no model to run the turn on: the
+	// chat names none and the account has no default, since it has not enabled
+	// one yet.
+	ErrCodeNoModelSelected = "no_model_selected"
 )
 
 // AllErrorCodes is every code this API can emit. It is the source the
@@ -121,6 +135,10 @@ var AllErrorCodes = []string{
 	ErrCodeProviderUnavailable,
 	ErrCodeCustomAddressNotAllowed,
 	ErrCodeProviderConnectionExists,
+	ErrCodeDefaultModelInUse,
+	ErrCodeConnectionNameTaken,
+	ErrCodeModelNameTaken,
+	ErrCodeNoModelSelected,
 }
 
 // genericErrorCodes maps HTTP statuses to their generic code.

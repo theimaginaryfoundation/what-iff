@@ -7,8 +7,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -66,8 +68,9 @@ func newestImagesFirst(atts []*models.FileAttachment) []*models.FileAttachment {
 
 // historyImagesForMessage collects vision payloads for the image attachments on a prior message
 // that are in inline. Prior turns send each image's thumbnail (falling back to the original when
-// none was stored): the model needs continuity there, not detail, and the current turn's
-// attachments are sent at full size separately. An image the store cannot produce is skipped.
+// none was stored, and then backfilling the thumbnail so the next turn sends the small one): the
+// model needs continuity there, not detail, and the current turn's attachments are sent at full
+// size separately. An image the store cannot produce is skipped.
 func historyImagesForMessage(
 	ctx context.Context,
 	logger *zap.Logger,
@@ -88,9 +91,12 @@ func historyImagesForMessage(
 		if _, ok := inline[att.ID]; !ok {
 			continue
 		}
-		raw, mediaType := resolveImageBytes(ctx, logger, fileStore, userID, chatID, att, true)
+		raw, mediaType, source := resolveImageBytes(ctx, logger, fileStore, userID, chatID, att, true)
 		if len(raw) == 0 {
 			continue
+		}
+		if source != telemetry.ImageSourceThumbnail {
+			imageutil.BackfillThumbnail(fileStore, logger, userID, att.ID, raw)
 		}
 		out = append(out, provider.UserMessageImage{MediaType: mediaType, RawBytes: raw})
 	}
@@ -114,7 +120,7 @@ func loadImageBytesForAttachments(
 		if att == nil || !strings.HasPrefix(att.FileType, models.ImageMIMEPrefix) {
 			continue
 		}
-		if raw, _ := resolveImageBytes(ctx, logger, fileStore, userID, chatID, att, false); len(raw) > 0 {
+		if raw, _, _ := resolveImageBytes(ctx, logger, fileStore, userID, chatID, att, false); len(raw) > 0 {
 			result[att.ID] = raw
 		}
 	}
@@ -122,9 +128,9 @@ func loadImageBytesForAttachments(
 }
 
 // resolveImageBytes is the canonical lookup of an image attachment's bytes for model context:
-// storage.ResolveAttachmentImageBytes, then the chat-scoped key for attachments that predate
-// s3_key. wantThumb prefers the stored thumbnail. It returns the bytes and their media type, or
-// nil (logged) when nothing was found.
+// storage.ResolveAttachmentImage, then the chat-scoped key for attachments that predate
+// s3_key. wantThumb prefers the stored thumbnail. It returns the bytes, their media type and the
+// telemetry.ImageSource* that answered, or nil (logged) when nothing was found.
 func resolveImageBytes(
 	ctx context.Context,
 	logger *zap.Logger,
@@ -132,13 +138,13 @@ func resolveImageBytes(
 	userID, chatID uuid.UUID,
 	att *models.FileAttachment,
 	wantThumb bool,
-) ([]byte, string) {
-	raw, mediaType := storage.ResolveAttachmentImageBytes(ctx, logger, fileStore, userID, att, wantThumb)
+) ([]byte, string, string) {
+	raw, mediaType, source := storage.ResolveAttachmentImage(ctx, logger, fileStore, userID, att, wantThumb)
 	if len(raw) == 0 && fileStore != nil && att.S3Key == "" {
 		chatKey := storage.FileKeyForChat(userID, chatID, att.ID, att.Name)
 		data, err := fileStore.DownloadFile(ctx, chatKey)
 		if err == nil && len(data) > 0 {
-			raw, mediaType = data, att.FileType
+			raw, mediaType, source = data, att.FileType, telemetry.ImageSourceChat
 		} else if err != nil && logger != nil {
 			logger.Debug("vision: chat key miss",
 				zap.String("attachment_id", att.ID.String()),
@@ -152,10 +158,10 @@ func resolveImageBytes(
 				zap.String("attachment_id", att.ID.String()),
 				zap.String("s3_key", att.S3Key))
 		}
-		return nil, ""
+		return nil, "", telemetry.ImageSourceNone
 	}
 	if mediaType == "" {
 		mediaType = att.FileType
 	}
-	return raw, mediaType
+	return raw, mediaType, source
 }

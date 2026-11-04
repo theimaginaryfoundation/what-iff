@@ -2,7 +2,7 @@ import { Signal, WritableSignal, computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { Router } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 
 import { ProfileSettingsModalComponent } from './profile-settings-modal.component';
 import { ProfileSettingsModalService } from './profile-settings-modal.service';
@@ -13,13 +13,17 @@ import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { ThemeService } from '../../core/services/theme.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
+import type { Model } from '../../core/models/model.model';
+import type { UserPreferences } from '../../core/models/user.model';
 import { ProviderKeysService } from '../../core/services/provider-keys.service';
 import { ProviderAccess } from '../../core/models/provider-key.model';
 
 describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
+  let modelService: { getModels: ReturnType<typeof vi.fn>; models$: Subject<Model[]> };
   let preferencesService: {
     getUserPreferences: ReturnType<typeof vi.fn>;
     updateUserPreferences: ReturnType<typeof vi.fn>;
+    preferences$: Subject<UserPreferences | null>;
   };
   let personalityService: {
     listPersonalities: ReturnType<typeof vi.fn>;
@@ -95,8 +99,10 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     preferencesService = {
       getUserPreferences: vi.fn().mockReturnValue(of(preferences)),
       updateUserPreferences: vi.fn().mockImplementation(updated => of(updated)),
+      preferences$: new Subject<UserPreferences | null>(),
     };
-    const modelService = {
+    modelService = {
+      models$: new Subject<Model[]>(),
       getModels: vi.fn().mockReturnValue(
         of([
           { id: 'model-1', name: 'model-one', display_name: 'Model One', description: '', tool_support: true },
@@ -259,6 +265,53 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     const modelSelect = fixture.nativeElement.querySelector('[data-testid="default-model-select"]') as HTMLSelectElement;
     expect(modelSelect.value).toBe('');
     expect(modelSelect.selectedOptions[0]?.textContent).toContain('Current default is unavailable');
+  });
+
+  it("names the connection a model comes from in the default-model list", async () => {
+    modelService.getModels.mockReturnValue(
+      of([
+        { id: 'model-1', name: 'gpt-5.1', display_name: 'GPT-5.1', description: '', provider: 'openai', tool_support: true },
+        { id: 'model-2', name: 'qwen3:4b', display_name: 'qwen3:4b', description: '', provider: 'ollama', tool_support: true, connection_id: 'c1', connection_name: 'Desk Ollama' },
+      ]),
+    );
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    await openAndWaitForProfile(fixture);
+    const options = [...(fixture.nativeElement.querySelector('[data-testid="default-model-select"]') as HTMLSelectElement).options].map(o => o.textContent?.trim());
+    expect(options).toEqual(['GPT-5.1', 'qwen3:4b · Desk Ollama']);
+  });
+
+  // ADR 0x027: on an install without a model catalog an account has no default until it enables a model.
+  it('says there is no default model yet, and where to choose one', async () => {
+    preferencesService.getUserPreferences.mockReturnValue(
+      of({ id: 'prefs-1', user_id: 'user-1', default_model_id: '00000000-0000-0000-0000-000000000000', favorite_model_ids: [] }),
+    );
+    modelService.getModels.mockReturnValue(of([]));
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    await openAndWaitForProfile(fixture);
+
+    const modelSelect = fixture.nativeElement.querySelector('[data-testid="default-model-select"]') as HTMLSelectElement;
+    expect(modelSelect.selectedOptions[0]?.textContent).toContain('None yet');
+    const hint = fixture.nativeElement.querySelector('[data-testid="default-model-none"]') as HTMLElement;
+    expect(hint.textContent).toContain('Choose models from a provider first.');
+    (hint.querySelector('button') as HTMLButtonElement).click();
+    expect(TestBed.inject(ProfileSettingsModalService).activeTab()).toBe('providers');
+  });
+
+  it('follows the models and default chosen on the Providers tab, without reopening', async () => {
+    preferencesService.getUserPreferences.mockReturnValue(
+      of({ id: 'prefs-1', user_id: 'user-1', default_model_id: '00000000-0000-0000-0000-000000000000', favorite_model_ids: [] }),
+    );
+    modelService.getModels.mockReturnValue(of([]));
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    await openAndWaitForProfile(fixture);
+
+    modelService.models$.next([{ id: 'model-9', name: 'gpt-5.4', display_name: 'gpt-5.4', description: '', tool_support: true }]);
+    preferencesService.preferences$.next({ id: 'prefs-1', user_id: 'user-1', default_model_id: 'model-9', favorite_model_ids: [] } as UserPreferences);
+    fixture.detectChanges();
+
+    const modelSelect = fixture.nativeElement.querySelector('[data-testid="default-model-select"]') as HTMLSelectElement;
+    expect(modelSelect.value).toBe('model-9');
+    expect(fixture.nativeElement.querySelector('[data-testid="default-model-none"]')).toBeNull();
   });
 
   it('merges a default change onto freshly read preferences so it cannot undo other writes', async () => {

@@ -177,14 +177,25 @@ func (s *Store) Builtins(ctx context.Context, userID uuid.UUID) ([]Connection, e
 
 // DeleteBuiltin removes the account's connection to a built-in provider.
 func (s *Store) DeleteBuiltin(ctx context.Context, userID uuid.UUID, provider models.ModelProvider) error {
-	n, err := s.client.ProviderConnection.Delete().
+	row, err := s.client.ProviderConnection.Query().
 		Where(providerconnection.UserID(userID), providerconnection.Builtin(string(provider))).
-		Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("delete provider key: %w", err)
-	}
-	if n == 0 {
+		Only(ctx)
+	if ent.IsNotFound(err) {
 		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read provider key: %w", err)
+	}
+	// As with removing any connection, the default model can't go with it.
+	inUse, err := s.defaultModelOn(ctx, userID, row.ID)
+	if err != nil {
+		return err
+	}
+	if inUse {
+		return ErrDefaultModelInUse
+	}
+	if err := s.client.ProviderConnection.DeleteOneID(row.ID).Exec(ctx); err != nil {
+		return fmt.Errorf("delete provider key: %w", err)
 	}
 	return nil
 }
@@ -355,4 +366,41 @@ func (s *Store) Delete(ctx context.Context, userID, id uuid.UUID) error {
 // keyOf returns a connection's decrypted key, or "" when it has none.
 func (s *Store) keyOf(row *ent.ProviderConnection) (string, error) {
 	return s.open(row.Key)
+}
+
+// connectionNames returns the names of the account's connections other than
+// except, to keep each connection's name its own.
+func (s *Store) connectionNames(ctx context.Context, userID, except uuid.UUID) ([]string, error) {
+	names, err := s.client.ProviderConnection.Query().
+		Where(providerconnection.UserID(userID), providerconnection.IDNEQ(except)).
+		Select(providerconnection.FieldName).
+		Strings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read provider connection names: %w", err)
+	}
+	return names, nil
+}
+
+// nameTaken reports whether name is among names, ignoring case: the model
+// picker groups other connections by name, so two the same can't be told apart.
+func nameTaken(names []string, name string) bool {
+	for _, n := range names {
+		if strings.EqualFold(n, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// freeName is base, or base with the first free number after it ("Ollama 2"),
+// for a connection named after its preset.
+func freeName(names []string, base string) string {
+	if !nameTaken(names, base) {
+		return base
+	}
+	for i := 2; ; i++ {
+		if name := fmt.Sprintf("%s %d", base, i); !nameTaken(names, name) {
+			return name
+		}
+	}
 }
