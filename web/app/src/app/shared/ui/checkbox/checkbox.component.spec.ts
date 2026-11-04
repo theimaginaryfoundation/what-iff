@@ -123,6 +123,8 @@ describe('CheckboxComponent', () => {
     const control = fixture.nativeElement.querySelector('.control input') as HTMLInputElement;
     expect(model.checked).toBe(false);
     expect(control.checked).toBe(true);
+    // With no inputClass the box still carries its base class, and only that.
+    expect(model.className).toBe('ui-checkbox');
 
     model.click();
     control.click();

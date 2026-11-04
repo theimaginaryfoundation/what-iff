@@ -17,6 +17,7 @@ import { ChatImportModalComponent } from '../chat/components/chat-import-modal/c
 import { XIconComponent } from '../../shared/ui/icons/icons';
 import { ExportDeliveryService } from '../../extensions/export-delivery.service';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 type ExportPhase = 'idle' | 'queued' | 'building' | 'uploading' | 'complete' | 'failed';
 type ImportPhase = 'idle' | 'inspecting' | 'review' | 'queued' | 'uploading' | 'validating' | 'importing' | 'complete' | 'failed';
@@ -32,7 +33,7 @@ const TERMINAL_JOB_STATES = ['complete', 'failed', 'cancelled'];
 @Component({
   selector: 'app-data-portability-page',
   standalone: true,
-  imports: [ChatImportModalComponent, XIconComponent, TooltipDirective],
+  imports: [CheckboxComponent, ChatImportModalComponent, XIconComponent, TooltipDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './data-portability-page.component.html',
 })

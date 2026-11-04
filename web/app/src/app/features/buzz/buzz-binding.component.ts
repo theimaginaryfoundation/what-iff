@@ -17,6 +17,7 @@ import {
 } from './buzz.service';
 import { BuzzTabState } from './buzz-tab.state';
 import { BUZZ_UI, buzzStatusClass } from './buzz-ui';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 /** The binding settings shown as checkboxes. */
 type BindingFlag = 'allow_unrestricted' | 'inbound_enabled' | 'answer_agents';
@@ -34,7 +35,7 @@ interface AccessDraft {
 @Component({
   selector: 'app-buzz-binding',
   standalone: true,
-  imports: [DatePipe, RouterLink, RelayIdChipsComponent],
+  imports: [CheckboxComponent, DatePipe, RouterLink, RelayIdChipsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let b = binding();
@@ -66,13 +67,12 @@ interface AccessDraft {
           }
           @if (b.chat_sandboxed === false) {
             <label class="mt-2 flex max-w-xl items-start gap-2 text-xs text-amber-900 dark:text-amber-200">
-              <input
-                type="checkbox"
+              <ui-checkbox
                 class="mt-0.5"
                 [checked]="b.allow_unrestricted"
                 [disabled]="state.busy()"
                 (change)="setFlag('allow_unrestricted', $any($event.target))"
-                data-testid="buzz-binding-ack"
+                testId="buzz-binding-ack"
               />
               <span>This thread is not sandboxed. {{ unrestrictedWarning }} Until this is ticked, mentions here are not answered.</span>
             </label>
@@ -80,12 +80,11 @@ interface AccessDraft {
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <label class="inline-flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
-            <input
-              type="checkbox"
+            <ui-checkbox
               [checked]="b.inbound_enabled"
               [disabled]="state.busy()"
               (change)="setFlag('inbound_enabled', $any($event.target))"
-              data-testid="buzz-binding-inbound"
+              testId="buzz-binding-inbound"
             />
             Answer when mentioned
           </label>
@@ -106,13 +105,12 @@ interface AccessDraft {
         </div>
       </div>
       <label class="mt-2 flex max-w-xl items-start gap-2 text-xs text-gray-700 dark:text-gray-300">
-        <input
-          type="checkbox"
+        <ui-checkbox
           class="mt-0.5"
           [checked]="b.answer_agents"
           [disabled]="state.busy()"
           (change)="setFlag('answer_agents', $any($event.target))"
-          data-testid="buzz-binding-agents"
+          testId="buzz-binding-agents"
         />
         <span>
           Answer other agents
@@ -199,6 +197,8 @@ export class BuzzBindingComponent {
   /**
    * Saves one of the binding's checkboxes. A failure is shown at the top of the tab and the box
    * goes back to the saved value (the binding did not change, so Angular would not redraw it).
+   * box is the `<ui-checkbox>`'s inner input: its (change) re-emits the native event, so
+   * `$event.target` is that input, not the component.
    */
   async setFlag(key: BindingFlag, box: HTMLInputElement): Promise<void> {
     await saveCheckbox(box, on => this.update({ [key]: on }));

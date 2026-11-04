@@ -16,13 +16,14 @@ import { ContextPanelService } from '../../../services/context-panel.service';
 import { friendlyToolName, summarizeToolInput } from '../../../helpers/tool-call-format.helpers';
 import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../../../../shared/ui/tooltip/tooltip.directive';
+import { CheckboxComponent } from '../../../../../shared/ui/checkbox/checkbox.component';
 
 type ToolContextTab = 'available' | 'history';
 
 @Component({
   selector: 'app-context-tools-tab',
   standalone: true,
-  imports: [CommonModule, HelpHintComponent, TooltipDirective],
+  imports: [CheckboxComponent, CommonModule, HelpHintComponent, TooltipDirective],
   template: `
     <section class="tab-body">
       <div class="context-tabs" role="tablist" aria-label="Tools view">
@@ -61,10 +62,9 @@ type ToolContextTab = 'available' | 'history';
             @for (tool of tools(); track tool.name) {
               <li>
                 <label class="tool-item" [uiTooltip]="tool.guide ?? ''" placement="left">
-                  <input
-                    type="checkbox"
+                  <ui-checkbox
                     [checked]="isToolEnabled(tool.name)"
-                    (change)="toggleTool(tool.name, $any($event.target).checked)"
+                    (checkedChange)="toggleTool(tool.name, $event)"
                   />
                   <span>{{ friendlyToolName(tool.name) }}</span>
                   <small>{{ tool.description }}</small>
@@ -225,7 +225,7 @@ type ToolContextTab = 'available' | 'history';
         padding: 0 0 0.5rem;
       }
 
-      .tool-item input {
+      .tool-item ui-checkbox {
         grid-row: span 2;
         margin-top: 0.125rem;
       }

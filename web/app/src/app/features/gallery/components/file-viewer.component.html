@@ -90,7 +90,7 @@
       }
       @if (!showRendered()) {
         <label class="file-viewer__toggle">
-          <input type="checkbox" [checked]="wrapLines()" (change)="wrapLines.set($any($event.target).checked)" />
+          <ui-checkbox [checked]="wrapLines()" (checkedChange)="wrapLines.set($event)" />
           Wrap lines
         </label>
       }

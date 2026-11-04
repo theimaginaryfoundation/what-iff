@@ -91,9 +91,8 @@
       >
         @if (view.layout() === 'grid') {
           <label uiBulkLead class="folder-tools__select-all">
-            <input
-              type="checkbox"
-              class="folder-tools__select-all-box"
+            <ui-checkbox
+              inputClass="folder-tools__select-all-box"
               [checked]="view.selectionState() === 'all'"
               [indeterminate]="view.selectionState() === 'some'"
               (change)="view.toggleSelectAll()"

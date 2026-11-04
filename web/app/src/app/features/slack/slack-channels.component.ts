@@ -10,6 +10,7 @@ import { RelayIdChipsComponent } from '../relay/relay-id-chips.component';
 import { RELAY_UI } from '../relay/relay-ui';
 import { SLACK_USER_IDS, SlackApp, SlackChannel, SlackService } from './slack.service';
 import { SlackTabState } from './slack-tab.state';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 /**
  * A workspace's channels, to connect one to a relay thread: channels the app is in can be
@@ -20,7 +21,7 @@ import { SlackTabState } from './slack-tab.state';
 @Component({
   selector: 'app-slack-channels',
   standalone: true,
-  imports: [FormsModule, RelayIdChipsComponent],
+  imports: [CheckboxComponent, FormsModule, RelayIdChipsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (!open()) {
@@ -127,13 +128,7 @@ import { SlackTabState } from './slack-tab.state';
                         other people can read them. Sandboxing the thread first is safer.
                       </p>
                       <label class="mt-2 flex items-start gap-2">
-                        <input
-                          type="checkbox"
-                          class="mt-0.5"
-                          [ngModel]="ack()"
-                          (ngModelChange)="ack.set($event)"
-                          data-testid="slack-ack-unrestricted"
-                        />
+                        <ui-checkbox class="mt-0.5" [ngModel]="ack()" (ngModelChange)="ack.set($event)" testId="slack-ack-unrestricted" />
                         <span>I understand: {{ unrestrictedWarning }}</span>
                       </label>
                     </div>

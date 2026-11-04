@@ -53,6 +53,8 @@ export class CheckboxComponent implements ControlValueAccessor {
   private onFormTouched: () => void = () => undefined;
   private readonly box = viewChild<ElementRef<HTMLInputElement>>('box');
 
+  /** `ui-checkbox` plus the caller's `inputClass`: one binding, so the base class can never be dropped. */
+  readonly inputClasses = computed(() => `ui-checkbox ${this.inputClass()}`.trim());
   readonly isChecked = computed(() => this.formValue() ?? this.checked());
   readonly isDisabled = computed(() => this.disabled() || this.formDisabled());
 

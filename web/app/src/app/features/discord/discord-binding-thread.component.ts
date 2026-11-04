@@ -12,6 +12,7 @@ import {
   UpdateDiscordBindingRequest,
   needsRelayAcknowledgement,
 } from './discord.service';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 /**
  * Moves a channel binding to another relay thread: a new sandboxed thread (the default, and the
@@ -23,7 +24,7 @@ import {
 @Component({
   selector: 'app-discord-binding-thread',
   standalone: true,
-  imports: [FormsModule],
+  imports: [CheckboxComponent, FormsModule],
   template: `
     @if (!open()) {
       <button type="button" class="text-indigo-600 underline dark:text-indigo-400" (click)="toggle()" data-testid="discord-binding-move">
@@ -56,13 +57,7 @@ import {
             <p class="font-semibold">That thread is not sandboxed.</p>
             <p class="mt-1">{{ unrestrictedWarning }}</p>
             <label class="mt-2 flex items-start gap-2">
-              <input
-                type="checkbox"
-                class="mt-0.5"
-                [ngModel]="ack()"
-                (ngModelChange)="ack.set($event)"
-                data-testid="discord-binding-move-ack"
-              />
+              <ui-checkbox class="mt-0.5" [ngModel]="ack()" (ngModelChange)="ack.set($event)" testId="discord-binding-move-ack" />
               <span>I understand: {{ unrestrictedWarning }}</span>
             </label>
           </div>

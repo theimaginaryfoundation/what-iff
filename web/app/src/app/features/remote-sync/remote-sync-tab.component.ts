@@ -7,6 +7,7 @@ import { ConfirmationService } from '../../core/services/confirmation.service';
 import { apiErrorMessage } from '../../core/utils/api-error.helpers';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { RemoteSyncService, RemoteSyncSettings, runSummary } from './remote-sync.service';
+import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
 
 /** Where people create the token: the hosted app's Tools page. */
 export const HOSTED_TOOLS_URL = 'https://app.whatiff.chat/integrations';
@@ -42,7 +43,7 @@ type Tone = 'success' | 'warning' | 'danger' | 'neutral' | 'info';
 @Component({
   selector: 'app-remote-sync-tab',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, FormsModule, HelpHintComponent],
+  imports: [CheckboxComponent, DatePipe, DecimalPipe, FormsModule, HelpHintComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6" data-testid="remote-sync-tab">
@@ -205,13 +206,7 @@ type Tone = 'success' | 'warning' | 'danger' | 'neutral' | 'info';
                 />
               </div>
               <label class="flex items-start gap-2 text-sm text-gray-900 dark:text-white">
-                <input
-                  type="checkbox"
-                  class="mt-0.5 rounded border-gray-300 dark:border-gray-600"
-                  [ngModel]="enabled()"
-                  (ngModelChange)="enabled.set($event)"
-                  data-testid="remote-sync-enabled"
-                />
+                <ui-checkbox class="mt-0.5" [ngModel]="enabled()" (ngModelChange)="enabled.set($event)" testId="remote-sync-enabled" />
                 <span>Keep this server in sync</span>
               </label>
               <button

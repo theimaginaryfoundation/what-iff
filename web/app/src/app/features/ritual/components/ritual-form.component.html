@@ -109,10 +109,10 @@
       <div class="ritual-form__checklist" role="group" [attr.aria-labelledby]="hintId('mcp-label')" [attr.aria-describedby]="hintId('mcp')">
         @for (server of mcpServers(); track server.id) {
           <label class="ritual-form__check">
-            <input
-              type="checkbox"
+            <ui-checkbox
               [checked]="isMcpSelected(server.id)"
-              (change)="toggleMcp(server.id, $any($event.target).checked)" />
+              (checkedChange)="toggleMcp(server.id, $event)"
+            />
             <span>{{ server.label }}</span>
           </label>
         }
@@ -132,10 +132,10 @@
       <div class="ritual-form__checklist" role="group" [attr.aria-labelledby]="hintId('tools-label')" [attr.aria-describedby]="hintId('tools')">
         @for (tool of tools(); track tool.id) {
           <label class="ritual-form__check">
-            <input
-              type="checkbox"
+            <ui-checkbox
               [checked]="isToolSelected(tool.id)"
-              (change)="toggleTool(tool.id, $any($event.target).checked)" />
+              (checkedChange)="toggleTool(tool.id, $event)"
+            />
             <span>{{ tool.label }}</span>
           </label>
         }
@@ -159,11 +159,11 @@
     <span class="ritual-form__label" [id]="hintId('activation-label')">Who can activate it</span>
     <div class="ritual-form__checklist ritual-form__checklist--static" role="group" [attr.aria-labelledby]="hintId('activation-label')">
       <label class="ritual-form__check">
-        <input type="checkbox" [checked]="modelInvocable()" (change)="modelInvocable.set($any($event.target).checked)" />
+        <ui-checkbox [checked]="modelInvocable()" (checkedChange)="modelInvocable.set($event)" />
         <span>The agent may load this skill itself when a task calls for it</span>
       </label>
       <label class="ritual-form__check">
-        <input type="checkbox" [checked]="userInvocable()" (change)="userInvocable.set($any($event.target).checked)" />
+        <ui-checkbox [checked]="userInvocable()" (checkedChange)="userInvocable.set($event)" />
         <span>Show it in the '/' picker and let hotkeys call it</span>
       </label>
     </div>

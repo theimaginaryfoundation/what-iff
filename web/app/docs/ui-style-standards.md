@@ -34,15 +34,15 @@ Inside it is a real native `<input type="checkbox">`, so labels, keyboard use, `
 
 | Output | Purpose |
 | --- | --- |
-| `(checkedChange)` | The new state as a boolean. Together with `[checked]` it gives you `[(checked)]`. |
+| `(checkedChange)` | The new state as a boolean. Together with `[checked]` it gives you `[(checked)]`. Prefer it whenever the handler only needs the value; use `(change)` only when it needs the input itself, as `saveCheckbox` does to put the box back after a failed save. |
 | `(change)` | The native change event, fired once. `$event.target` is the inner input, so `$any($event.target).checked` and `saveCheckbox($any($event.target), …)` (`core/utils/checkbox.helpers.ts`) work unchanged. |
 
 It is also a `ControlValueAccessor`, so `ngModel`, `formControl` and `formControlName` work on it directly.
 Layout utilities such as `class="mt-0.5"` go on `<ui-checkbox>` itself.
 
-Some checkboxes have not been migrated yet (gallery grid tile check, gallery folder-tools select-all, ritual form, data portability, Slack/Buzz tabs, connectors, login, and others).
-Do not copy them.
-When you touch one, swap it.
+Every public `<input type="checkbox">` now goes through `<ui-checkbox>`.
+The one exception is the gallery grid tile's check, a `<button role="checkbox">` with its own behaviour, which needs a pass of its own.
+Do not add a raw checkbox.
 
 ## 2. Tables with selection: `ui-data-table` + `ui-bulk-action-bar`
 

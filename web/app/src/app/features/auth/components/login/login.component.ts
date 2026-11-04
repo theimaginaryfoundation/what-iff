@@ -5,6 +5,7 @@ import { Router, ActivatedRoute } from '@angular/router';
 import { AuthService } from '../../../../core/services/auth.service';
 import { UserLoginRequest } from '../../../../core/models/user.model';
 import { EyeIconComponent, EyeOffIconComponent } from '../../../../shared/ui/icons';
+import { CheckboxComponent } from '../../../../shared/ui/checkbox/checkbox.component';
 
 /**
  * Local username/password sign-in against the built-in account store.
@@ -12,7 +13,7 @@ import { EyeIconComponent, EyeOffIconComponent } from '../../../../shared/ui/ico
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [ReactiveFormsModule, EyeIconComponent, EyeOffIconComponent],
+  imports: [CheckboxComponent, ReactiveFormsModule, EyeIconComponent, EyeOffIconComponent],
   templateUrl: './login.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./login.component.scss']

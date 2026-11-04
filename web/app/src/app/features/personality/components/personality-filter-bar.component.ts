@@ -7,6 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 
 export type PersonalitySortMode = 'recent' | 'alpha' | 'most-used';
 
@@ -30,7 +31,7 @@ const SORT_LABELS: Record<PersonalitySortMode, string> = {
 @Component({
   selector: 'app-personality-filter-bar',
   standalone: true,
-  imports: [FormsModule],
+  imports: [CheckboxComponent, FormsModule],
   template: `
     <div
       class="personality-filter-bar flex flex-col gap-3 rounded-xl border border-(--color-border-default) bg-(--color-surface-elevated) p-3 sm:flex-row sm:items-center"
@@ -63,9 +64,7 @@ const SORT_LABELS: Record<PersonalitySortMode, string> = {
       </label>
 
       <label class="inline-flex select-none items-center gap-2 text-sm text-(--color-text-secondary)">
-        <input
-          type="checkbox"
-          class="h-4 w-4 rounded border-(--color-border-default) text-(--color-accent) focus:ring-(--color-accent)"
+        <ui-checkbox
           [ngModel]="defaultOnly()"
           (ngModelChange)="onDefaultOnlyChange($event)"
         />

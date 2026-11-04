@@ -14,6 +14,7 @@ import {
 import { HotkeyInputComponent } from '../../../core/components/hotkey-input/hotkey-input.component';
 import { RitualSelectOption } from './ritual-filter-bar.component';
 import { RitualFilesPanelComponent } from './ritual-files-panel.component';
+import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 
 let nextFormId = 0;
 
@@ -39,7 +40,7 @@ export interface RitualFormSave {
 @Component({
   selector: 'app-ritual-form',
   standalone: true,
-  imports: [FormsModule, HotkeyInputComponent, RitualFilesPanelComponent],
+  imports: [CheckboxComponent, FormsModule, HotkeyInputComponent, RitualFilesPanelComponent],
   templateUrl: './ritual-form.component.html',
   styleUrl: './ritual-form.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
