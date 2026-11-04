@@ -19,7 +19,8 @@ In-process MCP runtime client for connector tool discovery and invocation.
 - `DiscoverTools`: resolves tool manifests for eligible connectors.
 - `CallToolByFullName`: resolves connector/tool target and performs MCP invocation.
 - `CallToolResult`: detailed result with tool status, structured data, model-visible output, attachments, and `Err()` for tool-level failures.
-- `ToolReportedError`: the typed error `Err()` returns for a failure the server reported (`isError`). Callers distinguish it with `errors.As` from transport and protocol errors (the agent logs it at Warn, without its text).
+- `ToolReportedError`: the typed error `Err()` returns for a failure the server reported (`isError`).
+  Callers distinguish it with `errors.As` from transport and protocol errors (the agent logs it at Warn, without its text).
 
 ## Dependencies
 
@@ -33,7 +34,9 @@ In-process MCP runtime client for connector tool discovery and invocation.
 - Eligibility filtering is state-driven (`active` and `refresh_failed` allowed by default).
 - Detailed calls return tool-level errors in `CallToolResult.IsError`; their Go error value is reserved for transport or protocol failures.
   String-returning calls and agent dispatch convert tool-level failures through `CallToolResult.Err()`.
-- Model-visible output is the result's text. Labeled structured JSON is used only when there is no text: the spec has servers repeat structured data as text, so appending it doubles tokens (2x to 9x measured on real replies). It is always kept on `CallToolResult.StructuredContent`.
+- Model-visible output is the result's text.
+  Labeled structured JSON is used only when there is no text: the spec has servers repeat structured data as text, so appending it doubles tokens (2x to 9x measured on real replies).
+  It is always kept on `CallToolResult.StructuredContent`.
 
 ## Testing
 
