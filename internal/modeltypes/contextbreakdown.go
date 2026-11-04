@@ -34,13 +34,26 @@ type ContextSegmentStat struct {
 // for vendor framing, image input, and other un-attributable tokens.
 type ContextBreakdown struct {
 	// Version is the ContextBreakdownVersion in effect when this snapshot was written.
-	Version      int                  `json:"version"`
-	Segments     []ContextSegmentStat `json:"segments"`
-	TotalTokens  int                  `json:"total_tokens"`
-	BudgetTokens int                  `json:"budget_tokens"`
-	Model        string               `json:"model,omitempty"`
-	Provider     string               `json:"provider,omitempty"`
-	CapturedAt   time.Time            `json:"captured_at"`
+	Version     int                  `json:"version"`
+	Segments    []ContextSegmentStat `json:"segments"`
+	TotalTokens int                  `json:"total_tokens"`
+	// BudgetTokens is the thread's checkpoint ceiling: once the turn's starting context passes
+	// it, older turns are summarized at a later checkpoint.
+	BudgetTokens int `json:"budget_tokens"`
+	// CheckpointInputTokens is the input size the checkpoint compares to BudgetTokens: the
+	// final call's input on a Standard turn (TotalTokens), the first call's on an Advanced one,
+	// whose later calls also carry the run's own work. 0 when unknown (older snapshots).
+	CheckpointInputTokens int `json:"checkpoint_input_tokens,omitempty"`
+	// AgentLoop is the loop the turn ran ("standard" or "advanced"); "" on older snapshots.
+	AgentLoop string `json:"agent_loop,omitempty"`
+	// RunBudgetTokens is an Advanced run's own ceiling: a call input past it makes the run
+	// compact its earlier steps into a work log before its next step. 0 on Standard turns.
+	RunBudgetTokens int `json:"run_budget_tokens,omitempty"`
+	// RunCompactions is how many times an Advanced run compacted its context.
+	RunCompactions int       `json:"run_compactions,omitempty"`
+	Model          string    `json:"model,omitempty"`
+	Provider       string    `json:"provider,omitempty"`
+	CapturedAt     time.Time `json:"captured_at"`
 	// Inputs lists, by reference, what this context was built from. Absent on snapshots
 	// captured before it existed.
 	Inputs *ContextInputs `json:"inputs,omitempty"`

@@ -912,6 +912,9 @@ type chatContext struct {
 	draftJob *models.Job
 	// agentRun is an Advanced turn's structured record, saved on the reply (nil on Standard turns).
 	agentRun *models.AgentRun
+	// advancedContext is how an Advanced run bounded its own context, for the Context X-ray
+	// (zero on Standard turns).
+	advancedContext advancedContextUsage
 	// meterDecision is the turn's Meter.Check result, passed back with every Record of the turn;
 	// skipUsageRecording turns recording off (the welcome message); turnID is the turn's job, which
 	// ties its step records and final record together.
@@ -1886,11 +1889,7 @@ func (a *Agent) buildContextBreakdown(chatCtx *chatContext, modelContext *provid
 		// ContextBreakdown uses ints for JSON/UI compatibility. Clamp only an
 		// implausibly large provider report rather than allowing a narrow-int
 		// overflow to turn billed usage negative.
-		maxInt := int64(^uint(0) >> 1)
-		if inputTokens > maxInt {
-			inputTokens = maxInt
-		}
-		billed := int(inputTokens)
+		billed := clampTokensToInt(inputTokens)
 		if remainder := billed - total; remainder > 0 {
 			segments = append(segments, modeltypes.ContextSegmentStat{
 				Kind:     "vendor_prompt_other",
@@ -1904,17 +1903,50 @@ func (a *Agent) buildContextBreakdown(chatCtx *chatContext, modelContext *provid
 		Version:     modeltypes.ContextBreakdownVersion,
 		Segments:    segments,
 		TotalTokens: total,
-		// Use the same ceiling as checkpoint policy so the Context X-ray gauge
-		// continues to reflect compaction behavior as the window evolves.
-		BudgetTokens: checkpointMaxLastInputTokens,
-		CapturedAt:   time.Now().UTC(),
-		Inputs:       contextInputs(chatCtx, modelContext),
+		CapturedAt:  time.Now().UTC(),
+		Inputs:      contextInputs(chatCtx, modelContext),
 	}
+	applyContextBudgets(breakdown, chatCtx, inputTokens)
 	if chatCtx != nil {
 		breakdown.Model = chatCtx.model
 		breakdown.Provider = chatCtx.modelProvider
 	}
 	return breakdown
+}
+
+// applyContextBudgets sets the X-ray's budgets from what enforces them, so the gauge cannot drift
+// from the turn's real limits (#397): the checkpoint ceiling the chat's context budget resolves
+// to (resolveContextBudget, as postMessageProcessing uses) with the input it is compared to
+// (turnContextTokensFrom), and on an Advanced turn the run's own compaction ceiling. An Advanced
+// run's final call carries its steps' work, so its total is read against the run ceiling, not
+// the checkpoint one.
+func applyContextBudgets(breakdown *modeltypes.ContextBreakdown, chatCtx *chatContext, finalInputTokens int64) {
+	var chat *models.Chat
+	if chatCtx != nil {
+		chat = chatCtx.chat
+	}
+	breakdown.BudgetTokens = resolveContextBudget(chat).MaxLastInputTokens
+	breakdown.AgentLoop = string(models.AgentLoopStandard)
+	if finalInputTokens > 0 {
+		breakdown.CheckpointInputTokens = clampTokensToInt(turnContextTokensFrom(chatCtx, finalInputTokens))
+	}
+	if chatCtx == nil || chatCtx.agentRun == nil {
+		// agentRun is set only once the Advanced loop actually ran (an adapter that cannot
+		// continue falls back to the Standard loop).
+		return
+	}
+	breakdown.AgentLoop = string(models.AgentLoopAdvanced)
+	breakdown.RunBudgetTokens = clampTokensToInt(chatCtx.advancedContext.ceilingTokens)
+	breakdown.RunCompactions = chatCtx.advancedContext.compactions
+}
+
+// clampTokensToInt narrows a token count for the int-typed ContextBreakdown fields.
+func clampTokensToInt(tokens int64) int {
+	maxInt := int64(^uint(0) >> 1)
+	if tokens > maxInt {
+		return int(maxInt)
+	}
+	return int(tokens)
 }
 
 // countCurrentToolCallTokens estimates the dynamic tool-call material replayed during

@@ -102,6 +102,82 @@ describe('ContextBreakdownTabComponent', () => {
         expect(text).toContain('Heavy turns can exceed this budget until the next compaction.');
     });
 
+    it('marks where the budget ends on an over-budget track and says what happens past it', () => {
+        fixture.componentRef.setInput('breakdown', {
+            ...sampleBreakdown,
+            segments: [{ kind: 'history_turn', segments: 40, tokens: 42000, cacheable: false }],
+            total_tokens: 42000,
+            budget_tokens: 30000,
+        } satisfies ContextBreakdown);
+        fixture.detectChanges();
+        const el = fixture.nativeElement as HTMLElement;
+        expect(el.querySelector('.gauge')?.classList).toContain('gauge--over');
+        const ceiling = el.querySelector('.gauge__ceiling') as HTMLElement;
+        expect(ceiling).not.toBeNull();
+        expect(parseFloat(ceiling.style.left)).toBeCloseTo((30000 / 42000) * 100, 1);
+        expect(el.querySelector('.gauge__past')).not.toBeNull();
+        const scale = el.querySelector('.gauge__scale')?.textContent ?? '';
+        expect(scale).toContain('140% of checkpoint budget');
+        expect(scale).toContain('12,000 over');
+        expect(el.querySelector('.gauge__notice')?.textContent ?? '').toContain('This is normal: the thread will be compacted soon.');
+        expect(el.querySelector('.gauge__track')?.getAttribute('aria-label') ?? '').toContain('12,000 tokens over');
+    });
+
+    it('shows no ceiling marker within budget', () => {
+        fixture.componentRef.setInput('breakdown', sampleBreakdown);
+        fixture.detectChanges();
+        const el = fixture.nativeElement as HTMLElement;
+        expect(el.querySelector('.gauge__ceiling')).toBeNull();
+        expect(el.querySelector('.gauge__notice')).toBeNull();
+        expect(el.querySelector('.gauge__scale')?.textContent ?? '').toContain('19% of checkpoint budget');
+    });
+
+    // #397: an Advanced (ReAct) turn showed "60,000 / 30,000" and read as over budget, although
+    // checkpointing measures the run's first call and the run itself compacts at its own limit.
+    it('reads an Advanced turn against its run limit, not the checkpoint budget (60k of 30k)', () => {
+        fixture.componentRef.setInput('breakdown', {
+            ...sampleBreakdown,
+            segments: [
+                { kind: 'history_turn', segments: 6, tokens: 18000, cacheable: false },
+                { kind: 'tool_result', segments: 12, tokens: 42000, cacheable: false },
+            ],
+            total_tokens: 60000,
+            budget_tokens: 30000,
+            agent_loop: 'advanced',
+            run_budget_tokens: 140000,
+            checkpoint_input_tokens: 20000,
+        } satisfies ContextBreakdown);
+        fixture.detectChanges();
+        const el = fixture.nativeElement as HTMLElement;
+        const text = el.textContent ?? '';
+        expect(fixture.componentInstance.overBudget()).toBe(false);
+        expect(text).toContain('/ 140,000 tokens');
+        expect(text).not.toContain('/ 30,000 tokens');
+        expect(el.querySelector('.gauge__scale')?.textContent ?? '').toContain('43% of run limit');
+        expect(el.querySelector('.gauge__checkpoint')?.textContent ?? '').toContain('20,000 / 30,000 at turn start');
+        expect(el.querySelector('.gauge__checkpoint--over')).toBeNull();
+        expect(el.querySelector('.gauge__ceiling')).toBeNull();
+    });
+
+    it('explains an Advanced run past its own limit and its compactions', () => {
+        fixture.componentRef.setInput('breakdown', {
+            ...sampleBreakdown,
+            segments: [{ kind: 'tool_result', segments: 30, tokens: 150000, cacheable: false }],
+            total_tokens: 150000,
+            budget_tokens: 30000,
+            agent_loop: 'advanced',
+            run_budget_tokens: 120000,
+            checkpoint_input_tokens: 32000,
+            run_compactions: 2,
+        } satisfies ContextBreakdown);
+        fixture.detectChanges();
+        const el = fixture.nativeElement as HTMLElement;
+        expect(fixture.componentInstance.overBudget()).toBe(true);
+        expect(el.querySelector('.gauge__notice')?.textContent ?? '').toContain('work log');
+        expect(el.querySelector('.gauge__checkpoint--over')?.textContent ?? '').toContain('older turns get summarized');
+        expect(el.querySelector('.gauge__note')?.textContent ?? '').toContain('Compacted 2 times');
+    });
+
     it('shows segment names and proportions without token counts', () => {
         fixture.componentRef.setInput('breakdown', sampleBreakdown);
         fixture.detectChanges();

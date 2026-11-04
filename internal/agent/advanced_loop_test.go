@@ -274,6 +274,12 @@ func TestAdvancedLoop_CompactsIntoFreshAdapter(t *testing.T) {
 	assert.Equal(t, provider.SegmentKindUserMessage, rebuiltWith.Segments[len(rebuiltWith.Segments)-1].Kind)
 	assert.Empty(t, first.Continuations(), "a compacted run starts fresh instead of continuing the old adapter")
 	assert.Len(t, chatCtx.calls, 4, "calls from the replaced adapter still count")
+	assert.Equal(t, 1, chatCtx.advancedContext.compactions, "the X-ray is told the run compacted")
+	usage := second.CallUsage()
+	require.NotEmpty(t, usage)
+	if usage[0].InputTokens > 0 {
+		assert.Equal(t, usage[0].InputTokens+10, chatCtx.advancedContext.ceilingTokens, "the ceiling is the current adapter's")
+	}
 }
 
 func TestAdvancedTranscript_DiscardDropsOnlyCurrentCallReasoning(t *testing.T) {
@@ -511,6 +517,28 @@ func TestAdvancedRun_ShouldCompact(t *testing.T) {
 	assert.True(t, check(200_000, 100_000, 130_000), "past 60% of a small window with real growth")
 	assert.False(t, check(200_000, 125_000, 130_000), "past 60% of the window, but too little growth to help")
 	assert.False(t, check(0, 100_000, 190_000), "unknown window: growth rule only")
+}
+
+// The ceiling the X-ray shows is the input shouldCompact compacts past.
+func TestAdvancedCompactCeiling(t *testing.T) {
+	assert.Equal(t, int64(0), advancedCompactCeiling(20_000, 0, 0), "no rule: no ceiling")
+	assert.Equal(t, int64(140_000), advancedCompactCeiling(20_000, 120_000, 0), "unknown window: growth rule")
+	assert.Equal(t, int64(120_000), advancedCompactCeiling(20_000, 120_000, 200_000), "60% of the window comes first")
+	assert.Equal(t, int64(141_000), advancedCompactCeiling(125_000, 120_000, 200_000), "window rule needs real growth")
+	assert.Equal(t, int64(600_000), advancedCompactCeiling(20_000, 0, 1_000_000), "window rule alone")
+	for _, tc := range []struct{ window, first, last int64 }{
+		{200_000, 100_000, 120_000}, {200_000, 100_000, 120_001}, {200_000, 125_000, 141_000}, {200_000, 125_000, 141_001},
+		{1_000_000, 150_000, 270_000}, {1_000_000, 150_000, 270_001}, {0, 100_000, 220_001},
+	} {
+		run := &advancedRun{adapter: &usageOnlyAdapter{usage: []provider.CallUsage{{InputTokens: tc.first}, {InputTokens: tc.last}}}, hooks: advancedLoopHooks{
+			rebuild:       func(*provider.ModelContext) (provider.AgentAdapter, error) { return nil, nil },
+			modelContext:  &provider.ModelContext{},
+			contextWindow: tc.window,
+			config:        advancedLoopConfig{compactTokens: 120_000},
+		}}
+		ceiling := run.compactCeiling()
+		assert.Equal(t, tc.last > ceiling, run.shouldCompact(), "window %d first %d last %d ceiling %d", tc.window, tc.first, tc.last, ceiling)
+	}
 }
 
 // A run that stopped before its work was done hands its open items to the next Advanced turn.

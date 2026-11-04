@@ -118,3 +118,51 @@ func TestBuildContextBreakdown_MergesCurrentToolCalls(t *testing.T) {
 		t.Errorf("expected positive tool-result token estimate, got %d", toolResult.Tokens)
 	}
 }
+
+// #397: an Advanced run's total is its final call, which carries the run's own steps, so the
+// snapshot also records the run's ceiling and the input checkpointing actually measures; the
+// checkpoint budget is the chat's resolved one, not a constant.
+func TestBuildContextBreakdown_AdvancedBudgets(t *testing.T) {
+	prev := contextBudgetForChat
+	t.Cleanup(func() { contextBudgetForChat = prev })
+	contextBudgetForChat = func(*models.Chat) contextBudget {
+		b := defaultContextBudget()
+		b.MaxLastInputTokens = 45_000
+		return b
+	}
+	a := &Agent{}
+	mc := &provider.ModelContext{}
+	mc.AppendUserMessage(provider.RoleUser, "research this", nil, false)
+
+	chatCtx := &chatContext{
+		chat:            &models.Chat{},
+		turnSettings:    models.TurnSettings{AgentLoop: models.AgentLoopAdvanced},
+		calls:           []provider.CallUsage{{InputTokens: 20_000}, {InputTokens: 60_000}},
+		agentRun:        &models.AgentRun{},
+		advancedContext: advancedContextUsage{ceilingTokens: 140_000, compactions: 1},
+	}
+	got := a.buildContextBreakdown(chatCtx, mc, 60_000, nil)
+	if got == nil {
+		t.Fatal("expected a breakdown")
+	}
+	if got.TotalTokens != 60_000 {
+		t.Errorf("total = %d, want the final call's 60000", got.TotalTokens)
+	}
+	if got.BudgetTokens != 45_000 {
+		t.Errorf("budget = %d, want the chat's resolved checkpoint ceiling 45000", got.BudgetTokens)
+	}
+	if got.CheckpointInputTokens != 20_000 {
+		t.Errorf("checkpoint input = %d, want the first call's 20000", got.CheckpointInputTokens)
+	}
+	if got.AgentLoop != string(models.AgentLoopAdvanced) || got.RunBudgetTokens != 140_000 || got.RunCompactions != 1 {
+		t.Errorf("run fields = %q/%d/%d", got.AgentLoop, got.RunBudgetTokens, got.RunCompactions)
+	}
+
+	// The same turn on the Standard loop: checkpointing reads the final call, and there is no run.
+	chatCtx.turnSettings = models.TurnSettings{}
+	chatCtx.agentRun = nil
+	got = a.buildContextBreakdown(chatCtx, mc, 60_000, nil)
+	if got.CheckpointInputTokens != 60_000 || got.AgentLoop != string(models.AgentLoopStandard) || got.RunBudgetTokens != 0 {
+		t.Errorf("standard = %d/%q/%d", got.CheckpointInputTokens, got.AgentLoop, got.RunBudgetTokens)
+	}
+}

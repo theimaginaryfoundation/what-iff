@@ -167,6 +167,14 @@ type advancedLoopHooks struct {
 	config        advancedLoopConfig
 }
 
+// advancedContextUsage is how an Advanced run bounded its context, as the Context X-ray reports
+// it: the input size past which it would compact before another step (advancedRun.compactCeiling
+// at the end of the run) and how many times it compacted.
+type advancedContextUsage struct {
+	ceilingTokens int64
+	compactions   int
+}
+
 // advancedRun is one Advanced run's state. It, and the chatContext it updates (calls,
 // recordedCalls, plan, planVersion), are owned by the turn's agent-loop goroutine: nothing else
 // reads or writes them while the run is in progress (the live timeline goes through
@@ -201,6 +209,8 @@ type advancedRun struct {
 	// fixedReply reports that the reply is quotaStop's note, not the model's: the last call's text
 	// then stays a note in the run record.
 	fixedReply bool
+	// compactions counts the times the run replaced its context with a work log (compact).
+	compactions int
 }
 
 // handleAdvancedLoop runs the Advanced loop on adapter, which must implement provider.Continuer.
@@ -212,6 +222,7 @@ func (a *Agent) handleAdvancedLoop(ctx context.Context, chatCtx *chatContext, ad
 		hooks.configure(adapter)
 	}
 	result, err := run.loop(ctx)
+	chatCtx.advancedContext = advancedContextUsage{ceilingTokens: run.compactCeiling(), compactions: run.compactions}
 	if err != nil {
 		run.endReason = models.AgentRunEndFailed
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
@@ -548,13 +559,45 @@ func (r *advancedRun) shouldCompact() bool {
 	if len(usage) < 2 {
 		return false
 	}
-	last := usage[len(usage)-1].InputTokens
-	growth := last - usage[0].InputTokens
-	if r.hooks.config.compactTokens > 0 && growth > r.hooks.config.compactTokens {
-		return true
+	ceiling := advancedCompactCeiling(usage[0].InputTokens, r.hooks.config.compactTokens, r.hooks.contextWindow)
+	return ceiling > 0 && usage[len(usage)-1].InputTokens > ceiling
+}
+
+// compactCeiling is the call input past which the run compacts before its next step, for the
+// adapter in use now (0 when the run cannot compact or the adapter reports no usage yet). The
+// Context X-ray shows it as an Advanced turn's budget (ContextBreakdown.RunBudgetTokens).
+func (r *advancedRun) compactCeiling() int64 {
+	if r.hooks.rebuild == nil || r.hooks.modelContext == nil {
+		return 0
 	}
-	window := r.hooks.contextWindow
-	return window > 0 && float64(last) > advancedCompactWindowShare*float64(window) && growth > advancedCompactMinGrowth
+	rep, ok := r.adapter.(provider.UsageReporter)
+	if !ok {
+		return 0
+	}
+	usage := rep.CallUsage()
+	if len(usage) == 0 || usage[0].InputTokens <= 0 {
+		return 0
+	}
+	return advancedCompactCeiling(usage[0].InputTokens, r.hooks.config.compactTokens, r.hooks.contextWindow)
+}
+
+// advancedCompactCeiling is shouldCompact's rule as one input size: a call whose input is above
+// it makes the run compact. first is the adapter's first call (the turn's own context, plus the
+// work log after a compaction). The growth rule fires past first+compactTokens; the window rule
+// past advancedCompactWindowShare of the window, and only with advancedCompactMinGrowth of
+// growth to remove. 0 means no rule applies (no growth limit and an unknown window).
+func advancedCompactCeiling(first, compactTokens, window int64) int64 {
+	ceiling := int64(0)
+	if compactTokens > 0 {
+		ceiling = first + compactTokens
+	}
+	if window > 0 {
+		byWindow := max(int64(advancedCompactWindowShare*float64(window)), first+advancedCompactMinGrowth)
+		if ceiling == 0 || byWindow < ceiling {
+			ceiling = byWindow
+		}
+	}
+	return ceiling
 }
 
 // compact replaces the adapter with a fresh one built from the original request plus a work log
@@ -576,6 +619,7 @@ func (r *advancedRun) compact(ctx context.Context, step int) error {
 		r.hooks.configure(next)
 	}
 	r.adapter = next
+	r.compactions++
 	r.a.logger.Info("advanced loop compacted its context", zap.Int("step", step), zap.Int("tool_calls", len(r.toolCalls)))
 	return nil
 }

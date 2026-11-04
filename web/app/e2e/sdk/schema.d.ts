@@ -14708,8 +14708,19 @@ export interface components {
             segments: components["schemas"]["ContextSegmentStat"][];
             /** @description Vendor-reported input tokens when available; otherwise the sum of estimated segments. */
             total_tokens: number;
-            /** @description Display budget denominator (the soft input-token ceiling before history compaction). */
+            /** @description The thread's checkpoint ceiling, as resolved for the chat: once the turn's starting context (checkpoint_input_tokens) passes it, older turns are summarized at a later checkpoint. */
             budget_tokens: number;
+            /** @description Input tokens the checkpoint compares to budget_tokens: the final call's input on a Standard turn (total_tokens), the first call's on an Advanced turn, whose later calls also carry the run's own work. Absent when unknown (older snapshots). */
+            checkpoint_input_tokens?: number;
+            /**
+             * @description The loop the turn ran. Absent on snapshots captured before it existed.
+             * @enum {string}
+             */
+            agent_loop?: "standard" | "advanced";
+            /** @description Advanced turns only: the run's own ceiling. A call whose input passes it makes the run compact its earlier steps into a work log before its next step. total_tokens (the final call) is read against this rather than budget_tokens. */
+            run_budget_tokens?: number;
+            /** @description Advanced turns only. How many times the run compacted its context. */
+            run_compactions?: number;
             /** @description Model that consumed this context. */
             model?: string;
             /** @description Provider that consumed this context. */
