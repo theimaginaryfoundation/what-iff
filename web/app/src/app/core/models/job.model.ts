@@ -118,4 +118,9 @@ export interface ActiveChatMessageJob {
   job_type?: 'chat_message' | 'agent_job_run';
   /** The user turn the job answers (set by the thread-level lookup); absent for a job's run. */
   message_id?: string;
+  /**
+   * The agent job a scheduled run is for (ADR 0x040). Only a scheduled run has one: a webhook
+   * background run or the onboarding welcome is a chat-keyed `agent_job_run` too.
+   */
+  job_run?: JobRun | null;
 }

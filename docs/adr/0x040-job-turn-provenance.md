@@ -42,6 +42,11 @@ The tool timeline and other progress stay in `progress`, which several writers r
 
 A stopped Advanced run's partial reply, saved from the ticket's draft, takes the record from the ticket.
 
+`GET /chat/{chatId}/active-job` returns the ticket's `job_run` too.
+That is what tells a scheduled run apart from the other chat-keyed `agent_job_run` turns, a webhook background run and the onboarding welcome, which the client follows the same way (ADR 0x039) but which are no job's run.
+The client shows the "Job running" label, the job chip and the composer's "A job is replying" notice only for a run with a `job_run`.
+It follows the others as a plain pending reply, placed by position.
+
 ### 3. The job reaches the agent on the run's context
 
 The scheduler puts the `JobRun` on the run's context (`models.WithJobRun`), as it already does for the job's turn settings (ADR 0x026).
@@ -68,7 +73,7 @@ So a job's turn is marked, its prompt is one click away, and none of it reads as
 ## Consequences
 
 - `chat_messages` and `jobs` each gain a nullable `job_run` jsonb column (auto-migrated).
-- The API returns `job_run` on chat messages and on jobs (`JobRun` in `openapi.yaml`), and account backups import it.
+- The API returns `job_run` on chat messages, on jobs and on the thread's active job (`JobRun` in `openapi.yaml`), and account backups import it.
 - A job run's memory load now shows live on its ticket, as on a user's turn.
 - Replies saved before this change have no `job_run`, so they show no chip. Nothing is backfilled.
 - Renaming a job does not rename the chip on earlier replies: the record keeps the title at the time of the run. The link still goes to the job.

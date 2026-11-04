@@ -45,13 +45,13 @@ describe('MessageBubbleComponent', () => {
         });
 
         it('navigates in-app when a chip is clicked', () => {
-            const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+            const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
             fixture.componentRef.setInput('displayContent', `${block}Hi`);
             fixture.detectChanges();
 
             (fixture.nativeElement.querySelector('.bubble__thread-ref') as HTMLAnchorElement).click();
 
-            expect(navigate).toHaveBeenCalledWith(['/chat', ID_A]);
+            expect(navigate).toHaveBeenCalledWith(`/chat/${ID_A}`);
         });
 
         it('leaves assistant messages and non-matching text untouched', () => {
@@ -352,15 +352,16 @@ describe('MessageBubbleComponent', () => {
         expect(fixture.nativeElement.querySelector('.bubble__pending-dots')).toBeNull();
     });
 
-    it('marks a job\'s run on its pending reply, and only there', () => {
-        fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), pending_label: 'Job running' });
+    it('marks a job\'s run as live on its pending reply, and only there', () => {
+        const run = { agent_job_id: '33333333-3333-4333-8333-333333333333', title: 'Forecast' };
+        fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), pending_label: 'Job running', job_run: run });
         fixture.componentRef.setInput('displayContent', 'Checking the forecast');
         fixture.detectChanges();
         expect(fixture.nativeElement.querySelector('.bubble__job-name')?.textContent).toContain('Job running');
 
-        fixture.componentRef.setInput('message', { ...message('Assistant'), pending_label: 'Job running' });
+        fixture.componentRef.setInput('message', { ...message('Assistant'), pending_label: 'Job running', job_run: run });
         fixture.detectChanges();
-        expect(fixture.nativeElement.querySelector('.bubble__job')).toBeNull();
+        expect(fixture.nativeElement.querySelector('.bubble__job-name')?.textContent).toBe('Forecast');
     });
 
     describe('job chip (ADR 0x040)', () => {
@@ -381,13 +382,13 @@ describe('MessageBubbleComponent', () => {
             expect(root().querySelector('.bubble__job-open')?.getAttribute('href')).toBe(`/agent-jobs/${JOB_ID}`);
         });
 
-        it('says a job is running before its ticket names the job', () => {
-            fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), pending_label: 'Job running' });
+        // A webhook background run or the welcome is followed like a job's run but names no job.
+        it('shows no chip on a pending reply that names no job', () => {
+            fixture.componentRef.setInput('message', pendingAssistantMessage());
             fixture.componentRef.setInput('displayContent', '');
             fixture.detectChanges();
 
-            expect(root().querySelector('.bubble__job-name')?.textContent).toBe('Job running');
-            expect(root().querySelector('.bubble__job-open')).toBeNull();
+            expect(chip()).toBeNull();
         });
 
         it('names the job on a saved job reply, with its prompt and link', () => {

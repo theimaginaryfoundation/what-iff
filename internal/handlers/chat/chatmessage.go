@@ -208,7 +208,7 @@ func (h *Handler) GetActiveChatJob(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	resp := models.ActiveChatMessageJobResponse{JobID: j.ID, Status: j.Status, JobType: j.JobType}
+	resp := models.ActiveChatMessageJobResponse{JobID: j.ID, Status: j.Status, JobType: j.JobType, JobRun: j.JobRun}
 	// A scheduled or webhook background run is keyed by the chat itself: it answers no saved message.
 	// This checks the reference, not the job type: a sync webhook run is an agent_job_run too, but
 	// keyed by the user message it answers, and the client follows it as a plain turn.

@@ -157,7 +157,23 @@ func TestGetActiveChatJob(t *testing.T) {
 		require.JSONEq(t, `{"job_id":"`+jobID.String()+`","status":"processing","job_type":"chat_message","message_id":"`+msgID.String()+`"}`, rec.Body.String())
 	})
 
-	t.Run("scheduled run keyed by the chat answers no message", func(t *testing.T) {
+	t.Run("scheduled run keyed by the chat answers no message and names its job", func(t *testing.T) {
+		t.Parallel()
+		userID, chatID, jobID, agentJobID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		store := &activeChatJobStoreStub{job: &models.Job{
+			ID: jobID, JobType: "agent_job_run", Status: models.JobStatusProcessing, Reference: chatID.String(),
+			JobRun: &models.JobRun{AgentJobID: agentJobID, Title: "Morning tea", Prompt: "Suggest a tea."},
+		}}
+
+		rec := serveActiveChatJob(t, store, chatID.String(), userID)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.JSONEq(t, `{"job_id":"`+jobID.String()+`","status":"processing","job_type":"agent_job_run",`+
+			`"job_run":{"agent_job_id":"`+agentJobID.String()+`","title":"Morning tea","prompt":"Suggest a tea."}}`, rec.Body.String())
+	})
+
+	// A webhook background run or the welcome is keyed by the chat too, but is no job's run.
+	t.Run("chat-keyed run with no job has no job_run", func(t *testing.T) {
 		t.Parallel()
 		userID, chatID, jobID := uuid.New(), uuid.New(), uuid.New()
 		store := &activeChatJobStoreStub{job: &models.Job{ID: jobID, JobType: "agent_job_run", Status: models.JobStatusProcessing, Reference: chatID.String()}}

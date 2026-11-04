@@ -45,13 +45,18 @@ export interface AssistantTurnDeps {
 }
 
 /**
- * A scheduled job's (or webhook's) run being followed in the open thread (ADR 0x039). It answers
- * no saved user message, so its reply is told apart by position: the first assistant message
- * after the message that was newest when the run was picked up (null when the thread was empty).
+ * A chat-keyed run being followed in the open thread (ADR 0x039): a scheduled job's run, a webhook
+ * background run or the onboarding welcome. It answers no saved user message, so its reply is told
+ * apart by position: the first assistant message after the message that was newest when the run
+ * was picked up (null when the thread was empty).
  */
 export interface FollowedJobRun {
   afterMessageId: string | null;
-  /** The agent job the run is for, from its ticket (ADR 0x040); null until a poll names it. */
+  /**
+   * The agent job the run is for (ADR 0x040), from the active-job lookup or its ticket. Only a
+   * scheduled job's run has one, and only that one is shown as a job's: the others are followed
+   * as a plain pending reply.
+   */
   job: JobRun | null;
 }
 
@@ -111,10 +116,10 @@ export class AssistantTurn {
   /** An Advanced turn's current step and plan (ADR 0x026); null on Standard turns and when idle. */
   readonly advancedProgress = this._advancedProgress.asReadonly();
   readonly pendingAssistantDraftReasoning = this._pendingAssistantDraftReasoning.asReadonly();
-  /** The job's run being followed, when the in-flight turn is one (not a reply to the user); null otherwise. */
+  /** The chat-keyed run being followed, when the in-flight turn is one (not a reply to the user); null otherwise. */
   readonly jobRun = this._jobRun.asReadonly();
-  /** True while the in-flight turn is a job's run, so the turn being generated is not the user's. */
-  readonly jobRunActive = computed(() => this._jobRun() !== null && this.inferenceGenerating());
+  /** True while the in-flight turn is a scheduled job's run, so the turn being generated is not the user's. */
+  readonly jobRunActive = computed(() => !!this._jobRun()?.job && this.inferenceGenerating());
   /** True while a chat_message job is in flight (after send) but not yet finished. */
   readonly jobPending = computed(() => this._activeChatJobId() !== null);
   /**
@@ -319,7 +324,7 @@ export class AssistantTurn {
           // followJobRun marks a job's run in the same step that starts its poll): nothing to do.
           if (this.deps.jobService.isJobBeingPolled(active.job_id)) return;
           if (active.job_type === 'agent_job_run' && !active.message_id && !isPostInferencePhase(active.status)) {
-            this.followJobRun(threadId, active.job_id);
+            this.followJobRun(threadId, active.job_id, active.job_run ?? null);
             return;
           }
           if (active.message_id) this.ensureUserTurnLoaded(threadId, active.message_id);
@@ -333,18 +338,19 @@ export class AssistantTurn {
   }
 
   /**
-   * Follows a job's run that is still generating (ADR 0x039): polled like a user's turn, its reply
-   * placed after the newest message loaded now. One picked up only after it replied is polled as
-   * a plain turn instead (resumeIfRunning), since its reply may already be loaded.
+   * Follows a chat-keyed run that is still generating (ADR 0x039): polled like a user's turn, its
+   * reply placed after the newest message loaded now. One picked up only after it replied is polled
+   * as a plain turn instead (resumeIfRunning), since its reply may already be loaded. job is the
+   * agent job a scheduled run is for, null for any other run.
    */
-  private followJobRun(threadId: string, jobId: string): void {
+  private followJobRun(threadId: string, jobId: string, job: JobRun | null): void {
     this.subscriptions.add(
       this.deps.messageService.messages$.pipe(take(1)).subscribe(messages => {
         if (!this.isActiveThread(threadId)) return;
         this.startPolling(jobId, threadId);
         if (this._activeChatJobId() !== jobId) return;
         // An empty thread has no anchor (null): then any assistant message is the run's reply.
-        this._jobRun.set({ afterMessageId: messages[messages.length - 1]?.id ?? null, job: null });
+        this._jobRun.set({ afterMessageId: messages[messages.length - 1]?.id ?? null, job });
       }),
     );
   }

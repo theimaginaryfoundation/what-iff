@@ -316,8 +316,11 @@ describe('ChatSessionService — returning to a thread with a running turn', () 
             ]);
             noActiveJob('chat-B');
         };
-        const runLookup = (status = 'processing') =>
-            activeJobLookup('chat-B').flush({ job_id: 'run-1', status, job_type: 'agent_job_run' });
+        const job = { agent_job_id: 'agent-job-1', title: 'Morning brief', prompt: 'Brief me.' };
+        // The lookup names the agent job a scheduled run is for (ADR 0x040); other chat-keyed runs
+        // (a webhook background run, the welcome) have none.
+        const runLookup = (status = 'processing', jobRun: typeof job | null = job) =>
+            activeJobLookup('chat-B').flush({ job_id: 'run-1', status, job_type: 'agent_job_run', job_run: jobRun });
         const runSnapshot = (extra: Record<string, unknown>) =>
             http.expectOne(`${api}/job/run-1`).flush({ id: 'run-1', job_type: 'agent_job_run', reference: 'chat-B', ...extra });
 
@@ -333,11 +336,10 @@ describe('ChatSessionService — returning to a thread with a running turn', () 
             await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS);
             runLookup();
 
-            expect(service.jobRun()).toEqual({ afterMessageId: 'asst-1', job: null });
+            expect(service.jobRun()).toEqual({ afterMessageId: 'asst-1', job });
             expect(service.jobRunActive()).toBe(true);
             expect(service.composerBusy()).toBe(true);
             await vi.advanceTimersByTimeAsync(0);
-            const job = { agent_job_id: 'agent-job-1', title: 'Morning brief', prompt: 'Brief me.' };
             runSnapshot({
                 status: 'processing',
                 draft_deltas: ['Good ', 'morning'],
@@ -345,7 +347,6 @@ describe('ChatSessionService — returning to a thread with a running turn', () 
                 job_run: job,
             });
             expect(service.pendingAssistantDraftText()).toBe('Good morning');
-            // The ticket names the job it runs for (ADR 0x040).
             expect(service.jobRun()).toEqual({ afterMessageId: 'asst-1', job });
             expect(service.liveToolCalls().map(c => c.name)).toEqual(['web_search']);
 
@@ -377,11 +378,32 @@ describe('ChatSessionService — returning to a thread with a running turn', () 
             service.setActive('chat-B');
             flushList('chat-B', [userMsg('user-1', 'chat-B', '2026-09-23T10:00:00Z')]);
             runLookup();
-            expect(service.jobRun()).toEqual({ afterMessageId: 'user-1', job: null });
+            expect(service.jobRun()).toEqual({ afterMessageId: 'user-1', job });
             await vi.advanceTimersByTimeAsync(0);
             runSnapshot({ status: 'processing', draft_deltas: ['On it'] });
             expect(service.pendingAssistantDraftText()).toBe('On it');
             expect(service.jobRunActive()).toBe(true);
+        });
+
+        it('follows a run that is no job\'s (a webhook\'s, the welcome) as a plain pending reply', async () => {
+            const messages = TestBed.inject(MessageService);
+            openWithHistory();
+            await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS);
+            runLookup('processing', null);
+
+            // Placed by position like a job's run, but not presented as one.
+            expect(service.jobRun()).toEqual({ afterMessageId: 'asst-1', job: null });
+            expect(service.jobRunActive()).toBe(false);
+            await vi.advanceTimersByTimeAsync(0);
+            runSnapshot({ status: 'processing', draft_deltas: ['Welcome'] });
+            expect(service.pendingAssistantDraftText()).toBe('Welcome');
+
+            await vi.advanceTimersByTimeAsync(CHAT_JOB_POLL_INTERVAL_MS);
+            runSnapshot({ status: 'complete', result_id: 'asst-2' });
+            http.expectOne(`${api}/chat/chat-message/asst-2`).flush(assistantMsg('asst-2', 'chat-B', '2026-09-23T11:00:00Z'));
+            TestBed.tick();
+            expect(messages.getMessages().map(m => m.id)).toEqual(['user-1', 'asst-1', 'asst-2']);
+            expect(service.jobRun()).toBeNull();
         });
 
         it('polls a run picked up after it replied as a plain turn', async () => {

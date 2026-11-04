@@ -169,6 +169,10 @@ type ActiveChatMessageJobResponse struct {
 	// (GET /chat/{chatId}/active-job), where the caller does not already know it. Absent for a
 	// run with no saved user message (a scheduled job's prompt is never saved).
 	MessageID *uuid.UUID `json:"message_id,omitempty"`
+	// JobRun is the agent job a scheduled run is for (ADR 0x040), from its queue ticket. Only a
+	// scheduled run has one: a webhook background run or the onboarding welcome is a chat-keyed
+	// agent_job_run too, but no job's run, so the client tells them apart by it.
+	JobRun *JobRun `json:"job_run,omitempty"`
 }
 
 // ChatMessageExport is the user-facing export of a chat message

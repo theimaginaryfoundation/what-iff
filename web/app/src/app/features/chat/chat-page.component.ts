@@ -150,7 +150,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
         draftText: this.session.pendingAssistantDraftText(),
         draftReasoning: this.session.pendingAssistantDraftReasoning(),
         pendingStatus: waiting ? chatTurnWaitingLabel(waiting) : undefined,
-        pendingLabel: jobRun ? JOB_RUN_PENDING_LABEL : undefined,
+        pendingLabel: jobRun?.job ? JOB_RUN_PENDING_LABEL : undefined,
         jobRun: jobRun?.job ?? null,
         generationPersonality: name,
         thinkingImageUrl: this.selectedPersonality()?.expressions_enabled === false

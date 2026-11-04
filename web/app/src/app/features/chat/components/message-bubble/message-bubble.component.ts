@@ -13,8 +13,8 @@ import { AgentRunNotesComponent } from '../agent-run-notes/agent-run-notes.compo
 import { AgentRunView, agentRunView } from '../../helpers/agent-run.helpers';
 
 interface JobChip {
-  /** The job's page; null until a running job turn's ticket names its job. */
-  href: string | null;
+  /** The job's page. */
+  href: string;
   /** "Job running · <title>" while the run is live, then the job's title. */
   label: string;
   live: boolean;
@@ -58,9 +58,7 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
             @if (chip.prompt) {
               <div class="bubble__job-prompt">{{ chip.prompt }}</div>
             }
-            @if (chip.href) {
-              <a class="bubble__job-open" [href]="chip.href" (click)="openJob($event, chip.href)">Open job</a>
-            }
+            <a class="bubble__job-open" [href]="chip.href" (click)="navigateInApp($event, chip.href)">Open job</a>
           </div>
         </details>
       }
@@ -668,16 +666,15 @@ export class MessageBubbleComponent {
   }
 
   readonly isPendingPlaceholder = computed(() => this.message().id === CHAT_PENDING_ASSISTANT_MESSAGE_ID);
-  /** The job chip on a job's turn (ADR 0x040): "Job running" and the job while it runs, then the job. */
+  /**
+   * The job chip on a scheduled job's turn (ADR 0x040): "Job running" and the job while it runs,
+   * then the job. A turn that names no job (any other chat-keyed run, such as a webhook's or the
+   * welcome) gets none.
+   */
   readonly jobChip = computed<JobChip | null>(() => {
     const message = this.message();
     const run = message.job_run;
-    if (message.origin !== 'Assistant' || !run?.agent_job_id) {
-      // A running job turn's ticket may not have been read yet: say a job is running, unlinked.
-      return this.isPendingPlaceholder() && message.pending_label
-        ? { href: null, label: message.pending_label, live: true, prompt: '' }
-        : null;
-    }
+    if (message.origin !== 'Assistant' || !run?.agent_job_id) return null;
     return jobChip(run, this.isPendingPlaceholder() ? message.pending_label ?? null : null);
   });
   readonly showPendingDots = computed(
@@ -711,7 +708,7 @@ export class MessageBubbleComponent {
   );
 
   /** Plain click navigates in-app; modified clicks keep the browser's new-tab behaviour. */
-  openJob(event: MouseEvent, href: string): void {
+  navigateInApp(event: MouseEvent, href: string): void {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
       return;
     }
@@ -720,11 +717,7 @@ export class MessageBubbleComponent {
   }
 
   openReferencedThread(event: MouseEvent, threadId: string): void {
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-      return;
-    }
-    event.preventDefault();
-    void this.router.navigate(['/chat', threadId]);
+    this.navigateInApp(event, `/chat/${encodeURIComponent(threadId)}`);
   }
 
   shortTime(value: string): string {

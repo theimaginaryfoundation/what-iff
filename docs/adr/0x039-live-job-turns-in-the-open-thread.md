@@ -101,6 +101,6 @@ Its worker now watches its job's status for a cancel (`watchChatJobCancel`), as 
 ## Not done yet
 
 - The label says "Job running", not which job.
-- The client cannot yet tell a scheduled run from a webhook background run or the welcome, which are also chat-keyed `agent_job_run` jobs, so those get the "Job running" label too. ADR 0x040 adds what tells them apart.
+- On its own, the client cannot tell a scheduled run from a webhook background run or the welcome, which are also chat-keyed `agent_job_run` jobs, so those would get the "Job running" label too. ADR 0x040 adds what tells them apart (`job_run` on the active job).
 - The bubble uses the thread's personality, not a job's personality override.
 - A run's expression pick lands after its ticket completes, so the reply's expression shows on the next sync rather than live.

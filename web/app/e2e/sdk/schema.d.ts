@@ -14682,6 +14682,8 @@ export interface components {
              * @description The user turn this job answers. Set by GET /chat/{chatId}/active-job; absent for a run that answers no saved message (a scheduled job's prompt is never saved).
              */
             message_id?: string;
+            /** @description The agent job a scheduled run is for (ADR 0x040). Set by GET /chat/{chatId}/active-job for a scheduled run only: a webhook background run or the onboarding welcome is an agent_job_run with no message_id too, but has none. */
+            job_run?: components["schemas"]["JobRun"];
         };
         /**
          * @description A model provider.
