@@ -3,7 +3,7 @@
 - **Status:** Accepted 2026-10-31 (design only; nothing implemented yet)
 - **Date:** 2026-10-30
 - **Deciders:** What Iff maintainers
-- **Builds on:** loadable built-in tools (`load_tools`, the catalog's `Loadable` flag, `chat_mcp_tool_states`, checkpoint unload), skill-linked connectors (#290), the agent file tools and gallery-as-VFS work in [ADR 0x034](0x034-agent-files-and-entity-wiki.md) (#406) and its private half (what-iff-private#225, `load_file_to_container`), the containers4agents `shell_exec` tool (private), and Nexus projections (private).
+- **Builds on:** loadable built-in tools (`load_tools`, the catalog's `Loadable` flag, `chat_mcp_tool_states`, checkpoint unload), skill-linked connectors (#290), the agent file tools and gallery-as-VFS work in [ADR 0x034](0x034-agent-files-and-entity-wiki.md) (#406), the containers4agents `shell_exec` tool (private), and Nexus projections (private).
 - **Standard:** [Agent Skills](https://agentskills.io/specification), as adopted by Claude Code, the Claude API, Codex, Cursor, Gemini CLI, Copilot, Amp and others.
 
 ## Context
@@ -216,7 +216,7 @@ On every migrating start, a backfill copies the FK column values whose mode or j
 Attaching a skill to a second mode or job then no longer detaches it from the first, which the editors silently do today.
 This ships first, since every later step assumes skills are reusable.
 
-### 12. Changes proposed to the in-flight VFS work (#406, what-iff-private#225)
+### 12. Changes proposed to the in-flight VFS work (#406)
 
 Posted 2026-10-31 as a comment-only review on #406 and a comment on #225; the author has agreed to the #406 changes, so step 3 of the delivery plan can assume them.
 
