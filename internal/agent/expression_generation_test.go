@@ -8,6 +8,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -47,11 +48,11 @@ func TestParseExpressionPickPayload_invalidJSON(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 
-// --- expressionPickStructuredOutputFormat ---
+// --- expressionPickSchema ---
 
-func TestExpressionPickStructuredOutputFormat(t *testing.T) {
+func TestExpressionPickSchema(t *testing.T) {
 	t.Parallel()
-	out := expressionPickStructuredOutputFormat()
+	out := provider.UtilityResponsesParams("m", provider.UtilityRequest{Schema: expressionPickSchema}).Text
 	require.NotNil(t, out.Format.OfJSONSchema)
 	require.Equal(t, "ExpressionPortraitPick", out.Format.OfJSONSchema.Name)
 }
