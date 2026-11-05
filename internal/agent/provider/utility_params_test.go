@@ -242,3 +242,49 @@ func TestUtilityClaudeParams_SystemBlockOrderWithConversation(t *testing.T) {
 	require.Equal(t, "be brief", texts[len(texts)-1])
 	require.Equal(t, mc.BuildClaudeParams("claude-x").System[0].CacheControl, got.System[1].CacheControl, "the conversation's cache marker is kept")
 }
+
+func TestUtilityResponsesParams_ConversationKeepsServiceTier(t *testing.T) {
+	t.Parallel()
+	got := UtilityResponsesParams("m", UtilityRequest{Context: &ModelContext{}, Flex: true})
+	require.Equal(t, responses.ResponseNewParamsServiceTierFlex, got.ServiceTier)
+}
+
+func TestOpenAIRejectedImages(t *testing.T) {
+	t.Parallel()
+	mc := &ModelContext{}
+	mc.AppendHistoryTurn(RoleUser, "a", []UserMessageImage{
+		{MediaType: "image/png", RawBytes: []byte{1}},
+		{MediaType: "image/heic", RawBytes: []byte{2}},
+		{MediaType: "image/jpeg"},
+	}, false)
+	noData, unsupported := OpenAIRejectedImages(mc)
+	require.Equal(t, 1, noData)
+	require.Equal(t, 1, unsupported)
+	noData, unsupported = OpenAIRejectedImages(nil)
+	require.Zero(t, noData+unsupported)
+}
+
+// The counts reported for a conversation are exactly the images the sanitizer leaves out of it,
+// so the metric can't drift from what was actually sent.
+func TestOpenAIRejectedImages_MatchesSanitizer(t *testing.T) {
+	t.Parallel()
+	mc := &ModelContext{}
+	mc.AppendHistoryTurn(RoleUser, "a", []UserMessageImage{
+		{MediaType: "image/png", RawBytes: []byte{1}},
+		{MediaType: "image/heic", RawBytes: []byte{2}},
+		{MediaType: "image/jpeg"},
+	}, false)
+	mc.AppendHistoryTurn(RoleUser, "", []UserMessageImage{{MediaType: "image/tiff", RawBytes: []byte{3}}}, false)
+	mc.AppendHistoryTurn(RoleUser, "b", []UserMessageImage{{MediaType: "image/webp", RawBytes: []byte{4}}}, false)
+
+	count := func(m *ModelContext) int {
+		n := 0
+		for _, seg := range m.Segments {
+			n += len(seg.UserImages)
+		}
+		return n
+	}
+	noData, unsupported := OpenAIRejectedImages(mc)
+	require.Equal(t, count(mc)-count(SanitizeImagesForOpenAIInput(mc)), noData+unsupported)
+	require.Equal(t, 5, count(mc), "the sanitizer works on a clone")
+}
