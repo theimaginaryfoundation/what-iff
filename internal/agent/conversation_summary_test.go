@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/openai/openai-go/v3/responses"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 )
@@ -48,11 +49,11 @@ func TestCheckpointArchivalContext_AppendsAssistantTurn(t *testing.T) {
 	require.Empty(t, nilBase.Segments)
 }
 
-func TestBuildCheckpointSummaryParams_ThreadedMode(t *testing.T) {
+func TestBuildCheckpointSummaryRequest_ThreadedMode(t *testing.T) {
 	t.Parallel()
 
 	rid := "resp_abc"
-	params, err := buildCheckpointSummaryParams(uuid.New(), "", checkpointSummarySource{
+	params, err := checkpointSummaryParams(uuid.New(), "", checkpointSummarySource{
 		PreviousResponseID: &rid,
 	})
 	require.NoError(t, err)
@@ -66,14 +67,14 @@ func TestBuildCheckpointSummaryParams_ThreadedMode(t *testing.T) {
 	require.Nil(t, params.Input.OfInputItemList)
 }
 
-func TestBuildCheckpointSummaryParams_ExplicitMode(t *testing.T) {
+func TestBuildCheckpointSummaryRequest_ExplicitMode(t *testing.T) {
 	t.Parallel()
 
 	mc := &provider.ModelContext{}
 	mc.Append(provider.SegmentKindHistoryTurn, provider.RoleUser, "hi", true)
 	mc.Append(provider.SegmentKindUserMessage, provider.RoleUser, "current user", false)
 
-	params, err := buildCheckpointSummaryParams(uuid.New(), "prior summary", checkpointSummarySource{
+	params, err := checkpointSummaryParams(uuid.New(), "prior summary", checkpointSummarySource{
 		ModelContext:   mc,
 		AssistantReply: "current assistant",
 	})
@@ -86,11 +87,11 @@ func TestBuildCheckpointSummaryParams_ExplicitMode(t *testing.T) {
 	require.Len(t, items, 4) // history user, current user, assistant reply, update prompt
 }
 
-// TestBuildCheckpointSummaryParams_StripsOpenAIUnsafeImages reproduces the checkpoint
+// TestBuildCheckpointSummaryRequest_StripsOpenAIUnsafeImages reproduces the checkpoint
 // summary crash: a Claude-chat turn carried an image with a media type OpenAI does not
 // support, which returned a 400 from the summarizer. The built params must never surface an
 // unsupported media type, and a kept image always renders as a data URL.
-func TestBuildCheckpointSummaryParams_StripsOpenAIUnsafeImages(t *testing.T) {
+func TestBuildCheckpointSummaryRequest_StripsOpenAIUnsafeImages(t *testing.T) {
 	t.Parallel()
 
 	mc := &provider.ModelContext{}
@@ -103,7 +104,7 @@ func TestBuildCheckpointSummaryParams_StripsOpenAIUnsafeImages(t *testing.T) {
 		{MediaType: "image/heic", RawBytes: []byte{4, 5}},
 	}, false)
 
-	params, err := buildCheckpointSummaryParams(uuid.New(), "", checkpointSummarySource{ModelContext: mc})
+	params, err := checkpointSummaryParams(uuid.New(), "", checkpointSummarySource{ModelContext: mc})
 	require.NoError(t, err)
 
 	sawImage := false
@@ -125,20 +126,29 @@ func TestBuildCheckpointSummaryParams_StripsOpenAIUnsafeImages(t *testing.T) {
 	require.True(t, sawImage, "the supported jpeg image should survive sanitization")
 }
 
-func TestBuildCheckpointSummaryParams_RequiresSource(t *testing.T) {
+func TestBuildCheckpointSummaryRequest_RequiresSource(t *testing.T) {
 	t.Parallel()
 
-	_, err := buildCheckpointSummaryParams(uuid.New(), "", checkpointSummarySource{})
+	_, err := checkpointSummaryParams(uuid.New(), "", checkpointSummarySource{})
 	require.Error(t, err)
 }
 
-// summarizeConversationForCheckpoint's cheapest branch is its own nil-provider
-// guard, which fires before chatCtx is dereferenced.
-func TestSummarizeConversationForCheckpoint_NilProviderReturnsError(t *testing.T) {
+// summarizeConversationForCheckpoint tolerates a nil chat context, and fails on a missing
+// source before making any call.
+func TestSummarizeConversationForCheckpoint_NoSourceReturnsError(t *testing.T) {
 	t.Parallel()
 
 	a := &Agent{}
 	_, err := a.summarizeConversationForCheckpoint(context.Background(), uuid.New(), nil, checkpointSummarySource{})
-	require.Error(t, err)
-	require.ErrorContains(t, err, "OpenAIProvider is nil")
+	require.ErrorContains(t, err, "requires PreviousResponseID or ModelContext")
+}
+
+// checkpointSummaryParams renders the summary request the way the memory role's model
+// receives it, so these tests pin the wire shape.
+func checkpointSummaryParams(userID uuid.UUID, existing string, src checkpointSummarySource) (responses.ResponseNewParams, error) {
+	req, err := buildCheckpointSummaryRequest(userID, existing, src)
+	if err != nil {
+		return responses.ResponseNewParams{}, err
+	}
+	return provider.UtilityResponsesParams(utilityModelName(req.Role), req), nil
 }

@@ -51,6 +51,9 @@ type UtilityRequest struct {
 	Instructions string
 	// Context, when set, is a conversation the call continues; Messages follow it.
 	Context *ModelContext
+	// PreviousResponseID continues a conversation the Responses API stored, in
+	// place of Context. Only a model on that API can use it.
+	PreviousResponseID string
 	// Input is the call's single user message as plain text. A call with more
 	// than one turn, or an image, uses Messages instead.
 	Input    string
