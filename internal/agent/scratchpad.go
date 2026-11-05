@@ -50,6 +50,8 @@ func (a *Agent) updateScratchpad(ctx context.Context, userID uuid.UUID, response
 	}
 	prompt := buildUpdateScratchpadPrompt(personalityModel)
 
+	// callUtility rather than CallUtility: memory extraction continues from this reply's
+	// stored response, so it needs the response ID.
 	reply, err := a.callUtility(ctx, provider.UtilityRequest{
 		Role:               provider.UtilityRoleMemory,
 		CallPath:           telemetry.CallPathScratchpad,

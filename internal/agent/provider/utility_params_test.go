@@ -240,3 +240,26 @@ func TestOpenAIRejectedImages(t *testing.T) {
 	noData, unsupported = OpenAIRejectedImages(nil)
 	require.Zero(t, noData+unsupported)
 }
+
+// On the Messages API the instructions come first, then the conversation's own system blocks
+// (cache markers and all), then the call's developer turns, in order.
+func TestUtilityClaudeParams_SystemBlockOrderWithConversation(t *testing.T) {
+	t.Parallel()
+	mc := &ModelContext{}
+	mc.Append(SegmentKindSystemPrompt, RoleDeveloper, "You are Vix.", true)
+	mc.Append(SegmentKindHistoryTurn, RoleUser, "hi", false)
+	got := UtilityClaudeParams("claude-x", UtilityRequest{
+		Instructions: "summarize",
+		Context:      mc,
+		Messages:     []UtilityMessage{{Role: RoleDeveloper, Text: "be brief"}, {Role: RoleUser, Text: "go"}},
+	})
+	var texts []string
+	for _, b := range got.System {
+		texts = append(texts, b.Text)
+	}
+	require.GreaterOrEqual(t, len(texts), 3)
+	require.Equal(t, "summarize", texts[0])
+	require.Contains(t, texts[1:len(texts)-1], "You are Vix.")
+	require.Equal(t, "be brief", texts[len(texts)-1])
+	require.Equal(t, mc.BuildClaudeParams("claude-x").System[0].CacheControl, got.System[1].CacheControl, "the conversation's cache marker is kept")
+}
