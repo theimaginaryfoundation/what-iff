@@ -447,7 +447,7 @@ func TestSummarizeText_NoProviderConfiguredReturnsError(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
 	_, err := a.summarizeText(context.Background(), uuid.New(), "instructions", "input", 100)
-	require.ErrorContains(t, err, "no OpenAI provider is configured")
+	require.ErrorIs(t, err, errUtilityProviderMissing, "no client for the role's provider on this deployment")
 }
 
 func TestSummarizeText_SuccessReturnsTrimmedOutput(t *testing.T) {
