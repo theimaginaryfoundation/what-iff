@@ -16,6 +16,8 @@ import (
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry/telemetrytest"
 )
 
 // recordingServer answers every request with body and keeps the last request's path and JSON.
@@ -123,5 +125,59 @@ func TestCallUtilityOn_ErrorNamesProvider(t *testing.T) {
 		_, err := a.callUtilityOn(context.Background(), tt.model, tt.modelProvider, utilityTestRequest)
 		require.Error(t, err, tt.model)
 		require.True(t, strings.HasPrefix(err.Error(), tt.name), "%s: %v", tt.model, err)
+	}
+}
+
+func TestCallUtilityOn_RefusesStoredResponseWithConversation(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()}
+	req := utilityTestRequest
+	req.PreviousResponseID = "resp_1"
+	req.Context = &provider.ModelContext{}
+	_, err := a.callUtilityOn(context.Background(), models.UtilityModelName, "", req)
+	require.ErrorContains(t, err, "not both")
+}
+
+// Every role's model must resolve to an API from its name alone, or every call on that role
+// fails; renaming one to a model outside the catalog would otherwise surface only at runtime.
+func TestUtilityModelName_EveryRoleResolvesToResponsesAPI(t *testing.T) {
+	t.Parallel()
+	for _, role := range []provider.UtilityRole{provider.UtilityRoleQuick, provider.UtilityRoleMemory, provider.UtilityRolePersonality} {
+		model := utilityModelName(role)
+		require.Equal(t, models.ModelProviderOpenAI, models.ProviderForModel("", model), "%s -> %s", role, model)
+		require.False(t, models.UsesOpenAIChatCompletionsAPI("", model), model)
+	}
+	require.True(t, models.IsNativeAnthropicModel("", archivalClaudeModel), archivalClaudeModel)
+}
+
+// A conversation sent to the Responses API loses the images it can't take, and the call goes
+// ahead; each drop is counted by reason so it shows up rather than vanishing.
+func TestCallUtility_CountsImagesLeftOut(t *testing.T) {
+	t.Parallel()
+	srv, reqs := capturingResponsesServer(t, responseTextJSONBody("resp_1", "summary"))
+	tm := telemetrytest.New(t)
+	a := &Agent{
+		logger:         zap.NewNop(),
+		telemetry:      &telemetry.Telemetry{Logger: zap.NewNop(), Metrics: tm.Metrics},
+		OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL),
+	}
+	mc := &provider.ModelContext{}
+	mc.AppendHistoryTurn(provider.RoleUser, "photos", []provider.UserMessageImage{
+		{MediaType: "image/jpeg", RawBytes: []byte{1}},
+		{MediaType: "image/heic", RawBytes: []byte{2}},
+		{MediaType: "image/png"},
+	}, false)
+
+	out, err := a.CallUtility(context.Background(), provider.UtilityRequest{
+		Role: provider.UtilityRoleMemory, CallPath: telemetry.CallPathConversationSummary, Context: mc,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "summary", out)
+	require.Len(t, reqs(), 1)
+	for reason, want := range map[string]int64{"unsupported_type": 1, "no_data": 1} {
+		require.Equal(t, want, tm.CounterValue(t, telemetry.GenAIImagesDropped.Name,
+			telemetry.AttrGenAIProvider.String(string(models.ModelProviderOpenAI)),
+			telemetry.AttrCallPath.String(string(telemetry.CallPathConversationSummary)),
+			telemetry.AttrReason.String(reason)), reason)
 	}
 }

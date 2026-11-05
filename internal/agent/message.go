@@ -3061,12 +3061,12 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	checkpointCtx, cancelCheckpoint := context.WithTimeout(ctx, checkpointTimeout)
 	defer cancelCheckpoint()
 	// Only genuine OpenAI (Responses API) chats can thread checkpoints off a
-	// PreviousResponseID. Anthropic, z.ai (GLM) and Gemini chats all rebuild
-	// context from the DB via the "Claude" checkpoint path, whose summarizer runs
-	// on GPT and whose scratchpad/memory archival runs on the Anthropic provider
-	// (a no-op that logs when ANTHROPIC_API_KEY is unset). A connection model
-	// rebuilds from the DB too: no connection returns an OpenAI response id to
-	// chain off.
+	// PreviousResponseID. Every other chat (Anthropic, z.ai, Gemini, a connection
+	// model) rebuilds context from the DB via the "Claude" checkpoint path, whose
+	// summarizer runs on GPT and whose scratchpad/memory archival runs on
+	// rebuiltCheckpointModel: Claude for native Anthropic chats, GPT otherwise.
+	// A connection model rebuilds from the DB too: no connection returns an
+	// OpenAI response id to chain off.
 	if checkpointRebuildsFromDB(chatCtx) {
 		a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
 	} else {
@@ -3155,7 +3155,8 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 }
 
 // runCheckpointClaude performs the scratchpad → memory → summary checkpoint sequence for
-// Claude-model chats by rebuilding conversation context from the DB (no PreviousResponseID).
+// every chat that can't chain off an OpenAI response ("Claude" is historical) by rebuilding
+// conversation context from the DB (no PreviousResponseID).
 func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatMessage, agentMessage *models.ChatMessage, chatCtx *chatContext, assistantMessageCount int, modelContext *provider.ModelContext, reason string) {
 	if agentMessage == nil {
 		a.logger.Warn("skipping Claude checkpoint: assistant message is nil",

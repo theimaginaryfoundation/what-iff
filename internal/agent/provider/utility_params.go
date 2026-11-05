@@ -27,12 +27,7 @@ func UtilityResponsesParams(model string, req UtilityRequest) responses.Response
 	if req.MaxOutputTokens > 0 {
 		params.MaxOutputTokens = openai.Int(req.MaxOutputTokens)
 	}
-	switch {
-	case req.Priority:
-		params.ServiceTier = responses.ResponseNewParamsServiceTierPriority
-	case req.Flex:
-		params.ServiceTier = responses.ResponseNewParamsServiceTierFlex
-	}
+	params.ServiceTier = utilityServiceTier(req)
 	if len(req.Messages) == 0 {
 		params.Input = responses.ResponseNewParamsInputUnion{OfString: openai.String(req.Input)}
 	} else {
@@ -61,8 +56,20 @@ func utilityResponsesParamsFromContext(model string, req UtilityRequest) respons
 	for _, m := range req.Messages {
 		params.Input.OfInputItemList = append(params.Input.OfInputItemList, utilityResponsesMessage(m))
 	}
+	params.ServiceTier = utilityServiceTier(req)
 	params.Text = utilityResponsesText(req)
 	return params
+}
+
+// utilityServiceTier is the Responses service tier a request asks for, if any.
+func utilityServiceTier(req UtilityRequest) responses.ResponseNewParamsServiceTier {
+	switch {
+	case req.Priority:
+		return responses.ResponseNewParamsServiceTierPriority
+	case req.Flex:
+		return responses.ResponseNewParamsServiceTierFlex
+	}
+	return ""
 }
 
 // utilityResponsesText asks for the request's structured output, if any.
