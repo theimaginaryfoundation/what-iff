@@ -103,7 +103,7 @@ var GenAIRetries = Counter{"whatiff.gen_ai.retries", "{retry}", "LLM call retrie
 var GenAISafetyBlocks = Counter{"whatiff.gen_ai.safety_blocks", "{block}", "LLM responses blocked by provider safety systems."}
 
 // GenAIImagesDropped counts images left out of an LLM request because the provider can't
-// take them. Attributes: gen_ai.provider.name, call_path, reason (no_data: only a reference,
+// take them, one per image, so one request can add several. Attributes: gen_ai.provider.name, call_path, reason (no_data: only a reference,
 // no bytes to send inline; unsupported_type: a media type the API rejects).
 var GenAIImagesDropped = Counter{"whatiff.gen_ai.images_dropped", "{image}", "Images left out of an LLM request the provider couldn't take."}
 

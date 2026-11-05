@@ -154,6 +154,8 @@ func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCo
 	if req.Context != nil {
 		params.Messages = append(params.Messages, req.Context.BuildOpenAIChatCompletionParams(model).Messages...)
 	}
+	// Like the Responses API, and unlike Messages, which requires one, the cap is sent only
+	// when the call sets it.
 	if req.MaxOutputTokens > 0 {
 		params.MaxCompletionTokens = openai.Int(req.MaxOutputTokens)
 	}

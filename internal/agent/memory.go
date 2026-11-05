@@ -65,9 +65,14 @@ Use the conversation and scratchpad context to decide what to store or how to ph
 
 // memoryDedupNote is the developer note for memory extraction: what to weigh,
 // and the memories already stored, which must not be extracted again.
+// A nil chatCtx has no stored memories to list.
 func memoryDedupNote(chatCtx *chatContext) string {
+	var memories []string
+	if chatCtx != nil {
+		memories = chatCtx.memories
+	}
 	return fmt.Sprintf("%s\n\nDO NOT extract memories that would be duplicative of the following memories:\n\n %s",
-		memoryExtractionDeveloperNote(chatCtx), strings.Join(chatCtx.memories, "\n\n"))
+		memoryExtractionDeveloperNote(chatCtx), strings.Join(memories, "\n\n"))
 }
 
 func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, responseID *string, inferenceModelContext *provider.ModelContext, chatCtx *chatContext, compactionEventID *uuid.UUID) {

@@ -181,3 +181,11 @@ func TestCallUtility_CountsImagesLeftOut(t *testing.T) {
 			telemetry.AttrReason.String(reason)), reason)
 	}
 }
+
+// The dedup note is safe without a chat context: no stored memories to list.
+func TestMemoryDedupNote_NilChatContext(t *testing.T) {
+	t.Parallel()
+	require.NotPanics(t, func() { _ = memoryDedupNote(nil) })
+	require.Contains(t, memoryDedupNote(nil), "DO NOT extract memories")
+	require.Contains(t, memoryDedupNote(&chatContext{memories: []string{"likes tea"}}), "likes tea")
+}
