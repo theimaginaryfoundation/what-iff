@@ -10,6 +10,9 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
+// These tests stay serial, like the remote-sync tests: they create tables from the generated
+// schema, whose shared definitions the migrator writes to, so creating them alongside parallel
+// tests that do the same is a data race.
 func newUtilityModelFixture(t *testing.T) (*Datastore, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	ds, cleanup := newTestDatastore(t, createGeneratedTestSchema)
@@ -26,7 +29,6 @@ func newUtilityModelFixture(t *testing.T) (*Datastore, uuid.UUID, uuid.UUID, uui
 }
 
 func TestUtilityModelSettings_ScopesAndReplacement(t *testing.T) {
-	t.Parallel()
 	ds, alice, bob, modelA, modelB := newUtilityModelFixture(t)
 	ctx := context.Background()
 
@@ -56,7 +58,6 @@ func TestUtilityModelSettings_ScopesAndReplacement(t *testing.T) {
 // Deleting an account or a model deletes the settings that named it, so a role falls back
 // rather than pointing at nothing.
 func TestUtilityModelSettings_Cascade(t *testing.T) {
-	t.Parallel()
 	ds, alice, _, modelA, modelB := newUtilityModelFixture(t)
 	ctx := context.Background()
 	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleMemory, modelA))
@@ -76,7 +77,6 @@ func TestUtilityModelSettings_Cascade(t *testing.T) {
 // An account chooses from what it can use and the deployment, whose choice applies to every
 // account, from the catalog; anything else is a model that doesn't exist for the chooser.
 func TestSetUtilityModel_OnlyModelsTheChooserCanUse(t *testing.T) {
-	t.Parallel()
 	ds, alice, bob, modelA, _ := newUtilityModelFixture(t)
 	ctx := context.Background()
 	conn, err := ds.dbClient.ProviderConnection.Create().SetUserID(bob).SetPreset("ollama").SetName("Ollama").Save(ctx)
