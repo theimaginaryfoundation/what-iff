@@ -1,0 +1,29 @@
+<fieldset class="background-models" data-testid="background-models">
+  <legend>Background models</legend>
+  <small>The models that save memories, name threads and write personalities. Changes save immediately.</small>
+
+  @for (row of rows(); track row.role) {
+    <label class="background-models__field">
+      <span class="background-models__label">{{ row.label }}</span>
+      <small>{{ row.covers }}</small>
+      <select
+        [attr.data-testid]="'background-model-' + row.role"
+        [disabled]="saving() !== null"
+        [uiTooltip]="row.label + ' runs on this model'"
+        (change)="onChange(row, $any($event.target))"
+      >
+        <option value="" [selected]="!row.chosen">{{ row.defaultLabel }}</option>
+        @if (row.chosenUnlisted) {
+          <option [value]="row.chosen" disabled selected>Chosen model is unavailable; using {{ row.defaultLabel }}</option>
+        }
+        @for (model of models(); track model.id) {
+          <option [value]="model.id" [selected]="model.id === row.chosen">{{ modelLabel(model) }}</option>
+        }
+      </select>
+    </label>
+  }
+
+  @if (error()) {
+    <p class="background-models__error" role="alert" data-testid="background-models-error">{{ error() }}</p>
+  }
+</fieldset>

@@ -187,6 +187,8 @@
           <small>Reasoning effort and agent loop apply to every thread that doesn't set its own, unless its personality does. Changes reach existing threads too; sandboxed threads don't use them.</small>
         </fieldset>
 
+        <app-background-models />
+
         @if (imageGenerationProviders().length > 1) {
           <fieldset class="profile-settings__callout profile-settings__form" data-testid="image-generation">
             <legend>Image generation</legend>
