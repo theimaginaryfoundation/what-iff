@@ -66,6 +66,9 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     `GetDisabledConnectionModel` and `ModelRowExists` let a chat or job tell a model turned off, or gone with its connection, from a retired catalog model.
     An account's default model (`user_preferences.default_model`) is optional: a new account gets the catalog's default (`resolveDefaultModelTx`: the admin-marked one, then `DEFAULT_MODEL_NAME`, then any catalog model, never a connection's), and none on an install without a catalog, until it enables a model.
     `CreateChat` without a model and with no default stores none; the chat's turns use the account's default once it has one.
+    Utility model settings (`utilitymodels.go`, ADR 0x027 section 6) choose the model for a utility role at a scope: the deployment's (no `user_id`) or an account's.
+    `ListUtilityModelSettings` returns the deployment's with the account's, `SetUtilityModel` replaces a role's choice and `ClearUtilityModel` removes it.
+    An account may choose only a model it can use (`assertUserCanUseModelTx`), and the deployment, whose choice applies to every account, only a catalog model; deleting the model or the account deletes the setting.
     `assertUserCanUseModelTx` treats a connection's model as nonexistent to anyone but the connection's owner, so it can't be set on another account's chat, job or preference.
   - Safety violations: `safety_violation_event.go`.
   - Tool call persistence: `toolcall.go`.
@@ -254,6 +257,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 ## Testing
 
 - `chat_checkpoint_test.go`, `chatmessage_test.go`, `chatmessage_mark_read_test.go` — message and checkpoint behavior.
+- `utilitymodels_test.go` — the deployment's and an account's settings side by side (never another account's), replacing and clearing a choice, what each scope may choose, and the cascades from a deleted model or account.
 - `model_connection_test.go` — the catalog excludes connection models, a user sees only their own, and the usage check refuses another account's.
 - `turnsettings_test.go` — threads store only explicit values, `InheritedTurnSettings` reads the personality and account default, explicit-only chat writes, and preference update semantics for the turn settings.
 - `memory_test.go`, `memory2_test.go`, `filechunk_test.go` — retrieval (including **`ListMemories`** excluding Summary unless `level=summary`), ZIP export/import helpers, full import count/persist coverage, and chunks.

@@ -9,21 +9,17 @@ package provider
 import (
 	"context"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 )
 
 // UtilityRole groups background work that runs on the same model.
-type UtilityRole string
+type UtilityRole = models.UtilityRole
 
 const (
-	// UtilityRoleMemory covers memory extraction and merge, the scratchpad, checkpoint
-	// summaries, recall and thread rehydration.
-	UtilityRoleMemory UtilityRole = "memory"
-	// UtilityRoleQuick covers short tasks: chat naming, expression and mood selection,
-	// schedule parsing and memory queries.
-	UtilityRoleQuick UtilityRole = "quick"
-	// UtilityRolePersonality covers generating a personality.
-	UtilityRolePersonality UtilityRole = "personality"
+	UtilityRoleMemory      = models.UtilityRoleMemory
+	UtilityRoleQuick       = models.UtilityRoleQuick
+	UtilityRolePersonality = models.UtilityRolePersonality
 )
 
 // UtilityMessage is one turn of a call's input.
