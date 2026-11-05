@@ -33,6 +33,8 @@ type Store interface {
 	MarkAllChatMessagesRead(ctx context.Context, userID uuid.UUID) (int, error)
 	SetChatMessageBookmarked(ctx context.Context, userID, messageID uuid.UUID, bookmarked bool) (*models.ChatMessage, error)
 	ListChatMessageBookmarks(ctx context.Context, userID, chatID uuid.UUID) ([]*models.ChatMessage, error)
+	ListBackgroundNotices(ctx context.Context, userID, chatID uuid.UUID) ([]models.BackgroundNotice, error)
+	DismissBackgroundNotice(ctx context.Context, userID, chatID, id uuid.UUID) error
 	CreateFileAttachment(ctx context.Context, userID uuid.UUID, fileAttachment models.FileAttachment) (*models.FileAttachment, error)
 	DeleteFileAttachment(ctx context.Context, userID, id uuid.UUID) error
 	SetFileAttachmentS3Key(ctx context.Context, userID, id uuid.UUID, s3Key string) error

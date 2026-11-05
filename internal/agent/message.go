@@ -3060,6 +3060,8 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	// which the next one redoes, not the thread.
 	checkpointCtx, cancelCheckpoint := context.WithTimeout(ctx, checkpointTimeout)
 	defer cancelCheckpoint()
+	checkpointCtx, run := withBackgroundRun(checkpointCtx)
+	defer a.settleBackgroundRun(context.WithoutCancel(ctx), userID, chatMessage.ChatID, run)
 	// Only genuine OpenAI (Responses API) chats can thread checkpoints off a
 	// PreviousResponseID. Every other chat (Anthropic, z.ai, Gemini, a connection
 	// model) rebuilds context from the DB via the "Claude" checkpoint path, whose
@@ -3109,6 +3111,7 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpad(ctx, userID, agentMessage.ResponseID, chatCtx)
 		doneScratchpad()
+		backgroundRunFrom(ctx).step(models.BackgroundStepScratchpad, err)
 		if err != nil {
 			a.logger.Error("failed to update scratchpad during checkpoint", zap.Error(err))
 		} else {
@@ -3131,8 +3134,9 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	}
 	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction {
 		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
-		a.extractMemoriesWithScratchpadDelta(ctx, userID, chatMessage.ChatID, newScratchpadResponseID, inferenceModelContext, chatCtx, compactionEventID)
+		err := a.extractMemoriesWithScratchpadDelta(ctx, userID, chatMessage.ChatID, newScratchpadResponseID, inferenceModelContext, chatCtx, compactionEventID)
 		doneMemory()
+		backgroundRunFrom(ctx).step(models.BackgroundStepMemory, err)
 	}
 
 	// 3) Conversation summarization
@@ -3141,6 +3145,7 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 		PreviousResponseID: agentMessage.ResponseID,
 	})
 	doneSummary()
+	backgroundRunFrom(ctx).step(models.BackgroundStepSummary, err)
 	if err != nil {
 		a.logger.Error("failed to summarize conversation for checkpoint", zap.Error(err))
 		return
@@ -3191,6 +3196,7 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpadClaude(ctx, userID, chatCtx, scratchpadCtx)
 		doneScratchpad()
+		backgroundRunFrom(ctx).step(models.BackgroundStepScratchpad, err)
 		if err != nil {
 			a.logger.Error("failed to update scratchpad during Claude checkpoint", zap.Error(err))
 		} else {
@@ -3209,7 +3215,9 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	// that delta, and a later checkpoint safely retries it.
 	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction {
 		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
-		if err := a.extractMemoriesWithScratchpadDeltaClaude(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID); err != nil {
+		err := a.extractMemoriesWithScratchpadDeltaClaude(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID)
+		backgroundRunFrom(ctx).step(models.BackgroundStepMemory, err)
+		if err != nil {
 			a.logger.Error("failed to extract memories during Claude checkpoint", zap.Error(err))
 		}
 		doneMemory()
@@ -3223,6 +3231,7 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 		AssistantReply: agentMessage.Message,
 	})
 	doneSummary()
+	backgroundRunFrom(ctx).step(models.BackgroundStepSummary, err)
 	if err != nil {
 		a.logger.Error("failed to summarize conversation for Claude checkpoint", zap.Error(err))
 		return

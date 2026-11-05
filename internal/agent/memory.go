@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -70,10 +71,10 @@ func memoryDedupNote(chatCtx *chatContext) string {
 		memoryExtractionDeveloperNote(chatCtx), strings.Join(chatCtx.memories, "\n\n"))
 }
 
-func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, responseID *string, inferenceModelContext *provider.ModelContext, chatCtx *chatContext, compactionEventID *uuid.UUID) {
+func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, responseID *string, inferenceModelContext *provider.ModelContext, chatCtx *chatContext, compactionEventID *uuid.UUID) error {
 	if responseID == nil {
 		a.logger.Error("response ID is nil. cannot extract memories from conversation.")
-		return
+		return errors.New("no stored response to extract memories from")
 	}
 	prompt := memoryWritePromptText()
 
@@ -96,17 +97,18 @@ func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID u
 	})
 	if err != nil {
 		a.logger.Error("failed to extract memories with scratchpad delta", zap.Error(err))
-		return
+		return err
 	}
 
 	extracted, err := decodeExtractedMemories(chatCtx, []byte(out))
 	if err != nil {
 		a.logger.Error("failed to unmarshal extracted memories", zap.Error(err))
-		return
+		return err
 	}
 
 	a.logger.Info("extracted memories (scratchpad delta)", zap.Any("count", len(extracted)))
 	a.compactMemoriesFromCheckpoint(ctx, userID, chatID, chatCtx.chat.PersonalityID, inferenceModelContext, chatCtx, extracted, compactionEventID)
+	return nil
 }
 
 // extractMemoriesWithScratchpadDeltaClaude extracts long-term memories for chats whose

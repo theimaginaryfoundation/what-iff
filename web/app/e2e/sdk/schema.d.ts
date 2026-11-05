@@ -10914,6 +10914,132 @@ export interface paths {
         };
         trace?: never;
     };
+    "/chat/{chatId}/background-notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Background work on a chat that failed or fell back
+         * @description Notices the account hasn't dismissed, newest first: a checkpoint step (scratchpad, memory, summary) that failed at its provider, or a utility role that passed over a chosen model it couldn't use. A notice goes away when the same step succeeds later, so fixing the cause clears it. Each states the step and the cause; what to do about it is the client's.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The chat's notices; empty for another account's chat */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BackgroundNotice"][];
+                    };
+                };
+                /** @description Invalid chat ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{chatId}/background-notices/{noticeId}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss a background notice
+         * @description Hides the notice until its cause changes.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                    noticeId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Dismissed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid chat or notice ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such notice on this account's chat */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/{chatId}/bookmarks": {
         parameters: {
             query?: never;
@@ -14984,6 +15110,29 @@ export interface components {
             message_id?: string;
             /** @description The agent job a scheduled run is for (ADR 0x040). Set by GET /chat/{chatId}/active-job for a scheduled run only: a webhook background run or the onboarding welcome is an agent_job_run with no message_id too, but has none. */
             job_run?: components["schemas"]["JobRun"];
+        };
+        BackgroundNotice: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            chat_id: string;
+            /** @description What didn't happen: `scratchpad`, `memory` or `summary` (a checkpoint step), or `fallback_<role>` (a utility role passed over the model chosen for it). */
+            step: string;
+            /**
+             * @description Why. `provider_not_configured`: the account has no key for `provider`. `provider_error`: the provider was asked and failed; the step is tried again at the chat's next checkpoint. `model_unavailable`: the chosen model couldn't be used, so the role ran on its next choice or its default.
+             * @enum {string}
+             */
+            code: "provider_not_configured" | "provider_error" | "model_unavailable";
+            /** @description The provider the step went to, when known. */
+            provider?: string;
+            /** @description The model the step ran on, when known. */
+            model?: string;
+            /** @description How many times it has happened since it was last cleared. */
+            count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         /**
          * @description A group of background work that runs on one model. `memory`: memory extraction and merging, the scratchpad, checkpoint summaries, recall and thread rehydration. `quick`: chat naming, expression and mood selection, schedule parsing and memory queries. `personality`: generating a personality.

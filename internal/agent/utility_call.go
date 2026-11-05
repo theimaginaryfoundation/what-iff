@@ -73,6 +73,7 @@ func (a *Agent) chosenUtilityTarget(ctx context.Context, role provider.UtilityRo
 		a.recordUtilityFallback(ctx, role, "", uuid.Nil, err)
 		return utilityTarget{}, false
 	}
+	fellBack := false
 	for _, scope := range a.utilityScopes() {
 		for _, s := range settings {
 			if s.Role != role || s.Scope != scope {
@@ -80,10 +81,17 @@ func (a *Agent) chosenUtilityTarget(ctx context.Context, role provider.UtilityRo
 			}
 			t, err := a.settingTarget(ctx, userID, s)
 			if err == nil {
+				if !fellBack {
+					backgroundRunFrom(ctx).succeeded(models.BackgroundFallbackStep(role))
+				}
 				return t, true
 			}
+			fellBack = true
 			a.recordUtilityFallback(ctx, role, scope, s.ModelID, err)
 		}
+	}
+	if !fellBack {
+		backgroundRunFrom(ctx).succeeded(models.BackgroundFallbackStep(role))
 	}
 	return utilityTarget{}, false
 }
@@ -131,6 +139,12 @@ func (a *Agent) recordUtilityFallback(ctx context.Context, role provider.Utility
 		zap.String("model_id", modelID.String()),
 		zap.String("reason", reason),
 		zap.Error(err))
+	if scope != "" {
+		backgroundRunFrom(ctx).failed(models.BackgroundNotice{
+			Step: models.BackgroundFallbackStep(role),
+			Code: models.BackgroundNoticeModelUnavailable,
+		})
+	}
 	a.metrics().Add(ctx, telemetry.UtilityModelFallbacks, 1,
 		telemetry.AttrUtilityRole.String(string(role)),
 		telemetry.AttrUtilityScope.String(string(scope)),
@@ -188,7 +202,7 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 		t.connection == nil && models.UsesAnthropicMessagesAPI(t.provider, t.name):
 		prov, _, err := a.claudeProviderForModel(lite)
 		if err != nil {
-			return utilityReply{}, err
+			return utilityReply{}, t.callError(err)
 		}
 		params := provider.UtilityClaudeParams(t.name, req)
 		if t.connection == nil && models.IsZAIModel(t.provider, t.name) {
@@ -209,7 +223,7 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 		return utilityReply{Text: text}, nil
 	case t.usesResponsesAPI():
 		if a.OpenAIProvider == nil {
-			return utilityReply{}, fmt.Errorf("OpenAI model %q requested but no OpenAI provider is configured", t.name)
+			return utilityReply{}, t.callError(fmt.Errorf("OpenAI model %q requested but no OpenAI provider is configured", t.name))
 		}
 		a.recordDroppedImages(ctx, models.ModelProviderOpenAI, req.Context)
 		resp, err := a.OpenAIProvider.CallWithRetry(ctx, provider.UtilityResponsesParams(t.name, req))
@@ -232,14 +246,14 @@ func (a *Agent) callUtilityChatCompletions(ctx context.Context, t utilityTarget,
 	var adapter provider.AgentAdapter
 	if t.connection == nil && models.IsGeminiModel(t.provider, t.name) {
 		if a.GeminiProvider == nil {
-			return "", fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", t.name)
+			return "", t.callError(fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", t.name))
 		}
 		adapter = provider.NewGeminiAdapter(a.GeminiProvider, params, nil, nil, a.logger)
 	} else {
 		var err error
 		adapter, err = a.openAIChatCompletionsAdapter(lite, params, nil, nil)
 		if err != nil {
-			return "", err
+			return "", t.callError(err)
 		}
 	}
 	resp, _, err := adapter.Call(ctx)
@@ -255,11 +269,24 @@ func (a *Agent) callUtilityChatCompletions(ctx context.Context, t utilityTarget,
 // callError names the provider a failed utility call went to, since a role's model, and so
 // its provider, is not fixed at the call site. A connection model is named by its connection.
 func (t utilityTarget) callError(err error) error {
+	provider := models.ProviderForModel(t.provider, t.name).DisplayName()
 	if t.connection != nil {
-		return fmt.Errorf("%s: %w", t.connection.Preset, err)
+		provider = t.connection.Preset
 	}
-	return fmt.Errorf("%s: %w", models.ProviderForModel(t.provider, t.name).DisplayName(), err)
+	return &UtilityCallError{Provider: provider, Model: t.name, Err: err}
 }
+
+// UtilityCallError is a utility call that failed at, or on the way to, its provider.
+type UtilityCallError struct {
+	// Provider names the provider the call went to: its display name, or a connection's preset.
+	Provider string
+	Model    string
+	Err      error
+}
+
+func (e *UtilityCallError) Error() string { return e.Provider + ": " + e.Err.Error() }
+
+func (e *UtilityCallError) Unwrap() error { return e.Err }
 
 // recordDroppedImages logs and counts the images a conversation loses on its way to the
 // Responses API, which can't take them; the call goes ahead on the rest rather than failing
