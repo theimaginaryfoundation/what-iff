@@ -103,6 +103,13 @@ export class BackgroundNoticesComponent {
   }
 
   private view(n: BackgroundNotice): NoticeView {
+    const view = this.describe(n);
+    // Where the deployment supplies the keys, it also chooses the models: nothing here is the
+    // person's to fix, so the notice only informs.
+    return this.keys.accountsSupplyKeys() ? view : { ...view, action: null, actionLabel: '' };
+  }
+
+  private describe(n: BackgroundNotice): NoticeView {
     const times = n.count > 1 ? ` This has happened ${n.count} times.` : '';
     if (n.step.startsWith('fallback_')) {
       const role = n.step.slice('fallback_'.length) as UtilityRole;
@@ -118,13 +125,12 @@ export class BackgroundNoticesComponent {
     const what = STEP_COPY[n.step] ?? "Some background work on this chat didn't finish.";
     const provider = n.provider || 'The provider';
     if (n.code === 'provider_not_configured') {
-      const canAdd = this.keys.accountsSupplyKeys();
       return {
         id: n.id,
         what,
         why: `There's no ${provider} key${n.model ? ` for ${n.model}` : ''}. Add one, or choose another background model.${times}`,
-        action: canAdd ? 'add-key' : 'background-models',
-        actionLabel: canAdd ? `Add ${article(provider)} ${provider} key` : 'Change background models',
+        action: 'add-key',
+        actionLabel: `Add ${article(provider)} ${provider} key`,
       };
     }
     return {

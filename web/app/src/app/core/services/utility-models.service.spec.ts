@@ -7,7 +7,7 @@ import { environment } from '@environments/environment';
 import { UtilityModels } from '../models/utility-model.model';
 import { UtilityModelsService } from './utility-models.service';
 
-const BODY: UtilityModels = { roles: [{ role: 'memory', account_model_id: null, deployment_model_id: null, built_in_model: 'gpt-5.6-luna' }] };
+const BODY: UtilityModels = { accounts_choose: true, roles: [{ role: 'memory', account_model_id: null, deployment_model_id: null, built_in_model: 'gpt-5.6-luna' }] };
 
 describe('UtilityModelsService', () => {
   let service: UtilityModelsService;

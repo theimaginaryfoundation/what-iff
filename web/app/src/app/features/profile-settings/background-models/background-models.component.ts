@@ -26,7 +26,8 @@ interface RoleRow {
 /**
  * The models the account's background work runs on, one per utility role (ADR
  * 0x027 section 6). Each role offers the models the account can use; leaving it
- * on Default runs it on the deployment's choice or its built-in model.
+ * on Default runs it on the deployment's choice or its built-in model. Shown only
+ * where accounts choose, which is where they bring their own keys.
  *
  * Self-contained so any build's settings modal can place it.
  */
