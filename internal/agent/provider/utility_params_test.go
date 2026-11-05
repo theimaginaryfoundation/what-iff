@@ -123,7 +123,7 @@ func TestUtilityResponsesParams_ContinuesConversation(t *testing.T) {
 	req := UtilityRequest{Context: mc, SafetyUserID: "u1", MaxOutputTokens: 384, Schema: testUtilitySchema}
 
 	got := UtilityResponsesParams("m", req)
-	want := mc.BuildOpenAIResponseParams(OpenAIResponseParamsOptions{Model: "m", SafetyUserID: "u1", MaxOutputTokens: 384})
+	want := SanitizeImagesForOpenAIInput(mc).BuildOpenAIResponseParams(OpenAIResponseParamsOptions{Model: "m", SafetyUserID: "u1", MaxOutputTokens: 384})
 	want.Text = UtilityResponsesParams("m", UtilityRequest{Schema: testUtilitySchema}).Text
 	requireSameJSON(t, want, got)
 }
@@ -145,8 +145,10 @@ func TestUtilityClaudeParams(t *testing.T) {
 
 	require.Equal(t, "claude-x", body["model"])
 	require.EqualValues(t, DefaultMaxContentLength, body["max_tokens"], "the Messages API requires a cap")
-	require.Equal(t, "extract\n\nskip duplicates", body["system"].([]any)[0].(map[string]any)["text"],
-		"developer turns join the instructions")
+	system := body["system"].([]any)
+	require.Len(t, system, 2, "developer turns follow the instructions as system blocks")
+	require.Equal(t, "extract", system[0].(map[string]any)["text"])
+	require.Equal(t, "skip duplicates", system[1].(map[string]any)["text"])
 	msgs := body["messages"].([]any)
 	require.Len(t, msgs, 1)
 	content := msgs[0].(map[string]any)["content"].([]any)
@@ -216,4 +218,27 @@ func TestSplitImageDataURL(t *testing.T) {
 		_, _, ok := splitImageDataURL(bad)
 		require.False(t, ok, bad)
 	}
+}
+
+// On the Messages API the instructions come first, then the conversation's own system blocks
+// (cache markers and all), then the call's developer turns, in order.
+func TestUtilityClaudeParams_SystemBlockOrderWithConversation(t *testing.T) {
+	t.Parallel()
+	mc := &ModelContext{}
+	mc.Append(SegmentKindSystemPrompt, RoleDeveloper, "You are Vix.", true)
+	mc.Append(SegmentKindHistoryTurn, RoleUser, "hi", false)
+	got := UtilityClaudeParams("claude-x", UtilityRequest{
+		Instructions: "summarize",
+		Context:      mc,
+		Messages:     []UtilityMessage{{Role: RoleDeveloper, Text: "be brief"}, {Role: RoleUser, Text: "go"}},
+	})
+	var texts []string
+	for _, b := range got.System {
+		texts = append(texts, b.Text)
+	}
+	require.GreaterOrEqual(t, len(texts), 3)
+	require.Equal(t, "summarize", texts[0])
+	require.Contains(t, texts[1:len(texts)-1], "You are Vix.")
+	require.Equal(t, "be brief", texts[len(texts)-1])
+	require.Equal(t, mc.BuildClaudeParams("claude-x").System[0].CacheControl, got.System[1].CacheControl, "the conversation's cache marker is kept")
 }
