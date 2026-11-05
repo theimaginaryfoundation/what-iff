@@ -13,3 +13,23 @@ export interface UtilityRoleModel {
 export interface UtilityModels {
   roles: UtilityRoleModel[];
 }
+
+/** Why a background step on a chat didn't go as it should. */
+export type BackgroundNoticeCode = 'provider_not_configured' | 'provider_error' | 'model_unavailable';
+
+/**
+ * Background work on a chat that failed or fell back, until the same step succeeds. `step` is
+ * `scratchpad`, `memory` or `summary`, or `fallback_<role>` for a role that passed over its
+ * chosen model.
+ */
+export interface BackgroundNotice {
+  id: string;
+  chat_id: string;
+  step: string;
+  code: BackgroundNoticeCode;
+  provider?: string;
+  model?: string;
+  count: number;
+  created_at: string;
+  updated_at: string;
+}

@@ -1,0 +1,115 @@
+import { Component, provideZonelessChangeDetection, signal } from '@angular/core';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { of } from 'rxjs';
+
+import { BackgroundNotice } from '../../../../core/models/utility-model.model';
+import { BackgroundNoticesService } from '../../../../core/services/background-notices.service';
+import { ProviderKeysService } from '../../../../core/services/provider-keys.service';
+import { ProfileSettingsModalService } from '../../../profile-settings/profile-settings-modal.service';
+import { BackgroundNoticesComponent } from './background-notices.component';
+
+function notice(overrides: Partial<BackgroundNotice>): BackgroundNotice {
+  return {
+    id: 'n1',
+    chat_id: 'chat-1',
+    step: 'memory',
+    code: 'provider_error',
+    count: 1,
+    created_at: '2026-11-05T12:00:00Z',
+    updated_at: '2026-11-05T12:00:00Z',
+    ...overrides,
+  };
+}
+
+@Component({
+  standalone: true,
+  imports: [BackgroundNoticesComponent],
+  template: `<app-background-notices [chatId]="chatId()" [settled]="settled()" />`,
+})
+class HostComponent {
+  chatId = signal<string | null>('chat-1');
+  settled = signal(0);
+}
+
+describe('BackgroundNoticesComponent', () => {
+  let service: { list: ReturnType<typeof vi.fn>; dismiss: ReturnType<typeof vi.fn> };
+  let settings: { open: ReturnType<typeof vi.fn> };
+  let accountsSupplyKeys: ReturnType<typeof signal<boolean>>;
+  let fixture: ComponentFixture<HostComponent>;
+
+  async function render(notices: BackgroundNotice[]): Promise<HTMLElement> {
+    service.list.mockReturnValue(of(notices));
+    fixture = TestBed.createComponent(HostComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    return fixture.nativeElement as HTMLElement;
+  }
+
+  function texts(el: HTMLElement): string[] {
+    return Array.from(el.querySelectorAll('[data-testid="background-notice"]')).map(n => n.textContent?.replace(/\s+/g, ' ').trim() ?? '');
+  }
+
+  beforeEach(async () => {
+    service = { list: vi.fn(), dismiss: vi.fn(() => of(undefined)) };
+    settings = { open: vi.fn() };
+    accountsSupplyKeys = signal(true);
+    await TestBed.configureTestingModule({
+      imports: [HostComponent],
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: BackgroundNoticesService, useValue: service },
+        { provide: ProfileSettingsModalService, useValue: settings },
+        { provide: ProviderKeysService, useValue: { accountsSupplyKeys } },
+      ],
+    }).compileComponents();
+  });
+
+  it('shows a missing key with the step, the provider and the way to add one', async () => {
+    const el = await render([notice({ code: 'provider_not_configured', provider: 'Anthropic', model: 'claude-haiku-4-5', count: 3 })]);
+    expect(service.list).toHaveBeenCalledWith('chat-1');
+    expect(texts(el)[0]).toContain("Memories from this chat weren't saved.");
+    expect(texts(el)[0]).toContain("There's no Anthropic key for claude-haiku-4-5.");
+    expect(texts(el)[0]).toContain('This has happened 3 times.');
+    const fix = el.querySelector('[data-testid="background-notice-fix"]') as HTMLButtonElement;
+    expect(fix.textContent?.trim()).toBe('Add an Anthropic key');
+    fix.click();
+    expect(settings.open).toHaveBeenCalledWith('providers');
+  });
+
+  it('offers background models instead where the deployment supplies the keys', async () => {
+    accountsSupplyKeys.set(false);
+    const el = await render([notice({ code: 'provider_not_configured', provider: 'Mistral' })]);
+    const fix = el.querySelector('[data-testid="background-notice-fix"]') as HTMLButtonElement;
+    expect(fix.textContent?.trim()).toBe('Change background models');
+    fix.click();
+    expect(settings.open).toHaveBeenCalledWith('profile');
+  });
+
+  it('says a provider error is retried, and names a fallback by its role', async () => {
+    const el = await render([
+      notice({ id: 'a', step: 'summary', provider: 'OpenAI', model: 'gpt-5.6-luna' }),
+      notice({ id: 'b', step: 'fallback_quick', code: 'model_unavailable' }),
+    ]);
+    const [error, fallback] = texts(el);
+    expect(error).toContain("This chat's summary wasn't updated.");
+    expect(error).toContain("OpenAI returned an error (gpt-5.6-luna). It's tried again after a few more messages.");
+    expect(fallback).toContain("The model chosen for Quick tasks wasn't available, so another was used.");
+  });
+
+  it('dismisses a notice, and reads them again when a turn settles', async () => {
+    const el = await render([notice({})]);
+    (el.querySelector('[data-testid="background-notice-dismiss"]') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(service.dismiss).toHaveBeenCalledWith('chat-1', 'n1');
+    expect(texts(el)).toEqual([]);
+
+    service.list.mockReturnValue(of([notice({ id: 'n2', step: 'scratchpad' })]));
+    fixture.componentInstance.settled.set(1);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(texts(el)[0]).toContain("The scratchpad wasn't updated from this chat.");
+  });
+});
