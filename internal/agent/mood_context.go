@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -168,34 +166,23 @@ func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMe
 	sysPrompt := "You are a routing assistant. Given a user message and a list of agent moods (moods), return ONLY the JSON object {\"mood_id\": \"<uuid>\"} for the best matching mood. Return exactly one mood. No explanation."
 	userPrompt := fmt.Sprintf("User message:\n%s\n\nAvailable moods:\n%s", userMessage, string(summaryJSON))
 
-	params := responses.ResponseNewParams{
-		Model:        moodAutoSelectModel,
-		Instructions: openai.String(sysPrompt),
-		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: []responses.ResponseInputItemUnionParam{
-				responses.ResponseInputItemParamOfMessage(userPrompt, "user"),
-			},
+	out, err := a.CallUtility(ctx, provider.UtilityRequest{
+		Role:         provider.UtilityRoleQuick,
+		CallPath:     telemetry.CallPathModeSelect,
+		Instructions: sysPrompt,
+		Messages:     []provider.UtilityMessage{{Role: provider.RoleUser, Text: userPrompt}},
+		Schema: &provider.UtilitySchema{
+			Name:        "MoodAutoSelect",
+			Description: "Mood auto-selection JSON",
+			Schema:      moodAutoSelectSchema,
 		},
-		Text: responses.ResponseTextConfigParam{
-			Format: responses.ResponseFormatTextConfigUnionParam{
-				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-					Name:        "MoodAutoSelect",
-					Schema:      moodAutoSelectSchema,
-					Strict:      openai.Bool(true),
-					Description: openai.String("Mood auto-selection JSON"),
-					Type:        "json_schema",
-				},
-			},
-		},
-	}
-
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathModeSelect), params)
+	})
 	if err != nil {
 		a.logger.Warn("mood auto-select: inference failed", zap.Error(err))
 		return nil
 	}
 
-	raw := strings.TrimSpace(provider.ProcessResponseOutput(resp))
+	raw := strings.TrimSpace(out)
 	// We rely on OpenAI structured output enforcement here; parser intentionally
 	// expects JSON-only text (no prose wrappers or concatenated objects).
 	a.logger.Debug("mood auto-select: raw structured output",
