@@ -8,6 +8,9 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 
 - **`ModelContext` / `ModelContextSegment`:** Segment kinds (including dedicated mode prompt segment) and append/insert helpers (`InsertBeforeLastUserMessage` for optional developer lines immediately before the final user turn).
   **`StripUserMessageImages`** clears multimodal payloads when reusing a context for APIs that only accept text (e.g. expression picker + strict JSON schema on Responses API).
+- **Utility requests** (`utility.go`, `utility_params.go`): `UtilityRequest` describes a background call in provider-neutral terms (role, instructions, plain input or messages with an optional image, an optional conversation `Context`, an optional JSON `UtilitySchema`, output cap, safety id, priority or flex).
+  `UtilityResponsesParams`, `UtilityClaudeParams` and `UtilityChatCompletionParams` render it for each API; the Responses rendering matches what each call site built by hand before, field for field.
+  APIs without a developer role get developer turns as system text, and no rendering carries sampling settings.
 - **OpenAI:** `RenderOpenAIInputItems`, `ModelContext.BuildOpenAIResponseParams`, `OpenAIProvider`, `OpenAIAdapter`, `ProcessResponseOutput` (assistant text extraction / dedup), `BuildOpenAITools`, image generation helpers, file-attachment upload helpers.
   **`SegmentKindUserMessage` with `RoleDeveloper` and images** (expression continuity portrait) is rendered as **two** input items—developer text plus a **user** message carrying `input_image`, because the Responses API allows images only under the user role for message parts.
 - **Claude:** `BuildClaudeParams`, `ClaudeProvider`, `ClaudeAdapter`, `ClaudeFunctionTool`, `ExtractClaudeText`, `ExtractClaudeBetaText`, `UnmarshalClaudeTextJSON`.
@@ -115,7 +118,7 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 
 ## Dependencies
 
-- **Inbound:** `internal/agent` (message handling, loops), `internal/agentjobs/schedule` (schedule parsing via `CallWithRetry`).
+- **Inbound:** `internal/agent` (message handling, loops), `internal/agentjobs/schedule` (schedule parsing via `UtilityCaller`).
 - **Outbound:** `internal/datastore` (OpenAI provider for some ops), OpenAI and Anthropic SDKs, `go.uber.org/zap`.
 
 ## Non-obvious decisions
@@ -183,6 +186,7 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 - `mistral_content_test.go` — Mistral thinking chunks in streamed and non-streamed content, and chunk replay on tool rounds.
   `call_timeouts_test.go` — each limit against `httptest` servers (slow response, stalled and endless streams), a healthy stream outliving `Request`, caller cancel staying a cancel, and a stalled Claude stream timing out after one attempt.
   `deny_transport_test.go` — proves an `httptest` server is never reached, including through a real openai-go client built on the deny client.
+- `utility_params_test.go` — each request shape's Responses rendering against the hand-built params it replaced, a conversation continued from a `ModelContext`, the Messages and Chat Completions renderings (developer turns, images, structured output), no sampling settings on any API, and data URL splitting.
 - `model_context_test.go`, `model_context_hydrate_test.go`, `model_context_openai_test.go` — segment assembly, hydration helpers, OpenAI/Claude rendering (including Claude text fallback when image bytes absent).
 - `model_context_breakdown_test.go` — `SegmentBreakdown` aggregation, first-appearance ordering, cacheable-any / image counting, and nil-receiver/nil-counter guards.
 - `openai_test.go`, `openai_tools_test.go`, `claude_test.go`, `claude_adapter_test.go`, `claude_adapter_more_test.go` — output shape and tool compatibility (including Beta MCP adapter mode).
