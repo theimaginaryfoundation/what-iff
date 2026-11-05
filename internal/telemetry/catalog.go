@@ -107,6 +107,12 @@ var GenAISafetyBlocks = Counter{"whatiff.gen_ai.safety_blocks", "{block}", "LLM 
 // no bytes to send inline; unsupported_type: a media type the API rejects).
 var GenAIImagesDropped = Counter{"whatiff.gen_ai.images_dropped", "{image}", "Images left out of an LLM request the provider couldn't take."}
 
+// UtilityModelFallbacks counts utility calls that passed over a chosen model they couldn't use
+// (turned off, gone, or its connection unreachable) or settings they couldn't read, falling
+// back to the next choice or the role's built-in model. Attributes: role, scope (account,
+// deployment; empty when the settings couldn't be read), reason (unavailable, unreadable).
+var UtilityModelFallbacks = Counter{"whatiff.utility.model_fallbacks", "{call}", "Utility calls that fell back past a chosen model."}
+
 // GenAIContextTokens is the estimated size of each context segment sent with a turn.
 // Attributes: segment, call_path.
 var GenAIContextTokens = Histogram{"whatiff.gen_ai.context.tokens", "{token}", "Estimated tokens per model context segment.", BucketsTokens}
