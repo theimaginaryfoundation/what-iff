@@ -203,6 +203,7 @@
             (retryUserMessage)="retryUserMessageFromList($event)"
             (loadOlder)="session.loadOlderMessages()"
           />
+          <app-background-notices [chatId]="session.thread()?.id ?? null" [settled]="session.settledTurns()" />
           <app-chat-send-outlet />
           <app-discord-composer-toggle />
           <app-buzz-composer-toggle />

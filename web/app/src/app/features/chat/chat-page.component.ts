@@ -47,6 +47,7 @@ import { isChatSendFailed, isChatSendSucceeded } from './chat-send-result';
 import { ChatSendGate } from './services/chat-send-gate';
 import { Mood } from '../../core/models/mood.model';
 import { InheritedTurnSettings, effectiveReasoningEffort, resolveEffectiveTurnSettings } from '../../core/models/turn-settings.model';
+import { BackgroundNoticesComponent } from './components/background-notices/background-notices.component';
 import { ChatSendOutletComponent } from '../../extensions/chat-send-outlet.component';
 import { DiscordComposerToggleComponent } from '../discord/discord-composer-toggle.component';
 import { BuzzComposerToggleComponent } from '../buzz/buzz-composer-toggle.component';
@@ -78,6 +79,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
   standalone: true,
   imports: [
     CommonModule,
+    BackgroundNoticesComponent,
     ChatSendOutletComponent,
     DiscordComposerToggleComponent,
     BuzzComposerToggleComponent,

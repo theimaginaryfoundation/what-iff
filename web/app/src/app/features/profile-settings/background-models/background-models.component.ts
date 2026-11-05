@@ -7,15 +7,9 @@ import { UtilityModels, UtilityRole, UtilityRoleModel } from '../../../core/mode
 import { ModelService } from '../../../core/services/model.service';
 import { UtilityModelsService } from '../../../core/services/utility-models.service';
 import { apiErrorMessage } from '../../../core/utils/api-error.helpers';
+import { UTILITY_ROLE_COPY } from '../../../core/utils/utility-role-copy';
 import { isConnectionGroup } from '../../chat/helpers/model-picker.helpers';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
-
-/** What each role is called and covers, in the words a person would use. */
-const ROLE_COPY: Record<UtilityRole, { label: string; covers: string }> = {
-  memory: { label: 'Memory and summaries', covers: 'Saves memories, keeps the scratchpad and summarizes long threads' },
-  simple: { label: 'Simple tasks', covers: 'Names threads, picks expressions and moods, and reads job schedules' },
-  personality: { label: 'Personality generation', covers: 'Writes a new personality from your answers' },
-};
 
 interface RoleRow {
   role: UtilityRole;
@@ -103,7 +97,7 @@ export class BackgroundModelsComponent implements OnInit {
     const fallbackName = fallback?.display_name ?? r.built_in_model;
     return {
       role: r.role,
-      ...ROLE_COPY[r.role],
+      ...UTILITY_ROLE_COPY[r.role],
       chosen: r.account_model_id ?? '',
       defaultLabel: `Default (${fallbackName})`,
       chosenUnlisted: !!r.account_model_id && !byId.has(r.account_model_id),
