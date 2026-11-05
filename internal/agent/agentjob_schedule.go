@@ -12,5 +12,5 @@ import (
 
 // ParseAgentJobSchedule converts a natural language schedule into a validated schedule spec and preview.
 func (a *Agent) ParseAgentJobSchedule(ctx context.Context, userID uuid.UUID, scheduleInput string, timezone string, now time.Time) (*models.AgentJobSchedulePreview, error) {
-	return schedule.Parse(ctx, a.OpenAIProvider, userID, scheduleInput, timezone, now)
+	return schedule.Parse(ctx, a, userID, scheduleInput, timezone, now)
 }

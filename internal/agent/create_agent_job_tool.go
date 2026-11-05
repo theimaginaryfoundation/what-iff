@@ -126,7 +126,7 @@ func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args 
 	}
 
 	now := time.Now()
-	preview, err := schedule.Parse(ctx, a.OpenAIProvider, chat.UserID, scheduleInput, tz, now)
+	preview, err := schedule.Parse(ctx, a, chat.UserID, scheduleInput, tz, now)
 	if err != nil {
 		return marshalAgentJobToolResult(createAgentJobToolResult{
 			Success: false,
