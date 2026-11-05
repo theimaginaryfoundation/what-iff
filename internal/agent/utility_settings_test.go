@@ -11,6 +11,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry/telemetrytest"
 )
@@ -106,4 +107,17 @@ func TestCheckpointChainsResponses_FollowsMemoryModel(t *testing.T) {
 
 	got := f.a.rebuiltCheckpointTarget(alice, openAIChat)
 	require.Equal(t, "qwen3:0.6b", got.name, "the rebuilt path uses the chosen memory model")
+}
+
+// Where the deployment supplies the keys, an account's stored choice doesn't count: the
+// deployment pays for background work, so only its choice does.
+func TestUtilityTargetFor_DeploymentKeysIgnoreAccountChoices(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	f.a.keyResolver = providerkeys.NewDeploymentResolver(map[models.ModelProvider]string{models.ModelProviderOpenAI: "k"})
+	f.choose(t, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleQuick, f.catalog.ID)
+	f.choose(t, models.UtilityScopeAccount, f.alice, models.UtilityRoleQuick, f.aliceModel.ID)
+
+	got := f.a.utilityTargetFor(apicontext.WithUserID(context.Background(), f.alice), provider.UtilityRoleQuick)
+	require.Equal(t, "gpt-5.1", got.name)
 }

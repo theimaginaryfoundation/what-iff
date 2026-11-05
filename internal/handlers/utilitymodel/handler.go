@@ -31,12 +31,15 @@ type Handler struct {
 	store Store
 	// builtIn names the model a role runs on when nothing is chosen.
 	builtIn func(models.UtilityRole) string
-	logger  *zap.Logger
+	// accountsChoose is whether accounts may choose: only where they bring their own keys, and so
+	// pay for their background work. Elsewhere the deployment chooses, and writes are refused.
+	accountsChoose bool
+	logger         *zap.Logger
 }
 
 // NewHandler builds the handler.
-func NewHandler(store Store, builtIn func(models.UtilityRole) string, logger *zap.Logger) *Handler {
-	return &Handler{store: store, builtIn: builtIn, logger: logger}
+func NewHandler(store Store, builtIn func(models.UtilityRole) string, accountsChoose bool, logger *zap.Logger) *Handler {
+	return &Handler{store: store, builtIn: builtIn, accountsChoose: accountsChoose, logger: logger}
 }
 
 // RegisterRoutes mounts the routes on an authenticated router.
@@ -115,6 +118,10 @@ func (h *Handler) target(w http.ResponseWriter, r *http.Request) (uuid.UUID, mod
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Unknown utility role", nil)
 		return uuid.Nil, "", false
 	}
+	if !h.accountsChoose {
+		handlerutils.RespondWithError(w, h.logger, http.StatusForbidden, handlerutils.CodeNotSet, "This deployment chooses the background models", nil)
+		return uuid.Nil, "", false
+	}
 	return userID, role, true
 }
 
@@ -133,7 +140,7 @@ func (h *Handler) utilityModels(ctx context.Context, userID uuid.UUID) (models.U
 	if err != nil {
 		return models.UtilityModels{}, err
 	}
-	out := models.UtilityModels{Roles: make([]models.UtilityRoleModel, 0, len(models.UtilityRoles))}
+	out := models.UtilityModels{AccountsChoose: h.accountsChoose, Roles: make([]models.UtilityRoleModel, 0, len(models.UtilityRoles))}
 	for _, role := range models.UtilityRoles {
 		entry := models.UtilityRoleModel{Role: role, BuiltInModel: h.builtIn(role)}
 		for _, s := range settings {
@@ -143,6 +150,9 @@ func (h *Handler) utilityModels(ctx context.Context, userID uuid.UUID) (models.U
 			id := s.ModelID
 			switch s.Scope {
 			case models.UtilityScopeAccount:
+				if !h.accountsChoose {
+					continue // stored before, but not this deployment's to honour
+				}
 				entry.AccountModelID = &id
 			case models.UtilityScopeDeployment:
 				entry.DeploymentModelID = &id

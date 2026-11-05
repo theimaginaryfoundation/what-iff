@@ -60,7 +60,10 @@ type UtilityRoleModel struct {
 
 // UtilityModels lists every role's models, in UtilityRoles order.
 type UtilityModels struct {
-	Roles []UtilityRoleModel `json:"roles"`
+	// AccountsChoose is whether an account may choose its own models: only where accounts bring
+	// their own keys, and so pay for their background work.
+	AccountsChoose bool               `json:"accounts_choose"`
+	Roles          []UtilityRoleModel `json:"roles"`
 }
 
 // SetUtilityModelRequest chooses a model for a role.
