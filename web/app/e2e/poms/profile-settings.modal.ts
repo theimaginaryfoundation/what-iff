@@ -66,6 +66,28 @@ export class ProfileSettingsModal {
    */
   readonly logoutButton: Locator;
 
+  /** The Background models fieldset: one select per utility role. */
+  get backgroundModels(): Locator {
+    return this.page.getByTestId('background-models');
+  }
+
+  /** The select for one utility role (memory, simple, personality). */
+  backgroundModelSelect(role: 'memory' | 'simple' | 'personality'): Locator {
+    return this.page.getByTestId(`background-model-${role}`);
+  }
+
+  /**
+   * Picks an option of a role's select (by index; 0 is Default) and waits for the save, a PUT
+   * for a model or a DELETE for Default, so a caller can reload right after.
+   */
+  async chooseBackgroundModel(role: 'memory' | 'simple' | 'personality', index: number): Promise<void> {
+    const saved = this.page.waitForResponse(
+      (res) => res.url().includes(`/utility-models/${role}`) && ['PUT', 'DELETE'].includes(res.request().method()),
+    );
+    await this.backgroundModelSelect(role).selectOption({ index });
+    await saved;
+  }
+
   /** Dismisses the announcement modal first — it intercepts the click. */
   async open(): Promise<void> {
     await this.shell.openMobileSidebarIfPresent();
