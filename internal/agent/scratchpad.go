@@ -100,10 +100,13 @@ func (a *Agent) updateScratchpad(ctx context.Context, userID uuid.UUID, response
 	a.logger.Info("successfully updated personality scratchpad",
 		zap.String("personality_id", chatCtx.chat.PersonalityID.String()),
 		zap.Int("scratchpad_length", len(updatedScratchpad)))
-	return ScratchpadUpdate{
-		Content:    updatedScratchpad,
-		ResponseID: &reply.ResponseID,
-	}, nil
+	// Memory extraction continues from this response; with no ID it would run without the
+	// conversation, so report none and let it refuse.
+	update := ScratchpadUpdate{Content: updatedScratchpad}
+	if reply.ResponseID != "" {
+		update.ResponseID = &reply.ResponseID
+	}
+	return update, nil
 }
 
 func buildScratchpadSummarizationInput(scratchpad string) string {

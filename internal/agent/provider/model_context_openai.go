@@ -98,6 +98,25 @@ func openAIAcceptsImage(im UserMessageImage) bool {
 	return ok
 }
 
+// OpenAIRejectedImages counts the images SanitizeImagesForOpenAIInput drops from ctx: those
+// with no bytes to send inline, and those of a media type the Responses API rejects.
+func OpenAIRejectedImages(ctx *ModelContext) (noData, unsupportedType int) {
+	if ctx == nil {
+		return 0, 0
+	}
+	for _, seg := range ctx.Segments {
+		for _, im := range seg.UserImages {
+			switch {
+			case len(im.RawBytes) == 0:
+				noData++
+			case !openAIAcceptsImage(im):
+				unsupportedType++
+			}
+		}
+	}
+	return noData, unsupportedType
+}
+
 // SanitizeImagesForOpenAIInput returns a clone of ctx whose image attachments are safe to
 // send to the OpenAI Responses API. Images OpenAI would reject (see openAIAcceptsImage) are
 // dropped. A segment left with no images and no text is removed, mirroring
