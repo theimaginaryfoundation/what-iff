@@ -80,6 +80,7 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
   A conversation sent to the Responses API goes ahead without the images that API can't take; `recordDroppedImages` logs a warning and counts each on `whatiff.gen_ai.images_dropped` by reason, so a drop is visible rather than silent.
   A failed call's error starts with the provider it went to (`utilityCallError`), since the call site no longer fixes the provider.
   `callUtilityTarget` makes a call on a model already resolved.
+  A call on a z.ai model bounds GLM's reasoning low with the raised cap (`ApplyZAIReasoningEffort`), since GLM always reasons and could otherwise spend the cap on it.
   A checkpoint chains off the stored OpenAI response only while both the chat and the memory role's model are on OpenAI's Responses API (`checkpointChainsResponses`); otherwise it rebuilds the chat's context from the DB.
   **Checkpoint** scratchpad update, memory extraction and conversation summary run on the memory role's model (chosen, else `archivalOpenAIModel`, `gpt-5.6-luna`, in `archival_models.go`) on both checkpoint paths and for every chat, whatever model the chat is on: no chat kind gets a model of its own.
   The chained path continues the stored response (`PreviousResponseID`); the rebuilt-context ("Claude") path sends the conversation from the database as `Context`, and the summary goes through the unified `summarizeConversationForCheckpoint`.

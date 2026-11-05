@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/anthropics/anthropic-sdk-go"
+
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
@@ -139,6 +141,11 @@ func (a *Agent) callUtilityTarget(ctx context.Context, t utilityTarget, req prov
 
 // callUtilityOn sends a utility call to a model through the API it speaks.
 func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider.UtilityRequest) (utilityReply, error) {
+	// A built-in model named without its provider gets it from the catalog here, once, so
+	// every helper below routes on the same explicit provider.
+	if t.connection == nil && t.provider == "" {
+		t.provider = string(models.ProviderForModel("", t.name))
+	}
 	if req.PreviousResponseID != "" && !t.usesResponsesAPI() {
 		return utilityReply{}, fmt.Errorf("model %q cannot continue a stored Responses conversation", t.name)
 	}
@@ -150,7 +157,13 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 		if err != nil {
 			return utilityReply{}, err
 		}
-		msg, err := prov.Call(ctx, provider.UtilityClaudeParams(t.name, req))
+		params := provider.UtilityClaudeParams(t.name, req)
+		if t.connection == nil && models.IsZAIModel(t.provider, t.name) {
+			// GLM always reasons; left alone it can spend the whole cap and answer nothing.
+			// Background work wants little of it, as a chat turn with a low effort does.
+			provider.ApplyZAIReasoningEffort(&params, anthropic.OutputConfigEffortLow)
+		}
+		msg, err := prov.Call(ctx, params)
 		if err != nil {
 			return utilityReply{}, t.callError(err)
 		}
