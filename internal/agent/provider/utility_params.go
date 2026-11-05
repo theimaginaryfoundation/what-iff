@@ -144,8 +144,9 @@ func UtilityClaudeParams(model string, req UtilityRequest) anthropic.MessageNewP
 
 // UtilityChatCompletionParams renders a utility call for an OpenAI-compatible
 // Chat Completions API. Some of those APIs accept a system message only first,
-// so the instructions and developer turns form one leading system message; with
-// a conversation, the conversation's own messages follow it.
+// so the instructions, the developer turns and a conversation's own system
+// messages form one leading system message, and the conversation's other
+// messages follow it in order.
 func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCompletionNewParams {
 	params := openai.ChatCompletionNewParams{
 		Model: shared.ChatModel(model),
@@ -160,12 +161,22 @@ func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCo
 			system = append(system, m.Text)
 		}
 	}
+	var conversation []openai.ChatCompletionMessageParamUnion
+	if req.Context != nil {
+		// The conversation renders its system prompt, scratchpad and summary as system
+		// messages, some after its turns; they join the leading one instead.
+		for _, m := range req.Context.BuildOpenAIChatCompletionParams(model).Messages {
+			if m.OfSystem != nil {
+				system = append(system, chatSystemText(m.OfSystem))
+				continue
+			}
+			conversation = append(conversation, m)
+		}
+	}
 	if len(system) > 0 {
 		params.Messages = append(params.Messages, openai.SystemMessage(strings.Join(system, "\n\n")))
 	}
-	if req.Context != nil {
-		params.Messages = append(params.Messages, req.Context.BuildOpenAIChatCompletionParams(model).Messages...)
-	}
+	params.Messages = append(params.Messages, conversation...)
 	if req.MaxOutputTokens > 0 {
 		params.MaxCompletionTokens = openai.Int(req.MaxOutputTokens)
 	}
@@ -194,6 +205,18 @@ func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCo
 		}
 	}
 	return params
+}
+
+// chatSystemText is a system message's text, whichever form its content takes.
+func chatSystemText(m *openai.ChatCompletionSystemMessageParam) string {
+	if m.Content.OfString.Valid() {
+		return m.Content.OfString.Value
+	}
+	parts := make([]string, 0, len(m.Content.OfArrayOfContentParts))
+	for _, p := range m.Content.OfArrayOfContentParts {
+		parts = append(parts, p.Text)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // utilityMessages is the turns a request adds: Messages, or Input as its one

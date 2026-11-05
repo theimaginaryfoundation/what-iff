@@ -40,9 +40,12 @@ const (
 	AttrOutcome = attribute.Key("outcome")
 	AttrStage   = attribute.Key("stage")
 	AttrReason  = attribute.Key("reason")
-	AttrTool    = attribute.Key("tool")
-	AttrSegment = attribute.Key("segment")
-	AttrKind    = attribute.Key("kind")
+	// AttrUtilityRole and AttrUtilityScope label utility-model fallbacks.
+	AttrUtilityRole  = attribute.Key("role")
+	AttrUtilityScope = attribute.Key("scope")
+	AttrTool         = attribute.Key("tool")
+	AttrSegment      = attribute.Key("segment")
+	AttrKind         = attribute.Key("kind")
 	// AttrVariant and AttrSource label image reads (ImageResolves); see files.go for their values.
 	AttrVariant = attribute.Key("variant")
 	AttrSource  = attribute.Key("source")

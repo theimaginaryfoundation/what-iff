@@ -119,12 +119,7 @@ func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, us
 
 	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
 	modelContext.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, memoryDedupNote(chatCtx), false)
-	target, err := a.rebuiltCheckpointTarget(ctx, chatCtx)
-	if err != nil {
-		a.logger.Error("rebuilt-context memory extraction has no model", zap.Error(err))
-		return fmt.Errorf("memory extraction failed: %w", err)
-	}
-	reply, err := a.callUtilityTarget(ctx, target, provider.UtilityRequest{
+	reply, err := a.callUtilityTarget(ctx, a.rebuiltCheckpointTarget(ctx, chatCtx), provider.UtilityRequest{
 		Role:            provider.UtilityRoleMemory,
 		CallPath:        telemetry.CallPathMemory,
 		Context:         modelContext,

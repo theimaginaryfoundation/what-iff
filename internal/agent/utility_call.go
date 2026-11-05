@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/google/uuid"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
@@ -55,56 +56,83 @@ func (t utilityTarget) usesResponsesAPI() bool {
 		models.ProviderForModel(t.provider, t.name) == models.ModelProviderOpenAI
 }
 
-// chosenUtilityTarget is the model chosen for role, by the account the context is for or else
-// by the deployment (ADR 0x027 section 6), and whether one was chosen. A chosen model that was
-// turned off since, or whose connection can't be reached, fails the call rather than quietly
-// running on another.
-func (a *Agent) chosenUtilityTarget(ctx context.Context, role provider.UtilityRole) (utilityTarget, bool, error) {
+// chosenUtilityTarget is the model chosen for role by the account the context is for, or
+// else by the deployment (ADR 0x027 section 6), and whether either chose one that can be used.
+//
+// A choice that can't be used (turned off, deleted with its connection, its connection
+// unreachable) falls back to the next one, and past the last to the role's built-in model, so
+// background work keeps running; each fallback is logged and counted, so it shows. A failed
+// read of the settings falls back the same way.
+func (a *Agent) chosenUtilityTarget(ctx context.Context, role provider.UtilityRole) (utilityTarget, bool) {
 	if a.ds == nil {
-		return utilityTarget{}, false, nil
+		return utilityTarget{}, false
 	}
 	userID, _ := middleware.GetUserIDFromContext(ctx)
 	settings, err := a.ds.ListUtilityModelSettings(ctx, userID)
 	if err != nil {
-		return utilityTarget{}, false, err
+		a.recordUtilityFallback(ctx, role, "", uuid.Nil, err)
+		return utilityTarget{}, false
 	}
-	var chosen *models.UtilityModelSetting
-	for i, s := range settings {
-		if s.Role != role {
-			continue
+	for _, scope := range []models.UtilityScope{models.UtilityScopeAccount, models.UtilityScopeDeployment} {
+		for _, s := range settings {
+			if s.Role != role || s.Scope != scope {
+				continue
+			}
+			t, err := a.settingTarget(ctx, userID, s)
+			if err == nil {
+				return t, true
+			}
+			a.recordUtilityFallback(ctx, role, scope, s.ModelID, err)
 		}
-		if s.Scope == models.UtilityScopeAccount || chosen == nil {
-			chosen = &settings[i]
-		}
 	}
-	if chosen == nil {
-		return utilityTarget{}, false, nil
-	}
-	m, err := a.ds.GetModel(ctx, chosen.ModelID)
+	return utilityTarget{}, false
+}
+
+// settingTarget is the model a setting chose, if it can still be used.
+func (a *Agent) settingTarget(ctx context.Context, userID uuid.UUID, s models.UtilityModelSetting) (utilityTarget, error) {
+	m, err := a.ds.GetModel(ctx, s.ModelID)
 	if errors.Is(err, datastore.ErrModelNotFound) {
-		return utilityTarget{}, true, fmt.Errorf("the model chosen for %s: %w", role, ErrModelDisabled)
+		return utilityTarget{}, ErrModelDisabled
 	}
 	if err != nil {
-		return utilityTarget{}, true, err
+		return utilityTarget{}, err
 	}
 	conn, err := a.connectionFor(ctx, userID, m)
 	if err != nil {
-		return utilityTarget{}, true, fmt.Errorf("the model chosen for %s: %w", role, err)
+		return utilityTarget{}, err
 	}
 	t := utilityTarget{name: m.Name, provider: m.Provider, connection: conn}
 	if conn != nil {
 		t.provider = conn.Preset
 	}
-	return t, true, nil
+	return t, nil
+}
+
+// recordUtilityFallback logs and counts a role passing over a choice it couldn't use, or
+// settings it couldn't read (an empty scope).
+func (a *Agent) recordUtilityFallback(ctx context.Context, role provider.UtilityRole, scope models.UtilityScope, modelID uuid.UUID, err error) {
+	reason := "unreadable"
+	if scope != "" {
+		reason = "unavailable"
+	}
+	a.logger.Warn("utility role is falling back past its chosen model",
+		zap.String("role", string(role)),
+		zap.String("scope", string(scope)),
+		zap.String("model_id", modelID.String()),
+		zap.String("reason", reason),
+		zap.Error(err))
+	a.metrics().Add(ctx, telemetry.UtilityModelFallbacks, 1,
+		telemetry.AttrUtilityRole.String(string(role)),
+		telemetry.AttrUtilityScope.String(string(scope)),
+		telemetry.AttrReason.String(reason))
 }
 
 // utilityTargetFor is the model a role's calls run on: the chosen one, or its built-in model.
-func (a *Agent) utilityTargetFor(ctx context.Context, role provider.UtilityRole) (utilityTarget, error) {
-	t, chosen, err := a.chosenUtilityTarget(ctx, role)
-	if err != nil || chosen {
-		return t, err
+func (a *Agent) utilityTargetFor(ctx context.Context, role provider.UtilityRole) utilityTarget {
+	if t, chosen := a.chosenUtilityTarget(ctx, role); chosen {
+		return t
 	}
-	return utilityTarget{name: utilityModelName(role)}, nil
+	return utilityTarget{name: utilityModelName(role)}
 }
 
 // utilityReply is a utility call's reply.
@@ -124,11 +152,7 @@ func (a *Agent) CallUtility(ctx context.Context, req provider.UtilityRequest) (s
 
 // callUtility is CallUtility returning the whole reply.
 func (a *Agent) callUtility(ctx context.Context, req provider.UtilityRequest) (utilityReply, error) {
-	t, err := a.utilityTargetFor(ctx, req.Role)
-	if err != nil {
-		return utilityReply{}, err
-	}
-	return a.callUtilityTarget(ctx, t, req)
+	return a.callUtilityTarget(ctx, a.utilityTargetFor(ctx, req.Role), req)
 }
 
 // callUtilityTarget makes a utility call on a given model rather than its role's, for the

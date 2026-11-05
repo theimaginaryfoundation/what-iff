@@ -33,12 +33,11 @@ func rebuiltCheckpointModel(chatCtx *chatContext) string {
 
 // rebuiltCheckpointTarget is the model for a rebuilt-context checkpoint's scratchpad update
 // and memory extraction: the one chosen for the memory role, or else rebuiltCheckpointModel.
-func (a *Agent) rebuiltCheckpointTarget(ctx context.Context, chatCtx *chatContext) (utilityTarget, error) {
-	t, chosen, err := a.chosenUtilityTarget(ctx, provider.UtilityRoleMemory)
-	if err != nil || chosen {
-		return t, err
+func (a *Agent) rebuiltCheckpointTarget(ctx context.Context, chatCtx *chatContext) utilityTarget {
+	if t, chosen := a.chosenUtilityTarget(ctx, provider.UtilityRoleMemory); chosen {
+		return t
 	}
-	return utilityTarget{name: rebuiltCheckpointModel(chatCtx)}, nil
+	return utilityTarget{name: rebuiltCheckpointModel(chatCtx)}
 }
 
 // checkpointChainsResponses reports whether a chat's checkpoint can chain off the stored
@@ -49,10 +48,6 @@ func (a *Agent) checkpointChainsResponses(ctx context.Context, chatCtx *chatCont
 	if checkpointRebuildsFromDB(chatCtx) {
 		return false
 	}
-	t, chosen, err := a.chosenUtilityTarget(ctx, provider.UtilityRoleMemory)
-	if err != nil {
-		// The memory calls fail on either path; rebuilding asks nothing of the chat.
-		return false
-	}
+	t, chosen := a.chosenUtilityTarget(ctx, provider.UtilityRoleMemory)
 	return !chosen || t.usesResponsesAPI()
 }

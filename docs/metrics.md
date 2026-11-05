@@ -96,6 +96,7 @@ Notes on these metrics:
 | `whatiff.gen_ai.tokens` | counter, {token} | — | provider, model, `gen_ai.token.type`, `call_path` |
 | `whatiff.gen_ai.retries` | counter | — | provider, model, `reason` (rate_limited, server_error, network, truncated, length) |
 | `whatiff.gen_ai.safety_blocks` | counter | — | provider, model, `call_path` |
+| `whatiff.utility.model_fallbacks` | counter, {call} | — | `role`, `scope` (account, deployment, empty), `reason` (unavailable, unreadable) |
 | `whatiff.gen_ai.images_dropped` | counter, {image} | — | provider, `call_path`, `reason` (no_data, unsupported_type) |
 | `whatiff.gen_ai.context.tokens` | histogram, {token} | tokens | `segment`, `call_path` |
 
