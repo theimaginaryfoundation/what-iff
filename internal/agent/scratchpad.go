@@ -142,9 +142,10 @@ func (a *Agent) summarizeScratchpad(ctx context.Context, userID uuid.UUID, respo
 	return summarized, nil
 }
 
-// updateScratchpadClaude updates the personality scratchpad for a Claude-model chat.
-// It rebuilds conversation context from the DB (scoped to the current checkpoint period)
-// rather than chaining off a PreviousResponseID. Uses a fixed small Claude model for cost and reliability.
+// updateScratchpadClaude updates the personality scratchpad for a chat whose checkpoint
+// rebuilds context from the DB (every chat not on OpenAI's own Responses API; "Claude" is
+// historical), scoped to the current checkpoint period, rather than chaining off a
+// PreviousResponseID. It runs on rebuiltCheckpointModel.
 func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, chatCtx *chatContext, modelContext *provider.ModelContext) (ScratchpadUpdate, error) {
 
 	personalityModel, err := a.ds.GetPersonality(ctx, userID, chatCtx.chat.PersonalityID)
@@ -155,7 +156,7 @@ func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, ch
 	prompt := buildUpdateScratchpadPrompt(personalityModel)
 	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
 
-	reply, err := a.callUtilityModel(ctx, archivalClaudeModel, provider.UtilityRequest{
+	reply, err := a.callUtilityModel(ctx, rebuiltCheckpointModel(chatCtx), provider.UtilityRequest{
 		Role:            provider.UtilityRoleMemory,
 		CallPath:        telemetry.CallPathScratchpad,
 		Context:         modelContext,
@@ -163,7 +164,7 @@ func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, ch
 		SafetyUserID:    userID.String(),
 	})
 	if err != nil {
-		return ScratchpadUpdate{}, fmt.Errorf("Claude scratchpad update failed: %w", err)
+		return ScratchpadUpdate{}, fmt.Errorf("scratchpad update failed: %w", err)
 	}
 	updatedScratchpad := strings.TrimSpace(reply.Text)
 
