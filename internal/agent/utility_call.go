@@ -24,45 +24,72 @@ func utilityModelName(role provider.UtilityRole) string {
 	}
 }
 
+// utilityReply is a utility call's reply.
+type utilityReply struct {
+	Text string
+	// ResponseID is the stored response's ID on the Responses API, which a
+	// later call can continue from; empty on other APIs.
+	ResponseID string
+}
+
 // CallUtility makes a utility call on its role's model, through whichever API
 // that model speaks, and returns the reply's text.
 func (a *Agent) CallUtility(ctx context.Context, req provider.UtilityRequest) (string, error) {
+	reply, err := a.callUtility(ctx, req)
+	return reply.Text, err
+}
+
+// callUtility is CallUtility returning the whole reply.
+func (a *Agent) callUtility(ctx context.Context, req provider.UtilityRequest) (utilityReply, error) {
+	return a.callUtilityModel(ctx, utilityModelName(req.Role), req)
+}
+
+// callUtilityModel makes a utility call on a given model rather than its
+// role's, for the calls whose model depends on the chat.
+func (a *Agent) callUtilityModel(ctx context.Context, model string, req provider.UtilityRequest) (utilityReply, error) {
 	if req.CallPath != "" {
 		ctx = telemetry.WithCallPath(ctx, req.CallPath)
 	}
-	return a.callUtilityOn(ctx, utilityModelName(req.Role), "", req)
+	return a.callUtilityOn(ctx, model, "", req)
 }
 
-// callUtilityOn makes a utility call on a given model. modelProvider is the
-// model row's provider, or empty to infer it from the name.
-func (a *Agent) callUtilityOn(ctx context.Context, model, modelProvider string, req provider.UtilityRequest) (string, error) {
+// callUtilityOn sends a utility call to a model. modelProvider is the model
+// row's provider, or empty to infer it from the name.
+func (a *Agent) callUtilityOn(ctx context.Context, model, modelProvider string, req provider.UtilityRequest) (utilityReply, error) {
+	responsesAPI := !models.UsesAnthropicMessagesAPI(modelProvider, model) &&
+		!models.UsesOpenAIChatCompletionsAPI(modelProvider, model) &&
+		models.ProviderForModel(modelProvider, model) == models.ModelProviderOpenAI
+	if req.PreviousResponseID != "" && !responsesAPI {
+		return utilityReply{}, fmt.Errorf("model %q cannot continue a stored Responses conversation", model)
+	}
 	switch {
 	case models.UsesAnthropicMessagesAPI(modelProvider, model):
 		prov, _, err := a.claudeProviderForModel(&chatContext{model: model, modelProvider: modelProvider})
 		if err != nil {
-			return "", err
+			return utilityReply{}, err
 		}
 		msg, err := prov.Call(ctx, provider.UtilityClaudeParams(model, req))
 		if err != nil {
-			return "", err
+			return utilityReply{}, err
 		}
-		return provider.ExtractClaudeText(msg), nil
+		return utilityReply{Text: provider.ExtractClaudeText(msg)}, nil
 	case models.UsesOpenAIChatCompletionsAPI(modelProvider, model):
-		return a.callUtilityChatCompletions(ctx, model, modelProvider, req)
-	case models.ProviderForModel(modelProvider, model) == models.ModelProviderOpenAI:
+		text, err := a.callUtilityChatCompletions(ctx, model, modelProvider, req)
+		return utilityReply{Text: text}, err
+	case responsesAPI:
 		if a.OpenAIProvider == nil {
-			return "", fmt.Errorf("OpenAI model %q requested but no OpenAI provider is configured", model)
+			return utilityReply{}, fmt.Errorf("OpenAI model %q requested but no OpenAI provider is configured", model)
 		}
 		resp, err := a.OpenAIProvider.CallWithRetry(ctx, provider.UtilityResponsesParams(model, req))
 		if err != nil {
-			return "", err
+			return utilityReply{}, err
 		}
 		if resp == nil {
-			return "", errors.New("utility call returned no response")
+			return utilityReply{}, errors.New("utility call returned no response")
 		}
-		return resp.OutputText(), nil
+		return utilityReply{Text: resp.OutputText(), ResponseID: resp.ID}, nil
 	default:
-		return "", fmt.Errorf("model %q has no API for utility calls", model)
+		return utilityReply{}, fmt.Errorf("model %q has no API for utility calls", model)
 	}
 }
 

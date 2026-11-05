@@ -170,7 +170,7 @@ func TestCheckpointSummaryInstructionsFor_Seam(t *testing.T) {
 	require.Equal(t, "Summarize as Lumi's diary.", got)
 
 	rid := "resp_abc"
-	params, err := buildCheckpointSummaryParams(uuid.New(), got, "", checkpointSummarySource{PreviousResponseID: &rid})
+	params, err := checkpointSummaryParams(uuid.New(), got, "", checkpointSummarySource{PreviousResponseID: &rid})
 	require.NoError(t, err)
 	require.Equal(t, "Summarize as Lumi's diary.", params.Instructions.Value, "the override is the request's instructions")
 }

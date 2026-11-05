@@ -21,6 +21,9 @@ func UtilityResponsesParams(model string, req UtilityRequest) responses.Response
 	if req.SafetyUserID != "" {
 		params.SafetyIdentifier = openai.String(req.SafetyUserID)
 	}
+	if req.PreviousResponseID != "" {
+		params.PreviousResponseID = openai.String(req.PreviousResponseID)
+	}
 	if req.MaxOutputTokens > 0 {
 		params.MaxOutputTokens = openai.Int(req.MaxOutputTokens)
 	}
@@ -46,9 +49,10 @@ func UtilityResponsesParams(model string, req UtilityRequest) responses.Response
 // utilityResponsesParamsFromContext renders a call that continues a
 // conversation the way a chat turn on the model renders it, with the call's
 // own messages after it. Without instructions, the conversation's system
-// prompt stands.
+// prompt stands. Images the Responses API rejects are dropped, since the
+// conversation may come from a chat on another provider.
 func utilityResponsesParamsFromContext(model string, req UtilityRequest) responses.ResponseNewParams {
-	params := req.Context.BuildOpenAIResponseParams(OpenAIResponseParamsOptions{
+	params := SanitizeImagesForOpenAIInput(req.Context).BuildOpenAIResponseParams(OpenAIResponseParamsOptions{
 		Model:           model,
 		SafetyUserID:    req.SafetyUserID,
 		MaxOutputTokens: int(req.MaxOutputTokens),
@@ -95,30 +99,26 @@ func utilityResponsesMessage(m UtilityMessage) responses.ResponseInputItemUnionP
 }
 
 // UtilityClaudeParams renders a utility call for the Anthropic Messages API.
-// Developer turns have no Messages role, so they join the instructions as
-// system text, in order.
+// Developer turns have no Messages role, so they follow the instructions as
+// system blocks, in order. A conversation keeps its own system blocks, cache
+// markers included, after the instructions.
 func UtilityClaudeParams(model string, req UtilityRequest) anthropic.MessageNewParams {
 	maxTokens := req.MaxOutputTokens
 	if maxTokens <= 0 {
 		maxTokens = int64(DefaultMaxContentLength)
 	}
 	var params anthropic.MessageNewParams
-	var system []string
 	if req.Context != nil {
 		params = req.Context.BuildClaudeParamsWithMaxTokens(model, int(maxTokens))
-		for _, b := range params.System {
-			system = append(system, b.Text)
-		}
-		if req.Instructions != "" {
-			system = append([]string{req.Instructions}, system...)
-		}
 	} else {
 		params = anthropic.MessageNewParams{Model: anthropic.Model(model), MaxTokens: maxTokens}
-		system = []string{req.Instructions}
+	}
+	if req.Instructions != "" {
+		params.System = append([]anthropic.TextBlockParam{{Text: req.Instructions}}, params.System...)
 	}
 	for _, m := range utilityMessages(req) {
 		if m.Role == RoleDeveloper {
-			system = append(system, m.Text)
+			params.System = append(params.System, anthropic.TextBlockParam{Text: m.Text})
 			continue
 		}
 		blocks := []anthropic.ContentBlockParamUnion{anthropic.NewTextBlock(m.Text)}
@@ -126,9 +126,6 @@ func UtilityClaudeParams(model string, req UtilityRequest) anthropic.MessageNewP
 			blocks = append(blocks, anthropic.NewImageBlockBase64(mediaType, data))
 		}
 		params.Messages = append(params.Messages, anthropic.NewUserMessage(blocks...))
-	}
-	if text := strings.TrimSpace(strings.Join(system, "\n\n")); text != "" {
-		params.System = []anthropic.TextBlockParam{{Text: text}}
 	}
 	if req.Schema != nil {
 		params.OutputConfig = anthropic.OutputConfigParam{
