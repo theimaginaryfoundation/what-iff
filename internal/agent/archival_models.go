@@ -22,6 +22,9 @@ const (
 // uses the OpenAI archival model, whose key the account already holds for embeddings,
 // rather than needing an Anthropic key it may not have.
 //
+// A connection model is excluded on purpose, even an Anthropic-compatible one: reaching a
+// server through a connection says nothing about holding an Anthropic key.
+//
 // A model chosen for the memory role, by the account or the deployment, replaces this rule
 // (rebuiltCheckpointTarget).
 func rebuiltCheckpointModel(chatCtx *chatContext) string {

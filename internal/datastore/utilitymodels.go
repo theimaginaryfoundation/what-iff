@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -12,6 +13,11 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/utilitymodelsetting"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
+
+// ErrInvalidUtilitySetting is a utility model setting that can't exist: an unknown role or
+// scope, or a scope written with the wrong owner (the deployment's has no user; an account's
+// has one). It is always a programming error, never the caller's input.
+var ErrInvalidUtilitySetting = errors.New("invalid utility model setting")
 
 // utilityScopeOwner selects the settings of one scope: an account's, or, for
 // userID uuid.Nil, the deployment's.
@@ -76,8 +82,9 @@ func (ds *Datastore) setUtilityModel(ctx context.Context, scope models.UtilitySc
 }
 
 func setUtilityModelTx(ctx context.Context, tx *ent.Tx, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID uuid.UUID) error {
-	if (scope == models.UtilityScopeDeployment) != (userID == uuid.Nil) {
-		return fmt.Errorf("a %s utility model setting with user %s", scope, userID)
+	if !role.Valid() || (scope != models.UtilityScopeDeployment && scope != models.UtilityScopeAccount) ||
+		(scope == models.UtilityScopeDeployment) != (userID == uuid.Nil) {
+		return fmt.Errorf("%w: role %q, scope %q, user %s", ErrInvalidUtilitySetting, role, scope, userID)
 	}
 	if userID == uuid.Nil {
 		catalog, err := tx.Model.Query().

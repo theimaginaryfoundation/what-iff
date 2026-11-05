@@ -32,6 +32,7 @@ func utilityModelName(role provider.UtilityRole) string {
 // UtilityBuiltInModel names the model a utility role runs on when neither the account nor the
 // deployment chose one. Memory's rebuilt-context checkpoint steps in a chat on a native
 // Anthropic model are the one exception: they keep a Claude model (rebuiltCheckpointModel).
+// GET /utility-models reports it as built_in_model, and openapi.yaml describes that field.
 func UtilityBuiltInModel(role models.UtilityRole) string {
 	return utilityModelName(role)
 }
@@ -45,6 +46,12 @@ type utilityTarget struct {
 	// connection reaches a model from an OpenRouter, local or Custom connection; nil for a
 	// model on a built-in provider's own path.
 	connection *ConnectionEndpoint
+}
+
+// chatContext is the part of a chat context the provider helpers route on, for a call that
+// has no chat of its own.
+func (t utilityTarget) chatContext() *chatContext {
+	return &chatContext{model: t.name, modelProvider: t.provider, connection: t.connection}
 }
 
 // usesResponsesAPI reports whether the target is on OpenAI's own Responses API, the only one
@@ -187,7 +194,9 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 	if req.PreviousResponseID != "" && req.Context != nil {
 		return utilityReply{}, errors.New("a utility call continues either a stored response or a conversation, not both")
 	}
-	lite := &chatContext{model: t.name, modelProvider: t.provider, connection: t.connection}
+	lite := t.chatContext()
+	// A connection's flavor decides its API before anything about the model's name: a
+	// connection model is routed only by its connection, a built-in one only by its provider.
 	switch {
 	case t.connection != nil && t.connection.Flavor == ConnectionFlavorAnthropic,
 		t.connection == nil && models.UsesAnthropicMessagesAPI(t.provider, t.name):
@@ -233,7 +242,7 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 // callUtilityChatCompletions sends a utility call through the same Chat
 // Completions adapter a chat turn on the model would use, without tools.
 func (a *Agent) callUtilityChatCompletions(ctx context.Context, t utilityTarget, req provider.UtilityRequest) (string, error) {
-	lite := &chatContext{model: t.name, modelProvider: t.provider, connection: t.connection}
+	lite := t.chatContext()
 	params := provider.UtilityChatCompletionParams(t.name, req)
 	var adapter provider.AgentAdapter
 	if t.connection == nil && models.IsGeminiModel(t.provider, t.name) {

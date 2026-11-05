@@ -146,7 +146,8 @@ func UtilityClaudeParams(model string, req UtilityRequest) anthropic.MessageNewP
 // Chat Completions API. Some of those APIs accept a system message only first,
 // so the instructions, the developer turns and a conversation's own system
 // messages form one leading system message, and the conversation's other
-// messages follow it in order.
+// messages follow it in order. A utility call never sends tools or sampling
+// settings; anything that needs them belongs on the chat adapters, not here.
 func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCompletionNewParams {
 	params := openai.ChatCompletionNewParams{
 		Model: shared.ChatModel(model),
@@ -207,7 +208,9 @@ func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCo
 	return params
 }
 
-// chatSystemText is a system message's text, whichever form its content takes.
+// chatSystemText is a system message's text, whichever form its content takes. A system
+// message's parts are text by type (ChatCompletionContentPartTextParam), so nothing else can be
+// dropped here.
 func chatSystemText(m *openai.ChatCompletionSystemMessageParam) string {
 	if m.Content.OfString.Valid() {
 		return m.Content.OfString.Value

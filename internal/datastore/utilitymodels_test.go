@@ -10,6 +10,9 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
+// The fixture's models are bare catalog rows (no provider, never turned off); the tests that
+// depend on connections or turned-off models create those themselves.
+//
 // These tests stay serial, like the remote-sync tests: they create tables from the generated
 // schema, whose shared definitions the migrator writes to, so creating them alongside parallel
 // tests that do the same is a data race.
@@ -98,4 +101,25 @@ func TestSetUtilityModel_OnlyModelsTheChooserCanUse(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []models.UtilityModelSetting{{Scope: models.UtilityScopeDeployment, Role: models.UtilityRoleQuick, ModelID: modelA}}, got,
 		"a refused choice leaves nothing behind")
+}
+
+// A setting that can't exist is refused before anything is written.
+func TestSetUtilityModel_RefusesImpossibleSettings(t *testing.T) {
+	ds, alice, _, modelA, _ := newUtilityModelFixture(t)
+	ctx := context.Background()
+	for name, call := range map[string]func() error{
+		"unknown role":  func() error { return ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, "images", modelA) },
+		"unknown scope": func() error { return ds.SetUtilityModel(ctx, "team", alice, models.UtilityRoleMemory, modelA) },
+		"deployment with user": func() error {
+			return ds.SetUtilityModel(ctx, models.UtilityScopeDeployment, alice, models.UtilityRoleMemory, modelA)
+		},
+		"account without user": func() error {
+			return ds.SetUtilityModel(ctx, models.UtilityScopeAccount, uuid.Nil, models.UtilityRoleMemory, modelA)
+		},
+	} {
+		require.ErrorIs(t, call(), ErrInvalidUtilitySetting, name)
+	}
+	n, err := ds.dbClient.UtilityModelSetting.Query().Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, n)
 }
