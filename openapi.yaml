@@ -1701,6 +1701,105 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /utility-models:
+    get:
+      summary: The models the account's background work runs on
+      description: >-
+        For each utility role (background work that isn't the assistant
+        talking: memory and summaries, quick tasks such as chat naming,
+        personality generation), the model the account chose, the model the
+        deployment chose, and the built-in model the role runs on when neither
+        chose one. The account's choice wins, then the deployment's.
+      tags: [Model Management]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Every role, in display order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UtilityModels'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /utility-models/{role}:
+    parameters:
+      - name: role
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/UtilityRole'
+    put:
+      summary: Choose the account's model for a utility role
+      description: >-
+        The model must be one the account can use: a catalog model or one
+        enabled on its own provider connections. A model turned off later fails
+        the role's background work rather than running it on another model.
+      tags: [Model Management]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetUtilityModelRequest'
+      responses:
+        '200':
+          description: Every role after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UtilityModels'
+        '400':
+          description: No model, or one the account can't use
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Not a utility role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Clear the account's model for a utility role
+      description: The role runs on the deployment's choice, or its built-in model.
+      tags: [Model Management]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Every role after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UtilityModels'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Not a utility role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /provider-keys:
     get:
       summary: List the account's provider keys
@@ -11045,6 +11144,51 @@ components:
             for a scheduled run only: a webhook background run or the onboarding welcome is an
             agent_job_run with no message_id too, but has none.
 
+    UtilityRole:
+      type: string
+      enum: [memory, quick, personality]
+      description: >-
+        A group of background work that runs on one model. `memory`: memory
+        extraction and merging, the scratchpad, checkpoint summaries, recall and
+        thread rehydration. `quick`: chat naming, expression and mood selection,
+        schedule parsing and memory queries. `personality`: generating a
+        personality.
+    UtilityRoleModel:
+      type: object
+      required: [role, account_model_id, deployment_model_id, built_in_model]
+      properties:
+        role:
+          $ref: '#/components/schemas/UtilityRole'
+        account_model_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The account's choice, or null.
+        deployment_model_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The deployment's choice, or null.
+        built_in_model:
+          type: string
+          description: >-
+            The name of the model the role runs on when neither chose one. A chat
+            on an Anthropic model keeps a Claude model for its memory steps.
+    UtilityModels:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/UtilityRoleModel'
+    SetUtilityModelRequest:
+      type: object
+      required: [model_id]
+      properties:
+        model_id:
+          type: string
+          format: uuid
     ModelProvider:
       type: string
       description: A model provider.

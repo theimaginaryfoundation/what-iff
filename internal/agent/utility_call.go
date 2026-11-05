@@ -28,6 +28,13 @@ func utilityModelName(role provider.UtilityRole) string {
 	}
 }
 
+// UtilityBuiltInModel names the model a utility role runs on when neither the account nor the
+// deployment chose one. Memory's rebuilt-context checkpoint steps in a chat on a native
+// Anthropic model are the one exception: they keep a Claude model (rebuiltCheckpointModel).
+func UtilityBuiltInModel(role models.UtilityRole) string {
+	return utilityModelName(role)
+}
+
 // utilityTarget is the model a utility call runs on.
 type utilityTarget struct {
 	name string

@@ -45,3 +45,25 @@ type UtilityModelSetting struct {
 	Role    UtilityRole  `json:"role"`
 	ModelID uuid.UUID    `json:"model_id"`
 }
+
+// UtilityRoleModel is what an account sees of one role: its own choice, the deployment's,
+// and the built-in model the role runs on when neither chose one.
+type UtilityRoleModel struct {
+	Role UtilityRole `json:"role"`
+	// AccountModelID is the account's choice, or nil when it made none.
+	AccountModelID *uuid.UUID `json:"account_model_id"`
+	// DeploymentModelID is the deployment's choice, or nil when it made none.
+	DeploymentModelID *uuid.UUID `json:"deployment_model_id"`
+	// BuiltInModel is the name of the model the role runs on when nothing is chosen.
+	BuiltInModel string `json:"built_in_model"`
+}
+
+// UtilityModels lists every role's models, in UtilityRoles order.
+type UtilityModels struct {
+	Roles []UtilityRoleModel `json:"roles"`
+}
+
+// SetUtilityModelRequest chooses a model for a role.
+type SetUtilityModelRequest struct {
+	ModelID uuid.UUID `json:"model_id"`
+}

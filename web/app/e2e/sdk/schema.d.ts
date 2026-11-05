@@ -3198,6 +3198,171 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/utility-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The models the account's background work runs on
+         * @description For each utility role (background work that isn't the assistant talking: memory and summaries, quick tasks such as chat naming, personality generation), the model the account chose, the model the deployment chose, and the built-in model the role runs on when neither chose one. The account's choice wins, then the deployment's.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Every role, in display order */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UtilityModels"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/utility-models/{role}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role: components["schemas"]["UtilityRole"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Choose the account's model for a utility role
+         * @description The model must be one the account can use: a catalog model or one enabled on its own provider connections. A model turned off later fails the role's background work rather than running it on another model.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    role: components["schemas"]["UtilityRole"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SetUtilityModelRequest"];
+                };
+            };
+            responses: {
+                /** @description Every role after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UtilityModels"];
+                    };
+                };
+                /** @description No model, or one the account can't use */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not a utility role */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Clear the account's model for a utility role
+         * @description The role runs on the deployment's choice, or its built-in model.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    role: components["schemas"]["UtilityRole"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Every role after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UtilityModels"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not a utility role */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/provider-keys": {
         parameters: {
             query?: never;
@@ -14801,6 +14966,33 @@ export interface components {
             message_id?: string;
             /** @description The agent job a scheduled run is for (ADR 0x040). Set by GET /chat/{chatId}/active-job for a scheduled run only: a webhook background run or the onboarding welcome is an agent_job_run with no message_id too, but has none. */
             job_run?: components["schemas"]["JobRun"];
+        };
+        /**
+         * @description A group of background work that runs on one model. `memory`: memory extraction and merging, the scratchpad, checkpoint summaries, recall and thread rehydration. `quick`: chat naming, expression and mood selection, schedule parsing and memory queries. `personality`: generating a personality.
+         * @enum {string}
+         */
+        UtilityRole: "memory" | "quick" | "personality";
+        UtilityRoleModel: {
+            role: components["schemas"]["UtilityRole"];
+            /**
+             * Format: uuid
+             * @description The account's choice, or null.
+             */
+            account_model_id: string | null;
+            /**
+             * Format: uuid
+             * @description The deployment's choice, or null.
+             */
+            deployment_model_id: string | null;
+            /** @description The name of the model the role runs on when neither chose one. A chat on an Anthropic model keeps a Claude model for its memory steps. */
+            built_in_model: string;
+        };
+        UtilityModels: {
+            roles: components["schemas"]["UtilityRoleModel"][];
+        };
+        SetUtilityModelRequest: {
+            /** Format: uuid */
+            model_id: string;
         };
         /**
          * @description A model provider.
