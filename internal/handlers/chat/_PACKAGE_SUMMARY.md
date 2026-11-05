@@ -6,6 +6,8 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 
 ## Responsibilities
 
+- **Background notices** (`background_notices.go`, ADR 0x027 section 6): `GET /chat/{chatId}/background-notices` lists the chat's background work that failed or fell back and that the account hasn't dismissed, and `POST /chat/{chatId}/background-notices/{noticeId}/dismiss` hides one until its cause changes.
+  A notice states the step and the cause; the client says what to do about it.
 - **Loaded skills** (`skills.go`, ADR 0x035): `GET /chat/{chatId}/loaded-skills` lists the skills the agent loaded in the thread with `load_skill` (mode and message skills are not loaded state) and `DELETE /chat/{chatId}/loaded-skills/{ritualId}` unloads one, for the thread's Tools panel.
 
 - **`Handler`:** `RegisterRoutes` mounts `/api/chat/...` (under parent `/api` from server).
@@ -67,6 +69,7 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 - `update_patch_test.go`, `mark_read_test.go`, `export_test.go`, `free_tier_quota_test.go`, `chatmessage_quota_test.go` — HTTP and quota behavior (including list `archived` query parsing and PATCH `archived`).
 - `chat_retry_test.go` covers `GetActiveChatJob`: a user turn with its message, a scheduled run with no message and its `job_run`, a chat-keyed run with no `job_run`, 204, 400 and 500.
 - `welcome_message_test.go` covers onboarding welcome endpoint eligibility and job enqueue behavior.
+- `background_notices_test.go` — listing a chat's notices, nothing for another account's chat, dismissing (404 for another account's), and bad IDs and no account refused.
 - `import_metrics_test.go` checks the chat import job outcome (including a timed-out run), stage timings, payload size and item counts.
 - `import_test.go` exercises the async import pipeline end-to-end (202 handoff, OpenAI + Anthropic happy paths, terminal job status on datastore failure); `import_unit_test.go` and `anthropic_import_test.go` cover the parsers and format detection.
 
