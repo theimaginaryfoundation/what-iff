@@ -63,7 +63,7 @@ func TestCallUtilityOn_RoutesAnthropicModelToMessagesAPI(t *testing.T) {
 	srv, path, req := recordingServer(t, `{"id":"m","type":"message","role":"assistant","model":"claude-haiku-4-5","content":[{"type":"text","text":"named"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
 	a := &Agent{logger: zap.NewNop(), ClaudeProvider: provider.NewClaudeProviderWithBaseURL("k", srv.URL, nil, nil)}
 
-	out, err := a.callUtilityOn(context.Background(), "claude-haiku-4-5", "", utilityTestRequest)
+	out, err := a.callUtilityOn(context.Background(), utilityTarget{name: "claude-haiku-4-5", provider: ""}, utilityTestRequest)
 	require.NoError(t, err)
 	require.Equal(t, "named", out.Text)
 	require.Equal(t, "/v1/messages", *path)
@@ -76,7 +76,7 @@ func TestCallUtilityOn_RoutesChatCompletionsModel(t *testing.T) {
 	srv, path, req := recordingServer(t, `{"id":"c","object":"chat.completion","created":1,"model":"mistral-small-latest","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"named"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
 	a := &Agent{logger: zap.NewNop(), MistralProvider: provider.NewMistralProvider("k", srv.URL, nil, nil)}
 
-	out, err := a.callUtilityOn(context.Background(), "mistral-small-latest", string(models.ModelProviderMistral), utilityTestRequest)
+	out, err := a.callUtilityOn(context.Background(), utilityTarget{name: "mistral-small-latest", provider: string(models.ModelProviderMistral)}, utilityTestRequest)
 	require.NoError(t, err)
 	require.Equal(t, "named", out.Text)
 	require.Contains(t, *path, "/chat/completions")
@@ -87,9 +87,9 @@ func TestCallUtilityOn_RoutesChatCompletionsModel(t *testing.T) {
 func TestCallUtilityOn_ReportsMissingProvider(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
-	_, err := a.callUtilityOn(context.Background(), "mistral-small-latest", string(models.ModelProviderMistral), utilityTestRequest)
+	_, err := a.callUtilityOn(context.Background(), utilityTarget{name: "mistral-small-latest", provider: string(models.ModelProviderMistral)}, utilityTestRequest)
 	require.ErrorContains(t, err, "MISTRAL_API_KEY is not configured")
-	_, err = a.callUtilityOn(context.Background(), models.UtilityModelName, "", utilityTestRequest)
+	_, err = a.callUtilityOn(context.Background(), utilityTarget{name: models.UtilityModelName, provider: ""}, utilityTestRequest)
 	require.ErrorContains(t, err, "no OpenAI provider")
 }
 
@@ -100,7 +100,7 @@ func TestCallUtilityOn_PreviousResponseIDNeedsResponsesAPI(t *testing.T) {
 	a := &Agent{logger: zap.NewNop()}
 	req := utilityTestRequest
 	req.PreviousResponseID = "resp_1"
-	_, err := a.callUtilityOn(context.Background(), "claude-haiku-4-5", "", req)
+	_, err := a.callUtilityOn(context.Background(), utilityTarget{name: "claude-haiku-4-5", provider: ""}, req)
 	require.ErrorContains(t, err, "cannot continue a stored Responses conversation")
 }
 
@@ -122,7 +122,7 @@ func TestCallUtilityOn_ErrorNamesProvider(t *testing.T) {
 		{"mistral-small-latest", string(models.ModelProviderMistral), "Mistral:"},
 		{models.UtilityModelName, "", "OpenAI:"},
 	} {
-		_, err := a.callUtilityOn(context.Background(), tt.model, tt.modelProvider, utilityTestRequest)
+		_, err := a.callUtilityOn(context.Background(), utilityTarget{name: tt.model, provider: tt.modelProvider}, utilityTestRequest)
 		require.Error(t, err, tt.model)
 		require.True(t, strings.HasPrefix(err.Error(), tt.name), "%s: %v", tt.model, err)
 	}

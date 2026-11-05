@@ -61,6 +61,13 @@ func expectOneExpressionSlot(mock sqlmock.Sqlmock, key string) {
 	mock.ExpectQuery("SELECT .*").
 		WillReturnRows(personalityExpressionRows(key))
 	mock.ExpectCommit()
+	expectNoUtilitySettings(mock)
+}
+
+// expectNoUtilitySettings answers the settings lookup each utility call makes with none, so
+// the call runs on its role's built-in model.
+func expectNoUtilitySettings(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery("SELECT .* FROM `utility_model_settings`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
 }
 
 func TestPickGenerationExpression_StandaloneOmitsTemperature(t *testing.T) {
