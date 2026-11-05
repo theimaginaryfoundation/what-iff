@@ -3060,8 +3060,6 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	// which the next one redoes, not the thread.
 	checkpointCtx, cancelCheckpoint := context.WithTimeout(ctx, checkpointTimeout)
 	defer cancelCheckpoint()
-	checkpointCtx, run := withBackgroundRun(checkpointCtx)
-	defer a.settleBackgroundRun(context.WithoutCancel(ctx), userID, chatMessage.ChatID, run)
 	// Only genuine OpenAI (Responses API) chats can thread checkpoints off a
 	// PreviousResponseID. Every other chat (Anthropic, z.ai, Gemini, a connection
 	// model) rebuilds context from the DB via the "Claude" checkpoint path, whose
@@ -3069,11 +3067,13 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	// rebuiltCheckpointModel: Claude for native Anthropic chats, GPT otherwise.
 	// A connection model rebuilds from the DB too: no connection returns an
 	// OpenAI response id to chain off.
-	if !a.checkpointChainsResponses(checkpointCtx, chatCtx) {
-		a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
-	} else {
-		a.runCheckpointOpenAI(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
-	}
+	a.withBackgroundNotices(checkpointCtx, userID, chatMessage.ChatID, func(checkpointCtx context.Context) {
+		if !a.checkpointChainsResponses(checkpointCtx, chatCtx) {
+			a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
+		} else {
+			a.runCheckpointOpenAI(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
+		}
+	})
 	if errors.Is(checkpointCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
 		a.logger.Warn("checkpoint ran out of time; the next checkpoint will retry it",
 			zap.String("chat_id", chatMessage.ChatID.String()),

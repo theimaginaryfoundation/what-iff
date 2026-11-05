@@ -139,7 +139,9 @@ func (a *Agent) recordUtilityFallback(ctx context.Context, role provider.Utility
 		zap.String("model_id", modelID.String()),
 		zap.String("reason", reason),
 		zap.Error(err))
-	if scope != "" {
+	// Only a choice that can't be used is the account's to know about; a failed read (a
+	// database hiccup, or the checkpoint running out of time) says nothing about the choice.
+	if scope != "" && (errors.Is(err, ErrModelDisabled) || errors.Is(err, ErrConnectionUnavailable)) && ctx.Err() == nil {
 		backgroundRunFrom(ctx).failed(models.BackgroundNotice{
 			Step: models.BackgroundFallbackStep(role),
 			Code: models.BackgroundNoticeModelUnavailable,
@@ -202,7 +204,7 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 		t.connection == nil && models.UsesAnthropicMessagesAPI(t.provider, t.name):
 		prov, _, err := a.claudeProviderForModel(lite)
 		if err != nil {
-			return utilityReply{}, t.callError(err)
+			return utilityReply{}, t.missingProvider(err)
 		}
 		params := provider.UtilityClaudeParams(t.name, req)
 		if t.connection == nil && models.IsZAIModel(t.provider, t.name) {
@@ -223,7 +225,7 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 		return utilityReply{Text: text}, nil
 	case t.usesResponsesAPI():
 		if a.OpenAIProvider == nil {
-			return utilityReply{}, t.callError(fmt.Errorf("OpenAI model %q requested but no OpenAI provider is configured", t.name))
+			return utilityReply{}, t.missingProvider(fmt.Errorf("OpenAI model %q requested but no OpenAI provider is configured", t.name))
 		}
 		a.recordDroppedImages(ctx, models.ModelProviderOpenAI, req.Context)
 		resp, err := a.OpenAIProvider.CallWithRetry(ctx, provider.UtilityResponsesParams(t.name, req))
@@ -246,14 +248,14 @@ func (a *Agent) callUtilityChatCompletions(ctx context.Context, t utilityTarget,
 	var adapter provider.AgentAdapter
 	if t.connection == nil && models.IsGeminiModel(t.provider, t.name) {
 		if a.GeminiProvider == nil {
-			return "", t.callError(fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", t.name))
+			return "", t.missingProvider(fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", t.name))
 		}
 		adapter = provider.NewGeminiAdapter(a.GeminiProvider, params, nil, nil, a.logger)
 	} else {
 		var err error
 		adapter, err = a.openAIChatCompletionsAdapter(lite, params, nil, nil)
 		if err != nil {
-			return "", t.callError(err)
+			return "", t.missingProvider(err)
 		}
 	}
 	resp, _, err := adapter.Call(ctx)
@@ -271,9 +273,33 @@ func (a *Agent) callUtilityChatCompletions(ctx context.Context, t utilityTarget,
 func (t utilityTarget) callError(err error) error {
 	provider := models.ProviderForModel(t.provider, t.name).DisplayName()
 	if t.connection != nil {
-		provider = t.connection.Preset
+		provider = connectionPresetName(t.connection.Preset)
 	}
 	return &UtilityCallError{Provider: provider, Model: t.name, Err: err}
+}
+
+// missingProvider marks a utility call that never reached a provider because this deployment
+// has no client for it; the account can only fix it by choosing another model.
+func (t utilityTarget) missingProvider(err error) error {
+	return t.callError(fmt.Errorf("%w: %w", errUtilityProviderMissing, err))
+}
+
+// errUtilityProviderMissing is a utility call's provider not being set up on this deployment.
+var errUtilityProviderMissing = errors.New("provider not set up")
+
+// connectionPresetName is how a person knows a connection preset.
+func connectionPresetName(preset string) string {
+	switch preset {
+	case "openrouter":
+		return "OpenRouter"
+	case "ollama":
+		return "Ollama"
+	case "lmstudio":
+		return "LM Studio"
+	case "custom":
+		return "your custom server"
+	}
+	return preset
 }
 
 // UtilityCallError is a utility call that failed at, or on the way to, its provider.

@@ -1,6 +1,6 @@
 import { Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 
 import { BackgroundNotice } from '../../../../core/models/utility-model.model';
 import { BackgroundNoticesService } from '../../../../core/services/background-notices.service';
@@ -89,12 +89,23 @@ describe('BackgroundNoticesComponent', () => {
   it('says a provider error is retried, and names a fallback by its role', async () => {
     const el = await render([
       notice({ id: 'a', step: 'summary', provider: 'OpenAI', model: 'gpt-5.6-luna' }),
-      notice({ id: 'b', step: 'fallback_quick', code: 'model_unavailable' }),
+      notice({ id: 'b', step: 'fallback_memory', code: 'model_unavailable' }),
     ]);
     const [error, fallback] = texts(el);
     expect(error).toContain("This chat's summary wasn't updated.");
-    expect(error).toContain("OpenAI returned an error (gpt-5.6-luna). It's tried again after a few more messages.");
-    expect(fallback).toContain("The model chosen for Quick tasks wasn't available, so another was used.");
+    expect(error).toContain('OpenAI returned an error (gpt-5.6-luna). It runs again as the chat goes on, and this goes away once it works.');
+    expect(fallback).toContain("The model chosen for Memory and summaries wasn't available, so another was used.");
+  });
+
+  it("never shows one chat's notices on another, even if the new chat's load fails", async () => {
+    const el = await render([notice({})]);
+    expect(texts(el).length).toBe(1);
+    service.list.mockReturnValue(throwError(() => new Error('offline')));
+    fixture.componentInstance.chatId.set('chat-2');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(texts(el)).toEqual([]);
   });
 
   it('dismisses a notice, and reads them again when a turn settles', async () => {
