@@ -1,5 +1,7 @@
 package models
 
+import "github.com/google/uuid"
+
 // UtilityRole groups background work that runs on the same model (ADR 0x027
 // section 6).
 type UtilityRole string
@@ -28,4 +30,19 @@ func (r UtilityRole) Valid() bool {
 		}
 	}
 	return false
+}
+
+// UtilityScope is whose choice a utility model setting is.
+type UtilityScope string
+
+const (
+	UtilityScopeDeployment UtilityScope = "deployment"
+	UtilityScopeAccount    UtilityScope = "account"
+)
+
+// UtilityModelSetting is the model chosen for a role at a scope.
+type UtilityModelSetting struct {
+	Scope   UtilityScope `json:"scope"`
+	Role    UtilityRole  `json:"role"`
+	ModelID uuid.UUID    `json:"model_id"`
 }
