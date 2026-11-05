@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 )
@@ -44,52 +42,47 @@ func buildCheckpointConversationSummaryInput(existingSummary string) string {
 	return fmt.Sprintf("Update the existing summary to incorporate new developments in the conversation, keeping it compact.\n\nEXISTING SUMMARY:\n%s", existingSummary)
 }
 
-func buildCheckpointSummaryParams(userID uuid.UUID, existingSummary string, src checkpointSummarySource) (responses.ResponseNewParams, error) {
+func buildCheckpointSummaryRequest(userID uuid.UUID, existingSummary string, src checkpointSummarySource) (provider.UtilityRequest, error) {
 	updatePrompt := buildCheckpointConversationSummaryInput(existingSummary)
-	params := responses.ResponseNewParams{
-		Model:            archivalOpenAIModel,
-		SafetyIdentifier: openai.String(userID.String()),
-		MaxOutputTokens:  openai.Int(checkpointSummaryMaxTokens),
-		Instructions:     openai.String(checkpointConversationSummaryInstructions),
+	req := provider.UtilityRequest{
+		Role:            provider.UtilityRoleMemory,
+		CallPath:        telemetry.CallPathConversationSummary,
+		Instructions:    checkpointConversationSummaryInstructions,
+		MaxOutputTokens: checkpointSummaryMaxTokens,
+		SafetyUserID:    userID.String(),
 	}
 
 	switch {
 	case src.PreviousResponseID != nil && strings.TrimSpace(*src.PreviousResponseID) != "":
-		params.PreviousResponseID = openai.String(*src.PreviousResponseID)
-		params.Input = responses.ResponseNewParamsInputUnion{
-			OfString: openai.String(updatePrompt),
-		}
+		req.PreviousResponseID = *src.PreviousResponseID
+		req.Input = updatePrompt
 	case src.ModelContext != nil:
-		// Strip images OpenAI won't accept (unsupported media types). Without this, a single
-		// bad image fails the whole checkpoint summary with a 400.
-		items := provider.RenderOpenAIInputItems(provider.SanitizeImagesForOpenAIInput(src.ModelContext))
-		if trimmed := strings.TrimSpace(src.AssistantReply); trimmed != "" {
-			items = append(items, responses.ResponseInputItemParamOfMessage(trimmed, provider.RoleAssistant))
-		}
-		items = append(items, responses.ResponseInputItemParamOfMessage(updatePrompt, provider.RoleUser))
-		params.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: items}
+		req.Context = checkpointArchivalContext(src.ModelContext, src.AssistantReply)
+		req.Messages = []provider.UtilityMessage{{Role: provider.RoleUser, Text: updatePrompt}}
 	default:
-		return responses.ResponseNewParams{}, fmt.Errorf("checkpoint summary requires PreviousResponseID or ModelContext")
+		return provider.UtilityRequest{}, fmt.Errorf("checkpoint summary requires PreviousResponseID or ModelContext")
 	}
-	return params, nil
+	return req, nil
 }
 
+// summarizeConversationForCheckpoint writes the chat's checkpoint summary, updating the
+// existing one, from whichever source the chat's checkpoint path has.
 func (a *Agent) summarizeConversationForCheckpoint(ctx context.Context, userID uuid.UUID, chatCtx *chatContext, src checkpointSummarySource) (string, error) {
-	if a.OpenAIProvider == nil {
-		return "", fmt.Errorf("OpenAIProvider is nil, cannot summarize conversation for checkpoint")
+	var existing string
+	if chatCtx != nil && chatCtx.chat != nil {
+		existing = chatCtx.chat.CheckpointSummary
 	}
-
-	params, err := buildCheckpointSummaryParams(userID, chatCtx.chat.CheckpointSummary, src)
+	req, err := buildCheckpointSummaryRequest(userID, existing, src)
 	if err != nil {
 		return "", err
 	}
 
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathConversationSummary), params)
+	summary, err := a.CallUtility(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("failed to summarize conversation for checkpoint: %w", err)
 	}
 
-	summary := strings.TrimSpace(resp.OutputText())
+	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		return "", fmt.Errorf("conversation summarization returned empty summary")
 	}

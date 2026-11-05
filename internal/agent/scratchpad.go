@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -52,28 +50,26 @@ func (a *Agent) updateScratchpad(ctx context.Context, userID uuid.UUID, response
 	}
 	prompt := buildUpdateScratchpadPrompt(personalityModel)
 
-	params := responses.ResponseNewParams{
-		Model:              archivalOpenAIModel,
-		SafetyIdentifier:   openai.String(userID.String()),
-		PreviousResponseID: openai.String(*responseID),
-		MaxOutputTokens:    openai.Int(scratchpadMaxTokens),
-		Instructions:       openai.String(chatCtx.chat.SystemPrompt),
-
-		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: []responses.ResponseInputItemUnionParam{
-				responses.ResponseInputItemParamOfMessage(scratchpadUpdateDeveloperMessage, provider.RoleDeveloper),
-				responses.ResponseInputItemParamOfMessage(prompt, provider.RoleUser),
-			},
+	// callUtility rather than CallUtility: memory extraction continues from this reply's
+	// stored response, so it needs the response ID.
+	reply, err := a.callUtility(ctx, provider.UtilityRequest{
+		Role:               provider.UtilityRoleMemory,
+		CallPath:           telemetry.CallPathScratchpad,
+		Instructions:       chatCtx.chat.SystemPrompt,
+		PreviousResponseID: *responseID,
+		Messages: []provider.UtilityMessage{
+			{Role: provider.RoleDeveloper, Text: scratchpadUpdateDeveloperMessage},
+			{Role: provider.RoleUser, Text: prompt},
 		},
-	}
-
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathScratchpad), params)
+		MaxOutputTokens: scratchpadMaxTokens,
+		SafetyUserID:    userID.String(),
+	})
 	if err != nil {
 		a.logger.Error("failed to update scratchpad", zap.Error(err))
 		return ScratchpadUpdate{}, fmt.Errorf("failed to update scratchpad: %w", err)
 	}
 
-	updatedScratchpad := strings.TrimSpace(resp.OutputText())
+	updatedScratchpad := strings.TrimSpace(reply.Text)
 	if updatedScratchpad == "" {
 		a.logger.Warn("scratchpad update returned empty content")
 		return ScratchpadUpdate{}, fmt.Errorf("scratchpad update returned empty content")
@@ -106,7 +102,7 @@ func (a *Agent) updateScratchpad(ctx context.Context, userID uuid.UUID, response
 		zap.Int("scratchpad_length", len(updatedScratchpad)))
 	return ScratchpadUpdate{
 		Content:    updatedScratchpad,
-		ResponseID: &resp.ID,
+		ResponseID: &reply.ResponseID,
 	}, nil
 }
 
@@ -126,23 +122,20 @@ func (a *Agent) summarizeScratchpad(ctx context.Context, userID uuid.UUID, respo
 
 	// we always use the mini model for scratchpad summarization because it is faster and cheaper, should not require deep personality context.
 	instructions := fmt.Sprintf(scratchpadSummarizeInstructions+"\n\n TOKEN BUDGET: %d", provider.ScratchpadMaxContentLength)
-	params := responses.ResponseNewParams{
-		Model:              archivalOpenAIModel,
-		SafetyIdentifier:   openai.String(userID.String()),
-		PreviousResponseID: openai.String(*responseID),
-		MaxOutputTokens:    openai.Int(provider.ScratchpadMaxContentLength),
-		Instructions:       openai.String(instructions),
-		Input: responses.ResponseNewParamsInputUnion{
-			OfString: openai.String(buildScratchpadSummarizationInput(scratchpad)),
-		},
-	}
-
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathScratchpad), params)
+	summarized, err := a.CallUtility(ctx, provider.UtilityRequest{
+		Role:               provider.UtilityRoleMemory,
+		CallPath:           telemetry.CallPathScratchpad,
+		Instructions:       instructions,
+		PreviousResponseID: *responseID,
+		Input:              buildScratchpadSummarizationInput(scratchpad),
+		MaxOutputTokens:    provider.ScratchpadMaxContentLength,
+		SafetyUserID:       userID.String(),
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to summarize scratchpad: %w", err)
 	}
 
-	summarized := strings.TrimSpace(resp.OutputText())
+	summarized = strings.TrimSpace(summarized)
 	if summarized == "" {
 		return "", fmt.Errorf("scratchpad summarization returned empty content")
 	}
@@ -160,19 +153,19 @@ func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, ch
 		return ScratchpadUpdate{}, fmt.Errorf("failed to get personality by ID: %w", err)
 	}
 	prompt := buildUpdateScratchpadPrompt(personalityModel)
-	if a.ClaudeProvider == nil {
-		return ScratchpadUpdate{}, fmt.Errorf("ClaudeProvider is nil")
-	}
 	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
 
-	params := modelContext.BuildClaudeParams(archivalClaudeModel)
-	params.MaxTokens = int64(scratchpadMaxTokens)
-
-	msg, err := a.ClaudeProvider.Call(telemetry.WithCallPath(ctx, telemetry.CallPathScratchpad), params)
+	reply, err := a.callUtilityModel(ctx, archivalClaudeModel, provider.UtilityRequest{
+		Role:            provider.UtilityRoleMemory,
+		CallPath:        telemetry.CallPathScratchpad,
+		Context:         modelContext,
+		MaxOutputTokens: scratchpadMaxTokens,
+		SafetyUserID:    userID.String(),
+	})
 	if err != nil {
 		return ScratchpadUpdate{}, fmt.Errorf("Claude scratchpad update failed: %w", err)
 	}
-	updatedScratchpad := strings.TrimSpace(provider.ExtractClaudeText(msg))
+	updatedScratchpad := strings.TrimSpace(reply.Text)
 
 	if updatedScratchpad == "" {
 		return ScratchpadUpdate{}, fmt.Errorf("scratchpad update returned empty content")
@@ -206,20 +199,18 @@ func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, ch
 // summarizeScratchpadClaude compresses an overlong scratchpad for the Claude archival path.
 func (a *Agent) summarizeScratchpadClaude(ctx context.Context, userID uuid.UUID, scratchpad string) (string, error) {
 	instructions := fmt.Sprintf(scratchpadSummarizeInstructions+"\n\n TOKEN BUDGET: %d", provider.ScratchpadMaxContentLength)
-	input := responses.ResponseInputItemParamOfMessage(buildScratchpadSummarizationInput(scratchpad), provider.RoleUser)
-
-	params := responses.ResponseNewParams{
-		Model:            archivalOpenAIModel,
-		SafetyIdentifier: openai.String(userID.String()),
-		MaxOutputTokens:  openai.Int(provider.ScratchpadMaxContentLength),
-		Instructions:     openai.String(instructions),
-		Input:            responses.ResponseNewParamsInputUnion{OfInputItemList: []responses.ResponseInputItemUnionParam{input}},
-	}
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathScratchpad), params)
+	summarized, err := a.CallUtility(ctx, provider.UtilityRequest{
+		Role:            provider.UtilityRoleMemory,
+		CallPath:        telemetry.CallPathScratchpad,
+		Instructions:    instructions,
+		Messages:        []provider.UtilityMessage{{Role: provider.RoleUser, Text: buildScratchpadSummarizationInput(scratchpad)}},
+		MaxOutputTokens: provider.ScratchpadMaxContentLength,
+		SafetyUserID:    userID.String(),
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to summarize Claude scratchpad: %w", err)
 	}
-	summarized := strings.TrimSpace(resp.OutputText())
+	summarized = strings.TrimSpace(summarized)
 	if summarized == "" {
 		return "", fmt.Errorf("scratchpad summarization returned empty content")
 	}
