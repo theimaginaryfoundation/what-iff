@@ -12,8 +12,6 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
 	"github.com/google/uuid"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"go.uber.org/zap"
 )
 
@@ -261,39 +259,30 @@ func (a *Agent) inferMemoryMergeGroupsOpenAI(ctx context.Context, userID uuid.UU
 	// the same self that formed these memories judges how they fold. The merge task rides as a
 	// developer message. When no persona is available we fall back to the task prompt alone.
 	instructions := strings.TrimSpace(personaInstructions)
-	inputItems := make([]responses.ResponseInputItemUnionParam, 0, 2)
+	messages := make([]provider.UtilityMessage, 0, 2)
 	if instructions == "" {
 		instructions = memoryMergeGroupingPrompt
 	} else {
-		inputItems = append(inputItems, responses.ResponseInputItemParamOfMessage(memoryMergeGroupingPrompt, provider.RoleDeveloper))
+		messages = append(messages, provider.UtilityMessage{Role: provider.RoleDeveloper, Text: memoryMergeGroupingPrompt})
 	}
-	inputItems = append(inputItems, responses.ResponseInputItemParamOfMessage(formatMemoryMergeCandidateList(candidates), provider.RoleUser))
-	params := responses.ResponseNewParams{
-		Model:            archivalOpenAIModel,
-		SafetyIdentifier: openai.String(userID.String()),
-		MaxOutputTokens:  openai.Int(memoryMergeMaxOutputTokens),
-		ServiceTier:      responses.ResponseNewParamsServiceTierFlex,
-		Instructions:     openai.String(instructions),
-		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: inputItems,
+	messages = append(messages, provider.UtilityMessage{Role: provider.RoleUser, Text: formatMemoryMergeCandidateList(candidates)})
+	text, err := a.CallUtility(ctx, provider.UtilityRequest{
+		Role:            provider.UtilityRoleMemory,
+		CallPath:        telemetry.CallPathMemory,
+		Instructions:    instructions,
+		Messages:        messages,
+		MaxOutputTokens: memoryMergeMaxOutputTokens,
+		SafetyUserID:    userID.String(),
+		Flex:            true,
+		Schema: &provider.UtilitySchema{
+			Name:        "MemoryMergeGrouping",
+			Description: "Memory merge grouping JSON",
+			Schema:      memoryMergeGroupingSchema,
 		},
-		Text: responses.ResponseTextConfigParam{
-			Format: responses.ResponseFormatTextConfigUnionParam{
-				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-					Name:        "MemoryMergeGrouping",
-					Schema:      memoryMergeGroupingSchema,
-					Strict:      openai.Bool(true),
-					Description: openai.String("Memory merge grouping JSON"),
-					Type:        "json_schema",
-				},
-			},
-		},
-	}
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathMemory), params)
+	})
 	if err != nil {
 		return nil, err
 	}
-	text := resp.OutputText()
 	var parsed models.MemoryMergeGroupingResponse
 	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
 		// Strict JSON output does not survive truncation at MaxOutputTokens (a cut-off response is

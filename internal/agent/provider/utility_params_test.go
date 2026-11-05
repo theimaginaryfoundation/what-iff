@@ -123,7 +123,7 @@ func TestUtilityResponsesParams_ContinuesConversation(t *testing.T) {
 	req := UtilityRequest{Context: mc, SafetyUserID: "u1", MaxOutputTokens: 384, Schema: testUtilitySchema}
 
 	got := UtilityResponsesParams("m", req)
-	want := mc.BuildOpenAIResponseParams(OpenAIResponseParamsOptions{Model: "m", SafetyUserID: "u1", MaxOutputTokens: 384})
+	want := SanitizeImagesForOpenAIInput(mc).BuildOpenAIResponseParams(OpenAIResponseParamsOptions{Model: "m", SafetyUserID: "u1", MaxOutputTokens: 384})
 	want.Text = UtilityResponsesParams("m", UtilityRequest{Schema: testUtilitySchema}).Text
 	requireSameJSON(t, want, got)
 }
@@ -145,8 +145,10 @@ func TestUtilityClaudeParams(t *testing.T) {
 
 	require.Equal(t, "claude-x", body["model"])
 	require.EqualValues(t, DefaultMaxContentLength, body["max_tokens"], "the Messages API requires a cap")
-	require.Equal(t, "extract\n\nskip duplicates", body["system"].([]any)[0].(map[string]any)["text"],
-		"developer turns join the instructions")
+	system := body["system"].([]any)
+	require.Len(t, system, 2, "developer turns follow the instructions as system blocks")
+	require.Equal(t, "extract", system[0].(map[string]any)["text"])
+	require.Equal(t, "skip duplicates", system[1].(map[string]any)["text"])
 	msgs := body["messages"].([]any)
 	require.Len(t, msgs, 1)
 	content := msgs[0].(map[string]any)["content"].([]any)

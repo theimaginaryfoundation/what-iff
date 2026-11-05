@@ -62,7 +62,7 @@ func TestCallUtilityOn_RoutesAnthropicModelToMessagesAPI(t *testing.T) {
 
 	out, err := a.callUtilityOn(context.Background(), "claude-haiku-4-5", "", utilityTestRequest)
 	require.NoError(t, err)
-	require.Equal(t, "named", out)
+	require.Equal(t, "named", out.Text)
 	require.Equal(t, "/v1/messages", *path)
 	require.Equal(t, "claude-haiku-4-5", (*req)["model"])
 	require.Contains(t, *req, "output_config")
@@ -75,7 +75,7 @@ func TestCallUtilityOn_RoutesChatCompletionsModel(t *testing.T) {
 
 	out, err := a.callUtilityOn(context.Background(), "mistral-small-latest", string(models.ModelProviderMistral), utilityTestRequest)
 	require.NoError(t, err)
-	require.Equal(t, "named", out)
+	require.Equal(t, "named", out.Text)
 	require.Contains(t, *path, "/chat/completions")
 	require.Contains(t, *req, "response_format")
 	require.NotContains(t, *req, "tools", "utility calls offer no tools")
@@ -88,4 +88,15 @@ func TestCallUtilityOn_ReportsMissingProvider(t *testing.T) {
 	require.ErrorContains(t, err, "MISTRAL_API_KEY is not configured")
 	_, err = a.callUtilityOn(context.Background(), models.UtilityModelName, "", utilityTestRequest)
 	require.ErrorContains(t, err, "no OpenAI provider")
+}
+
+// A stored Responses conversation exists only on that API, so another model refuses to
+// continue one rather than answering without the conversation.
+func TestCallUtilityOn_PreviousResponseIDNeedsResponsesAPI(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()}
+	req := utilityTestRequest
+	req.PreviousResponseID = "resp_1"
+	_, err := a.callUtilityOn(context.Background(), "claude-haiku-4-5", "", req)
+	require.ErrorContains(t, err, "cannot continue a stored Responses conversation")
 }

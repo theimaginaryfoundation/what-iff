@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/shared/constant"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/memoryutil"
@@ -15,8 +13,6 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
 	"github.com/google/uuid"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"go.uber.org/zap"
 )
 
@@ -67,6 +63,13 @@ Use both, along with the recent conversation, to decide what should be written t
 Prefer information that will remain useful after it falls out of the scratchpad.
 Use the conversation and scratchpad context to decide what to store or how to phrase it. `
 
+// memoryDedupNote is the developer note for memory extraction: what to weigh,
+// and the memories already stored, which must not be extracted again.
+func memoryDedupNote(chatCtx *chatContext) string {
+	return fmt.Sprintf("%s\n\nDO NOT extract memories that would be duplicative of the following memories:\n\n %s",
+		memoryExtractionDeveloperNote(chatCtx), strings.Join(chatCtx.memories, "\n\n"))
+}
+
 func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, responseID *string, inferenceModelContext *provider.ModelContext, chatCtx *chatContext, compactionEventID *uuid.UUID) {
 	if responseID == nil {
 		a.logger.Error("response ID is nil. cannot extract memories from conversation.")
@@ -74,40 +77,29 @@ func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID u
 	}
 	prompt := memoryWritePromptText()
 
-	instructions := chatCtx.chat.SystemPrompt
-	params := responses.ResponseNewParams{
-		Model:              archivalOpenAIModel,
-		SafetyIdentifier:   openai.String(userID.String()),
-		PreviousResponseID: openai.String(*responseID),
-		MaxOutputTokens:    openai.Int(provider.DefaultMaxContentLength),
-		Instructions:       openai.String(instructions),
-		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: []responses.ResponseInputItemUnionParam{
-				responses.ResponseInputItemParamOfMessage(
-					fmt.Sprintf("%s\n\nDO NOT extract memories that would be duplicative of the following memories:\n\n %s", memoryExtractionDeveloperNote(chatCtx), strings.Join(chatCtx.memories, "\n\n")), provider.RoleDeveloper),
-				responses.ResponseInputItemParamOfMessage(prompt, provider.RoleUser),
-			},
+	out, err := a.CallUtility(ctx, provider.UtilityRequest{
+		Role:               provider.UtilityRoleMemory,
+		CallPath:           telemetry.CallPathMemory,
+		Instructions:       chatCtx.chat.SystemPrompt,
+		PreviousResponseID: *responseID,
+		Messages: []provider.UtilityMessage{
+			{Role: provider.RoleDeveloper, Text: memoryDedupNote(chatCtx)},
+			{Role: provider.RoleUser, Text: prompt},
 		},
-		Text: responses.ResponseTextConfigParam{
-			Format: responses.ResponseFormatTextConfigUnionParam{
-				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-					Name:        "MemoryExtraction",
-					Schema:      memoryExtractionSchemaFor(chatCtx),
-					Strict:      openai.Bool(true),
-					Description: openai.String("Memory Extraction JSON"),
-					Type:        "json_schema",
-				},
-			},
+		MaxOutputTokens: provider.DefaultMaxContentLength,
+		SafetyUserID:    userID.String(),
+		Schema: &provider.UtilitySchema{
+			Name:        "MemoryExtraction",
+			Description: "Memory Extraction JSON",
+			Schema:      memoryExtractionSchemaFor(chatCtx),
 		},
-	}
-
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathMemory), params)
+	})
 	if err != nil {
 		a.logger.Error("failed to extract memories with scratchpad delta", zap.Error(err))
 		return
 	}
 
-	extracted, err := decodeExtractedMemories(chatCtx, []byte(resp.OutputText()))
+	extracted, err := decodeExtractedMemories(chatCtx, []byte(out))
 	if err != nil {
 		a.logger.Error("failed to unmarshal extracted memories", zap.Error(err))
 		return
@@ -128,27 +120,25 @@ func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, us
 
 	prompt := memoryWritePromptText()
 
-	dedupNote := fmt.Sprintf("%s\n\nDO NOT extract memories that would be duplicative of the following memories:\n\n %s",
-		memoryExtractionDeveloperNote(chatCtx), strings.Join(chatCtx.memories, "\n\n"))
-
 	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
-	modelContext.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, dedupNote, false)
-	params := modelContext.BuildClaudeParams(archivalClaudeModel)
-	// Mirror the OpenAI path: keep MaxTokens consistent with DefaultMaxContentLength.
-	params.MaxTokens = int64(provider.DefaultMaxContentLength)
-	// Structured JSON output (same schema as OpenAI memory extraction).
-	params.OutputConfig = anthropic.OutputConfigParam{
-		Format: anthropic.JSONOutputFormatParam{
-			Type:   constant.JSONSchema("").Default(),
-			Schema: extractionSchemaCopy(memoryExtractionSchemaFor(chatCtx)),
+	modelContext.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, memoryDedupNote(chatCtx), false)
+	reply, err := a.callUtilityModel(ctx, archivalClaudeModel, provider.UtilityRequest{
+		Role:            provider.UtilityRoleMemory,
+		CallPath:        telemetry.CallPathMemory,
+		Context:         modelContext,
+		MaxOutputTokens: provider.DefaultMaxContentLength,
+		SafetyUserID:    userID.String(),
+		Schema: &provider.UtilitySchema{
+			Name:        "MemoryExtraction",
+			Description: "Memory Extraction JSON",
+			Schema:      extractionSchemaCopy(memoryExtractionSchemaFor(chatCtx)),
 		},
-	}
-	msg, err := a.ClaudeProvider.Call(telemetry.WithCallPath(ctx, telemetry.CallPathMemory), params)
+	})
 	if err != nil {
 		a.logger.Error("Claude memory extraction failed", zap.Error(err))
 		return fmt.Errorf("Claude memory extraction failed: %w", err)
 	}
-	extracted, err := decodeExtractedMemories(chatCtx, []byte(provider.ExtractClaudeText(msg)))
+	extracted, err := decodeExtractedMemories(chatCtx, []byte(reply.Text))
 	if err != nil {
 		a.logger.Error("failed to unmarshal Claude memory extraction", zap.Error(err))
 		return fmt.Errorf("failed to unmarshal Claude memory extraction: %w", err)
