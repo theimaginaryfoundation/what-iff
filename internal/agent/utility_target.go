@@ -155,7 +155,9 @@ func (a *Agent) recordUtilityFallback(ctx context.Context, role provider.Utility
 	a.logger.Warn("utility role is falling back past its chosen model", append(fields,
 		zap.String("reason", reason),
 		zap.Error(err))...)
-	if scope != "" {
+	// Only a choice that can't be used is the account's to know about; a failed read (a
+	// database hiccup, or the checkpoint running out of time) says nothing about the choice.
+	if scope != "" && (errors.Is(err, ErrModelDisabled) || errors.Is(err, ErrConnectionUnavailable)) && ctx.Err() == nil {
 		backgroundRunFrom(ctx).failed(models.BackgroundNotice{
 			Step: models.BackgroundFallbackStep(role),
 			Code: models.BackgroundNoticeModelUnavailable,

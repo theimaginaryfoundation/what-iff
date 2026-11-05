@@ -53,6 +53,10 @@ export class BackgroundNoticesComponent {
   readonly settled = input(0);
 
   readonly notices = signal<NoticeView[]>([]);
+  /** The chat the shown notices belong to; another chat's are never shown. */
+  private shownFor: string | null = null;
+  /** Only the latest load may land, so an earlier, slower one can't overwrite it. */
+  private loadToken = 0;
 
   constructor() {
     effect(() => {
@@ -63,13 +67,15 @@ export class BackgroundNoticesComponent {
   }
 
   async load(chatId: string | null): Promise<void> {
-    if (!chatId) {
+    const token = ++this.loadToken;
+    if (chatId !== this.shownFor) {
       this.notices.set([]);
-      return;
+      this.shownFor = chatId;
     }
+    if (!chatId) return;
     try {
       const notices = await firstValueFrom(this.service.list(chatId));
-      if (this.chatId() === chatId) {
+      if (token === this.loadToken) {
         this.notices.set(notices.map(n => this.view(n)));
       }
     } catch {
@@ -124,7 +130,7 @@ export class BackgroundNoticesComponent {
     return {
       id: n.id,
       what,
-      why: `${provider} returned an error${n.model ? ` (${n.model})` : ''}. It's tried again after a few more messages.${times}`,
+      why: `${provider} returned an error${n.model ? ` (${n.model})` : ''}. It runs again as the chat goes on, and this goes away once it works.${times}`,
       action: 'background-models',
       actionLabel: 'Change background models',
     };

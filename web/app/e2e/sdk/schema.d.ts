@@ -15125,10 +15125,10 @@ export interface components {
             id: string;
             /** Format: uuid */
             chat_id: string;
-            /** @description What didn't happen: `scratchpad`, `memory` or `summary` (a checkpoint step), or `fallback_<role>` (a utility role passed over the model chosen for it). */
+            /** @description What didn't happen: `scratchpad`, `memory` or `summary` (a checkpoint step), or `fallback_<role>` (a utility role passed over the model chosen for it during a checkpoint; today that is the `memory` role). */
             step: string;
             /**
-             * @description Why. `provider_not_configured`: the account has no key for `provider`. `provider_error`: the provider was asked and failed; the step is tried again at the chat's next checkpoint. `model_unavailable`: the chosen model couldn't be used, so the role ran on its next choice or its default.
+             * @description Why. `provider_not_configured`: the account has no key for `provider` (or the deployment can't reach it at all). `provider_error`: the provider was asked and failed; background work runs again as the chat goes on. `model_unavailable`: the chosen model couldn't be used (turned off, or its connection gone or unreachable), so the role ran on its next choice or its default.
              * @enum {string}
              */
             code: "provider_not_configured" | "provider_error" | "model_unavailable";

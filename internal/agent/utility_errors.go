@@ -1,15 +1,44 @@
 package agent
 
-import "github.com/theimaginaryfoundation/what-iff/internal/models"
+import (
+	"errors"
+	"fmt"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
+)
 
 // callError names the provider a failed utility call went to, since a role's model, and so
 // its provider, is not fixed at the call site. A connection model is named by its connection.
 func (t utilityTarget) callError(err error) error {
 	provider := models.ProviderForModel(t.provider, t.name).DisplayName()
 	if t.connection != nil {
-		provider = t.connection.Preset
+		provider = connectionPresetName(t.connection.Preset)
 	}
 	return &UtilityCallError{Provider: provider, Model: t.name, Err: err}
+}
+
+// missingProvider marks a utility call that never reached a provider because this deployment
+// has no client for it; the account can only fix it by choosing another model.
+func (t utilityTarget) missingProvider(err error) error {
+	return t.callError(fmt.Errorf("%w: %w", errUtilityProviderMissing, err))
+}
+
+// errUtilityProviderMissing is a utility call's provider not being set up on this deployment.
+var errUtilityProviderMissing = errors.New("provider not set up")
+
+// connectionPresetName is how a person knows a connection preset.
+func connectionPresetName(preset string) string {
+	switch preset {
+	case "openrouter":
+		return "OpenRouter"
+	case "ollama":
+		return "Ollama"
+	case "lmstudio":
+		return "LM Studio"
+	case "custom":
+		return "your custom server"
+	}
+	return preset
 }
 
 // UtilityCallError is a utility call that failed at, or on the way to, its provider.

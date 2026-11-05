@@ -45,9 +45,9 @@ select {
   padding: 0.55rem 0.65rem;
   width: 100%;
 
-  &:focus {
-    border-color: var(--brand);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 18%, transparent);
+  &:focus-visible {
+    border-color: var(--accent, #8c87ff);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #8c87ff) 35%, transparent);
   }
 }
 

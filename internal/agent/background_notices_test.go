@@ -38,8 +38,9 @@ func TestBackgroundRun_MissingKeyBecomesNotice(t *testing.T) {
 		&provider.ModelContext{}, &provider.ModelContext{}, claudeChatCtx(), nil)
 	backgroundRunFrom(ctx).step(models.BackgroundStepMemory, err)
 
-	require.Len(t, run.outcome.Failed, 1)
-	got := run.outcome.Failed[0]
+	out := run.outcome()
+	require.Len(t, out.Failed, 1)
+	got := out.Failed[0]
 	require.Equal(t, models.BackgroundStepMemory, got.Step)
 	require.Equal(t, models.BackgroundNoticeProviderNotConfigured, got.Code)
 	require.Equal(t, "OpenAI", got.Provider)
@@ -73,6 +74,84 @@ func TestBackgroundRun_RecordsFallbacks(t *testing.T) {
 	f.a.utilityTargetFor(ctx, provider.UtilityRoleMemory)
 	f.a.utilityTargetFor(ctx, provider.UtilityRoleSimple)
 
-	require.Equal(t, []models.BackgroundNotice{{Step: "fallback_memory", Code: models.BackgroundNoticeModelUnavailable}}, run.outcome.Failed)
-	require.Equal(t, []models.BackgroundStep{"fallback_simple"}, run.outcome.Succeeded)
+	out := run.outcome()
+	require.Equal(t, []models.BackgroundNotice{{Step: "fallback_memory", Code: models.BackgroundNoticeModelUnavailable}}, out.Failed)
+	require.Equal(t, []models.BackgroundStep{"fallback_simple"}, out.Succeeded)
+}
+
+// One checkpoint resolves a role and calls a step several times; it reports each step once,
+// and a failure anywhere in the run outweighs a success, so a notice is neither counted many
+// times over nor cleared by the same run that saw it fail.
+func TestBackgroundRun_OncePerStepFailureWins(t *testing.T) {
+	t.Parallel()
+	_, run := withBackgroundRun(context.Background())
+	call := &UtilityCallError{Provider: "Mistral", Model: "m", Err: errors.New("503")}
+	run.succeeded(models.BackgroundStepMemory)
+	run.step(models.BackgroundStepMemory, call)
+	run.step(models.BackgroundStepMemory, call)
+	run.succeeded(models.BackgroundStepMemory)
+	run.succeeded(models.BackgroundStepSummary)
+	run.succeeded(models.BackgroundStepSummary)
+
+	out := run.outcome()
+	require.Len(t, out.Failed, 1)
+	require.Equal(t, models.BackgroundStepMemory, out.Failed[0].Step)
+	require.Equal(t, []models.BackgroundStep{models.BackgroundStepSummary}, out.Succeeded)
+}
+
+// A checkpoint that runs out of time, or a server stopping, isn't the provider's doing.
+func TestBackgroundRun_IgnoresCancellation(t *testing.T) {
+	t.Parallel()
+	_, run := withBackgroundRun(context.Background())
+	run.step(models.BackgroundStepSummary, &UtilityCallError{Provider: "OpenAI", Model: "m", Err: context.DeadlineExceeded})
+	run.step(models.BackgroundStepMemory, &UtilityCallError{Provider: "OpenAI", Model: "m", Err: context.Canceled})
+	require.Empty(t, run.outcome().Failed)
+}
+
+// A provider this deployment has no client for was never asked, so it's a missing provider,
+// not a provider error.
+func TestBackgroundNoticeFor_MissingProviderClient(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()}
+	_, err := a.callUtilityOn(context.Background(), utilityTarget{name: "mistral-small-latest", provider: string(models.ModelProviderMistral)}, utilityTestRequest)
+	n, ok := backgroundNoticeFor(models.BackgroundStepMemory, err)
+	require.True(t, ok)
+	require.Equal(t, models.BackgroundNoticeProviderNotConfigured, n.Code)
+	require.Equal(t, "Mistral", n.Provider)
+}
+
+// A connection model's provider is named the way a person knows it.
+func TestUtilityCallError_NamesConnectionPreset(t *testing.T) {
+	t.Parallel()
+	err := utilityTarget{name: "x", connection: &ConnectionEndpoint{Preset: "lmstudio"}}.callError(errors.New("boom"))
+	var call *UtilityCallError
+	require.ErrorAs(t, err, &call)
+	require.Equal(t, "LM Studio", call.Provider)
+}
+
+// Steps run with a collector on their context, and what they found lands on the chat: a
+// failure becomes a notice, and the same step succeeding in a later run clears it.
+func TestWithBackgroundNotices_SavesToTheChat(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	ctx := context.Background()
+	chat, err := f.ent.Chat.Create().SetName("c").SetOwnerID(f.alice).Save(ctx)
+	require.NoError(t, err)
+	missing := &providerkeys.NotConfiguredError{Provider: models.ModelProviderAnthropic}
+
+	f.a.withBackgroundNotices(ctx, f.alice, chat.ID, func(ctx context.Context) {
+		backgroundRunFrom(ctx).step(models.BackgroundStepMemory, missing)
+		backgroundRunFrom(ctx).step(models.BackgroundStepSummary, nil)
+	})
+	got, err := f.a.ds.ListBackgroundNotices(ctx, f.alice, chat.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, models.BackgroundNoticeProviderNotConfigured, got[0].Code)
+
+	f.a.withBackgroundNotices(ctx, f.alice, chat.ID, func(ctx context.Context) {
+		backgroundRunFrom(ctx).step(models.BackgroundStepMemory, nil)
+	})
+	got, err = f.a.ds.ListBackgroundNotices(ctx, f.alice, chat.ID)
+	require.NoError(t, err)
+	require.Empty(t, got)
 }

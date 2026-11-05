@@ -80,7 +80,7 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 		t.connection == nil && models.UsesAnthropicMessagesAPI(t.provider, t.name):
 		prov, _, err := a.claudeProviderForModel(lite)
 		if err != nil {
-			return utilityReply{}, t.callError(err)
+			return utilityReply{}, t.missingProvider(err)
 		}
 		params := provider.UtilityClaudeParams(t.name, req)
 		if t.connection == nil && models.IsZAIModel(t.provider, t.name) {
@@ -101,7 +101,7 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 		return utilityReply{Text: text}, nil
 	case t.usesResponsesAPI():
 		if a.OpenAIProvider == nil {
-			return utilityReply{}, t.callError(fmt.Errorf("OpenAI model %q requested but no OpenAI provider is configured", t.name))
+			return utilityReply{}, t.missingProvider(fmt.Errorf("OpenAI model %q requested but no OpenAI provider is configured", t.name))
 		}
 		a.recordDroppedImages(ctx, t.name, req.Context)
 		resp, err := a.OpenAIProvider.CallWithRetry(ctx, provider.UtilityResponsesParams(t.name, req))
@@ -125,14 +125,14 @@ func (a *Agent) callUtilityChatCompletions(ctx context.Context, t utilityTarget,
 	var adapter provider.AgentAdapter
 	if t.connection == nil && models.IsGeminiModel(t.provider, t.name) {
 		if a.GeminiProvider == nil {
-			return "", t.callError(fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", t.name))
+			return "", t.missingProvider(fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", t.name))
 		}
 		adapter = provider.NewGeminiAdapter(a.GeminiProvider, params, nil, nil, a.logger)
 	} else {
 		var err error
 		adapter, err = a.openAIChatCompletionsAdapter(lite, params, nil, nil)
 		if err != nil {
-			return "", t.callError(err)
+			return "", t.missingProvider(err)
 		}
 	}
 	// The adapter offers no tools, so it has no tool uses to return.

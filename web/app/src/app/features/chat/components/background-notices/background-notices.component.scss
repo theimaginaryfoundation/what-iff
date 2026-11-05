@@ -67,6 +67,6 @@
 
 .background-notice__fix:focus-visible,
 .background-notice__dismiss:focus-visible {
-  outline: 2px solid var(--brand);
+  outline: 2px solid var(--accent, #8c87ff);
   outline-offset: 2px;
 }

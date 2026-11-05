@@ -3061,8 +3061,6 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	// which the next one redoes, not the thread.
 	checkpointCtx, cancelCheckpoint := context.WithTimeout(ctx, checkpointTimeout)
 	defer cancelCheckpoint()
-	checkpointCtx, run := withBackgroundRun(checkpointCtx)
-	defer a.settleBackgroundRun(context.WithoutCancel(ctx), userID, chatMessage.ChatID, run)
 	// Only genuine OpenAI (Responses API) chats can thread checkpoints off a
 	// PreviousResponseID. Every other chat (Anthropic, z.ai, Gemini, a connection
 	// model) rebuilds context from the DB via the "Claude" checkpoint path. Both paths
@@ -3073,14 +3071,16 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	// The memory model is resolved once and pinned for the whole checkpoint. Its steps would
 	// otherwise each resolve it again, and a choice saved mid-checkpoint, or a settings read
 	// that failed only the first time, would send a step that continues the stored response
-	// to a model that can't.
-	memory := a.utilityTargetFor(checkpointCtx, provider.UtilityRoleMemory)
-	checkpointCtx = withUtilityTarget(checkpointCtx, provider.UtilityRoleMemory, memory)
-	if !checkpointChainsResponses(chatCtx, memory) {
-		a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
-	} else {
-		a.runCheckpointOpenAI(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
-	}
+	// to a model that can't. It is resolved inside the run, so a fallback becomes its notice.
+	a.withBackgroundNotices(checkpointCtx, userID, chatMessage.ChatID, func(checkpointCtx context.Context) {
+		memory := a.utilityTargetFor(checkpointCtx, provider.UtilityRoleMemory)
+		checkpointCtx = withUtilityTarget(checkpointCtx, provider.UtilityRoleMemory, memory)
+		if !checkpointChainsResponses(chatCtx, memory) {
+			a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
+		} else {
+			a.runCheckpointOpenAI(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
+		}
+	})
 	if errors.Is(checkpointCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
 		a.logger.Warn("checkpoint ran out of time; the next checkpoint will retry it",
 			zap.String("chat_id", chatMessage.ChatID.String()),

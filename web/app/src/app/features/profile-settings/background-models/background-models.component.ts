@@ -43,6 +43,8 @@ export class BackgroundModelsComponent implements OnInit {
   private readonly modelService = inject(ModelService);
 
   readonly models = signal<readonly Model[]>([]);
+  /** Whether the account's models have loaded, so a choice missing from them really is gone. */
+  readonly modelsLoaded = signal(false);
   readonly utility = signal<UtilityModels | null>(null);
   readonly saving = signal<UtilityRole | null>(null);
   readonly error = signal('');
@@ -55,7 +57,10 @@ export class BackgroundModelsComponent implements OnInit {
 
   constructor() {
     // The account's models change when models are chosen on the Providers tab.
-    this.modelService.models$.pipe(takeUntilDestroyed()).subscribe(models => this.models.set(models));
+    this.modelService.models$.pipe(takeUntilDestroyed()).subscribe(models => {
+      this.models.set(models);
+      if (models.length > 0) this.modelsLoaded.set(true);
+    });
   }
 
   async ngOnInit(): Promise<void> {
@@ -67,6 +72,7 @@ export class BackgroundModelsComponent implements OnInit {
     if (this.models().length === 0) {
       try {
         await firstValueFrom(this.modelService.getModels());
+        this.modelsLoaded.set(true);
       } catch {
         // The selects still offer Default; the error above covers a failed load of the roles.
       }
@@ -100,7 +106,7 @@ export class BackgroundModelsComponent implements OnInit {
       ...UTILITY_ROLE_COPY[r.role],
       chosen: r.account_model_id ?? '',
       defaultLabel: `Default (${fallbackName})`,
-      chosenUnlisted: !!r.account_model_id && !byId.has(r.account_model_id),
+      chosenUnlisted: this.modelsLoaded() && !!r.account_model_id && !byId.has(r.account_model_id),
     };
   }
 }
