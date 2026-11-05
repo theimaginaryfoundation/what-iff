@@ -198,3 +198,16 @@ func TestCallUtilityOn_ZAIBoundsReasoning(t *testing.T) {
 	require.Equal(t, "json_schema", cfg["format"].(map[string]any)["type"], "the schema survives")
 	require.EqualValues(t, provider.ReasoningMaxOutputTokens, (*req)["max_tokens"])
 }
+
+// A built-in model named without its provider is routed on the catalog's provider: a z.ai
+// model goes to z.ai with its reasoning bounded.
+func TestCallUtilityOn_InfersBuiltInProvider(t *testing.T) {
+	t.Parallel()
+	srv, path, req := recordingServer(t, `{"id":"m","type":"message","role":"assistant","model":"glm-5.3","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+	a := &Agent{logger: zap.NewNop(), ZAIProvider: provider.NewClaudeProviderWithBaseURL("k", srv.URL, nil, nil)}
+
+	_, err := a.callUtilityOn(context.Background(), utilityTarget{name: "glm-5.3"}, utilityTestRequest)
+	require.NoError(t, err)
+	require.Equal(t, "/v1/messages", *path)
+	require.Equal(t, "low", (*req)["output_config"].(map[string]any)["effort"])
+}

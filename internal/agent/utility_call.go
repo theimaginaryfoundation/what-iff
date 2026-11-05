@@ -176,6 +176,11 @@ func (a *Agent) callUtilityTarget(ctx context.Context, t utilityTarget, req prov
 
 // callUtilityOn sends a utility call to a model through the API it speaks.
 func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider.UtilityRequest) (utilityReply, error) {
+	// A built-in model named without its provider gets it from the catalog here, once, so
+	// every helper below routes on the same explicit provider.
+	if t.connection == nil && t.provider == "" {
+		t.provider = string(models.ProviderForModel("", t.name))
+	}
 	if req.PreviousResponseID != "" && !t.usesResponsesAPI() {
 		return utilityReply{}, fmt.Errorf("model %q cannot continue a stored Responses conversation", t.name)
 	}
