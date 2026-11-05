@@ -161,4 +161,81 @@ describe('ContextToolsTabComponent', () => {
         expect(fixture.nativeElement.textContent).toContain('Search: "Austin vs Seattle cost of living 2026"');
         expect(fixture.nativeElement.querySelectorAll('.tool-item').length).toBe(0);
     });
+
+    describe('panel search', () => {
+        function search(text: string): void {
+            const input = fixture.nativeElement.querySelector('#context-panel-search') as HTMLInputElement;
+            input.value = text;
+            input.dispatchEvent(new Event('input'));
+            fixture.detectChanges();
+        }
+
+        function seedServers(): void {
+            fixture.componentInstance.connected.set([{ id: 's1', name: 'GitHub', description: 'Repos and issues' } as never]);
+            fixture.componentInstance.available.set([{ id: 's2', name: 'Calendar', description: 'Events' } as never]);
+            fixture.detectChanges();
+        }
+
+        it('labels the search box and exposes it as a search landmark', () => {
+            const input = fixture.nativeElement.querySelector('#context-panel-search') as HTMLInputElement;
+            expect(fixture.nativeElement.querySelector('[role="search"]')).not.toBeNull();
+            expect(fixture.nativeElement.querySelector('label[for="context-panel-search"]')?.textContent).toContain('Search tools, skills and MCP servers');
+            expect(input.type).toBe('search');
+            expect(fixture.nativeElement.querySelector('[role="status"]')).not.toBeNull();
+        });
+
+        it('filters tools, skills and MCP servers together, ignoring case', () => {
+            seedServers();
+
+            search('PDF');
+            expect(fixture.nativeElement.querySelectorAll('.tool-item').length).toBe(0);
+            expect(fixture.nativeElement.textContent).toContain('PDF Forms');
+            expect(fixture.nativeElement.textContent).not.toContain('GitHub');
+
+            search('github');
+            expect(fixture.nativeElement.textContent).toContain('GitHub');
+            expect(fixture.nativeElement.textContent).not.toContain('Calendar');
+            expect(fixture.nativeElement.textContent).not.toContain('PDF Forms');
+
+            search('WEB');
+            expect(fixture.nativeElement.querySelectorAll('.tool-item').length).toBe(1);
+        });
+
+        it('opens the MCP section while searching and announces the result counts', () => {
+            seedServers();
+            const mcp = fixture.nativeElement.querySelectorAll('details')[1] as HTMLDetailsElement;
+            expect(mcp.open).toBe(false);
+
+            search('git');
+            expect(mcp.open).toBe(true);
+            expect(fixture.nativeElement.querySelector('[role="status"]').textContent).toBe('1 result: 0 tools, 0 skills, 1 MCP server');
+        });
+
+        it('announces and shows an empty state, and hides the empty sections', () => {
+            search('zzz');
+            expect(fixture.nativeElement.querySelector('[role="status"]').textContent).toBe('No results for zzz');
+            expect(fixture.nativeElement.textContent).toContain('Nothing matches "zzz".');
+            expect(fixture.nativeElement.querySelectorAll('details').length).toBe(0);
+        });
+
+        it('clears with Escape and restores everything', () => {
+            search('zzz');
+            const input = fixture.nativeElement.querySelector('#context-panel-search') as HTMLInputElement;
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+            fixture.detectChanges();
+
+            expect(fixture.componentInstance.searchText()).toBe('');
+            expect(fixture.nativeElement.querySelectorAll('.tool-item').length).toBe(2);
+            expect(fixture.nativeElement.querySelectorAll('details').length).toBe(2);
+        });
+
+        it('hides the search box on the history tab and ignores the query there', () => {
+            search('zzz');
+            (fixture.nativeElement.querySelectorAll('.context-tabs button')[1] as HTMLButtonElement).click();
+            fixture.detectChanges();
+
+            expect(fixture.nativeElement.querySelector('#context-panel-search')).toBeNull();
+            expect(fixture.nativeElement.textContent).toContain('PDF Forms');
+        });
+    });
 });
