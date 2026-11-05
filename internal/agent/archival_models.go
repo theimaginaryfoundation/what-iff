@@ -19,10 +19,6 @@ func (a *Agent) checkpointChainsResponses(ctx context.Context, chatCtx *chatCont
 	if checkpointRebuildsFromDB(chatCtx) {
 		return false
 	}
-	t, chosen, err := a.chosenUtilityTarget(ctx, provider.UtilityRoleMemory)
-	if err != nil {
-		// The memory calls fail on either path; rebuilding asks nothing of the chat.
-		return false
-	}
+	t, chosen := a.chosenUtilityTarget(ctx, provider.UtilityRoleMemory)
 	return !chosen || t.usesResponsesAPI()
 }
