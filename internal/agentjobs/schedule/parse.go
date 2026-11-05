@@ -14,14 +14,8 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
 	"github.com/google/uuid"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"go.uber.org/zap"
 )
-
-type openAICaller interface {
-	CallWithRetry(ctx context.Context, params responses.ResponseNewParams) (*responses.Response, error)
-}
 
 // agentJobScheduleOutput is the structured output shape for the schedule interpreter.
 // All fields are required strings so the schema has no oneOf (OpenAI does not support oneOf).
@@ -37,6 +31,9 @@ type agentJobScheduleOutput struct {
 }
 
 var scheduleSchema = initScheduleSchema()
+
+// scheduleMaxOutputTokens bounds the schedule interpreter's reply: one small JSON object.
+const scheduleMaxOutputTokens = 800
 
 const recurringPreviewRunCount = 5
 const minRecurringIntervalMinutes = 5
@@ -56,7 +53,7 @@ func initScheduleSchema() map[string]interface{} {
 }
 
 // Parse converts a natural language schedule into a validated schedule spec and preview.
-func Parse(ctx context.Context, caller openAICaller, userID uuid.UUID, scheduleInput string, timezone string, now time.Time) (*models.AgentJobSchedulePreview, error) {
+func Parse(ctx context.Context, caller provider.UtilityCaller, userID uuid.UUID, scheduleInput string, timezone string, now time.Time) (*models.AgentJobSchedulePreview, error) {
 	scheduleInput = strings.TrimSpace(scheduleInput)
 	if scheduleInput == "" {
 		return nil, fmt.Errorf("schedule_input is required")
@@ -105,36 +102,24 @@ func Parse(ctx context.Context, caller openAICaller, userID uuid.UUID, scheduleI
 		fmt.Sprintf("Timezone: %s", timezone),
 	}, "\n")
 
-	params := responses.ResponseNewParams{
-		Model:            models.UtilityModelName,
-		SafetyIdentifier: openai.String(userID.String()),
-		MaxOutputTokens:  openai.Int(800),
-		Instructions:     openai.String(instructions),
-		Input: responses.ResponseNewParamsInputUnion{
-			OfString: openai.String(scheduleInput),
+	out, err := caller.CallUtility(ctx, provider.UtilityRequest{
+		Role:            provider.UtilityRoleQuick,
+		CallPath:        telemetry.CallPathScheduleParse,
+		Instructions:    instructions,
+		Input:           scheduleInput,
+		MaxOutputTokens: scheduleMaxOutputTokens,
+		SafetyUserID:    userID.String(),
+		Schema: &provider.UtilitySchema{
+			Name:        "AgentJobSchedule",
+			Description: "Agent job schedule JSON",
+			Schema:      scheduleSchema,
 		},
-		Text: responses.ResponseTextConfigParam{
-			Format: responses.ResponseFormatTextConfigUnionParam{
-				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-					Name:        "AgentJobSchedule",
-					Schema:      scheduleSchema,
-					Strict:      openai.Bool(true),
-					Description: openai.String("Agent job schedule JSON"),
-					Type:        "json_schema",
-				},
-			},
-		},
-	}
-
-	resp, err := caller.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathScheduleParse), params)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to interpret schedule: %w", err)
 	}
-	if resp == nil {
-		return nil, fmt.Errorf("schedule interpreter returned nil response")
-	}
 
-	raw := strings.TrimSpace(resp.OutputText())
+	raw := strings.TrimSpace(out)
 	if raw == "" {
 		return nil, fmt.Errorf("schedule interpreter returned empty output")
 	}
