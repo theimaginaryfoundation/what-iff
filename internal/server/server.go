@@ -462,7 +462,7 @@ func (s *Server) setupRoutes() {
 	)
 	mountAccountKeyRoutes(authRouter, keyResolver, accountKeys, connectionsHandler)
 	provideraccess.NewHandler(keyResolver, s.logger).RegisterRoutes(authRouter)
-	utilitymodel.NewHandler(dataStore, utilityBuiltIn, s.logger).RegisterRoutes(authRouter)
+	utilitymodel.NewHandler(dataStore, utilityBuiltIn, keyResolver.AccountsSupplyKeys(), s.logger).RegisterRoutes(authRouter)
 	toolsHandler.RegisterRoutes(authRouter)
 	searchHandler.RegisterRoutes(authRouter)
 
