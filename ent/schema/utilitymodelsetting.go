@@ -16,8 +16,10 @@ import (
 // runs on its built-in default.
 //
 // The edges are one-way, with the foreign keys and cascades on this table:
-// deleting an account deletes its settings, and deleting a model (with its
-// connection) deletes the settings that chose it, so the role falls back.
+// deleting an account deletes its settings, and deleting a model row (with its
+// connection) deletes the settings that chose it. A model turned off or retired
+// keeps its row, and its setting; the agent passes over a choice it can't use,
+// falling back to the next one or the role's built-in model.
 type UtilityModelSetting struct {
 	ent.Schema
 }

@@ -51,6 +51,16 @@ func (ds *Datastore) ListUtilityModelSettings(ctx context.Context, userID uuid.U
 // chooses from the catalog and its own connections' models, and the deployment,
 // whose choice applies to every account, from the catalog only.
 func (ds *Datastore) SetUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID uuid.UUID) error {
+	err := ds.setUtilityModel(ctx, scope, userID, role, modelID)
+	if ent.IsConstraintError(err) {
+		// Two writes for the same role raced: both cleared nothing, and the other one saved
+		// first. Once more replaces it, so the last write wins.
+		err = ds.setUtilityModel(ctx, scope, userID, role, modelID)
+	}
+	return err
+}
+
+func (ds *Datastore) setUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID uuid.UUID) error {
 	tx, err := ds.dbClient.Tx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin utility model setting: %w", err)

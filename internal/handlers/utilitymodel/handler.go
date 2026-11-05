@@ -73,6 +73,10 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := h.store.SetUtilityModel(r.Context(), models.UtilityScopeAccount, userID, role, req.ModelID)
+	if errors.Is(err, datastore.ErrExperimentalModelNotAllowed) {
+		handlerutils.RespondWithError(w, h.logger, http.StatusForbidden, handlerutils.CodeNotSet, "Experimental models are not enabled for this account", nil)
+		return
+	}
 	if errors.Is(err, datastore.ErrModelNotFound) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "That model is not available", err)
 		return

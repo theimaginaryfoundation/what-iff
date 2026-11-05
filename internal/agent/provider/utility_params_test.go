@@ -314,3 +314,30 @@ func TestOpenAIRejectedImages_MatchesSanitizer(t *testing.T) {
 	require.Equal(t, count(mc)-count(SanitizeImagesForOpenAIInput(mc)), noData+unsupported)
 	require.Equal(t, 5, count(mc), "the sanitizer works on a clone")
 }
+
+// A conversation's own system messages (its system prompt, and a scratchpad rendered after its
+// turns) join the one leading system message rather than appearing mid-conversation.
+func TestUtilityChatCompletionParams_ConversationHasOneLeadingSystemMessage(t *testing.T) {
+	t.Parallel()
+	mc := &ModelContext{}
+	mc.Append(SegmentKindSystemPrompt, RoleDeveloper, "You are Vix.", false)
+	mc.Append(SegmentKindHistoryTurn, RoleUser, "hi", false)
+	mc.Append(SegmentKindHistoryTurn, RoleAssistant, "hello", false)
+	mc.Append(SegmentKindScratchpad, RoleDeveloper, "scratchpad notes", false)
+	raw, err := json.Marshal(UtilityChatCompletionParams("m", UtilityRequest{Instructions: "summarize", Context: mc}))
+	require.NoError(t, err)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+
+	msgs := body["messages"].([]any)
+	var roles []string
+	for _, m := range msgs {
+		roles = append(roles, m.(map[string]any)["role"].(string))
+	}
+	require.Equal(t, "system", roles[0])
+	require.NotContains(t, roles[1:], "system", "no system message after the first")
+	lead := msgs[0].(map[string]any)["content"].(string)
+	require.Contains(t, lead, "summarize")
+	require.Contains(t, lead, "You are Vix.")
+	require.Contains(t, lead, "scratchpad notes")
+}
