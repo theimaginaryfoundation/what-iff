@@ -13,6 +13,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerconnections"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 )
 
@@ -151,4 +152,13 @@ func TestWithBackgroundNotices_SavesToTheChat(t *testing.T) {
 	got, err = f.a.ds.ListBackgroundNotices(ctx, f.alice, chat.ID)
 	require.NoError(t, err)
 	require.Empty(t, got)
+}
+
+// Every connection preset a person can add has a name they'd know, so a notice never shows a
+// preset's code.
+func TestConnectionPresetName_EveryPreset(t *testing.T) {
+	t.Parallel()
+	for _, preset := range []string{providerconnections.PresetOpenRouter, providerconnections.PresetOllama, providerconnections.PresetLMStudio, providerconnections.PresetCustom} {
+		require.NotEqual(t, preset, connectionPresetName(preset), preset)
+	}
 }

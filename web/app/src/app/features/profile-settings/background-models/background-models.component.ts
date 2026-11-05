@@ -46,6 +46,8 @@ export class BackgroundModelsComponent implements OnInit {
   readonly models = signal<readonly Model[]>([]);
   /** Whether the account's models have loaded, so a choice missing from them really is gone. */
   readonly modelsLoaded = signal(false);
+  /** The account's models couldn't be loaded, so only Default can be offered. */
+  readonly modelsFailed = signal(false);
   readonly utility = signal<UtilityModels | null>(null);
   readonly saving = signal<UtilityRole | null>(null);
   readonly error = signal('');
@@ -75,7 +77,7 @@ export class BackgroundModelsComponent implements OnInit {
         await firstValueFrom(this.modelService.getModels());
         this.modelsLoaded.set(true);
       } catch {
-        // The selects still offer Default; the error above covers a failed load of the roles.
+        this.modelsFailed.set(true);
       }
     }
   }

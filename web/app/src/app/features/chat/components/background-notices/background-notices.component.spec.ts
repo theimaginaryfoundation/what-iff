@@ -82,6 +82,8 @@ describe('BackgroundNoticesComponent', () => {
     const el = await render([notice({ code: 'provider_not_configured', provider: 'Mistral' }), notice({ id: 'b', step: 'fallback_memory', code: 'model_unavailable' })]);
     expect(texts(el).length).toBe(2);
     expect(el.querySelector('[data-testid="background-notice-fix"]')).toBeNull();
+    expect(texts(el)[0]).toContain("Mistral isn't set up on this server.");
+    expect(texts(el)[0]).not.toContain('Add one');
   });
 
   it('offers to change background models for a provider error', async () => {

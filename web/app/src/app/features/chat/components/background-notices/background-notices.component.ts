@@ -125,6 +125,15 @@ export class BackgroundNoticesComponent {
     const what = STEP_COPY[n.step] ?? "Some background work on this chat didn't finish.";
     const provider = n.provider || 'The provider';
     if (n.code === 'provider_not_configured') {
+      if (!this.keys.accountsSupplyKeys()) {
+        return {
+          id: n.id,
+          what,
+          why: `${provider} isn't set up on this server${n.model ? ` for ${n.model}` : ''}.${times}`,
+          action: null,
+          actionLabel: '',
+        };
+      }
       return {
         id: n.id,
         what,

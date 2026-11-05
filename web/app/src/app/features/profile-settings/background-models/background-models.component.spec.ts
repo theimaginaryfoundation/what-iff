@@ -31,6 +31,7 @@ function utility(overrides: Partial<Record<'memory' | 'quick' | 'personality', {
 describe('BackgroundModelsComponent', () => {
   let service: { get: ReturnType<typeof vi.fn>; choose: ReturnType<typeof vi.fn>; clear: ReturnType<typeof vi.fn> };
   let models$: BehaviorSubject<Model[]>;
+  let modelService: { models$: BehaviorSubject<Model[]>; getModels: ReturnType<typeof vi.fn> };
   let fixture: ComponentFixture<BackgroundModelsComponent>;
 
   async function render(initial: UtilityModels): Promise<HTMLElement> {
@@ -57,12 +58,13 @@ describe('BackgroundModelsComponent', () => {
   beforeEach(async () => {
     service = { get: vi.fn(), choose: vi.fn(), clear: vi.fn() };
     models$ = new BehaviorSubject<Model[]>(MODELS);
+    modelService = { models$, getModels: vi.fn(() => of(MODELS)) };
     await TestBed.configureTestingModule({
       imports: [BackgroundModelsComponent],
       providers: [
         provideZonelessChangeDetection(),
         { provide: UtilityModelsService, useValue: service },
-        { provide: ModelService, useValue: { models$, getModels: vi.fn(() => of(MODELS)) } },
+        { provide: ModelService, useValue: modelService },
       ],
     }).compileComponents();
   });
@@ -117,5 +119,16 @@ describe('BackgroundModelsComponent', () => {
   it('shows nothing where the deployment chooses the models', async () => {
     const el = await render({ ...utility(), accounts_choose: false });
     expect(el.querySelector('[data-testid="background-models"]')).toBeNull();
+  });
+
+  it("says so when the account's models can't be loaded", async () => {
+    models$.next([]);
+    modelService.getModels.mockReturnValue(throwError(() => new Error('offline')));
+    const el = await render(utility());
+    // ngOnInit awaits the roles, then the models, so the failure lands a tick after render.
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(el.querySelector('[data-testid="background-models-unloaded"]')?.textContent).toContain('only Default is offered');
+    expect(select(el, 'memory').options.length).toBe(1);
   });
 });

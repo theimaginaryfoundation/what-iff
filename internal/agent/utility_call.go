@@ -310,7 +310,12 @@ type UtilityCallError struct {
 	Err      error
 }
 
-func (e *UtilityCallError) Error() string { return e.Provider + ": " + e.Err.Error() }
+func (e *UtilityCallError) Error() string {
+	if e.Model == "" {
+		return e.Provider + ": " + e.Err.Error()
+	}
+	return e.Provider + " (" + e.Model + "): " + e.Err.Error()
+}
 
 func (e *UtilityCallError) Unwrap() error { return e.Err }
 
