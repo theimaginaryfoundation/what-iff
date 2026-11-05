@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3"
@@ -99,4 +100,28 @@ func TestCallUtilityOn_PreviousResponseIDNeedsResponsesAPI(t *testing.T) {
 	req.PreviousResponseID = "resp_1"
 	_, err := a.callUtilityOn(context.Background(), "claude-haiku-4-5", "", req)
 	require.ErrorContains(t, err, "cannot continue a stored Responses conversation")
+}
+
+// A failed call names the provider it went to, and keeps the cause for errors.Is.
+func TestCallUtilityOn_ErrorNamesProvider(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	t.Cleanup(srv.Close)
+	a := &Agent{
+		logger:          zap.NewNop(),
+		ClaudeProvider:  provider.NewClaudeProviderWithBaseURL("k", srv.URL, nil, nil),
+		MistralProvider: provider.NewMistralProvider("k", srv.URL, nil, nil),
+		OpenAIProvider:  newHTTPTestOpenAIProvider(srv.URL),
+	}
+	for _, tt := range []struct{ model, modelProvider, name string }{
+		{"claude-haiku-4-5", "", "Anthropic:"},
+		{"mistral-small-latest", string(models.ModelProviderMistral), "Mistral:"},
+		{models.UtilityModelName, "", "OpenAI:"},
+	} {
+		_, err := a.callUtilityOn(context.Background(), tt.model, tt.modelProvider, utilityTestRequest)
+		require.Error(t, err, tt.model)
+		require.True(t, strings.HasPrefix(err.Error(), tt.name), "%s: %v", tt.model, err)
+	}
 }
