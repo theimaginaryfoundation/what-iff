@@ -93,6 +93,8 @@ func TestExtractAndStoreImportedMemories_AppliesThreadPersonalityAutoPin(t *test
 			a, mock := newImportMemoryScopeAgent(t, extracted)
 			userID, chatID, personalityID := uuid.New(), uuid.New(), uuid.New()
 
+			// Extraction runs on the memory role's model: no setting chooses one.
+			expectNoUtilitySettings(mock)
 			// Rehydration-time personality lookup.
 			lookup := mock.ExpectQuery("SELECT .* FROM `personalities`")
 			switch {
