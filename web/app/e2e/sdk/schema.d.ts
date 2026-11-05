@@ -3302,6 +3302,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description The deployment supplies the keys, so it chooses the models */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Not a utility role */
                 404: {
                     headers: {
@@ -3340,6 +3349,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The deployment supplies the keys, so it chooses the models */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -14988,6 +15006,8 @@ export interface components {
             built_in_model: string;
         };
         UtilityModels: {
+            /** @description Whether an account may choose its own models: only where accounts bring their own keys, and so pay for their background work. Where the deployment supplies the keys, it chooses; account choices are refused and not reported. */
+            accounts_choose: boolean;
             roles: components["schemas"]["UtilityRoleModel"][];
         };
         SetUtilityModelRequest: {

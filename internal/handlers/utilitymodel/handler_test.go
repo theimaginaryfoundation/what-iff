@@ -74,7 +74,7 @@ func newFixture(t *testing.T) *fixture {
 	f := &fixture{store: &fakeStore{owners: map[int]uuid.UUID{}, usable: map[uuid.UUID]bool{}}, account: uuid.New()}
 	f.router = mux.NewRouter()
 	builtIn := func(r models.UtilityRole) string { return "built-in-" + string(r) }
-	NewHandler(f.store, builtIn, zap.NewNop()).RegisterRoutes(f.router)
+	NewHandler(f.store, builtIn, true, zap.NewNop()).RegisterRoutes(f.router)
 	return f
 }
 
@@ -121,6 +121,7 @@ func TestList_EveryRoleInOrderWithBothScopes(t *testing.T) {
 	require.Equal(t, &deployment, quick.DeploymentModelID)
 	require.Nil(t, quick.AccountModelID, "another account's choice is not this one's")
 	require.Contains(t, rec.Body.String(), `"account_model_id":null`, "an unset choice is null, not missing")
+	require.True(t, got.AccountsChoose)
 }
 
 func TestSetAndClear(t *testing.T) {
@@ -158,4 +159,33 @@ func TestSet_Refusals(t *testing.T) {
 	rec, _ = f.do(t, http.MethodGet, "/utility-models", "", false)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 	require.Empty(t, f.store.settings, "a refused write changes nothing")
+}
+
+// Where the deployment supplies the keys it pays for background work, so it chooses: an
+// account's writes are refused, and a choice stored before isn't reported as in force.
+func TestDeploymentChooses(t *testing.T) {
+	t.Parallel()
+	store := &fakeStore{owners: map[int]uuid.UUID{}, usable: map[uuid.UUID]bool{}}
+	account, model := uuid.New(), uuid.New()
+	store.usable[model] = true
+	require.NoError(t, store.SetUtilityModel(context.Background(), models.UtilityScopeAccount, account, models.UtilityRoleMemory, model))
+	router := mux.NewRouter()
+	NewHandler(store, func(models.UtilityRole) string { return "built-in" }, false, zap.NewNop()).RegisterRoutes(router)
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req = req.WithContext(apicontext.WithUserID(req.Context(), account))
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := do(http.MethodGet, "/utility-models", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got models.UtilityModels
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.False(t, got.AccountsChoose)
+	require.Nil(t, roleModel(got, models.UtilityRoleMemory).AccountModelID)
+
+	require.Equal(t, http.StatusForbidden, do(http.MethodPut, "/utility-models/memory", `{"model_id":"`+model.String()+`"}`).Code)
+	require.Equal(t, http.StatusForbidden, do(http.MethodDelete, "/utility-models/memory", "").Code)
 }

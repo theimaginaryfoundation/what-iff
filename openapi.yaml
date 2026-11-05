@@ -1768,6 +1768,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '403':
+          description: The deployment supplies the keys, so it chooses the models
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: Not a utility role
           content:
@@ -1789,6 +1795,12 @@ paths:
                 $ref: '#/components/schemas/UtilityModels'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: The deployment supplies the keys, so it chooses the models
           content:
             application/json:
               schema:
@@ -11176,8 +11188,15 @@ components:
             on an Anthropic model keeps a Claude model for its memory steps.
     UtilityModels:
       type: object
-      required: [roles]
+      required: [accounts_choose, roles]
       properties:
+        accounts_choose:
+          type: boolean
+          description: >-
+            Whether an account may choose its own models: only where accounts
+            bring their own keys, and so pay for their background work. Where the
+            deployment supplies the keys, it chooses; account choices are refused
+            and not reported.
         roles:
           type: array
           items:
