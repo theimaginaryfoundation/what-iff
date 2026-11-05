@@ -70,19 +70,22 @@ func (a *Agent) callUtilityOn(ctx context.Context, model, modelProvider string, 
 		}
 		msg, err := prov.Call(ctx, provider.UtilityClaudeParams(model, req))
 		if err != nil {
-			return utilityReply{}, err
+			return utilityReply{}, utilityCallError(modelProvider, model, err)
 		}
 		return utilityReply{Text: provider.ExtractClaudeText(msg)}, nil
 	case models.UsesOpenAIChatCompletionsAPI(modelProvider, model):
 		text, err := a.callUtilityChatCompletions(ctx, model, modelProvider, req)
-		return utilityReply{Text: text}, err
+		if err != nil {
+			return utilityReply{}, err
+		}
+		return utilityReply{Text: text}, nil
 	case responsesAPI:
 		if a.OpenAIProvider == nil {
 			return utilityReply{}, fmt.Errorf("OpenAI model %q requested but no OpenAI provider is configured", model)
 		}
 		resp, err := a.OpenAIProvider.CallWithRetry(ctx, provider.UtilityResponsesParams(model, req))
 		if err != nil {
-			return utilityReply{}, err
+			return utilityReply{}, utilityCallError(modelProvider, model, err)
 		}
 		if resp == nil {
 			return utilityReply{}, errors.New("utility call returned no response")
@@ -112,10 +115,16 @@ func (a *Agent) callUtilityChatCompletions(ctx context.Context, model, modelProv
 	}
 	resp, _, err := adapter.Call(ctx)
 	if err != nil {
-		return "", err
+		return "", utilityCallError(modelProvider, model, err)
 	}
 	if resp == nil {
 		return "", errors.New("utility call returned no response")
 	}
 	return resp.Text, nil
+}
+
+// utilityCallError names the provider a failed utility call went to, since a role's model,
+// and so its provider, is not fixed at the call site.
+func utilityCallError(modelProvider, model string, err error) error {
+	return fmt.Errorf("%s: %w", models.ProviderForModel(modelProvider, model).DisplayName(), err)
 }
