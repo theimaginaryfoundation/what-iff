@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/anthropics/anthropic-sdk-go"
+
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
@@ -147,7 +149,13 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 		if err != nil {
 			return utilityReply{}, err
 		}
-		msg, err := prov.Call(ctx, provider.UtilityClaudeParams(t.name, req))
+		params := provider.UtilityClaudeParams(t.name, req)
+		if t.connection == nil && models.IsZAIModel(t.provider, t.name) {
+			// GLM always reasons; left alone it can spend the whole cap and answer nothing.
+			// Background work wants little of it, as a chat turn with a low effort does.
+			provider.ApplyZAIReasoningEffort(&params, anthropic.OutputConfigEffortLow)
+		}
+		msg, err := prov.Call(ctx, params)
 		if err != nil {
 			return utilityReply{}, t.callError(err)
 		}

@@ -143,13 +143,25 @@ func UtilityClaudeParams(model string, req UtilityRequest) anthropic.MessageNewP
 }
 
 // UtilityChatCompletionParams renders a utility call for an OpenAI-compatible
-// Chat Completions API. Instructions and developer turns are system messages.
+// Chat Completions API. Some of those APIs accept a system message only first,
+// so the instructions and developer turns form one leading system message; with
+// a conversation, the conversation's own messages follow it.
 func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCompletionNewParams {
 	params := openai.ChatCompletionNewParams{
 		Model: shared.ChatModel(model),
 	}
+	var system []string
 	if req.Instructions != "" {
-		params.Messages = append(params.Messages, openai.SystemMessage(req.Instructions))
+		system = append(system, req.Instructions)
+	}
+	turns := utilityMessages(req)
+	for _, m := range turns {
+		if m.Role == RoleDeveloper {
+			system = append(system, m.Text)
+		}
+	}
+	if len(system) > 0 {
+		params.Messages = append(params.Messages, openai.SystemMessage(strings.Join(system, "\n\n")))
 	}
 	if req.Context != nil {
 		params.Messages = append(params.Messages, req.Context.BuildOpenAIChatCompletionParams(model).Messages...)
@@ -157,19 +169,17 @@ func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCo
 	if req.MaxOutputTokens > 0 {
 		params.MaxCompletionTokens = openai.Int(req.MaxOutputTokens)
 	}
-	for _, m := range utilityMessages(req) {
-		if m.Role == RoleDeveloper {
-			params.Messages = append(params.Messages, openai.SystemMessage(m.Text))
-			continue
-		}
-		if m.ImageDataURL == "" {
+	for _, m := range turns {
+		switch {
+		case m.Role == RoleDeveloper:
+		case m.ImageDataURL == "":
 			params.Messages = append(params.Messages, openai.UserMessage(m.Text))
-			continue
+		default:
+			params.Messages = append(params.Messages, openai.UserMessage([]openai.ChatCompletionContentPartUnionParam{
+				openai.TextContentPart(m.Text),
+				openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: m.ImageDataURL}),
+			}))
 		}
-		params.Messages = append(params.Messages, openai.UserMessage([]openai.ChatCompletionContentPartUnionParam{
-			openai.TextContentPart(m.Text),
-			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: m.ImageDataURL}),
-		}))
 	}
 	if req.Schema != nil {
 		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{

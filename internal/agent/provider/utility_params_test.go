@@ -179,10 +179,12 @@ func TestUtilityChatCompletionParams(t *testing.T) {
 
 	require.EqualValues(t, 200, body["max_completion_tokens"])
 	msgs := body["messages"].([]any)
-	require.Len(t, msgs, 3)
+	require.Len(t, msgs, 2)
 	require.Equal(t, "system", msgs[0].(map[string]any)["role"])
-	require.Equal(t, "system", msgs[1].(map[string]any)["role"], "developer turns are system messages")
-	parts := msgs[2].(map[string]any)["content"].([]any)
+	require.Equal(t, "extract\n\nskip duplicates", msgs[0].(map[string]any)["content"],
+		"one leading system message: some providers take a system message only first")
+	require.Equal(t, "user", msgs[1].(map[string]any)["role"])
+	parts := msgs[1].(map[string]any)["content"].([]any)
 	require.Equal(t, "image_url", parts[1].(map[string]any)["type"])
 	format := body["response_format"].(map[string]any)
 	require.Equal(t, "json_schema", format["type"])

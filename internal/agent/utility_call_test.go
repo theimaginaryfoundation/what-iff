@@ -181,3 +181,20 @@ func TestCallUtility_CountsImagesLeftOut(t *testing.T) {
 			telemetry.AttrReason.String(reason)), reason)
 	}
 }
+
+// GLM always reasons, so a utility call on it bounds the reasoning low and raises the cap, or
+// the reasoning can use the whole cap and leave no answer.
+func TestCallUtilityOn_ZAIBoundsReasoning(t *testing.T) {
+	t.Parallel()
+	srv, path, req := recordingServer(t, `{"id":"m","type":"message","role":"assistant","model":"glm-5","content":[{"type":"text","text":"named"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+	a := &Agent{logger: zap.NewNop(), ZAIProvider: provider.NewClaudeProviderWithBaseURL("k", srv.URL, nil, nil)}
+
+	out, err := a.callUtilityOn(context.Background(), utilityTarget{name: "glm-5", provider: string(models.ModelProviderZAI)}, utilityTestRequest)
+	require.NoError(t, err)
+	require.Equal(t, "named", out.Text)
+	require.Equal(t, "/v1/messages", *path)
+	cfg := (*req)["output_config"].(map[string]any)
+	require.Equal(t, "low", cfg["effort"])
+	require.Equal(t, "json_schema", cfg["format"].(map[string]any)["type"], "the schema survives")
+	require.EqualValues(t, provider.ReasoningMaxOutputTokens, (*req)["max_tokens"])
+}
