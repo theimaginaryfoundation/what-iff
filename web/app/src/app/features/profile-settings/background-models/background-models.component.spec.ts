@@ -18,6 +18,7 @@ const MODELS: Model[] = [
 function utility(overrides: Partial<Record<'memory' | 'simple' | 'personality', { account?: string; deployment?: string }>> = {}): UtilityModels {
   const builtIn = { memory: 'gpt-5.6-luna', simple: 'gpt-5.6-luna', personality: 'gpt-5.1' } as const;
   return {
+    accounts_choose: true,
     roles: (['memory', 'simple', 'personality'] as const).map(role => ({
       role,
       account_model_id: overrides[role]?.account ?? null,
@@ -111,5 +112,10 @@ describe('BackgroundModelsComponent', () => {
     const el = await render(utility({ memory: { account: 'turned-off' } }));
     const memory = select(el, 'memory');
     expect(memory.selectedOptions[0].textContent?.trim()).toBe('Chosen model is unavailable; using Default (GPT-5.6 Luna)');
+  });
+
+  it('shows nothing where the deployment chooses the models', async () => {
+    const el = await render({ ...utility(), accounts_choose: false });
+    expect(el.querySelector('[data-testid="background-models"]')).toBeNull();
   });
 });

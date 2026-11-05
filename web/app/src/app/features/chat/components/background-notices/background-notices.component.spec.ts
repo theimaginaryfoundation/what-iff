@@ -77,9 +77,15 @@ describe('BackgroundNoticesComponent', () => {
     expect(settings.open).toHaveBeenCalledWith('providers');
   });
 
-  it('offers background models instead where the deployment supplies the keys', async () => {
+  it('offers no fix where the deployment supplies the keys, since it chooses the models', async () => {
     accountsSupplyKeys.set(false);
-    const el = await render([notice({ code: 'provider_not_configured', provider: 'Mistral' })]);
+    const el = await render([notice({ code: 'provider_not_configured', provider: 'Mistral' }), notice({ id: 'b', step: 'fallback_memory', code: 'model_unavailable' })]);
+    expect(texts(el).length).toBe(2);
+    expect(el.querySelector('[data-testid="background-notice-fix"]')).toBeNull();
+  });
+
+  it('offers to change background models for a provider error', async () => {
+    const el = await render([notice({ provider: 'Mistral' })]);
     const fix = el.querySelector('[data-testid="background-notice-fix"]') as HTMLButtonElement;
     expect(fix.textContent?.trim()).toBe('Change background models');
     fix.click();

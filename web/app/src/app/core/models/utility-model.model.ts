@@ -11,6 +11,8 @@ export interface UtilityRoleModel {
 }
 
 export interface UtilityModels {
+  /** Whether the account may choose: only where it brings its own keys, and so pays. */
+  accounts_choose: boolean;
   roles: UtilityRoleModel[];
 }
 
