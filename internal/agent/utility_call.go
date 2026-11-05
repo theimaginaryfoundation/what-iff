@@ -30,6 +30,13 @@ func utilityBuiltIn(role provider.UtilityRole) (model string, modelProvider mode
 	}
 }
 
+// UtilityBuiltInModel names the model a utility role runs on when neither the account nor the
+// deployment chose one.
+func UtilityBuiltInModel(role models.UtilityRole) string {
+	name, _ := utilityBuiltIn(role)
+	return name
+}
+
 // utilityTarget is the model a utility call runs on.
 type utilityTarget struct {
 	name string
