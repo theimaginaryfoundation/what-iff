@@ -16,6 +16,7 @@ Serves an account's choice of model for each utility role: the background work, 
 
 ## Non-obvious decisions
 
+- Accounts choose only where they bring their own keys (`providerkeys` `AccountsSupplyKeys`), since then they pay for their background work; where the deployment supplies the keys, writes are a 403 and `accounts_choose` is false, and a choice stored before is not reported.
 - It writes the account scope only.
   The deployment's choices are set elsewhere; this package only reports them.
 - The datastore decides which models an account may choose (the catalog and its own connections' models); a refusal is a 400, "That model is not available".
@@ -24,7 +25,7 @@ Serves an account's choice of model for each utility role: the background work, 
 
 ## Testing
 
-- `handler_test.go` — over a fake store: every role in order with both scopes, never another account's choice; setting and clearing; and refusals (a model the account can't use, no model, an unknown role, no signed-in account) that change nothing.
+- `handler_test.go` — over a fake store: every role in order with both scopes, never another account's choice; setting and clearing; refusals (a model the account can't use, no model, an unknown role, no signed-in account) that change nothing; and a deployment that supplies the keys refusing account writes.
 
 ## Related documentation
 

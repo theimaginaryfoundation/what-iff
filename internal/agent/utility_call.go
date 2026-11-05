@@ -75,7 +75,7 @@ func (a *Agent) chosenUtilityTarget(ctx context.Context, role provider.UtilityRo
 		a.recordUtilityFallback(ctx, role, "", uuid.Nil, err)
 		return utilityTarget{}, false
 	}
-	for _, scope := range []models.UtilityScope{models.UtilityScopeAccount, models.UtilityScopeDeployment} {
+	for _, scope := range a.utilityScopes() {
 		for _, s := range settings {
 			if s.Role != role || s.Scope != scope {
 				continue
@@ -88,6 +88,16 @@ func (a *Agent) chosenUtilityTarget(ctx context.Context, role provider.UtilityRo
 		}
 	}
 	return utilityTarget{}, false
+}
+
+// utilityScopes are the scopes whose choices count, first wins. An account chooses only where it
+// brings its own keys and so pays for its background work; where the deployment supplies the
+// keys, it pays, and only its choices count, whatever an account stored before.
+func (a *Agent) utilityScopes() []models.UtilityScope {
+	if a.keyResolver != nil && !a.keyResolver.AccountsSupplyKeys() {
+		return []models.UtilityScope{models.UtilityScopeDeployment}
+	}
+	return []models.UtilityScope{models.UtilityScopeAccount, models.UtilityScopeDeployment}
 }
 
 // settingTarget is the model a setting chose, if it can still be used.
