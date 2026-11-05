@@ -37,6 +37,7 @@ import { AvatarComponent } from '../../shared/ui/avatar/avatar.component';
 import { PersonaAccentScopeComponent } from '../../features/personality/picker/persona-accent-scope.component';
 import { AppSidebarHeaderComponent } from './app-sidebar-header.component';
 import { AppSidebarProfileComponent } from './app-sidebar-profile.component';
+import { SidebarRecentJobsComponent } from './sidebar-recent-jobs.component';
 import { APP_MODE_HINT, CONFIG_MODE_HINT, appNavItems, configNavItems, NavItem, navTooltip } from './nav.helpers';
 
 const PORTRAIT_SOURCE_WIDTH = 200;
@@ -67,6 +68,7 @@ const SIDEBAR_MOBILE_QUERY = '(max-width: 1023px)';
   standalone: true,
   imports: [
     RouterLink,
+    SidebarRecentJobsComponent,
     RouterLinkActive,
     AsyncPipe,
     AuthImagePipe,
@@ -510,6 +512,10 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
 
   isSkillsView(): boolean {
     return this.router.url.startsWith('/skills') || this.router.url.startsWith('/rituals') || this.router.url.startsWith('/ritual');
+  }
+
+  isJobsView(): boolean {
+    return this.router.url.startsWith('/agent-jobs');
   }
 
   isModeView(): boolean {
