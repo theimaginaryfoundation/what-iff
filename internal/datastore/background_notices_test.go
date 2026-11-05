@@ -10,8 +10,9 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
+// Serial, like the other tests that create tables from the generated schema: its shared
+// definitions are written to by the migrator, so doing that in parallel is a data race.
 func TestBackgroundNotices_Lifecycle(t *testing.T) {
-	t.Parallel()
 	ds, cleanup := newTestDatastore(t, createGeneratedTestSchema)
 	t.Cleanup(cleanup)
 	ctx := context.Background()
