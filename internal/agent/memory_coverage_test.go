@@ -83,12 +83,18 @@ func claudeMessageTextJSONBody(id, text string) string {
 		`"usage":{"input_tokens":5,"output_tokens":7}}`
 }
 
-func TestExtractMemoriesWithScratchpadDeltaClaude_NilProviderReturnsError(t *testing.T) {
+// claudeChatCtx is a chat on a native Anthropic model, whose rebuilt-context checkpoint
+// calls stay on Claude.
+func claudeChatCtx(memories ...string) *chatContext {
+	return &chatContext{chat: &models.Chat{}, model: "claude-sonnet-4-5", modelProvider: string(models.ModelProviderAnthropic), memories: memories}
+}
+
+func TestExtractMemoriesWithScratchpadDeltaClaude_ClaudeChatWithoutAnthropicProviderReturnsError(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
 	err := a.extractMemoriesWithScratchpadDeltaClaude(context.Background(), uuid.New(), uuid.New(),
-		&provider.ModelContext{}, &provider.ModelContext{}, &chatContext{chat: &models.Chat{}}, nil)
-	require.ErrorContains(t, err, "ClaudeProvider is nil")
+		&provider.ModelContext{}, &provider.ModelContext{}, claudeChatCtx(), nil)
+	require.ErrorContains(t, err, "ANTHROPIC_API_KEY is not configured")
 }
 
 func TestExtractMemoriesWithScratchpadDeltaClaude_ProviderErrorIsWrapped(t *testing.T) {
@@ -100,8 +106,8 @@ func TestExtractMemoriesWithScratchpadDeltaClaude_ProviderErrorIsWrapped(t *test
 
 	a := &Agent{logger: zap.NewNop(), ClaudeProvider: newHTTPTestClaudeProvider(srv.URL)}
 	err := a.extractMemoriesWithScratchpadDeltaClaude(context.Background(), uuid.New(), uuid.New(),
-		&provider.ModelContext{}, &provider.ModelContext{}, &chatContext{chat: &models.Chat{}}, nil)
-	require.ErrorContains(t, err, "Claude memory extraction failed")
+		&provider.ModelContext{}, &provider.ModelContext{}, claudeChatCtx(), nil)
+	require.ErrorContains(t, err, "memory extraction failed")
 }
 
 func TestExtractMemoriesWithScratchpadDeltaClaude_SuccessWithNoMemoriesIsNoOpDownstream(t *testing.T) {
@@ -115,8 +121,47 @@ func TestExtractMemoriesWithScratchpadDeltaClaude_SuccessWithNoMemoriesIsNoOpDow
 
 	a := &Agent{logger: zap.NewNop(), ClaudeProvider: newHTTPTestClaudeProvider(srv.URL)}
 	err := a.extractMemoriesWithScratchpadDeltaClaude(context.Background(), uuid.New(), uuid.New(),
-		&provider.ModelContext{}, &provider.ModelContext{}, &chatContext{chat: &models.Chat{}, memories: []string{"m1"}}, nil)
+		&provider.ModelContext{}, &provider.ModelContext{}, claudeChatCtx("m1"), nil)
 	require.NoError(t, err)
+}
+
+// A chat that isn't on a native Anthropic model extracts its memories on the OpenAI archival
+// model, so an account without an Anthropic key still gets them (Gemini here; OpenRouter,
+// local and Custom connections take the same path).
+func TestExtractMemoriesWithScratchpadDeltaClaude_NonClaudeChatUsesOpenAIWithoutAnthropic(t *testing.T) {
+	t.Parallel()
+	srv, reqs := capturingResponsesServer(t, responseTextJSONBody("resp_1", `{\"memories\":[]}`))
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
+	chatCtx := &chatContext{chat: &models.Chat{}, model: "gemini-3.5", modelProvider: string(models.ModelProviderGoogle), memories: []string{"m1"}}
+
+	err := a.extractMemoriesWithScratchpadDeltaClaude(context.Background(), uuid.New(), uuid.New(),
+		&provider.ModelContext{}, &provider.ModelContext{}, chatCtx, nil)
+	require.NoError(t, err)
+	got := reqs()
+	require.Len(t, got, 1)
+	require.Equal(t, archivalOpenAIModel, got[0]["model"])
+	require.NotContains(t, got[0], "previous_response_id", "the rebuilt context is sent, not a stored response")
+}
+
+func TestRebuiltCheckpointModel(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		chatCtx *chatContext
+		want    string
+	}{
+		{"native Anthropic", claudeChatCtx(), archivalClaudeModel},
+		{"Gemini", &chatContext{model: "gemini-3.5", modelProvider: string(models.ModelProviderGoogle)}, archivalOpenAIModel},
+		{"z.ai, Anthropic wire format", &chatContext{model: "glm-5", modelProvider: string(models.ModelProviderZAI)}, archivalOpenAIModel},
+		{"Anthropic-compatible connection", &chatContext{model: "claude-sonnet-4-5", modelProvider: "custom", connection: &ConnectionEndpoint{Flavor: ConnectionFlavorAnthropic}}, archivalOpenAIModel},
+		{"no chat", nil, archivalOpenAIModel},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, rebuiltCheckpointModel(tt.chatCtx))
+		})
+	}
 }
 
 // --- getMemoryQuery ---
