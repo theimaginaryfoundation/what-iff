@@ -141,7 +141,7 @@ func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, us
 		return fmt.Errorf("failed to unmarshal memory extraction: %w", err)
 	}
 
-	a.logger.Info("extracted memories (Claude scratchpad delta)", zap.Int("count", len(extracted)))
+	a.logger.Info("extracted memories (rebuilt-context scratchpad delta)", zap.Int("count", len(extracted)))
 	a.compactMemoriesFromCheckpoint(ctx, userID, chatID, chatCtx.chat.PersonalityID, inferenceModelContext, chatCtx, extracted, compactionEventID)
 
 	return nil

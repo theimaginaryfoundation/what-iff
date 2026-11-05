@@ -102,6 +102,11 @@ var GenAIRetries = Counter{"whatiff.gen_ai.retries", "{retry}", "LLM call retrie
 // gen_ai.provider.name, gen_ai.request.model, call_path.
 var GenAISafetyBlocks = Counter{"whatiff.gen_ai.safety_blocks", "{block}", "LLM responses blocked by provider safety systems."}
 
+// GenAIImagesDropped counts images left out of an LLM request because the provider can't
+// take them. Attributes: gen_ai.provider.name, call_path, reason (no_data: only a reference,
+// no bytes to send inline; unsupported_type: a media type the API rejects).
+var GenAIImagesDropped = Counter{"whatiff.gen_ai.images_dropped", "{image}", "Images left out of an LLM request the provider couldn't take."}
+
 // GenAIContextTokens is the estimated size of each context segment sent with a turn.
 // Attributes: segment, call_path.
 var GenAIContextTokens = Histogram{"whatiff.gen_ai.context.tokens", "{token}", "Estimated tokens per model context segment.", BucketsTokens}

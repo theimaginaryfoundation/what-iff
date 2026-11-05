@@ -219,3 +219,24 @@ func TestSplitImageDataURL(t *testing.T) {
 		require.False(t, ok, bad)
 	}
 }
+
+func TestUtilityResponsesParams_ConversationKeepsServiceTier(t *testing.T) {
+	t.Parallel()
+	got := UtilityResponsesParams("m", UtilityRequest{Context: &ModelContext{}, Flex: true})
+	require.Equal(t, responses.ResponseNewParamsServiceTierFlex, got.ServiceTier)
+}
+
+func TestOpenAIRejectedImages(t *testing.T) {
+	t.Parallel()
+	mc := &ModelContext{}
+	mc.AppendHistoryTurn(RoleUser, "a", []UserMessageImage{
+		{MediaType: "image/png", RawBytes: []byte{1}},
+		{MediaType: "image/heic", RawBytes: []byte{2}},
+		{MediaType: "image/jpeg"},
+	}, false)
+	noData, unsupported := OpenAIRejectedImages(mc)
+	require.Equal(t, 1, noData)
+	require.Equal(t, 1, unsupported)
+	noData, unsupported = OpenAIRejectedImages(nil)
+	require.Zero(t, noData+unsupported)
+}

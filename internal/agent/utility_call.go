@@ -8,6 +8,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
+	"go.uber.org/zap"
 )
 
 // utilityModelName is the model a utility role runs on. These are the fixed
@@ -62,6 +63,9 @@ func (a *Agent) callUtilityOn(ctx context.Context, model, modelProvider string, 
 	if req.PreviousResponseID != "" && !responsesAPI {
 		return utilityReply{}, fmt.Errorf("model %q cannot continue a stored Responses conversation", model)
 	}
+	if req.PreviousResponseID != "" && req.Context != nil {
+		return utilityReply{}, errors.New("a utility call continues either a stored response or a conversation, not both")
+	}
 	switch {
 	case models.UsesAnthropicMessagesAPI(modelProvider, model):
 		prov, _, err := a.claudeProviderForModel(&chatContext{model: model, modelProvider: modelProvider})
@@ -83,6 +87,7 @@ func (a *Agent) callUtilityOn(ctx context.Context, model, modelProvider string, 
 		if a.OpenAIProvider == nil {
 			return utilityReply{}, fmt.Errorf("OpenAI model %q requested but no OpenAI provider is configured", model)
 		}
+		a.recordDroppedImages(ctx, models.ModelProviderOpenAI, req.Context)
 		resp, err := a.OpenAIProvider.CallWithRetry(ctx, provider.UtilityResponsesParams(model, req))
 		if err != nil {
 			return utilityReply{}, utilityCallError(modelProvider, model, err)
@@ -127,4 +132,26 @@ func (a *Agent) callUtilityChatCompletions(ctx context.Context, model, modelProv
 // and so its provider, is not fixed at the call site.
 func utilityCallError(modelProvider, model string, err error) error {
 	return fmt.Errorf("%s: %w", models.ProviderForModel(modelProvider, model).DisplayName(), err)
+}
+
+// recordDroppedImages logs and counts the images a conversation loses on its way to the
+// Responses API, which can't take them; the call goes ahead on the rest rather than failing
+// over one image.
+func (a *Agent) recordDroppedImages(ctx context.Context, prov models.ModelProvider, mc *provider.ModelContext) {
+	noData, unsupported := provider.OpenAIRejectedImages(mc)
+	if noData+unsupported == 0 {
+		return
+	}
+	callPath := telemetry.CallPathFromContext(ctx)
+	a.logger.Warn("utility call left out images the provider can't take",
+		zap.String("provider", string(prov)),
+		zap.String("call_path", string(callPath)),
+		zap.Int("no_data", noData),
+		zap.Int("unsupported_type", unsupported))
+	for reason, n := range map[string]int{"no_data": noData, "unsupported_type": unsupported} {
+		a.metrics().Add(ctx, telemetry.GenAIImagesDropped, int64(n),
+			telemetry.AttrGenAIProvider.String(string(prov)),
+			telemetry.AttrCallPath.String(string(callPath)),
+			telemetry.AttrReason.String(reason))
+	}
 }
