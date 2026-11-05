@@ -109,20 +109,17 @@ func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID u
 	a.compactMemoriesFromCheckpoint(ctx, userID, chatID, chatCtx.chat.PersonalityID, inferenceModelContext, chatCtx, extracted, compactionEventID)
 }
 
-// extractMemoriesWithScratchpadDeltaClaude extracts long-term memories for Claude-model
-// chats. It builds context from DB history instead of PreviousResponseID chaining, and
-// makes the scratchpad delta (old → new) explicit via context blocks.
+// extractMemoriesWithScratchpadDeltaClaude extracts long-term memories for chats whose
+// checkpoint rebuilds context from the DB (every chat not on OpenAI's own Responses API;
+// "Claude" is historical). It builds context from DB history instead of PreviousResponseID
+// chaining, makes the scratchpad delta (old → new) explicit via context blocks, and runs on
+// rebuiltCheckpointModel.
 func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, userID, chatID uuid.UUID, modelContext *provider.ModelContext, inferenceModelContext *provider.ModelContext, chatCtx *chatContext, compactionEventID *uuid.UUID) error {
-
-	if a.ClaudeProvider == nil {
-		return fmt.Errorf("ClaudeProvider is nil")
-	}
-
 	prompt := memoryWritePromptText()
 
 	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
 	modelContext.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, memoryDedupNote(chatCtx), false)
-	reply, err := a.callUtilityModel(ctx, archivalClaudeModel, provider.UtilityRequest{
+	reply, err := a.callUtilityModel(ctx, rebuiltCheckpointModel(chatCtx), provider.UtilityRequest{
 		Role:            provider.UtilityRoleMemory,
 		CallPath:        telemetry.CallPathMemory,
 		Context:         modelContext,
@@ -135,13 +132,13 @@ func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, us
 		},
 	})
 	if err != nil {
-		a.logger.Error("Claude memory extraction failed", zap.Error(err))
-		return fmt.Errorf("Claude memory extraction failed: %w", err)
+		a.logger.Error("rebuilt-context memory extraction failed", zap.Error(err))
+		return fmt.Errorf("memory extraction failed: %w", err)
 	}
 	extracted, err := decodeExtractedMemories(chatCtx, []byte(reply.Text))
 	if err != nil {
-		a.logger.Error("failed to unmarshal Claude memory extraction", zap.Error(err))
-		return fmt.Errorf("failed to unmarshal Claude memory extraction: %w", err)
+		a.logger.Error("failed to unmarshal rebuilt-context memory extraction", zap.Error(err))
+		return fmt.Errorf("failed to unmarshal memory extraction: %w", err)
 	}
 
 	a.logger.Info("extracted memories (Claude scratchpad delta)", zap.Int("count", len(extracted)))
