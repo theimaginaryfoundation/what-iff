@@ -65,3 +65,29 @@ func TestBackgroundNotices_Lifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, n, "deleting the chat deletes its notices")
 }
+
+// A chat holds one notice per step, so several at once, and an account many across its chats:
+// the edges to the chat and the account are each notice's one chat and owner, not a limit of
+// one notice per chat or account.
+func TestBackgroundNotices_SeveralPerChatAndAccount(t *testing.T) {
+	ds, cleanup := newTestDatastore(t, createGeneratedTestSchema)
+	t.Cleanup(cleanup)
+	ctx := context.Background()
+	alice, chatA, chatB := uuid.New(), uuid.New(), uuid.New()
+	createTestUser(t, ds, alice)
+	createTestChat(t, ds, chatA, alice)
+	createTestChat(t, ds, chatB, alice)
+	failed := models.BackgroundOutcome{Failed: []models.BackgroundNotice{
+		{Step: models.BackgroundStepMemory, Code: models.BackgroundNoticeProviderError},
+		{Step: models.BackgroundStepSummary, Code: models.BackgroundNoticeProviderError},
+		{Step: models.BackgroundStepScratchpad, Code: models.BackgroundNoticeProviderError},
+	}}
+	require.NoError(t, ds.SettleBackgroundNotices(ctx, alice, chatA, failed))
+	require.NoError(t, ds.SettleBackgroundNotices(ctx, alice, chatB, failed))
+
+	for _, chat := range []uuid.UUID{chatA, chatB} {
+		got, err := ds.ListBackgroundNotices(ctx, alice, chat)
+		require.NoError(t, err)
+		require.Len(t, got, 3)
+	}
+}
