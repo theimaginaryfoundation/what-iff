@@ -32,6 +32,9 @@ type agentJobScheduleOutput struct {
 
 var scheduleSchema = initScheduleSchema()
 
+// scheduleMaxOutputTokens bounds the schedule interpreter's reply: one small JSON object.
+const scheduleMaxOutputTokens = 800
+
 const recurringPreviewRunCount = 5
 const minRecurringIntervalMinutes = 5
 const minRecurringIntervalValidationRuns = 64
@@ -104,7 +107,7 @@ func Parse(ctx context.Context, caller provider.UtilityCaller, userID uuid.UUID,
 		CallPath:        telemetry.CallPathScheduleParse,
 		Instructions:    instructions,
 		Input:           scheduleInput,
-		MaxOutputTokens: 800,
+		MaxOutputTokens: scheduleMaxOutputTokens,
 		SafetyUserID:    userID.String(),
 		Schema: &provider.UtilitySchema{
 			Name:        "AgentJobSchedule",
