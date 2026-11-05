@@ -202,7 +202,7 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 		}
 		return utilityReply{Text: provider.ExtractClaudeText(msg)}, nil
 	case t.connection != nil, models.UsesOpenAIChatCompletionsAPI(t.provider, t.name):
-		text, err := a.callUtilityChatCompletions(ctx, t, lite, req)
+		text, err := a.callUtilityChatCompletions(ctx, t, req)
 		if err != nil {
 			return utilityReply{}, err
 		}
@@ -227,7 +227,8 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 
 // callUtilityChatCompletions sends a utility call through the same Chat
 // Completions adapter a chat turn on the model would use, without tools.
-func (a *Agent) callUtilityChatCompletions(ctx context.Context, t utilityTarget, lite *chatContext, req provider.UtilityRequest) (string, error) {
+func (a *Agent) callUtilityChatCompletions(ctx context.Context, t utilityTarget, req provider.UtilityRequest) (string, error) {
+	lite := &chatContext{model: t.name, modelProvider: t.provider, connection: t.connection}
 	params := provider.UtilityChatCompletionParams(t.name, req)
 	var adapter provider.AgentAdapter
 	if t.connection == nil && models.IsGeminiModel(t.provider, t.name) {

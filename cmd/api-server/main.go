@@ -235,7 +235,10 @@ func init() {
 
 	// Every utility call reads the utility model settings, so a missing table would fail all
 	// background work rather than one feature: stop here instead, with the remedy.
-	if _, err := client.UtilityModelSetting.Query().Exist(context.Background()); err != nil {
+	settingsCtx, cancelSettings := context.WithTimeout(context.Background(), 30*time.Second)
+	_, err = client.UtilityModelSetting.Query().Exist(settingsCtx)
+	cancelSettings()
+	if err != nil {
 		logger.Fatal("Failed to read utility model settings; if the utility_model_settings table does not exist, run the migrations (AUTO_MIGRATE=true)",
 			zap.Error(err))
 	}
