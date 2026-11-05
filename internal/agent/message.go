@@ -3114,7 +3114,7 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	// run their scratchpad, memory and summary steps on the memory role's model.
 	// A connection model rebuilds from the DB too: no connection returns an
 	// OpenAI response id to chain off.
-	if checkpointRebuildsFromDB(chatCtx) {
+	if !a.checkpointChainsResponses(checkpointCtx, chatCtx) {
 		a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
 	} else {
 		a.runCheckpointOpenAI(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
