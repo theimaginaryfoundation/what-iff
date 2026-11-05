@@ -157,7 +157,11 @@ func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, ch
 	prompt := buildUpdateScratchpadPrompt(personalityModel)
 	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
 
-	reply, err := a.callUtilityModel(ctx, rebuiltCheckpointModel(chatCtx), provider.UtilityRequest{
+	target, err := a.rebuiltCheckpointTarget(ctx, chatCtx)
+	if err != nil {
+		return ScratchpadUpdate{}, fmt.Errorf("scratchpad update failed: %w", err)
+	}
+	reply, err := a.callUtilityTarget(ctx, target, provider.UtilityRequest{
 		Role:            provider.UtilityRoleMemory,
 		CallPath:        telemetry.CallPathScratchpad,
 		Context:         modelContext,

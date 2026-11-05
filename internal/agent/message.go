@@ -3067,7 +3067,7 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	// rebuiltCheckpointModel: Claude for native Anthropic chats, GPT otherwise.
 	// A connection model rebuilds from the DB too: no connection returns an
 	// OpenAI response id to chain off.
-	if checkpointRebuildsFromDB(chatCtx) {
+	if !a.checkpointChainsResponses(checkpointCtx, chatCtx) {
 		a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
 	} else {
 		a.runCheckpointOpenAI(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
