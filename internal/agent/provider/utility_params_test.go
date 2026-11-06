@@ -320,7 +320,7 @@ func TestOpenAIRejectedImages_MatchesSanitizer(t *testing.T) {
 func TestUtilityChatCompletionParams_ConversationHasOneLeadingSystemMessage(t *testing.T) {
 	t.Parallel()
 	mc := &ModelContext{}
-	mc.Append(SegmentKindSystemPrompt, RoleDeveloper, "You are Vix.", false)
+	mc.Append(SegmentKindSystemPrompt, RoleDeveloper, "You are a helpful assistant.", false)
 	mc.Append(SegmentKindHistoryTurn, RoleUser, "hi", false)
 	mc.Append(SegmentKindHistoryTurn, RoleAssistant, "hello", false)
 	mc.Append(SegmentKindScratchpad, RoleDeveloper, "scratchpad notes", false)
@@ -338,6 +338,6 @@ func TestUtilityChatCompletionParams_ConversationHasOneLeadingSystemMessage(t *t
 	require.NotContains(t, roles[1:], "system", "no system message after the first")
 	lead := msgs[0].(map[string]any)["content"].(string)
 	require.Contains(t, lead, "summarize")
-	require.Contains(t, lead, "You are Vix.")
+	require.Contains(t, lead, "You are a helpful assistant.")
 	require.Contains(t, lead, "scratchpad notes")
 }
