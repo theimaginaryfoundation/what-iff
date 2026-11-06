@@ -116,12 +116,11 @@ func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID u
 // checkpoint rebuilds context from the DB (every chat not on OpenAI's own Responses API;
 // "Claude" is historical). It builds context from DB history instead of PreviousResponseID
 // chaining, makes the scratchpad delta (old → new) explicit via context blocks, and runs on
-// rebuiltCheckpointModel.
+// the memory role's model, like the chained path.
 func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, userID, chatID uuid.UUID, modelContext *provider.ModelContext, inferenceModelContext *provider.ModelContext, chatCtx *chatContext, compactionEventID *uuid.UUID) error {
 	prompt := memoryWritePromptText()
 
-	model := rebuiltCheckpointModel(chatCtx)
-	reply, err := a.callUtilityModel(ctx, model, provider.UtilityRequest{
+	reply, err := a.callUtility(ctx, provider.UtilityRequest{
 		Role:            provider.UtilityRoleMemory,
 		CallPath:        telemetry.CallPathMemory,
 		Context:         modelContext,
@@ -136,7 +135,7 @@ func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, us
 		},
 	})
 	if err != nil {
-		a.logger.Error("rebuilt-context memory extraction failed", zap.String("model", model), zap.Error(err))
+		a.logger.Error("rebuilt-context memory extraction failed", zap.Error(err))
 		return fmt.Errorf("memory extraction failed: %w", err)
 	}
 	extracted, err := decodeExtractedMemories(chatCtx, []byte(reply.Text))
