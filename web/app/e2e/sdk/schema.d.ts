@@ -3258,7 +3258,7 @@ export interface paths {
         get?: never;
         /**
          * Choose the account's model for a utility role
-         * @description The model must be one the account can use: a catalog model or one enabled on its own provider connections. A choice that can't be used later (turned off, or its connection gone or unreachable) is passed over: the role falls back to the deployment's choice or its built-in model, and the fallback is logged and counted.
+         * @description The model must be one the account can use: a catalog model whose provider it holds a key for, or one enabled on its own provider connections. A choice that can't be used later (turned off, its connection gone or unreachable, its provider's key removed, or an experimental model after the account turns experimental models off) is passed over: the role falls back to the deployment's choice or its built-in model, and the fallback is logged and counted.
          */
         put: {
             parameters: {
@@ -3302,7 +3302,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The deployment supplies the keys, so it chooses the models */
+                /** @description The deployment supplies the keys, so it chooses the models; or the model is experimental and the account hasn't turned experimental models on */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -3313,6 +3313,15 @@ export interface paths {
                 };
                 /** @description Not a utility role */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A catalog model whose provider the account holds no key for (`provider_not_configured`, with the provider in `details`) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
