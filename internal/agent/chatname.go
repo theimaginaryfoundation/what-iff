@@ -4,37 +4,29 @@ import (
 	"context"
 	"strings"
 
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
-	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
-
-const chatNameModel = models.UtilityModelName
 
 func (a *Agent) generateChatName(ctx context.Context, userMessage string) (string, error) {
 	// Mock/local mode: deterministic fake — no provider call.
 	if a.nonVendorLLM() {
 		return mockChatName(userMessage), nil
 	}
-	params := responses.ResponseNewParams{
-		Model:           chatNameModel,
-		MaxOutputTokens: openai.Int(provider.DefaultMaxContentLength),
-		Instructions:    openai.String(chatNamePrompt),
-		Input: responses.ResponseNewParamsInputUnion{
-			OfString: openai.String(userMessage),
-		},
-	}
-
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathChatName), params)
+	name, err := a.CallUtility(ctx, provider.UtilityRequest{
+		Role:            provider.UtilityRoleSimple,
+		CallPath:        telemetry.CallPathChatName,
+		Instructions:    chatNamePrompt,
+		Input:           userMessage,
+		MaxOutputTokens: provider.DefaultMaxContentLength,
+	})
 	if err != nil {
 		a.logger.Error("failed to generate chat name", zap.Error(err))
 		return "", err
 	}
 
-	return resp.OutputText(), nil
+	return name, nil
 }
 
 // mockChatName derives a deterministic chat name from the first words of the

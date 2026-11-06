@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -15,8 +13,6 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
-
-const expressionPickModel = chatNameModel
 
 // expressionPickStructuredOut is the OpenAI structured-output shape for the portrait classifier.
 type expressionPickStructuredOut struct {
@@ -53,18 +49,10 @@ Selection guidance:
 Include a non-empty reasoning string whenever possible (one or two sentences).
 `)
 
-func expressionPickStructuredOutputFormat() responses.ResponseTextConfigParam {
-	return responses.ResponseTextConfigParam{
-		Format: responses.ResponseFormatTextConfigUnionParam{
-			OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-				Name:        "ExpressionPortraitPick",
-				Schema:      expressionPickStructuredSchema,
-				Strict:      openai.Bool(true),
-				Description: openai.String("Portrait expression classifier output"),
-				Type:        "json_schema",
-			},
-		},
-	}
+var expressionPickSchema = &provider.UtilitySchema{
+	Name:        "ExpressionPortraitPick",
+	Description: "Portrait expression classifier output",
+	Schema:      expressionPickStructuredSchema,
 }
 
 // buildExpressionPickUserMessageBody is the final user turn for the expression picker when using a forked
@@ -93,7 +81,12 @@ func (a *Agent) PickGenerationExpression(ctx context.Context, userID, personalit
 
 	catalog := buildExpressionPickCatalog(slots)
 
-	var params responses.ResponseNewParams
+	req := provider.UtilityRequest{
+		Role:            provider.UtilityRoleSimple,
+		CallPath:        telemetry.CallPathExpressionPick,
+		MaxOutputTokens: 384,
+		Schema:          expressionPickSchema,
+	}
 	if inferenceModelCtx != nil {
 		fork := inferenceModelCtx.Clone()
 		// Structured JSON output on the Responses API rejects multimodal input_image on
@@ -102,16 +95,12 @@ func (a *Agent) PickGenerationExpression(ctx context.Context, userID, personalit
 		if reply := strings.TrimSpace(assistantReply); reply != "" {
 			fork.Append(provider.SegmentKindHistoryTurn, provider.RoleAssistant, reply, false)
 		}
-		fork.AppendUserMessage(provider.RoleUser, buildExpressionPickUserMessageBody(catalog), nil, false)
-
-		params = fork.BuildOpenAIResponseParams(provider.OpenAIResponseParamsOptions{
-			Model:           expressionPickModel,
-			SafetyUserID:    userID.String(),
-			MaxOutputTokens: 384,
-		})
-		params.Text = expressionPickStructuredOutputFormat()
+		req.Context = fork
+		req.Input = buildExpressionPickUserMessageBody(catalog)
+		req.SafetyUserID = userID.String()
 	} else {
-		userPayload := strings.TrimSpace(fmt.Sprintf(`
+		req.Instructions = expressionPickInstructions
+		req.Input = strings.TrimSpace(fmt.Sprintf(`
 Available expressions:
 %s
 
@@ -121,24 +110,15 @@ Latest user message:
 Assistant reply to evaluate:
 %s
 `, catalog, strings.TrimSpace(userTurn), strings.TrimSpace(assistantReply)))
-		params = responses.ResponseNewParams{
-			Model:           expressionPickModel,
-			MaxOutputTokens: openai.Int(384),
-			Instructions:    openai.String(expressionPickInstructions),
-			Input: responses.ResponseNewParamsInputUnion{
-				OfString: openai.String(userPayload),
-			},
-			Text: expressionPickStructuredOutputFormat(),
-		}
 	}
 
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathExpressionPick), params)
+	out, err := a.CallUtility(ctx, req)
 	if err != nil {
 		a.logger.Warn("expression picker model call failed", zap.Error(err))
 		return nil, "", nil
 	}
 
-	raw := strings.TrimSpace(provider.ProcessResponseOutput(resp))
+	raw := strings.TrimSpace(out)
 	if raw == "" {
 		return nil, "", nil
 	}

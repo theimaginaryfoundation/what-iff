@@ -76,7 +76,7 @@ func (a *Agent) updateAgentJobTool(ctx context.Context, chat *models.Chat, args 
 	u := agentJobUpdater{
 		store: a.ds,
 		parseSchedule: func(ctx context.Context, userID uuid.UUID, input, tz string, now time.Time) (*models.AgentJobSchedulePreview, error) {
-			return schedule.Parse(ctx, a.OpenAIProvider, userID, input, tz, now)
+			return schedule.Parse(ctx, a, userID, input, tz, now)
 		},
 		resolveModel: func(ctx context.Context, ref string) (uuid.UUID, error) {
 			m, err := a.resolveModelByReference(ctx, ref, modelResolverOptions{AllowDisplayName: true, AllowPrefixMatch: true, UserID: chat.UserID})
