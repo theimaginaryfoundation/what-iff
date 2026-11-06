@@ -3063,9 +3063,8 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	defer cancelCheckpoint()
 	// Only genuine OpenAI (Responses API) chats can thread checkpoints off a
 	// PreviousResponseID. Every other chat (Anthropic, z.ai, Gemini, a connection
-	// model) rebuilds context from the DB via the "Claude" checkpoint path, whose
-	// summarizer runs on GPT and whose scratchpad/memory archival runs on
-	// rebuiltCheckpointModel: Claude for native Anthropic chats, GPT otherwise.
+	// model) rebuilds context from the DB via the "Claude" checkpoint path. Both paths
+	// run their scratchpad, memory and summary steps on the memory role's model.
 	// A connection model rebuilds from the DB too: no connection returns an
 	// OpenAI response id to chain off.
 	if checkpointRebuildsFromDB(chatCtx) {

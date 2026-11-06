@@ -146,7 +146,7 @@ func (a *Agent) summarizeScratchpad(ctx context.Context, userID uuid.UUID, respo
 // updateScratchpadClaude updates the personality scratchpad for a chat whose checkpoint
 // rebuilds context from the DB (every chat not on OpenAI's own Responses API; "Claude" is
 // historical), scoped to the current checkpoint period, rather than chaining off a
-// PreviousResponseID. It runs on rebuiltCheckpointModel.
+// PreviousResponseID. It runs on the memory role's model, like the chained path.
 func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, chatCtx *chatContext, modelContext *provider.ModelContext) (ScratchpadUpdate, error) {
 
 	personalityModel, err := a.ds.GetPersonality(ctx, userID, chatCtx.chat.PersonalityID)
@@ -156,7 +156,7 @@ func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, ch
 	}
 	prompt := buildUpdateScratchpadPrompt(personalityModel)
 
-	reply, err := a.callUtilityModel(ctx, rebuiltCheckpointModel(chatCtx), provider.UtilityRequest{
+	reply, err := a.callUtility(ctx, provider.UtilityRequest{
 		Role:            provider.UtilityRoleMemory,
 		CallPath:        telemetry.CallPathScratchpad,
 		Context:         modelContext,
