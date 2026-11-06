@@ -14,7 +14,7 @@ func TestUtilityRequestValidate(t *testing.T) {
 		"history and input":      {Role: UtilityRoleSimple, History: []UtilityMessage{{Role: UtilityMessageDeveloper, Text: "a"}}, Input: "b", InputImageDataURL: "data:image/png;base64,AAAA"},
 		"conversation and input": {Role: UtilityRoleMemory, Context: conversation, Input: "a"},
 		"stored response":        {Role: UtilityRoleMemory, PreviousResponseID: "resp_1", Input: "a"},
-		"empty input":            {Role: UtilityRoleSimple, Instructions: "x"},
+		"image alone":            {Role: UtilityRoleSimple, InputImageDataURL: "data:image/png;base64,AAAA"},
 	}
 	for name, req := range valid {
 		require.NoError(t, req.Validate(), name)
@@ -27,6 +27,7 @@ func TestUtilityRequestValidate(t *testing.T) {
 		"unknown service tier": {Role: UtilityRoleSimple, Input: "a", ServiceTier: "fast"},
 		"negative cap":         {Role: UtilityRoleSimple, Input: "a", MaxOutputTokens: -1},
 		"assistant turn":       {Role: UtilityRoleSimple, History: []UtilityMessage{{Role: RoleAssistant, Text: "a"}}, Input: "b"},
+		"nothing to ask":         {Role: UtilityRoleSimple, Instructions: "x"},
 		"image not a data URL": {Role: UtilityRoleSimple, Input: "a", InputImageDataURL: "https://example.com/a.png"},
 	}
 	for name, req := range invalid {
