@@ -263,9 +263,9 @@ func (a *Agent) inferMemoryMergeGroupsOpenAI(ctx context.Context, userID uuid.UU
 	if instructions == "" {
 		instructions = memoryMergeGroupingPrompt
 	} else {
-		messages = append(messages, provider.UtilityMessage{Role: provider.RoleDeveloper, Text: memoryMergeGroupingPrompt})
+		messages = append(messages, provider.UtilityMessage{Role: provider.UtilityMessageDeveloper, Text: memoryMergeGroupingPrompt})
 	}
-	messages = append(messages, provider.UtilityMessage{Role: provider.RoleUser, Text: formatMemoryMergeCandidateList(candidates)})
+	messages = append(messages, provider.UtilityMessage{Role: provider.UtilityMessageUser, Text: formatMemoryMergeCandidateList(candidates)})
 	text, err := a.CallUtility(ctx, provider.UtilityRequest{
 		Role:            provider.UtilityRoleMemory,
 		CallPath:        telemetry.CallPathMemory,
@@ -273,7 +273,7 @@ func (a *Agent) inferMemoryMergeGroupsOpenAI(ctx context.Context, userID uuid.UU
 		Messages:        messages,
 		MaxOutputTokens: memoryMergeMaxOutputTokens,
 		SafetyUserID:    userID.String(),
-		Flex:            true,
+		ServiceTier:     provider.UtilityServiceTierFlex,
 		Schema: &provider.UtilitySchema{
 			Name:        "MemoryMergeGrouping",
 			Description: "Memory merge grouping JSON",

@@ -58,7 +58,7 @@ func TestUtilityResponsesParams_MatchesHandBuiltRequests(t *testing.T) {
 			name: "structured, priority, safety id",
 			req: UtilityRequest{
 				Instructions: "build it", Input: "answers", MaxOutputTokens: 100,
-				SafetyUserID: "u1", Priority: true, Schema: testUtilitySchema,
+				SafetyUserID: "u1", ServiceTier: UtilityServiceTierPriority, Schema: testUtilitySchema,
 			},
 			want: responses.ResponseNewParams{
 				Model:            "m",
@@ -73,7 +73,7 @@ func TestUtilityResponsesParams_MatchesHandBuiltRequests(t *testing.T) {
 		{
 			name: "message list, flex",
 			req: UtilityRequest{
-				Instructions: "pick", Flex: true, Schema: testUtilitySchema,
+				Instructions: "pick", ServiceTier: UtilityServiceTierFlex, Schema: testUtilitySchema,
 				Messages: []UtilityMessage{{Role: RoleDeveloper, Text: "note"}, {Role: RoleUser, Text: "pick one"}},
 			},
 			want: responses.ResponseNewParams{
@@ -245,7 +245,7 @@ func TestUtilityClaudeParams_SystemBlockOrderWithConversation(t *testing.T) {
 
 func TestUtilityResponsesParams_ConversationKeepsServiceTier(t *testing.T) {
 	t.Parallel()
-	got := UtilityResponsesParams("m", UtilityRequest{Context: &ModelContext{}, Flex: true})
+	got := UtilityResponsesParams("m", UtilityRequest{Context: &ModelContext{}, ServiceTier: UtilityServiceTierFlex})
 	require.Equal(t, responses.ResponseNewParamsServiceTierFlex, got.ServiceTier)
 }
 
