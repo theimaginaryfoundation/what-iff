@@ -17,6 +17,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 )
 
 // Store is what the handler reads and writes.
@@ -24,6 +25,7 @@ type Store interface {
 	ListUtilityModelSettings(ctx context.Context, userID uuid.UUID) ([]models.UtilityModelSetting, error)
 	SetUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID uuid.UUID) error
 	ClearUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole) error
+	GetModel(ctx context.Context, id uuid.UUID) (*models.Model, error)
 }
 
 // Handler serves the utility-model routes.
@@ -31,6 +33,8 @@ type Handler struct {
 	store Store
 	// builtIn names the model a role runs on when nothing is chosen.
 	builtIn func(models.UtilityRole) string
+	// keys answers which providers the account holds a key for.
+	keys providerkeys.Resolver
 	// accountsChoose is whether accounts may choose: only where they bring their own keys, and so
 	// pay for their background work. Elsewhere the deployment chooses, and writes are refused.
 	accountsChoose bool
@@ -38,8 +42,8 @@ type Handler struct {
 }
 
 // NewHandler builds the handler.
-func NewHandler(store Store, builtIn func(models.UtilityRole) string, accountsChoose bool, logger *zap.Logger) *Handler {
-	return &Handler{store: store, builtIn: builtIn, accountsChoose: accountsChoose, logger: logger}
+func NewHandler(store Store, builtIn func(models.UtilityRole) string, keys providerkeys.Resolver, logger *zap.Logger) *Handler {
+	return &Handler{store: store, builtIn: builtIn, keys: keys, accountsChoose: keys.AccountsSupplyKeys(), logger: logger}
 }
 
 // RegisterRoutes mounts the routes on an authenticated router.
@@ -79,7 +83,15 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "model_id is required", nil)
 		return
 	}
+	if !h.hasKeyFor(w, r, req.ModelID) {
+		return
+	}
 	err := h.store.SetUtilityModel(r.Context(), models.UtilityScopeAccount, userID, role, req.ModelID)
+	if errors.Is(err, datastore.ErrUserNotFound) {
+		// The account was deleted while the request ran.
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+		return
+	}
 	if errors.Is(err, datastore.ErrExperimentalModelNotAllowed) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusForbidden, handlerutils.CodeNotSet, "Experimental models are not enabled for this account", nil)
 		return
@@ -165,4 +177,21 @@ func (h *Handler) utilityModels(ctx context.Context, userID uuid.UUID) (models.U
 		out.Roles = append(out.Roles, entry)
 	}
 	return out, nil
+}
+
+// hasKeyFor answers the request and reports false when the account holds no key for the
+// provider of the catalog model it chose, which would only fail at every call. A connection
+// model carries its connection's key, and a model the account can't use at all is the
+// store's to refuse.
+func (h *Handler) hasKeyFor(w http.ResponseWriter, r *http.Request, modelID uuid.UUID) bool {
+	m, err := h.store.GetModel(r.Context(), modelID)
+	if err != nil || m.ConnectionID != nil {
+		return true
+	}
+	p := models.ProviderForModel(m.Provider, m.Name)
+	if h.keys.Key(r.Context(), p) != "" {
+		return true
+	}
+	handlerutils.RespondIfProviderNotConfigured(w, h.logger, &providerkeys.NotConfiguredError{Provider: p})
+	return false
 }

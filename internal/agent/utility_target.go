@@ -12,6 +12,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
@@ -120,6 +121,11 @@ func (a *Agent) settingTarget(ctx context.Context, userID uuid.UUID, s models.Ut
 	if err != nil {
 		return utilityTarget{}, err
 	}
+	if conn == nil {
+		if err := a.catalogChoiceUsable(ctx, userID, s.Scope, m); err != nil {
+			return utilityTarget{}, err
+		}
+	}
 	t := utilityTarget{name: m.Name, provider: m.Provider, connection: conn}
 	if conn != nil {
 		t.provider = conn.Preset
@@ -157,6 +163,28 @@ func (a *Agent) utilityTargetFor(ctx context.Context, role provider.UtilityRole)
 	}
 	name, modelProvider := utilityBuiltIn(role)
 	return utilityTarget{name: name, provider: string(modelProvider)}
+}
+
+// catalogChoiceUsable checks what a catalog model's choice was saved with and can lose since:
+// a key for its provider, and, for an account's choice of an experimental model, the account's
+// opt-in. Either lost makes the choice unusable, so the role falls back rather than failing at
+// every call.
+func (a *Agent) catalogChoiceUsable(ctx context.Context, userID uuid.UUID, scope models.UtilityScope, m *models.Model) error {
+	p := models.ProviderForModel(m.Provider, m.Name)
+	if a.keyResolver != nil && a.keyResolver.Key(ctx, p) == "" {
+		return &providerkeys.NotConfiguredError{Provider: p}
+	}
+	if scope != models.UtilityScopeAccount || !models.IsExperimentalModel(m) {
+		return nil
+	}
+	u, err := a.ds.GetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if !u.EnableExperimentalModels {
+		return datastore.ErrExperimentalModelNotAllowed
+	}
+	return nil
 }
 
 // pinnedUtilityTargetKey carries a role's target, already resolved, on a context.

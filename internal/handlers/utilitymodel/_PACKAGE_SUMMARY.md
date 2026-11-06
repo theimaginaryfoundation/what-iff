@@ -11,8 +11,8 @@ Serves an account's choice of model for each utility role: the background work, 
 
 ## Dependencies
 
-- **Inbound:** `internal/server` mounts it on the authenticated router, with the datastore and `agent.UtilityBuiltInModel`.
-- **Outbound:** `internal/datastore` (`ListUtilityModelSettings`, `SetUtilityModel`, `ClearUtilityModel`, through the `Store` interface), `internal/models`, `internal/handlers/handlerutils`.
+- **Inbound:** `internal/server` mounts it on the authenticated router, with the datastore, `agent.UtilityBuiltInModel` and the key resolver.
+- **Outbound:** `internal/datastore` (`ListUtilityModelSettings`, `SetUtilityModel`, `ClearUtilityModel`, `GetModel`, through the `Store` interface), `internal/providerkeys`, `internal/models`, `internal/handlers/handlerutils`.
 
 ## Non-obvious decisions
 
@@ -20,12 +20,14 @@ Serves an account's choice of model for each utility role: the background work, 
 - It writes the account scope only.
   The deployment's choices are set elsewhere; this package only reports them.
 - The datastore decides which models an account may choose (the catalog and its own connections' models); a refusal is a 400, "That model is not available".
+- A catalog model whose provider the account holds no key for is refused as a 409 `provider_not_configured` naming the provider, since it would fail at every call; a connection model carries its connection's key.
+  An experimental model the account hasn't opted into is a 403, and an account deleted while the request ran is a 401.
 - An unset choice is `null`, not missing, so a client can tell "not chosen" from an older server.
 - `built_in_model` is a name, not a model ID: a built-in model need not be a catalog row on every install.
 
 ## Testing
 
-- `handler_test.go` — over a fake store: every role in order with both scopes, never another account's choice; setting and clearing; refusals (a model the account can't use, no model, an unknown role, no signed-in account) that change nothing; and a deployment that supplies the keys refusing account writes.
+- `handler_test.go` — over a fake store: every role in order with both scopes, never another account's choice; setting and clearing; refusals (a model the account can't use, no model, an unknown role, no signed-in account) that change nothing; a deployment that supplies the keys refusing account writes; a catalog model without a key refused as `provider_not_configured`; and a deleted account answered 401.
 
 ## Related documentation
 

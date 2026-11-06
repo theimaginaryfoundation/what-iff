@@ -143,6 +143,21 @@ func TestCheckpoint_PinnedMemoryModelSurvivesAChoiceMidRun(t *testing.T) {
 	require.Equal(t, archivalOpenAIModel, got[0]["model"])
 }
 
+// A catalog model whose provider has lost its key since it was chosen can't be used, so the
+// role falls back rather than failing at every call.
+func TestUtilityTargetFor_ChoiceWithoutKeyFallsBack(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	alice := apicontext.WithUserID(context.Background(), f.alice)
+	f.choose(t, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleSimple, f.catalog.ID)
+
+	f.a.keyResolver = providerkeys.NewDeploymentResolver(map[models.ModelProvider]string{models.ModelProviderOpenAI: "key"})
+	require.Equal(t, "gpt-5.1", f.a.utilityTargetFor(alice, provider.UtilityRoleSimple).name, "with its key, the choice runs")
+
+	f.a.keyResolver = providerkeys.NewDeploymentResolver(map[models.ModelProvider]string{})
+	require.Equal(t, models.UtilityModelName, f.a.utilityTargetFor(alice, provider.UtilityRoleSimple).name, "without it, the built-in model")
+}
+
 // Where the deployment supplies the keys, an account's stored choice doesn't count: the
 // deployment pays for background work, so only its choice does.
 func TestUtilityTargetFor_DeploymentKeysIgnoreAccountChoices(t *testing.T) {

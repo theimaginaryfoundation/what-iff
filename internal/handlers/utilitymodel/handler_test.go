@@ -27,7 +27,35 @@ type fakeStore struct {
 	mu       sync.Mutex
 	settings []fakeSetting
 	usable   map[uuid.UUID]bool
+	// catalog holds the models GetModel finds; the rest are not found.
+	catalog map[uuid.UUID]*models.Model
+	// setErr, when set, is what SetUtilityModel fails with.
+	setErr error
 }
+
+func (f *fakeStore) GetModel(_ context.Context, id uuid.UUID) (*models.Model, error) {
+	if m, ok := f.catalog[id]; ok {
+		return m, nil
+	}
+	return nil, datastore.ErrModelNotFound
+}
+
+// fakeKeys is a key resolver holding keys for the providers in keys.
+type fakeKeys struct {
+	accountsSupply bool
+	keys           map[models.ModelProvider]bool
+}
+
+func (k fakeKeys) Key(_ context.Context, p models.ModelProvider) string {
+	if k.keys[p] {
+		return "key"
+	}
+	return ""
+}
+
+func (k fakeKeys) Configured(p models.ModelProvider) bool { return k.keys[p] }
+
+func (k fakeKeys) AccountsSupplyKeys() bool { return k.accountsSupply }
 
 type fakeSetting struct {
 	models.UtilityModelSetting
@@ -47,6 +75,9 @@ func (f *fakeStore) ListUtilityModelSettings(_ context.Context, userID uuid.UUID
 }
 
 func (f *fakeStore) SetUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID uuid.UUID) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
 	if !f.usable[modelID] {
 		return datastore.ErrModelNotFound
 	}
@@ -81,7 +112,7 @@ func newFixture(t *testing.T) *fixture {
 	f := &fixture{store: &fakeStore{usable: map[uuid.UUID]bool{}}, account: uuid.New()}
 	f.router = mux.NewRouter()
 	builtIn := func(r models.UtilityRole) string { return "built-in-" + string(r) }
-	NewHandler(f.store, builtIn, true, zap.NewNop()).RegisterRoutes(f.router)
+	NewHandler(f.store, builtIn, fakeKeys{accountsSupply: true, keys: map[models.ModelProvider]bool{models.ModelProviderOpenAI: true}}, zap.NewNop()).RegisterRoutes(f.router)
 	return f
 }
 
@@ -124,9 +155,9 @@ func TestList_EveryRoleInOrderWithBothScopes(t *testing.T) {
 		require.Equal(t, models.UtilityRoles[i], r.Role)
 		require.Equal(t, "built-in-"+string(r.Role), r.BuiltInModel)
 	}
-	quick := roleModel(got, models.UtilityRoleSimple)
-	require.Equal(t, &deployment, quick.DeploymentModelID)
-	require.Nil(t, quick.AccountModelID, "another account's choice is not this one's")
+	simple := roleModel(got, models.UtilityRoleSimple)
+	require.Equal(t, &deployment, simple.DeploymentModelID)
+	require.Nil(t, simple.AccountModelID, "another account's choice is not this one's")
 	require.Contains(t, rec.Body.String(), `"account_model_id":null`, "an unset choice is null, not missing")
 	require.True(t, got.AccountsChoose)
 }
@@ -181,7 +212,7 @@ func TestDeploymentChooses(t *testing.T) {
 	store.usable[model] = true
 	require.NoError(t, store.SetUtilityModel(context.Background(), models.UtilityScopeAccount, account, models.UtilityRoleMemory, model))
 	router := mux.NewRouter()
-	NewHandler(store, func(models.UtilityRole) string { return "built-in" }, false, zap.NewNop()).RegisterRoutes(router)
+	NewHandler(store, func(models.UtilityRole) string { return "built-in" }, fakeKeys{}, zap.NewNop()).RegisterRoutes(router)
 	do := func(method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req = req.WithContext(apicontext.WithUserID(req.Context(), account))
@@ -199,4 +230,36 @@ func TestDeploymentChooses(t *testing.T) {
 
 	require.Equal(t, http.StatusForbidden, do(http.MethodPut, "/utility-models/memory", `{"model_id":"`+model.String()+`"}`).Code)
 	require.Equal(t, http.StatusForbidden, do(http.MethodDelete, "/utility-models/memory", "").Code)
+}
+
+// A catalog model whose provider the account holds no key for would fail at every call, so
+// choosing it is refused as provider_not_configured, naming the provider; a connection model
+// carries its own key.
+func TestSet_CatalogModelWithoutKeyIsRefused(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	claude, local, conn := uuid.New(), uuid.New(), uuid.New()
+	f.store.usable[claude], f.store.usable[local] = true, true
+	f.store.catalog = map[uuid.UUID]*models.Model{
+		claude: {ID: claude, Name: "claude-haiku-4-5", Provider: string(models.ModelProviderAnthropic)},
+		local:  {ID: local, Name: "qwen3:0.6b", Provider: "ollama", ConnectionID: &conn},
+	}
+
+	rec, _ := f.do(t, http.MethodPut, "/utility-models/memory", `{"model_id":"`+claude.String()+`"}`, true)
+	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Contains(t, rec.Body.String(), models.ErrCodeProviderNotConfigured)
+	require.Contains(t, rec.Body.String(), `"provider":"anthropic"`)
+	require.Empty(t, f.store.settings, "nothing is saved")
+
+	rec, _ = f.do(t, http.MethodPut, "/utility-models/memory", `{"model_id":"`+local.String()+`"}`, true)
+	require.Equal(t, http.StatusOK, rec.Code, "a connection model needs no catalog key")
+}
+
+// An account deleted while the request ran is unauthorized, not a server error.
+func TestSet_DeletedAccountIsUnauthorized(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.store.setErr = datastore.ErrUserNotFound
+	rec, _ := f.do(t, http.MethodPut, "/utility-models/memory", `{"model_id":"`+uuid.New().String()+`"}`, true)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
