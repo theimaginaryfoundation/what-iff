@@ -87,12 +87,10 @@ func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID u
 		CallPath:           telemetry.CallPathMemory,
 		Instructions:       chatCtx.chat.SystemPrompt,
 		PreviousResponseID: *responseID,
-		Messages: []provider.UtilityMessage{
-			{Role: provider.UtilityMessageDeveloper, Text: memoryDedupNote(chatCtx)},
-			{Role: provider.UtilityMessageUser, Text: prompt},
-		},
-		MaxOutputTokens: provider.DefaultMaxContentLength,
-		SafetyUserID:    userID.String(),
+		History:            []provider.UtilityMessage{{Role: provider.UtilityMessageDeveloper, Text: memoryDedupNote(chatCtx)}},
+		Input:              prompt,
+		MaxOutputTokens:    provider.DefaultMaxContentLength,
+		SafetyUserID:       userID.String(),
 		Schema: &provider.UtilitySchema{
 			Name:        "MemoryExtraction",
 			Description: "Memory Extraction JSON",
@@ -122,13 +120,13 @@ func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID u
 func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, userID, chatID uuid.UUID, modelContext *provider.ModelContext, inferenceModelContext *provider.ModelContext, chatCtx *chatContext, compactionEventID *uuid.UUID) error {
 	prompt := memoryWritePromptText()
 
-	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
-	modelContext.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, memoryDedupNote(chatCtx), false)
 	model := rebuiltCheckpointModel(chatCtx)
 	reply, err := a.callUtilityModel(ctx, model, provider.UtilityRequest{
 		Role:            provider.UtilityRoleMemory,
 		CallPath:        telemetry.CallPathMemory,
 		Context:         modelContext,
+		History:         []provider.UtilityMessage{{Role: provider.UtilityMessageDeveloper, Text: memoryDedupNote(chatCtx)}},
+		Input:           prompt,
 		MaxOutputTokens: provider.DefaultMaxContentLength,
 		SafetyUserID:    userID.String(),
 		Schema: &provider.UtilitySchema{

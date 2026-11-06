@@ -28,12 +28,13 @@ func UtilityResponsesParams(model string, req UtilityRequest) responses.Response
 		params.MaxOutputTokens = openai.Int(req.MaxOutputTokens)
 	}
 	params.ServiceTier = utilityServiceTier(req)
-	if len(req.Messages) == 0 {
+	if len(req.History) == 0 && req.InputImageDataURL == "" {
 		params.Input = responses.ResponseNewParamsInputUnion{OfString: openai.String(req.Input)}
 	} else {
-		items := make([]responses.ResponseInputItemUnionParam, 0, len(req.Messages))
-		for _, m := range req.Messages {
-			items = append(items, utilityResponsesMessage(m))
+		turns := utilityTurns(req)
+		items := make([]responses.ResponseInputItemUnionParam, 0, len(turns))
+		for _, t := range turns {
+			items = append(items, utilityResponsesMessage(t))
 		}
 		params.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: items}
 	}
@@ -43,7 +44,7 @@ func UtilityResponsesParams(model string, req UtilityRequest) responses.Response
 
 // utilityResponsesParamsFromContext renders a call that continues a
 // conversation the way a chat turn on the model renders it, with the call's
-// own messages after it. Without instructions, the conversation's system
+// own History and Input after it. Without instructions, the conversation's system
 // prompt stands. Images the Responses API rejects are dropped, since the
 // conversation may come from a chat on another provider.
 func utilityResponsesParamsFromContext(model string, req UtilityRequest) responses.ResponseNewParams {
@@ -53,8 +54,8 @@ func utilityResponsesParamsFromContext(model string, req UtilityRequest) respons
 		MaxOutputTokens: int(req.MaxOutputTokens),
 		Instructions:    req.Instructions,
 	})
-	for _, m := range req.Messages {
-		params.Input.OfInputItemList = append(params.Input.OfInputItemList, utilityResponsesMessage(m))
+	for _, t := range utilityTurns(req) {
+		params.Input.OfInputItemList = append(params.Input.OfInputItemList, utilityResponsesMessage(t))
 	}
 	params.ServiceTier = utilityServiceTier(req)
 	params.Text = utilityResponsesText(req)
@@ -90,7 +91,7 @@ func utilityResponsesText(req UtilityRequest) responses.ResponseTextConfigParam 
 	}
 }
 
-func utilityResponsesMessage(m UtilityMessage) responses.ResponseInputItemUnionParam {
+func utilityResponsesMessage(m utilityTurn) responses.ResponseInputItemUnionParam {
 	role := responses.EasyInputMessageRole(m.Role)
 	if m.ImageDataURL == "" {
 		return responses.ResponseInputItemParamOfMessage(m.Text, role)
@@ -123,7 +124,7 @@ func UtilityClaudeParams(model string, req UtilityRequest) anthropic.MessageNewP
 	if req.Instructions != "" {
 		params.System = append([]anthropic.TextBlockParam{{Text: req.Instructions}}, params.System...)
 	}
-	for _, m := range utilityMessages(req) {
+	for _, m := range utilityTurns(req) {
 		if m.Role == RoleDeveloper {
 			params.System = append(params.System, anthropic.TextBlockParam{Text: m.Text})
 			continue
@@ -159,7 +160,7 @@ func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCo
 	if req.MaxOutputTokens > 0 {
 		params.MaxCompletionTokens = openai.Int(req.MaxOutputTokens)
 	}
-	for _, m := range utilityMessages(req) {
+	for _, m := range utilityTurns(req) {
 		if m.Role == RoleDeveloper {
 			params.Messages = append(params.Messages, openai.SystemMessage(m.Text))
 			continue
@@ -188,13 +189,20 @@ func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCo
 	return params
 }
 
-// utilityMessages is the turns a request adds: Messages, or Input as its one
-// user turn when there are no Messages and no conversation.
-func utilityMessages(req UtilityRequest) []UtilityMessage {
-	if len(req.Messages) > 0 || req.Context != nil {
-		return req.Messages
+// utilityTurn is one turn a request adds after its conversation.
+type utilityTurn struct {
+	Role         UtilityMessageRole
+	Text         string
+	ImageDataURL string
+}
+
+// utilityTurns is the turns a request adds after its conversation: the History, then Input.
+func utilityTurns(req UtilityRequest) []utilityTurn {
+	turns := make([]utilityTurn, 0, len(req.History)+1)
+	for _, m := range req.History {
+		turns = append(turns, utilityTurn{Role: m.Role, Text: m.Text})
 	}
-	return []UtilityMessage{{Role: RoleUser, Text: req.Input}}
+	return append(turns, utilityTurn{Role: UtilityMessageUser, Text: req.Input, ImageDataURL: req.InputImageDataURL})
 }
 
 // splitImageDataURL splits "data:<media type>;base64,<data>".
