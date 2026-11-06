@@ -12074,8 +12074,8 @@ components:
         built_in_model:
           type: string
           description: >-
-            The name of the model the role runs on when neither chose one. A chat
-            on an Anthropic model keeps a Claude model for its memory steps.
+            The name of the model the role runs on when neither chose one, for
+            every chat whatever model it is on.
     UtilityModels:
       type: object
       required: [accounts_choose, roles]
