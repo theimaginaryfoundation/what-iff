@@ -15011,7 +15011,7 @@ export interface components {
              * @description The deployment's choice, or null.
              */
             deployment_model_id: string | null;
-            /** @description The name of the model the role runs on when neither chose one. A chat on an Anthropic model keeps a Claude model for its memory steps. */
+            /** @description The name of the model the role runs on when neither chose one, for every chat whatever model it is on. */
             built_in_model: string;
         };
         UtilityModels: {
