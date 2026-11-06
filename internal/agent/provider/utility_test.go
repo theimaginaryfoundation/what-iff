@@ -27,7 +27,7 @@ func TestUtilityRequestValidate(t *testing.T) {
 		"unknown service tier": {Role: UtilityRoleSimple, Input: "a", ServiceTier: "fast"},
 		"negative cap":         {Role: UtilityRoleSimple, Input: "a", MaxOutputTokens: -1},
 		"assistant turn":       {Role: UtilityRoleSimple, History: []UtilityMessage{{Role: RoleAssistant, Text: "a"}}, Input: "b"},
-		"nothing to ask":         {Role: UtilityRoleSimple, Instructions: "x"},
+		"nothing to ask":       {Role: UtilityRoleSimple, Instructions: "x"},
 		"image not a data URL": {Role: UtilityRoleSimple, Input: "a", InputImageDataURL: "https://example.com/a.png"},
 	}
 	for name, req := range invalid {

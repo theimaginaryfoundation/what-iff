@@ -89,12 +89,14 @@ func claudeChatCtx(memories ...string) *chatContext {
 	return &chatContext{chat: &models.Chat{}, model: "claude-sonnet-4-5", modelProvider: string(models.ModelProviderAnthropic), memories: memories}
 }
 
-func TestExtractMemoriesWithScratchpadDeltaClaude_ClaudeChatWithoutAnthropicProviderReturnsError(t *testing.T) {
+// Memory extraction on a rebuilt context needs the memory role's provider, not the chat's: a
+// Claude chat with no OpenAI provider fails for want of OpenAI.
+func TestExtractMemoriesWithScratchpadDeltaClaude_WithoutMemoryRoleProviderReturnsError(t *testing.T) {
 	t.Parallel()
-	a := &Agent{logger: zap.NewNop()}
+	a := &Agent{logger: zap.NewNop(), ClaudeProvider: newHTTPTestClaudeProvider("http://127.0.0.1:1")}
 	err := a.extractMemoriesWithScratchpadDeltaClaude(context.Background(), uuid.New(), uuid.New(),
 		&provider.ModelContext{}, &provider.ModelContext{}, claudeChatCtx(), nil)
-	require.ErrorContains(t, err, "ANTHROPIC_API_KEY is not configured")
+	require.ErrorContains(t, err, "no OpenAI provider is configured")
 }
 
 func TestExtractMemoriesWithScratchpadDeltaClaude_ProviderErrorIsWrapped(t *testing.T) {
@@ -104,62 +106,36 @@ func TestExtractMemoriesWithScratchpadDeltaClaude_ProviderErrorIsWrapped(t *test
 	}))
 	defer srv.Close()
 
-	a := &Agent{logger: zap.NewNop(), ClaudeProvider: newHTTPTestClaudeProvider(srv.URL)}
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 	err := a.extractMemoriesWithScratchpadDeltaClaude(context.Background(), uuid.New(), uuid.New(),
 		&provider.ModelContext{}, &provider.ModelContext{}, claudeChatCtx(), nil)
 	require.ErrorContains(t, err, "memory extraction failed")
 }
 
-func TestExtractMemoriesWithScratchpadDeltaClaude_SuccessWithNoMemoriesIsNoOpDownstream(t *testing.T) {
+// A rebuilt-context checkpoint extracts memories on the memory role's model whatever the chat
+// is on, Claude included: no chat kind gets a model of its own, and an account without an
+// Anthropic key still gets its memories.
+func TestExtractMemoriesWithScratchpadDeltaClaude_UsesMemoryRoleModelForEveryChat(t *testing.T) {
 	t.Parallel()
-	body := claudeMessageTextJSONBody("msg_1", `{\"memories\":[]}`)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
-	}))
-	defer srv.Close()
-
-	a := &Agent{logger: zap.NewNop(), ClaudeProvider: newHTTPTestClaudeProvider(srv.URL)}
-	err := a.extractMemoriesWithScratchpadDeltaClaude(context.Background(), uuid.New(), uuid.New(),
-		&provider.ModelContext{}, &provider.ModelContext{}, claudeChatCtx("m1"), nil)
-	require.NoError(t, err)
-}
-
-// A chat that isn't on a native Anthropic model extracts its memories on the OpenAI archival
-// model, so an account without an Anthropic key still gets them (Gemini here; OpenRouter,
-// local and Custom connections take the same path).
-func TestExtractMemoriesWithScratchpadDeltaClaude_NonClaudeChatUsesOpenAIWithoutAnthropic(t *testing.T) {
-	t.Parallel()
-	srv, reqs := capturingResponsesServer(t, responseTextJSONBody("resp_1", `{\"memories\":[]}`))
-	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	chatCtx := &chatContext{chat: &models.Chat{}, model: "gemini-3.5", modelProvider: string(models.ModelProviderGoogle), memories: []string{"m1"}}
-
-	err := a.extractMemoriesWithScratchpadDeltaClaude(context.Background(), uuid.New(), uuid.New(),
-		&provider.ModelContext{}, &provider.ModelContext{}, chatCtx, nil)
-	require.NoError(t, err)
-	got := reqs()
-	require.Len(t, got, 1)
-	require.Equal(t, archivalOpenAIModel, got[0]["model"])
-	require.NotContains(t, got[0], "previous_response_id", "the rebuilt context is sent, not a stored response")
-}
-
-func TestRebuiltCheckpointModel(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		chatCtx *chatContext
-		want    string
-	}{
-		{"native Anthropic", claudeChatCtx(), archivalClaudeModel},
-		{"Gemini", &chatContext{model: "gemini-3.5", modelProvider: string(models.ModelProviderGoogle)}, archivalOpenAIModel},
-		{"z.ai, Anthropic wire format", &chatContext{model: "glm-5", modelProvider: string(models.ModelProviderZAI)}, archivalOpenAIModel},
-		{"Anthropic-compatible connection", &chatContext{model: "claude-sonnet-4-5", modelProvider: "custom", connection: &ConnectionEndpoint{Flavor: ConnectionFlavorAnthropic}}, archivalOpenAIModel},
-		{"no chat", nil, archivalOpenAIModel},
+	chats := map[string]*chatContext{
+		"native Anthropic":                claudeChatCtx("m1"),
+		"Gemini":                          {chat: &models.Chat{}, model: "gemini-3.5", modelProvider: string(models.ModelProviderGoogle), memories: []string{"m1"}},
+		"z.ai, Anthropic wire format":     {chat: &models.Chat{}, model: "glm-5", modelProvider: string(models.ModelProviderZAI)},
+		"Anthropic-compatible connection": {chat: &models.Chat{}, model: "claude-sonnet-4-5", modelProvider: "custom", connection: &ConnectionEndpoint{Flavor: ConnectionFlavorAnthropic}},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for name, chatCtx := range chats {
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			require.Equal(t, tt.want, rebuiltCheckpointModel(tt.chatCtx))
+			srv, reqs := capturingResponsesServer(t, responseTextJSONBody("resp_1", `{\"memories\":[]}`))
+			a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
+
+			err := a.extractMemoriesWithScratchpadDeltaClaude(context.Background(), uuid.New(), uuid.New(),
+				&provider.ModelContext{}, &provider.ModelContext{}, chatCtx, nil)
+			require.NoError(t, err)
+			got := reqs()
+			require.Len(t, got, 1)
+			require.Equal(t, archivalOpenAIModel, got[0]["model"])
+			require.NotContains(t, got[0], "previous_response_id", "the rebuilt context is sent, not a stored response")
 		})
 	}
 }

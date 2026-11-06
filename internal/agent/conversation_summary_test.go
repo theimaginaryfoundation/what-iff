@@ -150,5 +150,5 @@ func checkpointSummaryParams(userID uuid.UUID, instructions, existing string, sr
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
-	return provider.UtilityResponsesParams(utilityModelName(req.Role), req), nil
+	return provider.UtilityResponsesParams(archivalOpenAIModel, req), nil
 }
