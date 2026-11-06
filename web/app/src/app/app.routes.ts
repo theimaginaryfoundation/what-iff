@@ -8,6 +8,11 @@ import { authChildRoutes } from './extensions/auth-routes';
 
 export const routes: Routes = [
   {
+    // ADR 0x043 step 0 spike, throwaway.
+    path: 'spike/monaco',
+    loadComponent: () => import('./spike/monaco-spike.component').then(m => m.MonacoSpikeComponent)
+  },
+  {
     path: 'auth',
     canActivate: [guestGuard],
     // Auth screens (local sign-in/registration), defined in the extensions
