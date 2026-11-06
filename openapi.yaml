@@ -1738,8 +1738,10 @@ paths:
       summary: Choose the account's model for a utility role
       description: >-
         The model must be one the account can use: a catalog model or one
-        enabled on its own provider connections. A model turned off later fails
-        the role's background work rather than running it on another model.
+        enabled on its own provider connections. A choice that can't be used
+        later (turned off, or its connection gone or unreachable) is passed
+        over: the role falls back to the deployment's choice or its built-in
+        model, and the fallback is logged and counted.
       tags: [Model Management]
       security:
         - bearerAuth: []

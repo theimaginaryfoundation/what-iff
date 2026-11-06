@@ -20,21 +20,27 @@ import (
 )
 
 // fakeStore keeps settings in memory and refuses any model not in usable, the way the
-// datastore refuses a model the account can't use.
+// datastore refuses a model the account can't use. It's deliberately simpler than the
+// datastore: it doesn't check scope against owner or which models a scope may choose, which
+// the datastore's own tests cover.
 type fakeStore struct {
 	mu       sync.Mutex
-	settings []models.UtilityModelSetting
-	owners   map[int]uuid.UUID
+	settings []fakeSetting
 	usable   map[uuid.UUID]bool
+}
+
+type fakeSetting struct {
+	models.UtilityModelSetting
+	owner uuid.UUID
 }
 
 func (f *fakeStore) ListUtilityModelSettings(_ context.Context, userID uuid.UUID) ([]models.UtilityModelSetting, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []models.UtilityModelSetting
-	for i, s := range f.settings {
-		if s.Scope == models.UtilityScopeDeployment || f.owners[i] == userID {
-			out = append(out, s)
+	for _, s := range f.settings {
+		if s.Scope == models.UtilityScopeDeployment || s.owner == userID {
+			out = append(out, s.UtilityModelSetting)
 		}
 	}
 	return out, nil
@@ -47,19 +53,20 @@ func (f *fakeStore) SetUtilityModel(ctx context.Context, scope models.UtilitySco
 	_ = f.ClearUtilityModel(ctx, scope, userID, role)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.owners[len(f.settings)] = userID
-	f.settings = append(f.settings, models.UtilityModelSetting{Scope: scope, Role: role, ModelID: modelID})
+	f.settings = append(f.settings, fakeSetting{models.UtilityModelSetting{Scope: scope, Role: role, ModelID: modelID}, userID})
 	return nil
 }
 
 func (f *fakeStore) ClearUtilityModel(_ context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for i, s := range f.settings {
-		if s.Scope == scope && s.Role == role && f.owners[i] == userID {
-			f.settings[i].Role = "" // gone
+	kept := f.settings[:0]
+	for _, s := range f.settings {
+		if !(s.Scope == scope && s.Role == role && s.owner == userID) {
+			kept = append(kept, s)
 		}
 	}
+	f.settings = kept
 	return nil
 }
 
@@ -71,7 +78,7 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{store: &fakeStore{owners: map[int]uuid.UUID{}, usable: map[uuid.UUID]bool{}}, account: uuid.New()}
+	f := &fixture{store: &fakeStore{usable: map[uuid.UUID]bool{}}, account: uuid.New()}
 	f.router = mux.NewRouter()
 	builtIn := func(r models.UtilityRole) string { return "built-in-" + string(r) }
 	NewHandler(f.store, builtIn, true, zap.NewNop()).RegisterRoutes(f.router)
@@ -150,6 +157,10 @@ func TestSet_Refusals(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code, "a model the account can't use")
 	rec, _ = f.do(t, http.MethodPut, "/utility-models/memory", `{}`, true)
 	require.Equal(t, http.StatusBadRequest, rec.Code, "no model")
+	require.Contains(t, rec.Body.String(), "model_id is required")
+	rec, _ = f.do(t, http.MethodPut, "/utility-models/memory", `{"model_id":`, true)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "unreadable body")
+	require.Contains(t, rec.Body.String(), "Invalid request body")
 	rec, _ = f.do(t, http.MethodPut, "/utility-models/images", body, true)
 	require.Equal(t, http.StatusNotFound, rec.Code, "not a role")
 	rec, _ = f.do(t, http.MethodDelete, "/utility-models/images", "", true)
@@ -165,7 +176,7 @@ func TestSet_Refusals(t *testing.T) {
 // account's writes are refused, and a choice stored before isn't reported as in force.
 func TestDeploymentChooses(t *testing.T) {
 	t.Parallel()
-	store := &fakeStore{owners: map[int]uuid.UUID{}, usable: map[uuid.UUID]bool{}}
+	store := &fakeStore{usable: map[uuid.UUID]bool{}}
 	account, model := uuid.New(), uuid.New()
 	store.usable[model] = true
 	require.NoError(t, store.SetUtilityModel(context.Background(), models.UtilityScopeAccount, account, models.UtilityRoleMemory, model))
