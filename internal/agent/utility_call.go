@@ -48,6 +48,9 @@ func (a *Agent) callUtility(ctx context.Context, req provider.UtilityRequest) (u
 // callUtilityModel makes a utility call on a given model rather than its
 // role's, for the calls whose model depends on the chat.
 func (a *Agent) callUtilityModel(ctx context.Context, model string, req provider.UtilityRequest) (utilityReply, error) {
+	if err := req.Validate(); err != nil {
+		return utilityReply{}, err
+	}
 	if req.CallPath != "" {
 		ctx = telemetry.WithCallPath(ctx, req.CallPath)
 	}
@@ -62,9 +65,6 @@ func (a *Agent) callUtilityOn(ctx context.Context, model, modelProvider string, 
 		models.ProviderForModel(modelProvider, model) == models.ModelProviderOpenAI
 	if req.PreviousResponseID != "" && !responsesAPI {
 		return utilityReply{}, fmt.Errorf("model %q cannot continue a stored Responses conversation", model)
-	}
-	if req.PreviousResponseID != "" && req.Context != nil {
-		return utilityReply{}, errors.New("a utility call continues either a stored response or a conversation, not both")
 	}
 	switch {
 	case models.UsesAnthropicMessagesAPI(modelProvider, model):
