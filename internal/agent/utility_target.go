@@ -149,9 +149,28 @@ func (a *Agent) recordUtilityFallback(ctx context.Context, role provider.Utility
 
 // utilityTargetFor is the model a role's calls run on: the chosen one, or its built-in model.
 func (a *Agent) utilityTargetFor(ctx context.Context, role provider.UtilityRole) utilityTarget {
+	if t, ok := pinnedUtilityTarget(ctx, role); ok {
+		return t
+	}
 	if t, chosen := a.chosenUtilityTarget(ctx, role); chosen {
 		return t
 	}
 	name, modelProvider := utilityBuiltIn(role)
 	return utilityTarget{name: name, provider: string(modelProvider)}
+}
+
+// pinnedUtilityTargetKey carries a role's target, already resolved, on a context.
+type pinnedUtilityTargetKey struct{ role provider.UtilityRole }
+
+// withUtilityTarget pins role's calls under ctx to t, so they all run on one model however the
+// settings change meanwhile. A checkpoint pins its memory model: its steps continue one stored
+// response, which only the model that decided to chain off it can do.
+func withUtilityTarget(ctx context.Context, role provider.UtilityRole, t utilityTarget) context.Context {
+	return context.WithValue(ctx, pinnedUtilityTargetKey{role}, t)
+}
+
+// pinnedUtilityTarget is the target withUtilityTarget pinned for role on ctx, if any.
+func pinnedUtilityTarget(ctx context.Context, role provider.UtilityRole) (utilityTarget, bool) {
+	t, ok := ctx.Value(pinnedUtilityTargetKey{role}).(utilityTarget)
+	return t, ok
 }
