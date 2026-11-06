@@ -153,6 +153,7 @@ describe('BackgroundNoticesComponent', () => {
 
   it("puts a notice back if dismissing fails, but never on a chat the person has moved to", async () => {
     const el = await render([notice({})]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const failing = new Subject<void>();
     service.dismiss.mockReturnValue(failing);
     (el.querySelector('[data-testid="background-notice-dismiss"]') as HTMLButtonElement).click();
@@ -168,6 +169,8 @@ describe('BackgroundNoticesComponent', () => {
     fixture.detectChanges();
     expect(service.list).not.toHaveBeenCalled();
     expect(texts(el)).toEqual([]);
+    expect(warn).toHaveBeenCalledWith('Failed to dismiss a background notice:', expect.any(Error));
+    warn.mockRestore();
   });
 
   it('dismisses a notice, and reads them again when a turn settles', async () => {

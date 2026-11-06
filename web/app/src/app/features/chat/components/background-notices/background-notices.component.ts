@@ -104,7 +104,9 @@ export class BackgroundNoticesComponent {
     this.raw.update(list => list.filter(n => n.id !== id));
     try {
       await firstValueFrom(this.service.dismiss(chatId, id));
-    } catch {
+    } catch (error) {
+      // Logged like a failed load, so the failure itself doesn't go unseen.
+      console.warn('Failed to dismiss a background notice:', error);
       // Show it again, but only on its own chat: the person may have moved to another meanwhile.
       if (chatId === this.chatId()) {
         this.dismissed.delete(id);
