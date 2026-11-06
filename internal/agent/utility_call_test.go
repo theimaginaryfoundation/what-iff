@@ -128,14 +128,15 @@ func TestCallUtilityOn_ErrorNamesProvider(t *testing.T) {
 	}
 }
 
-func TestCallUtilityOn_RefusesStoredResponseWithConversation(t *testing.T) {
+// A request that breaks UtilityRequest's rules is refused before it reaches any provider.
+func TestCallUtilityModel_RefusesInvalidRequest(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
 	req := utilityTestRequest
 	req.PreviousResponseID = "resp_1"
 	req.Context = &provider.ModelContext{}
-	_, err := a.callUtilityOn(context.Background(), models.UtilityModelName, "", req)
-	require.ErrorContains(t, err, "not both")
+	_, err := a.callUtilityModel(context.Background(), models.UtilityModelName, req)
+	require.ErrorIs(t, err, provider.ErrInvalidUtilityRequest)
 }
 
 // Every role's model must resolve to an API from its name alone, or every call on that role
