@@ -48,6 +48,16 @@ func TestBackgroundNotices_Lifecycle(t *testing.T) {
 	settle(models.BackgroundOutcome{Failed: []models.BackgroundNotice{missingKey}})
 	require.Empty(t, list(alice), "dismissed stays dismissed while the cause is the same")
 
+	// The same code from another provider is a different problem.
+	elsewhere := missingKey
+	elsewhere.Provider, elsewhere.Model = "OpenAI", "gpt-5.6-luna"
+	settle(models.BackgroundOutcome{Failed: []models.BackgroundNotice{elsewhere}})
+	got = list(alice)
+	require.Len(t, got, 1, "a change of provider or model shows it again")
+	require.Equal(t, "OpenAI", got[0].Provider)
+	require.Equal(t, 1, got[0].Count)
+	require.NoError(t, ds.DismissBackgroundNotice(ctx, alice, chat, got[0].ID))
+
 	outage := missingKey
 	outage.Code = models.BackgroundNoticeProviderError
 	settle(models.BackgroundOutcome{Failed: []models.BackgroundNotice{outage}})

@@ -40,8 +40,8 @@ func (BackgroundNotice) Fields() []ent.Field {
 		field.String("model").Default(""),
 		// How many times it has happened since it was last cleared.
 		field.Int("count").Default(1),
-		// When the account dismissed it. It stays dismissed while the cause stays
-		// the same.
+		// When the account dismissed it. It stays dismissed while the cause (code,
+		// provider and model) stays the same.
 		field.Time("dismissed_at").Optional().Nillable(),
 	}
 }

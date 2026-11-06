@@ -72,8 +72,10 @@ func upsertBackgroundNoticeTx(ctx context.Context, tx *ent.Tx, userID, chatID uu
 	if err != nil {
 		return err
 	}
-	if existing.Code == n.Code {
-		return existing.Update().SetProvider(n.Provider).SetModel(n.Model).AddCount(1).Exec(ctx)
+	// The cause is the code and where it happened: the same error from another provider or model
+	// is a different problem, which the account hasn't seen yet.
+	if existing.Code == n.Code && existing.Provider == n.Provider && existing.Model == n.Model {
+		return existing.Update().AddCount(1).Exec(ctx)
 	}
 	// A new cause: show it again, even if the old one was dismissed.
 	return existing.Update().SetCode(n.Code).SetProvider(n.Provider).SetModel(n.Model).
