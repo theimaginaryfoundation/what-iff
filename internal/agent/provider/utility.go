@@ -107,8 +107,10 @@ type UtilityRequest struct {
 // the call site, never something the account did.
 var ErrInvalidUtilityRequest = errors.New("invalid utility request")
 
-// Validate reports a request that would send something other than what it says. An empty
-// Input is allowed: a message can be all attachments, and its call sends an empty turn.
+// Validate reports a request that would send something other than what it says, or nothing
+// to ask: Input needs text or an image, since a call with no ask has nothing to answer and
+// Anthropic rejects an empty text block. A caller whose ask can be empty, such as naming a chat
+// from an image-only message, skips the call instead.
 func (r UtilityRequest) Validate() error {
 	invalid := func(format string, args ...any) error {
 		return fmt.Errorf("%w: %s", ErrInvalidUtilityRequest, fmt.Sprintf(format, args...))
@@ -120,6 +122,8 @@ func (r UtilityRequest) Validate() error {
 		return invalid("continues both a conversation and a stored response")
 	case !r.ServiceTier.Valid():
 		return invalid("unknown service tier %q", r.ServiceTier)
+	case r.Input == "" && r.InputImageDataURL == "":
+		return invalid("nothing to ask: Input has no text or image")
 	case r.MaxOutputTokens < 0:
 		return invalid("negative MaxOutputTokens")
 	}

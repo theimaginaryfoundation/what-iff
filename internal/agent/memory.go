@@ -151,7 +151,12 @@ func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, us
 	return nil
 }
 
+// getMemoryQuery asks whether the user's message calls for memories, and what to search for.
+// A message with no text, such as an image alone, has nothing to search with, so it doesn't.
 func (a *Agent) getMemoryQuery(ctx context.Context, userID uuid.UUID, prompt string, userMessage string) (models.MemoryQuery, error) {
+	if strings.TrimSpace(userMessage) == "" {
+		return models.MemoryQuery{}, nil
+	}
 
 	out, err := a.CallUtility(ctx, provider.UtilityRequest{
 		Role:            provider.UtilityRoleSimple,

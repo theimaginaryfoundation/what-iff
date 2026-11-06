@@ -170,7 +170,7 @@ func TestCallUtility_CountsImagesLeftOut(t *testing.T) {
 	}, false)
 
 	out, err := a.CallUtility(context.Background(), provider.UtilityRequest{
-		Role: provider.UtilityRoleMemory, CallPath: telemetry.CallPathConversationSummary, Context: mc,
+		Role: provider.UtilityRoleMemory, CallPath: telemetry.CallPathConversationSummary, Context: mc, Input: "summarize",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "summary", out)
