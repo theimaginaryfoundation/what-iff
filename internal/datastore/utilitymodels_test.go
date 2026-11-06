@@ -10,6 +10,9 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
+// The fixture's models are bare catalog rows (no provider, never turned off); the tests that
+// depend on connections or turned-off models create those themselves.
+//
 // These tests stay serial, like the remote-sync tests: they create tables from the generated
 // schema, whose shared definitions the migrator writes to, so creating them alongside parallel
 // tests that do the same is a data race.
@@ -98,4 +101,43 @@ func TestSetUtilityModel_OnlyModelsTheChooserCanUse(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []models.UtilityModelSetting{{Scope: models.UtilityScopeDeployment, Role: models.UtilityRoleSimple, ModelID: modelA}}, got,
 		"a refused choice leaves nothing behind")
+}
+
+// A setting that can't exist is refused before anything is written or cleared.
+func TestUtilityModel_RefusesImpossibleSettings(t *testing.T) {
+	ds, alice, _, modelA, _ := newUtilityModelFixture(t)
+	ctx := context.Background()
+	// Each case has a setting to clear, so a clear that ignored its scope would show.
+	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleMemory, modelA))
+	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleMemory, modelA))
+	for name, c := range map[string]struct {
+		scope models.UtilityScope
+		user  uuid.UUID
+		role  models.UtilityRole
+	}{
+		"unknown role":         {models.UtilityScopeAccount, alice, "images"},
+		"unknown scope":        {"team", alice, models.UtilityRoleMemory},
+		"deployment with user": {models.UtilityScopeDeployment, alice, models.UtilityRoleMemory},
+		"account without user": {models.UtilityScopeAccount, uuid.Nil, models.UtilityRoleMemory},
+	} {
+		require.ErrorIs(t, ds.SetUtilityModel(ctx, c.scope, c.user, c.role, modelA), ErrInvalidUtilitySetting, "set: "+name)
+		require.ErrorIs(t, ds.ClearUtilityModel(ctx, c.scope, c.user, c.role), ErrInvalidUtilitySetting, "clear: "+name)
+	}
+	n, err := ds.dbClient.UtilityModelSetting.Query().Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, n, "nothing written or cleared")
+}
+
+// The database holds to the scope's owner too, whatever writes the row.
+func TestUtilityModelSetting_DatabaseRefusesWrongOwner(t *testing.T) {
+	ds, alice, _, modelA, _ := newUtilityModelFixture(t)
+	ctx := context.Background()
+	_, err := ds.dbClient.UtilityModelSetting.Create().
+		SetScope(string(models.UtilityScopeDeployment)).SetUserID(alice).
+		SetRole(string(models.UtilityRoleMemory)).SetModelID(modelA).Save(ctx)
+	require.Error(t, err, "a deployment setting with an owner")
+	_, err = ds.dbClient.UtilityModelSetting.Create().
+		SetScope(string(models.UtilityScopeAccount)).
+		SetRole(string(models.UtilityRoleMemory)).SetModelID(modelA).Save(ctx)
+	require.Error(t, err, "an account setting without one")
 }

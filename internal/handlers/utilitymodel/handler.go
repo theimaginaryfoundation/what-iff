@@ -71,8 +71,12 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req models.SetUtilityModelRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ModelID == uuid.Nil {
-		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "model_id is required", err)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid request body", err)
+		return
+	}
+	if req.ModelID == uuid.Nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "model_id is required", nil)
 		return
 	}
 	err := h.store.SetUtilityModel(r.Context(), models.UtilityScopeAccount, userID, role, req.ModelID)
