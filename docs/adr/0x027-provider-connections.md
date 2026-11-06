@@ -127,7 +127,7 @@ A role is a row in a list, so new kinds of background work add a role rather tha
 | Role | Covers | Today |
 |---|---|---|
 | Memory and summaries | Memory extraction and merge, the scratchpad, checkpoint summaries, recall, thread rehydration | `gpt-5.6-luna` (memory and scratchpad use `claude-haiku-4-5` in chats with a Claude model) |
-| Quick tasks | Chat naming, expression and mode selection, schedule parsing, memory dedupe | `gpt-5.6-luna` |
+| Simple tasks | Chat naming, expression and mode selection, schedule parsing, memory dedupe | `gpt-5.6-luna` |
 | Personality generation | Generating a personality | `gpt-5.1` |
 | Images | Portraits and expression sets | `gpt-image-2.5-flare` |
 

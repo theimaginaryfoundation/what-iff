@@ -167,7 +167,7 @@ func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMe
 	userPrompt := fmt.Sprintf("User message:\n%s\n\nAvailable moods:\n%s", userMessage, string(summaryJSON))
 
 	out, err := a.CallUtility(ctx, provider.UtilityRequest{
-		Role:         provider.UtilityRoleQuick,
+		Role:         provider.UtilityRoleSimple,
 		CallPath:     telemetry.CallPathModeSelect,
 		Instructions: sysPrompt,
 		Messages:     []provider.UtilityMessage{{Role: provider.RoleUser, Text: userPrompt}},

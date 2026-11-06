@@ -15,7 +15,7 @@ func (a *Agent) generateChatName(ctx context.Context, userMessage string) (strin
 		return mockChatName(userMessage), nil
 	}
 	name, err := a.CallUtility(ctx, provider.UtilityRequest{
-		Role:            provider.UtilityRoleQuick,
+		Role:            provider.UtilityRoleSimple,
 		CallPath:        telemetry.CallPathChatName,
 		Instructions:    chatNamePrompt,
 		Input:           userMessage,
