@@ -170,7 +170,7 @@ func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMe
 		Role:         provider.UtilityRoleSimple,
 		CallPath:     telemetry.CallPathModeSelect,
 		Instructions: sysPrompt,
-		Messages:     []provider.UtilityMessage{{Role: provider.RoleUser, Text: userPrompt}},
+		Messages:     []provider.UtilityMessage{{Role: provider.UtilityMessageUser, Text: userPrompt}},
 		Schema: &provider.UtilitySchema{
 			Name:        "MoodAutoSelect",
 			Description: "Mood auto-selection JSON",
