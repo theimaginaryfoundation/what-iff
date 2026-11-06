@@ -3,6 +3,7 @@ package utilitymodel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,9 +32,14 @@ type fakeStore struct {
 	catalog map[uuid.UUID]*models.Model
 	// setErr, when set, is what SetUtilityModel fails with.
 	setErr error
+	// getErr, when set, is what GetModel fails with.
+	getErr error
 }
 
 func (f *fakeStore) GetModel(_ context.Context, id uuid.UUID) (*models.Model, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
 	if m, ok := f.catalog[id]; ok {
 		return m, nil
 	}
@@ -262,4 +268,17 @@ func TestSet_DeletedAccountIsUnauthorized(t *testing.T) {
 	f.store.setErr = datastore.ErrUserNotFound
 	rec, _ := f.do(t, http.MethodPut, "/utility-models/memory", `{"model_id":"`+uuid.New().String()+`"}`, true)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+// A model that can't be read is a server error, answered at once rather than passed on to the
+// save.
+func TestSet_UnreadableModelIsAServerError(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	model := uuid.New()
+	f.store.usable[model] = true
+	f.store.getErr = errors.New("database is down")
+	rec, _ := f.do(t, http.MethodPut, "/utility-models/memory", `{"model_id":"`+model.String()+`"}`, true)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	require.Empty(t, f.store.settings, "nothing is saved")
 }
