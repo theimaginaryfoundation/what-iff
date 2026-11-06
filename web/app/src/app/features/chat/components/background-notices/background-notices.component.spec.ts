@@ -82,6 +82,8 @@ describe('BackgroundNoticesComponent', () => {
     const el = await render([notice({ code: 'provider_not_configured', provider: 'Mistral' }), notice({ id: 'b', step: 'fallback_memory', code: 'model_unavailable' })]);
     expect(texts(el).length).toBe(2);
     expect(el.querySelector('[data-testid="background-notice-fix"]')).toBeNull();
+    expect(texts(el)[0]).toContain("Mistral isn't set up on this server.");
+    expect(texts(el)[0]).not.toContain('Add one');
   });
 
   it('offers to change background models for a provider error', async () => {
@@ -103,15 +105,24 @@ describe('BackgroundNoticesComponent', () => {
     expect(fallback).toContain("The model chosen for Memory and summaries wasn't available, so another was used.");
   });
 
+  it("names a role this app doesn't know in general terms, not by its raw name", async () => {
+    const el = await render([notice({ step: 'fallback_portraits', code: 'model_unavailable' })]);
+    expect(texts(el)[0]).toContain("A model chosen for background work wasn't available, so another was used.");
+    expect(texts(el)[0]).not.toContain('portraits');
+  });
+
   it("never shows one chat's notices on another, even if the new chat's load fails", async () => {
     const el = await render([notice({})]);
     expect(texts(el).length).toBe(1);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     service.list.mockReturnValue(throwError(() => new Error('offline')));
     fixture.componentInstance.chatId.set('chat-2');
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
     expect(texts(el)).toEqual([]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('dismisses a notice, and reads them again when a turn settles', async () => {

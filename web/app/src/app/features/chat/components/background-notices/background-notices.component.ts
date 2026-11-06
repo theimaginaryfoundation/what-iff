@@ -78,8 +78,10 @@ export class BackgroundNoticesComponent {
       if (token === this.loadToken) {
         this.notices.set(notices.map(n => this.view(n)));
       }
-    } catch {
-      // A notice is a courtesy; failing to load one says nothing new.
+    } catch (error) {
+      // A notice is a courtesy, so a failed load shows nothing rather than an error of its
+      // own; it is logged so the failure itself doesn't go unseen.
+      console.warn('Failed to load background notices:', error);
     }
   }
 
@@ -113,10 +115,14 @@ export class BackgroundNoticesComponent {
     const times = n.count > 1 ? ` This has happened ${n.count} times.` : '';
     if (n.step.startsWith('fallback_')) {
       const role = n.step.slice('fallback_'.length) as UtilityRole;
-      const label = UTILITY_ROLE_COPY[role]?.label ?? role;
+      // A role this app doesn't know yet (a newer server's) gets a general sentence rather than
+      // its raw name.
+      const label = UTILITY_ROLE_COPY[role]?.label;
       return {
         id: n.id,
-        what: `The model chosen for ${label} wasn't available, so another was used.`,
+        what: label
+          ? `The model chosen for ${label} wasn't available, so another was used.`
+          : "A model chosen for background work wasn't available, so another was used.",
         why: `It may have been turned off, or its provider removed.${times}`,
         action: 'background-models',
         actionLabel: 'Change background models',
@@ -125,6 +131,15 @@ export class BackgroundNoticesComponent {
     const what = STEP_COPY[n.step] ?? "Some background work on this chat didn't finish.";
     const provider = n.provider || 'The provider';
     if (n.code === 'provider_not_configured') {
+      if (!this.keys.accountsSupplyKeys()) {
+        return {
+          id: n.id,
+          what,
+          why: `${provider} isn't set up on this server${n.model ? ` for ${n.model}` : ''}.${times}`,
+          action: null,
+          actionLabel: '',
+        };
+      }
       return {
         id: n.id,
         what,

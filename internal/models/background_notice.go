@@ -49,7 +49,8 @@ type BackgroundNotice struct {
 }
 
 // BackgroundOutcome is what a run of background steps on a chat found: the steps that failed
-// or fell back, and the steps that succeeded, whose notices it clears.
+// or fell back, and the steps that succeeded, whose notices it clears. It passes between the
+// agent and the datastore only and is never serialized; the API returns BackgroundNotice.
 type BackgroundOutcome struct {
 	Failed    []BackgroundNotice
 	Succeeded []BackgroundStep
