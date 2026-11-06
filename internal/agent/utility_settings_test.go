@@ -98,15 +98,49 @@ func TestCheckpointChainsResponses_FollowsMemoryModel(t *testing.T) {
 	openAIChat := &chatContext{model: "gpt-5.4", modelProvider: string(models.ModelProviderOpenAI)}
 	alice := apicontext.WithUserID(context.Background(), f.alice)
 
-	require.True(t, f.a.checkpointChainsResponses(alice, openAIChat))
+	chains := func(chatCtx *chatContext) bool {
+		return checkpointChainsResponses(chatCtx, f.a.utilityTargetFor(alice, provider.UtilityRoleMemory))
+	}
+	require.True(t, chains(openAIChat))
 	f.choose(t, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleMemory, f.catalog.ID)
-	require.True(t, f.a.checkpointChainsResponses(alice, openAIChat), "an OpenAI memory model still chains")
+	require.True(t, chains(openAIChat), "an OpenAI memory model still chains")
 	f.choose(t, models.UtilityScopeAccount, f.alice, models.UtilityRoleMemory, f.aliceModel.ID)
-	require.False(t, f.a.checkpointChainsResponses(alice, openAIChat))
-	require.False(t, f.a.checkpointChainsResponses(alice, &chatContext{model: "gemini-3.5", modelProvider: string(models.ModelProviderGoogle)}))
+	require.False(t, chains(openAIChat))
+	require.False(t, chains(&chatContext{model: "gemini-3.5", modelProvider: string(models.ModelProviderGoogle)}))
 
 	got := f.a.utilityTargetFor(alice, provider.UtilityRoleMemory)
 	require.Equal(t, "qwen3:0.6b", got.name, "the rebuilt path runs on the chosen memory model")
+}
+
+// A checkpoint pins the memory model it decided to chain with, so a choice saved while it runs
+// can't send a later step, still continuing the stored response, to a model that can't
+// continue it.
+func TestCheckpoint_PinnedMemoryModelSurvivesAChoiceMidRun(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	f.serve(f.aliceModel, ConnectionEndpoint{Preset: "ollama", Flavor: ConnectionFlavorOpenAI, BaseURL: "http://local"})
+	srv, reqs := capturingResponsesServer(t, responseTextJSONBody("resp_2", "updated"))
+	f.a.OpenAIProvider = newHTTPTestOpenAIProvider(srv.URL)
+	alice := apicontext.WithUserID(context.Background(), f.alice)
+	openAIChat := &chatContext{model: "gpt-5.4", modelProvider: string(models.ModelProviderOpenAI)}
+
+	memory := f.a.utilityTargetFor(alice, provider.UtilityRoleMemory)
+	require.True(t, checkpointChainsResponses(openAIChat, memory))
+	checkpoint := withUtilityTarget(alice, provider.UtilityRoleMemory, memory)
+
+	// Alice chooses a local model for memory while the checkpoint runs.
+	f.choose(t, models.UtilityScopeAccount, f.alice, models.UtilityRoleMemory, f.aliceModel.ID)
+	require.Equal(t, "qwen3:0.6b", f.a.utilityTargetFor(alice, provider.UtilityRoleMemory).name, "outside the checkpoint, the new choice counts")
+	require.Equal(t, memory, f.a.utilityTargetFor(checkpoint, provider.UtilityRoleMemory), "inside it, the pinned model stays")
+
+	_, err := f.a.callUtility(checkpoint, provider.UtilityRequest{
+		Role: provider.UtilityRoleMemory, PreviousResponseID: "resp_1", Input: "update the scratchpad",
+	})
+	require.NoError(t, err, "the step continues the stored response on the model that chained it")
+	got := reqs()
+	require.Len(t, got, 1)
+	require.Equal(t, "resp_1", got[0]["previous_response_id"])
+	require.Equal(t, archivalOpenAIModel, got[0]["model"])
 }
 
 // Where the deployment supplies the keys, an account's stored choice doesn't count: the

@@ -3114,7 +3114,14 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	// run their scratchpad, memory and summary steps on the memory role's model.
 	// A connection model rebuilds from the DB too: no connection returns an
 	// OpenAI response id to chain off.
-	if !a.checkpointChainsResponses(checkpointCtx, chatCtx) {
+	//
+	// The memory model is resolved once and pinned for the whole checkpoint. Its steps would
+	// otherwise each resolve it again, and a choice saved mid-checkpoint, or a settings read
+	// that failed only the first time, would send a step that continues the stored response
+	// to a model that can't.
+	memory := a.utilityTargetFor(checkpointCtx, provider.UtilityRoleMemory)
+	checkpointCtx = withUtilityTarget(checkpointCtx, provider.UtilityRoleMemory, memory)
+	if !checkpointChainsResponses(chatCtx, memory) {
 		a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
 	} else {
 		a.runCheckpointOpenAI(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
