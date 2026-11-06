@@ -10,12 +10,12 @@ func TestUtilityRequestValidate(t *testing.T) {
 	t.Parallel()
 	conversation := &ModelContext{}
 	valid := map[string]UtilityRequest{
-		"input":                  {Role: UtilityRoleQuick, Input: "hi"},
-		"messages":               {Role: UtilityRoleQuick, Messages: []UtilityMessage{{Role: RoleDeveloper, Text: "a"}, {Role: RoleUser, Text: "b", ImageDataURL: "data:image/png;base64,AAAA"}}},
-		"conversation alone":     {Role: UtilityRoleQuick, Context: conversation},
+		"input":                  {Role: UtilityRoleSimple, Input: "hi"},
+		"messages":               {Role: UtilityRoleSimple, Messages: []UtilityMessage{{Role: RoleDeveloper, Text: "a"}, {Role: RoleUser, Text: "b", ImageDataURL: "data:image/png;base64,AAAA"}}},
+		"conversation alone":     {Role: UtilityRoleSimple, Context: conversation},
 		"conversation and turns": {Role: UtilityRoleMemory, Context: conversation, Messages: []UtilityMessage{{Role: RoleUser, Text: "a"}}},
 		"stored response":        {Role: UtilityRoleMemory, PreviousResponseID: "resp_1", Input: "a"},
-		"empty input":            {Role: UtilityRoleQuick, Instructions: "x"},
+		"empty input":            {Role: UtilityRoleSimple, Instructions: "x"},
 	}
 	for name, req := range valid {
 		require.NoError(t, req.Validate(), name)
@@ -25,12 +25,12 @@ func TestUtilityRequestValidate(t *testing.T) {
 		"unknown role":            {Role: "images", Input: "hi"},
 		"no role":                 {Input: "hi"},
 		"both conversations":      {Role: UtilityRoleMemory, Context: conversation, PreviousResponseID: "resp_1", Messages: []UtilityMessage{{Role: RoleUser, Text: "a"}}},
-		"input and messages":      {Role: UtilityRoleQuick, Input: "a", Messages: []UtilityMessage{{Role: RoleUser, Text: "b"}}},
-		"input with conversation": {Role: UtilityRoleQuick, Context: conversation, Input: "a"},
-		"priority and flex":       {Role: UtilityRoleQuick, Input: "a", Priority: true, Flex: true},
-		"negative cap":            {Role: UtilityRoleQuick, Input: "a", MaxOutputTokens: -1},
-		"assistant turn":          {Role: UtilityRoleQuick, Messages: []UtilityMessage{{Role: RoleAssistant, Text: "a"}}},
-		"image not a data URL":    {Role: UtilityRoleQuick, Messages: []UtilityMessage{{Role: RoleUser, Text: "a", ImageDataURL: "https://example.com/a.png"}}},
+		"input and messages":      {Role: UtilityRoleSimple, Input: "a", Messages: []UtilityMessage{{Role: RoleUser, Text: "b"}}},
+		"input with conversation": {Role: UtilityRoleSimple, Context: conversation, Input: "a"},
+		"priority and flex":       {Role: UtilityRoleSimple, Input: "a", Priority: true, Flex: true},
+		"negative cap":            {Role: UtilityRoleSimple, Input: "a", MaxOutputTokens: -1},
+		"assistant turn":          {Role: UtilityRoleSimple, Messages: []UtilityMessage{{Role: RoleAssistant, Text: "a"}}},
+		"image not a data URL":    {Role: UtilityRoleSimple, Messages: []UtilityMessage{{Role: RoleUser, Text: "a", ImageDataURL: "https://example.com/a.png"}}},
 	}
 	for name, req := range invalid {
 		require.ErrorIs(t, req.Validate(), ErrInvalidUtilityRequest, name)

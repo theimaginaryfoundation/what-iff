@@ -36,6 +36,9 @@
   `ChatMessage.ExcludeFromMemory` is the one stored trace of a turn: set on both messages of a save-off turn (`chat_message.exclude_from_memory`, nullable), never in the API (`json:"-"`).
 - **Superseded messages:** `ChatMessage.SupersededAt` / `SupersededBy` (`json:"-"`) mark a message taken back and the reply that replaced it (agent `SupersedeTurn` / `RegenerateTurn`).
   `ChatMessageFilters.IncludeSuperseded` (`json:"-"`) lists them too; off by default, so they are hidden wherever messages are listed.
+- **Utility roles (`utility.go`):** `UtilityRole` (`memory`, `simple`, `personality`) groups background work that runs on the same model (ADR 0x027 section 6).
+  `UtilityRoles` lists them in display order and `Valid` checks one.
+  They live here, not in `agent/provider`, so code that can't import the agent, such as the datastore, can name a role.
 - **Error envelope (`error.go`):** `ErrorResponse` plus the error-code registry — `ErrCode*` constants and `GenericErrorCode(status)`.
   This is the single source of truth for the taxonomy; the `ErrorCode` enum in `openapi.yaml` mirrors it and must be updated alongside.
   Adding a provider connection that fails answers with `provider_unreachable`, `provider_key_rejected`, `provider_incompatible` or `provider_unavailable`, `custom_address_not_allowed` when the deployment does not let accounts choose an address, `provider_connection_exists` for a second connection to a built-in provider, and `default_model_in_use` when a change would take away the account's default model (ADR 0x027).

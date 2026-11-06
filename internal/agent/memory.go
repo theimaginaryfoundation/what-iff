@@ -156,7 +156,7 @@ func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, us
 func (a *Agent) getMemoryQuery(ctx context.Context, userID uuid.UUID, prompt string, userMessage string) (models.MemoryQuery, error) {
 
 	out, err := a.CallUtility(ctx, provider.UtilityRequest{
-		Role:            provider.UtilityRoleQuick,
+		Role:            provider.UtilityRoleSimple,
 		CallPath:        telemetry.CallPathMemory,
 		Instructions:    prompt,
 		Input:           userMessage,
