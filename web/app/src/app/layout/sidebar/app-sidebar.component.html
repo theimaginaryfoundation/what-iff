@@ -976,6 +976,10 @@
     </section>
   }
 
+  @if (!collapsed() && isJobsView()) {
+    <app-sidebar-recent-jobs />
+  }
+
   @if (refSelectionMode()) {
     <div class="app-sidebar__ref-bar" role="group" aria-label="Attach threads to your next message">
       <span class="app-sidebar__ref-bar-label">{{ refSelectionLabel() }}</span>
