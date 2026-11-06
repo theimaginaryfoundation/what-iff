@@ -43,7 +43,7 @@ func (d *recallDistiller) Distill(ctx context.Context, question, material string
 		Role:            provider.UtilityRoleMemory,
 		CallPath:        telemetry.CallPathMemory,
 		Instructions:    recallDistillPrompt,
-		Messages:        []provider.UtilityMessage{{Role: provider.UtilityMessageUser, Text: userContent}},
+		Input:           userContent,
 		MaxOutputTokens: recallDistillMaxOutputTokens,
 	})
 	if err != nil {
