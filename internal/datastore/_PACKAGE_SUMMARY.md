@@ -76,6 +76,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     Utility model settings (`utilitymodels.go`, ADR 0x027 section 6) choose the model for a utility role at a scope: the deployment's (no `user_id`) or an account's.
     `ListUtilityModelSettings` returns the deployment's with the account's, `SetUtilityModel` replaces a role's choice and `ClearUtilityModel` removes it.
     An account may choose only a model it can use (`assertUserCanUseModelTx`), and the deployment, whose choice applies to every account, only a catalog model; deleting the model or the account deletes the setting.
+    A setting that can't exist (an unknown role or scope, or a scope with the wrong owner) is refused with `ErrInvalidUtilitySetting` before anything is written or cleared.
+    The table's CHECK constraint holds the scope-owner rule in the database too.
     `assertUserCanUseModelTx` treats a connection's model as nonexistent to anyone but the connection's owner, so it can't be set on another account's chat, job or preference.
   - Safety violations: `safety_violation_event.go`.
   - Tool call persistence: `toolcall.go`.
