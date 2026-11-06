@@ -156,10 +156,10 @@ func UtilityClaudeParams(model string, req UtilityRequest) anthropic.MessageNewP
 // settings; anything that needs them belongs on the chat adapters, not here.
 //
 // For example, instructions "Summarize.", a developer turn "Be brief." and a
-// conversation [system "You are Vix.", user "hi", assistant "hello", system
-// "<scratchpad>"] send:
+// conversation [system "You are a helpful assistant.", user "hi", assistant
+// "hello", system "<scratchpad>"] send:
 //
-//	system:    "Summarize.\n\nBe brief.\n\nYou are Vix.\n\n<scratchpad>"
+//	system:    "Summarize.\n\nBe brief.\n\nYou are a helpful assistant.\n\n<scratchpad>"
 //	user:      "hi"
 //	assistant: "hello"
 func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCompletionNewParams {
