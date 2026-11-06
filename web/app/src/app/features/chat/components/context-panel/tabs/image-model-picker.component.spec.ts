@@ -7,6 +7,8 @@ describe('ImageModelPickerComponent', () => {
   let fixture: ComponentFixture<ImageModelPickerComponent>;
 
   beforeEach(async () => {
+    // The picker persists its choice; start every test from the stored-nothing default.
+    window.localStorage.removeItem('whatiff.defaultImageModel');
     await TestBed.configureTestingModule({
       imports: [ImageModelPickerComponent],
       providers: [provideZonelessChangeDetection()],
@@ -14,6 +16,8 @@ describe('ImageModelPickerComponent', () => {
     fixture = TestBed.createComponent(ImageModelPickerComponent);
     fixture.detectChanges();
   });
+
+  afterEach(() => window.localStorage.removeItem('whatiff.defaultImageModel'));
 
   const el = (): HTMLElement => fixture.nativeElement;
   const trigger = () => el().querySelector('[data-testid="image-model-trigger"]') as HTMLButtonElement;
@@ -75,6 +79,21 @@ describe('ImageModelPickerComponent', () => {
     reopened.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
     fixture.detectChanges();
     expect(trigger().textContent).toContain('Gemini Flash Image');
+  });
+
+  it('restores a stored default on creation', () => {
+    window.localStorage.setItem('whatiff.defaultImageModel', 'gemini-flash-image');
+    const restored = TestBed.createComponent(ImageModelPickerComponent);
+    restored.detectChanges();
+    const restoredTrigger = restored.nativeElement.querySelector('[data-testid="image-model-trigger"]') as HTMLButtonElement;
+    expect(restoredTrigger.textContent).toContain('Gemini Flash Image');
+  });
+
+  it('stops listening for outside clicks once destroyed', () => {
+    const remove = vi.spyOn(document, 'removeEventListener');
+    fixture.destroy();
+    expect(remove).toHaveBeenCalledWith('click', expect.any(Function), true);
+    remove.mockRestore();
   });
 
   describe('accessibility', () => {

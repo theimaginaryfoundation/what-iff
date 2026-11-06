@@ -46,7 +46,18 @@ const STORAGE_KEY = 'whatiff.defaultImageModel';
       >
         <span class="picker__name">{{ current().label }}</span>
         <span class="pill pill--on" aria-hidden="true">default</span>
-        <svg class="picker__chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg
+          class="picker__chevron"
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
           <path d="M6 9l6 6 6-6" />
         </svg>
       </button>
@@ -72,7 +83,9 @@ const STORAGE_KEY = 'whatiff.defaultImageModel';
               (click)="choose(model.id)"
             >
               <span class="picker__name">{{ model.label }}</span>
-              <span class="pill" aria-hidden="true" [class.pill--on]="model.id === selected()" [class.pill--off]="model.id !== selected()">default</span>
+              <span class="pill" aria-hidden="true" [class.pill--on]="model.id === selected()" [class.pill--off]="model.id !== selected()"
+                >default</span
+              >
             </li>
           }
         </ul>
@@ -187,6 +200,7 @@ export class ImageModelPickerComponent {
   private readonly announcer = inject(AnnouncerService);
 
   constructor() {
+    // Registers a document capture listener and removes it via DestroyRef when this picker is destroyed.
     listenForOutsideClick(() => this.open.set(false));
   }
 
@@ -258,7 +272,12 @@ export class ImageModelPickerComponent {
   }
 
   private openList(): void {
-    this.activeIndex.set(Math.max(0, this.models.findIndex(m => m.id === this.selected())));
+    this.activeIndex.set(
+      Math.max(
+        0,
+        this.models.findIndex(m => m.id === this.selected()),
+      ),
+    );
     this.open.set(true);
     // The list is rendered by this change, so focus it once Angular has put it in the DOM.
     afterNextRender(() => this.list()?.nativeElement.focus(), { injector: this.injector });
