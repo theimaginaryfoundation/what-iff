@@ -83,6 +83,8 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	chatRouter.HandleFunc("/{chatId}/chat-message/{messageId}/active-job", h.GetActiveChatMessageJob).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/chat-message/{messageId}/bookmark", h.SetChatMessageBookmark).Methods("PATCH")
 	chatRouter.HandleFunc("/{chatId}/bookmarks", h.GetChatMessageBookmarks).Methods("GET")
+	chatRouter.HandleFunc("/{chatId}/background-notices", h.ListBackgroundNotices).Methods("GET")
+	chatRouter.HandleFunc("/{chatId}/background-notices/{noticeId}/dismiss", h.DismissBackgroundNotice).Methods("POST")
 	chatRouter.HandleFunc("/{chatId}/active-job", h.GetActiveChatJob).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/chat-message", h.GetChatMessages).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/chat-message", h.CreateChatMessage).Methods("POST")

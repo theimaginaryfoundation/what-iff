@@ -63,6 +63,11 @@ export class ChatSessionService implements OnDestroy {
   private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly subscriptions = new Subscription();
   /**
+   * Counts turns that fully ended on the active thread, post-processing included: a checkpoint
+   * may have run, so what it found (background notices) is worth reading again.
+   */
+  readonly settledTurns = signal(0);
+  /**
    * The active thread's in-flight reply: job polling, pending draft, streaming, cancel and
    * resume-on-entry. New behaviour in those areas belongs in AssistantTurn, not here; this
    * service only decides when a turn starts and resets it on thread switches.
@@ -74,7 +79,10 @@ export class ChatSessionService implements OnDestroy {
     sendGate: this.sendGate,
     activeThreadId: () => this.activeThreadId,
     reportError: message => this._error.set(message),
-    onJobSettled: chatId => this.refreshThread(chatId),
+    onJobSettled: chatId => {
+      this.settledTurns.update(n => n + 1);
+      this.refreshThread(chatId);
+    },
     watchIntervalMs: CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS,
     canWatch: () => this.document.visibilityState !== 'hidden' && !this._loading(),
   });

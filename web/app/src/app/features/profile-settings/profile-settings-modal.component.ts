@@ -38,6 +38,7 @@ import { TIMEZONE_MAX_LENGTH, detectBrowserTimezone, listTimezones, timezoneVali
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { ShieldIconComponent, UserIconComponent } from '../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
+import { BackgroundModelsComponent } from './background-models/background-models.component';
 import { ProfileSettingsModalService, ProfileSettingsTab } from './profile-settings-modal.service';
 import { ProvidersSectionComponent } from './providers/providers-section.component';
 
@@ -45,7 +46,7 @@ import { ProvidersSectionComponent } from './providers/providers-section.compone
 @Component({
   selector: 'app-profile-settings-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ReactiveFormsModule, UserIconComponent, ShieldIconComponent, TooltipDirective, ProvidersSectionComponent],
+  imports: [CommonModule, ModalComponent, ReactiveFormsModule, UserIconComponent, ShieldIconComponent, TooltipDirective, ProvidersSectionComponent, BackgroundModelsComponent],
   templateUrl: './profile-settings-modal.component.html',
   styleUrl: './profile-settings-modal.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -7138,6 +7138,89 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /chat/{chatId}/background-notices:
+    get:
+      summary: Background work on a chat that failed or fell back
+      description: >-
+        Notices the account hasn't dismissed, newest first: a checkpoint step
+        (scratchpad, memory, summary) that failed at its provider, or a utility
+        role that passed over a chosen model it couldn't use. A notice goes away
+        when the same step succeeds later, so fixing the cause clears it. Each
+        states the step and the cause; what to do about it is the client's.
+      tags: [Chat Management]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The chat's notices; empty for another account's chat
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BackgroundNotice'
+        '400':
+          description: Invalid chat ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chat/{chatId}/background-notices/{noticeId}/dismiss:
+    post:
+      summary: Dismiss a background notice
+      description: Hides the notice until its cause changes.
+      tags: [Chat Management]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: noticeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Dismissed
+        '400':
+          description: Invalid chat or notice ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such notice on this account's chat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /chat/{chatId}/bookmarks:
     get:
       summary: List bookmarked messages in a chat
@@ -11171,6 +11254,47 @@ components:
             for a scheduled run only: a webhook background run or the onboarding welcome is an
             agent_job_run with no message_id too, but has none.
 
+    BackgroundNotice:
+      type: object
+      required: [id, chat_id, step, code, count, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        chat_id:
+          type: string
+          format: uuid
+        step:
+          type: string
+          description: >-
+            What didn't happen: `scratchpad`, `memory` or `summary` (a checkpoint
+            step), or `fallback_<role>` (a utility role passed over the model
+            chosen for it during a checkpoint; today that is the `memory` role).
+        code:
+          type: string
+          enum: [provider_not_configured, provider_error, model_unavailable]
+          description: >-
+            Why. `provider_not_configured`: the account has no key for
+            `provider` (or the deployment can't reach it at all).
+            `provider_error`: the provider was asked and failed; background work
+            runs again as the chat goes on. `model_unavailable`: the chosen model
+            couldn't be used (turned off, or its connection gone or
+            unreachable), so the role ran on its next choice or its default.
+        provider:
+          type: string
+          description: The provider the step went to, when known.
+        model:
+          type: string
+          description: The model the step ran on, when known.
+        count:
+          type: integer
+          description: How many times it has happened since it was last cleared.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     UtilityRole:
       type: string
       enum: [memory, simple, personality]

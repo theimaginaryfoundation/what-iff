@@ -83,6 +83,7 @@ func (a *Agent) chosenUtilityTarget(ctx context.Context, role provider.UtilityRo
 		a.recordUtilityFallback(ctx, role, "", uuid.Nil, err)
 		return utilityTarget{}, false
 	}
+	fellBack := false
 	for _, scope := range a.utilityScopes() {
 		for _, s := range settings {
 			if s.Role != role || s.Scope != scope {
@@ -90,10 +91,17 @@ func (a *Agent) chosenUtilityTarget(ctx context.Context, role provider.UtilityRo
 			}
 			t, err := a.settingTarget(ctx, userID, s)
 			if err == nil {
+				if !fellBack {
+					backgroundRunFrom(ctx).succeeded(models.BackgroundFallbackStep(role))
+				}
 				return t, true
 			}
+			fellBack = true
 			a.recordUtilityFallback(ctx, role, scope, s.ModelID, err)
 		}
+	}
+	if !fellBack {
+		backgroundRunFrom(ctx).succeeded(models.BackgroundFallbackStep(role))
 	}
 	return utilityTarget{}, false
 }
@@ -147,6 +155,14 @@ func (a *Agent) recordUtilityFallback(ctx context.Context, role provider.Utility
 	a.logger.Warn("utility role is falling back past its chosen model", append(fields,
 		zap.String("reason", reason),
 		zap.Error(err))...)
+	// Only a choice that can't be used is the account's to know about; a failed read (a
+	// database hiccup, or the checkpoint running out of time) says nothing about the choice.
+	if scope != "" && (errors.Is(err, ErrModelDisabled) || errors.Is(err, ErrConnectionUnavailable)) && ctx.Err() == nil {
+		backgroundRunFrom(ctx).failed(models.BackgroundNotice{
+			Step: models.BackgroundFallbackStep(role),
+			Code: models.BackgroundNoticeModelUnavailable,
+		})
+	}
 	a.metrics().Add(ctx, telemetry.UtilityModelFallbacks, 1,
 		telemetry.AttrUtilityRole.String(string(role)),
 		telemetry.AttrUtilityScope.String(string(scope)),
