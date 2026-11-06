@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, effect, inject, input, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
 import { BackgroundNotice, UtilityRole } from '../../../../core/models/utility-model.model';
@@ -52,9 +52,20 @@ export class BackgroundNoticesComponent {
   /** Changes whenever a turn on the chat fully ends, when a checkpoint may have run. */
   readonly settled = input(0);
 
-  readonly notices = signal<NoticeView[]>([]);
+  /** The chat's notices as the server sent them, less any dismissed here since. */
+  private readonly raw = signal<BackgroundNotice[]>([]);
+  /**
+   * What each notice says. Derived rather than worked out once on load, so the words follow
+   * whether accounts supply keys, which may still be loading on a direct visit to a chat.
+   */
+  readonly notices = computed(() => this.raw().map(n => this.view(n)));
   /** The chat the shown notices belong to; another chat's are never shown. */
   private shownFor: string | null = null;
+  /**
+   * Notices dismissed on the shown chat. A list request already on its way when one was
+   * dismissed would otherwise bring it back.
+   */
+  private dismissed = new Set<string>();
   /** Only the latest load may land, so an earlier, slower one can't overwrite it. */
   private loadToken = 0;
 
@@ -69,14 +80,15 @@ export class BackgroundNoticesComponent {
   async load(chatId: string | null): Promise<void> {
     const token = ++this.loadToken;
     if (chatId !== this.shownFor) {
-      this.notices.set([]);
+      this.raw.set([]);
       this.shownFor = chatId;
+      this.dismissed = new Set();
     }
     if (!chatId) return;
     try {
       const notices = await firstValueFrom(this.service.list(chatId));
       if (token === this.loadToken) {
-        this.notices.set(notices.map(n => this.view(n)));
+        this.raw.set(notices.filter(n => !this.dismissed.has(n.id)));
       }
     } catch (error) {
       // A notice is a courtesy, so a failed load shows nothing rather than an error of its
@@ -88,11 +100,16 @@ export class BackgroundNoticesComponent {
   async dismiss(id: string): Promise<void> {
     const chatId = this.chatId();
     if (!chatId) return;
-    this.notices.update(list => list.filter(n => n.id !== id));
+    this.dismissed.add(id);
+    this.raw.update(list => list.filter(n => n.id !== id));
     try {
       await firstValueFrom(this.service.dismiss(chatId, id));
     } catch {
-      await this.load(chatId);
+      // Show it again, but only on its own chat: the person may have moved to another meanwhile.
+      if (chatId === this.chatId()) {
+        this.dismissed.delete(id);
+        await this.load(chatId);
+      }
     }
   }
 

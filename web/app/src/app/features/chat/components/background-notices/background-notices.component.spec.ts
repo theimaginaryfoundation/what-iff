@@ -1,6 +1,6 @@
 import { Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { of, throwError } from 'rxjs';
+import { of, Subject, throwError } from 'rxjs';
 
 import { BackgroundNotice } from '../../../../core/models/utility-model.model';
 import { BackgroundNoticesService } from '../../../../core/services/background-notices.service';
@@ -123,6 +123,51 @@ describe('BackgroundNoticesComponent', () => {
     expect(texts(el)).toEqual([]);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it('words a notice once it knows who supplies keys, even when that loads after the notices', async () => {
+    accountsSupplyKeys.set(false);
+    const el = await render([notice({ code: 'provider_not_configured', provider: 'Anthropic', model: 'claude-haiku-4-5' })]);
+    expect(texts(el)[0]).toContain("Anthropic isn't set up on this server");
+
+    accountsSupplyKeys.set(true);
+    fixture.detectChanges();
+    expect(texts(el)[0]).toContain("There's no Anthropic key for claude-haiku-4-5.");
+    expect(el.querySelector('[data-testid="background-notice-fix"]')).not.toBeNull();
+  });
+
+  it("doesn't bring back a dismissed notice from a list that was already on its way", async () => {
+    const el = await render([notice({})]);
+    const inFlight = new Subject<BackgroundNotice[]>();
+    service.list.mockReturnValue(inFlight);
+    fixture.componentInstance.settled.set(1);
+    fixture.detectChanges();
+
+    (el.querySelector('[data-testid="background-notice-dismiss"]') as HTMLButtonElement).click();
+    inFlight.next([notice({})]);
+    inFlight.complete();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(texts(el)).toEqual([]);
+  });
+
+  it("puts a notice back if dismissing fails, but never on a chat the person has moved to", async () => {
+    const el = await render([notice({})]);
+    const failing = new Subject<void>();
+    service.dismiss.mockReturnValue(failing);
+    (el.querySelector('[data-testid="background-notice-dismiss"]') as HTMLButtonElement).click();
+
+    service.list.mockReturnValue(of([]));
+    fixture.componentInstance.chatId.set('chat-2');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    service.list.mockClear();
+    service.list.mockReturnValue(of([notice({})]));
+    failing.error(new Error('offline'));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(service.list).not.toHaveBeenCalled();
+    expect(texts(el)).toEqual([]);
   });
 
   it('dismisses a notice, and reads them again when a turn settles', async () => {
