@@ -95,7 +95,7 @@ func (a *Agent) GeneratePersonality(ctx context.Context, answers map[string]stri
 		Input:           sb.String(),
 		MaxOutputTokens: provider.DefaultMaxContentLength,
 		// Priority, because these are small and part of onboarding, so we want them to be fast.
-		Priority: true,
+		ServiceTier: provider.UtilityServiceTierPriority,
 		Schema: &provider.UtilitySchema{
 			Name:        "GeneratePersonality",
 			Description: "Generate Personality JSON",

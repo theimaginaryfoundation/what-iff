@@ -27,7 +27,7 @@ func TestUtilityRequestValidate(t *testing.T) {
 		"both conversations":      {Role: UtilityRoleMemory, Context: conversation, PreviousResponseID: "resp_1", Messages: []UtilityMessage{{Role: RoleUser, Text: "a"}}},
 		"input and messages":      {Role: UtilityRoleSimple, Input: "a", Messages: []UtilityMessage{{Role: RoleUser, Text: "b"}}},
 		"input with conversation": {Role: UtilityRoleSimple, Context: conversation, Input: "a"},
-		"priority and flex":       {Role: UtilityRoleSimple, Input: "a", Priority: true, Flex: true},
+		"unknown service tier":    {Role: UtilityRoleSimple, Input: "a", ServiceTier: "fast"},
 		"negative cap":            {Role: UtilityRoleSimple, Input: "a", MaxOutputTokens: -1},
 		"assistant turn":          {Role: UtilityRoleSimple, Messages: []UtilityMessage{{Role: RoleAssistant, Text: "a"}}},
 		"image not a data URL":    {Role: UtilityRoleSimple, Messages: []UtilityMessage{{Role: RoleUser, Text: "a", ImageDataURL: "https://example.com/a.png"}}},

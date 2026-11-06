@@ -88,8 +88,8 @@ func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID u
 		Instructions:       chatCtx.chat.SystemPrompt,
 		PreviousResponseID: *responseID,
 		Messages: []provider.UtilityMessage{
-			{Role: provider.RoleDeveloper, Text: memoryDedupNote(chatCtx)},
-			{Role: provider.RoleUser, Text: prompt},
+			{Role: provider.UtilityMessageDeveloper, Text: memoryDedupNote(chatCtx)},
+			{Role: provider.UtilityMessageUser, Text: prompt},
 		},
 		MaxOutputTokens: provider.DefaultMaxContentLength,
 		SafetyUserID:    userID.String(),
