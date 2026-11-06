@@ -110,6 +110,24 @@ describe('BackgroundModelsComponent', () => {
     expect(el.querySelector('[data-testid="background-models-error"]')?.textContent).toContain('That model is not available');
   });
 
+  it('says where to add the key when the chosen model has none', async () => {
+    const el = await render(utility());
+    service.choose.mockReturnValue(
+      throwError(
+        () =>
+          new HttpErrorResponse({
+            status: 409,
+            error: { code: 'provider_not_configured', message: 'No Anthropic API key is set.', details: { provider: 'anthropic' } },
+          }),
+      ),
+    );
+    await change(el, 'memory', 'gpt51');
+    expect(select(el, 'memory').value).toBe('');
+    expect(el.querySelector('[data-testid="background-models-error"]')?.textContent).toContain(
+      'No Anthropic API key is set. Add one on the Providers tab, or choose another model.',
+    );
+  });
+
   it('says when a chosen model is no longer available, and what runs instead', async () => {
     const el = await render(utility({ memory: { account: 'turned-off' } }));
     const memory = select(el, 'memory');

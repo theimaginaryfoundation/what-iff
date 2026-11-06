@@ -6,7 +6,7 @@ import { Model } from '../../../core/models/model.model';
 import { UtilityModels, UtilityRole, UtilityRoleModel } from '../../../core/models/utility-model.model';
 import { ModelService } from '../../../core/services/model.service';
 import { UtilityModelsService } from '../../../core/services/utility-models.service';
-import { apiErrorMessage } from '../../../core/utils/api-error.helpers';
+import { apiErrorMessage, hasErrorCode } from '../../../core/utils/api-error.helpers';
 import { UTILITY_ROLE_COPY } from '../../../core/utils/utility-role-copy';
 import { isConnectionGroup } from '../../chat/helpers/model-picker.helpers';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
@@ -93,7 +93,11 @@ export class BackgroundModelsComponent implements OnInit {
       const next = select.value ? this.service.choose(row.role, select.value) : this.service.clear(row.role);
       this.utility.set(await firstValueFrom(next));
     } catch (err) {
-      this.error.set(apiErrorMessage(err, 'Could not save that choice.'));
+      const message = apiErrorMessage(err, 'Could not save that choice.');
+      // The API says which key is missing; the fix is this app's to say.
+      this.error.set(
+        hasErrorCode(err, 'provider_not_configured') ? `${message} Add one on the Providers tab, or choose another model.` : message,
+      );
       // Nothing changed, so the select goes back to what is saved.
       select.value = row.chosen;
     } finally {
