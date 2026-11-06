@@ -165,3 +165,20 @@ func TestConnectionPresetName_EveryPreset(t *testing.T) {
 		require.NotEqual(t, preset, connectionPresetName(preset), preset)
 	}
 }
+
+// Only a provider with no client on the deployment, which a key fixes, tells the account it
+// isn't set up; failing to route a model at all is a bug, which stays in the logs.
+func TestUtilityClientError_OnlyAMissingKeyIsANotice(t *testing.T) {
+	t.Parallel()
+	target := utilityTarget{name: "mistral-small-latest", provider: string(models.ModelProviderMistral)}
+
+	n, ok := backgroundNoticeFor(models.BackgroundStepMemory,
+		target.clientError(providerNotConfigured("Mistral model %q requested but MISTRAL_API_KEY is not configured", target.name)))
+	require.True(t, ok)
+	require.Equal(t, models.BackgroundNoticeProviderNotConfigured, n.Code)
+	require.Equal(t, "Mistral", n.Provider)
+
+	_, ok = backgroundNoticeFor(models.BackgroundStepMemory,
+		target.clientError(errors.New(`unsupported OpenAI Chat Completions provider "mistral" for model "mistral-small-latest"`)))
+	require.False(t, ok, "a routing bug is not the account's to fix")
+}

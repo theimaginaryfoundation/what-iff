@@ -80,7 +80,7 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 		t.connection == nil && models.UsesAnthropicMessagesAPI(t.provider, t.name):
 		prov, _, err := a.claudeProviderForModel(lite)
 		if err != nil {
-			return utilityReply{}, t.missingProvider(err)
+			return utilityReply{}, t.clientError(err)
 		}
 		params := provider.UtilityClaudeParams(t.name, req)
 		if t.connection == nil && models.IsZAIModel(t.provider, t.name) {
@@ -132,7 +132,7 @@ func (a *Agent) callUtilityChatCompletions(ctx context.Context, t utilityTarget,
 		var err error
 		adapter, err = a.openAIChatCompletionsAdapter(lite, params, nil, nil)
 		if err != nil {
-			return "", t.missingProvider(err)
+			return "", t.clientError(err)
 		}
 	}
 	// The adapter offers no tools, so it has no tool uses to return.

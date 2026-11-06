@@ -23,6 +23,17 @@ func (t utilityTarget) missingProvider(err error) error {
 	return t.callError(fmt.Errorf("%w: %w", errUtilityProviderMissing, err))
 }
 
+// clientError reports a failure to pick the client for a utility call: the provider not set up
+// on this deployment, which the account can act on, or anything else, a routing bug, which
+// stays a plain error for the logs rather than becoming a notice.
+func (t utilityTarget) clientError(err error) error {
+	var notConfigured *providerNotConfiguredError
+	if errors.As(err, &notConfigured) {
+		return t.missingProvider(err)
+	}
+	return fmt.Errorf("utility call on %q: %w", t.name, err)
+}
+
 // errUtilityProviderMissing is a utility call's provider not being set up on this deployment.
 var errUtilityProviderMissing = errors.New("provider not set up")
 

@@ -1494,6 +1494,17 @@ func (a *Agent) generateAssistantForMessageOpenAI(ctx context.Context, userID uu
 	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, first, opts)
 }
 
+// providerNotConfiguredError is a model whose provider has no client on this deployment, which
+// adding the provider's key fixes; any other failure to pick a client is a routing bug.
+type providerNotConfiguredError struct{ msg string }
+
+func (e *providerNotConfiguredError) Error() string { return e.msg }
+
+// providerNotConfigured formats a providerNotConfiguredError.
+func providerNotConfigured(format string, args ...any) error {
+	return &providerNotConfiguredError{msg: fmt.Sprintf(format, args...)}
+}
+
 // claudeProviderForModel selects the Anthropic-Messages-API provider for the model
 // and reports whether it is native Anthropic. z.ai GLM models share the wire format
 // but use a different client (a.ZAIProvider) and do not support Anthropic-native tool
@@ -1504,12 +1515,12 @@ func (a *Agent) claudeProviderForModel(chatCtx *chatContext) (prov *provider.Cla
 	}
 	if models.IsZAIModel(chatCtx.modelProvider, chatCtx.model) {
 		if a.ZAIProvider == nil {
-			return nil, false, fmt.Errorf("z.ai model %q requested but ZAI_API_KEY is not configured", chatCtx.model)
+			return nil, false, providerNotConfigured("z.ai model %q requested but ZAI_API_KEY is not configured", chatCtx.model)
 		}
 		return a.ZAIProvider, false, nil
 	}
 	if a.ClaudeProvider == nil {
-		return nil, false, fmt.Errorf("Claude model %q requested but ANTHROPIC_API_KEY is not configured", chatCtx.model)
+		return nil, false, providerNotConfigured("Claude model %q requested but ANTHROPIC_API_KEY is not configured", chatCtx.model)
 	}
 	return a.ClaudeProvider, true, nil
 }
@@ -1723,25 +1734,25 @@ func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai
 	switch models.ProviderForModel(chatCtx.modelProvider, chatCtx.model) {
 	case models.ModelProviderMistral:
 		if a.MistralProvider == nil {
-			return nil, fmt.Errorf("Mistral model %q requested but MISTRAL_API_KEY is not configured", chatCtx.model)
+			return nil, providerNotConfigured("Mistral model %q requested but MISTRAL_API_KEY is not configured", chatCtx.model)
 		}
 		provider.ApplyMistralReasoning(&params, chatCtx.reasoningEffort)
 		return provider.NewMistralAdapter(a.MistralProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderDeepSeek:
 		if a.DeepSeekProvider == nil {
-			return nil, fmt.Errorf("DeepSeek model %q requested but DEEPSEEK_API_KEY is not configured", chatCtx.model)
+			return nil, providerNotConfigured("DeepSeek model %q requested but DEEPSEEK_API_KEY is not configured", chatCtx.model)
 		}
 		provider.ApplyDeepSeekReasoning(&params, chatCtx.reasoningEffort)
 		return provider.NewDeepSeekAdapter(a.DeepSeekProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderQwen:
 		if a.QwenProvider == nil {
-			return nil, fmt.Errorf("Qwen model %q requested but QWEN_API_KEY is not configured", chatCtx.model)
+			return nil, providerNotConfigured("Qwen model %q requested but QWEN_API_KEY is not configured", chatCtx.model)
 		}
 		provider.ApplyQwenReasoning(&params, chatCtx.reasoningEffort)
 		return provider.NewQwenAdapter(a.QwenProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderXiaomi:
 		if a.XiaomiProvider == nil {
-			return nil, fmt.Errorf("Xiaomi model %q requested but XIAOMI_API_KEY is not configured", chatCtx.model)
+			return nil, providerNotConfigured("Xiaomi model %q requested but XIAOMI_API_KEY is not configured", chatCtx.model)
 		}
 		adapter := provider.NewXiaomiAdapter(a.XiaomiProvider, params, functionTools, disabledTools)
 		// MiMo's only reasoning control: an effort of off turns thinking off (ADR 0x026).
