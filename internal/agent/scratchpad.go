@@ -57,12 +57,10 @@ func (a *Agent) updateScratchpad(ctx context.Context, userID uuid.UUID, response
 		CallPath:           telemetry.CallPathScratchpad,
 		Instructions:       chatCtx.chat.SystemPrompt,
 		PreviousResponseID: *responseID,
-		Messages: []provider.UtilityMessage{
-			{Role: provider.UtilityMessageDeveloper, Text: scratchpadUpdateDeveloperMessage},
-			{Role: provider.UtilityMessageUser, Text: prompt},
-		},
-		MaxOutputTokens: scratchpadMaxTokens,
-		SafetyUserID:    userID.String(),
+		History:            []provider.UtilityMessage{{Role: provider.UtilityMessageDeveloper, Text: scratchpadUpdateDeveloperMessage}},
+		Input:              prompt,
+		MaxOutputTokens:    scratchpadMaxTokens,
+		SafetyUserID:       userID.String(),
 	})
 	if err != nil {
 		a.logger.Error("failed to update scratchpad", zap.Error(err))
@@ -157,15 +155,18 @@ func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, ch
 		return ScratchpadUpdate{}, fmt.Errorf("failed to get personality by ID: %w", err)
 	}
 	prompt := buildUpdateScratchpadPrompt(personalityModel)
-	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
 
 	reply, err := a.callUtilityModel(ctx, rebuiltCheckpointModel(chatCtx), provider.UtilityRequest{
 		Role:            provider.UtilityRoleMemory,
 		CallPath:        telemetry.CallPathScratchpad,
 		Context:         modelContext,
+		Input:           prompt,
 		MaxOutputTokens: scratchpadMaxTokens,
 		SafetyUserID:    userID.String(),
 	})
+	// Memory extraction continues from this context, the way the chained path continues from
+	// this reply's stored response, so it keeps the prompt too.
+	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
 	if err != nil {
 		return ScratchpadUpdate{}, fmt.Errorf("scratchpad update failed: %w", err)
 	}
@@ -207,7 +208,7 @@ func (a *Agent) summarizeScratchpadClaude(ctx context.Context, userID uuid.UUID,
 		Role:            provider.UtilityRoleMemory,
 		CallPath:        telemetry.CallPathScratchpad,
 		Instructions:    instructions,
-		Messages:        []provider.UtilityMessage{{Role: provider.UtilityMessageUser, Text: buildScratchpadSummarizationInput(scratchpad)}},
+		Input:           buildScratchpadSummarizationInput(scratchpad),
 		MaxOutputTokens: provider.ScratchpadMaxContentLength,
 		SafetyUserID:    userID.String(),
 	})

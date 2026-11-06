@@ -95,8 +95,8 @@ func (a *Agent) PickGenerationExpression(ctx context.Context, userID, personalit
 		if reply := strings.TrimSpace(assistantReply); reply != "" {
 			fork.Append(provider.SegmentKindHistoryTurn, provider.RoleAssistant, reply, false)
 		}
-		fork.AppendUserMessage(provider.RoleUser, buildExpressionPickUserMessageBody(catalog), nil, false)
 		req.Context = fork
+		req.Input = buildExpressionPickUserMessageBody(catalog)
 		req.SafetyUserID = userID.String()
 	} else {
 		req.Instructions = expressionPickInstructions

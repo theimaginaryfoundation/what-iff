@@ -259,18 +259,18 @@ func (a *Agent) inferMemoryMergeGroupsOpenAI(ctx context.Context, userID uuid.UU
 	// the same self that formed these memories judges how they fold. The merge task rides as a
 	// developer message. When no persona is available we fall back to the task prompt alone.
 	instructions := strings.TrimSpace(personaInstructions)
-	messages := make([]provider.UtilityMessage, 0, 2)
+	var history []provider.UtilityMessage
 	if instructions == "" {
 		instructions = memoryMergeGroupingPrompt
 	} else {
-		messages = append(messages, provider.UtilityMessage{Role: provider.UtilityMessageDeveloper, Text: memoryMergeGroupingPrompt})
+		history = []provider.UtilityMessage{{Role: provider.UtilityMessageDeveloper, Text: memoryMergeGroupingPrompt}}
 	}
-	messages = append(messages, provider.UtilityMessage{Role: provider.UtilityMessageUser, Text: formatMemoryMergeCandidateList(candidates)})
 	text, err := a.CallUtility(ctx, provider.UtilityRequest{
 		Role:            provider.UtilityRoleMemory,
 		CallPath:        telemetry.CallPathMemory,
 		Instructions:    instructions,
-		Messages:        messages,
+		History:         history,
+		Input:           formatMemoryMergeCandidateList(candidates),
 		MaxOutputTokens: memoryMergeMaxOutputTokens,
 		SafetyUserID:    userID.String(),
 		ServiceTier:     provider.UtilityServiceTierFlex,

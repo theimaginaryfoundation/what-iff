@@ -57,12 +57,10 @@ func (t UtilityServiceTier) Valid() bool {
 	return t == UtilityServiceTierDefault || t == UtilityServiceTierPriority || t == UtilityServiceTierFlex
 }
 
-// UtilityMessage is one turn of a call's input.
+// UtilityMessage is one turn of a call's History.
 type UtilityMessage struct {
 	Role UtilityMessageRole
 	Text string
-	// ImageDataURL, when set, attaches one image (a data: URL) after the text.
-	ImageDataURL string
 }
 
 // UtilitySchema asks for structured output: the reply is JSON matching Schema.
@@ -75,25 +73,27 @@ type UtilitySchema struct {
 // UtilityRequest is one utility call.
 //
 // What the call sends is, in order: the Instructions; the conversation it continues, either
-// Context or the stored response PreviousResponseID names (never both); then its own turns,
-// which are Messages, or Input as a single user turn. A request sets Input or Messages, not
-// both, and Input not alongside Context, which takes Messages; Validate enforces this, so no
-// field is ever silently left out.
+// Context or the stored response PreviousResponseID names (never both); the History; and last,
+// Input, the user turn that asks for the work. Validate enforces the rules, so no field is
+// ever silently left out.
 type UtilityRequest struct {
 	Role UtilityRole
 	// CallPath labels the call's telemetry. Set it unless the context already carries the
 	// caller's label, which an empty CallPath keeps.
 	CallPath     telemetry.CallPath
 	Instructions string
-	// Context, when set, is a conversation the call continues; Messages follow it.
+	// Context, when set, is a conversation the call continues.
 	Context *ModelContext
 	// PreviousResponseID continues a conversation the Responses API stored, in
 	// place of Context. Only a model on that API can use it.
 	PreviousResponseID string
-	// Input is the call's single user message as plain text. A call with more
-	// than one turn, or an image, uses Messages instead.
-	Input    string
-	Messages []UtilityMessage
+	// History is the call's own turns before Input, such as a developer note on how to
+	// do the work.
+	History []UtilityMessage
+	// Input is the call's last user turn, the one that asks for the work.
+	Input string
+	// InputImageDataURL, when set, attaches one image (a data: URL) to Input, after its text.
+	InputImageDataURL string
 	// Schema, when set, asks for structured output.
 	Schema *UtilitySchema
 	// MaxOutputTokens caps the reply; zero leaves the API's default.
@@ -118,23 +118,19 @@ func (r UtilityRequest) Validate() error {
 		return invalid("unknown role %q", r.Role)
 	case r.Context != nil && r.PreviousResponseID != "":
 		return invalid("continues both a conversation and a stored response")
-	case r.Input != "" && len(r.Messages) > 0:
-		return invalid("sets both Input and Messages")
-	case r.Input != "" && r.Context != nil:
-		return invalid("sets Input alongside a conversation, which takes Messages")
 	case !r.ServiceTier.Valid():
 		return invalid("unknown service tier %q", r.ServiceTier)
 	case r.MaxOutputTokens < 0:
 		return invalid("negative MaxOutputTokens")
 	}
-	for i, m := range r.Messages {
+	for i, m := range r.History {
 		if !m.Role.Valid() {
-			return invalid("message %d has role %q, not user or developer", i, m.Role)
+			return invalid("history turn %d has role %q, not user or developer", i, m.Role)
 		}
-		if m.ImageDataURL != "" {
-			if _, _, ok := splitImageDataURL(m.ImageDataURL); !ok {
-				return invalid("message %d has an image that is not a base64 data: URL", i)
-			}
+	}
+	if r.InputImageDataURL != "" {
+		if _, _, ok := splitImageDataURL(r.InputImageDataURL); !ok {
+			return invalid("input image is not a base64 data: URL")
 		}
 	}
 	return nil

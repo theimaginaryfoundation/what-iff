@@ -278,7 +278,12 @@ func (a *Agent) inferExpressionGridLikeness(ctx context.Context, systemPrompt st
 		return "", nil
 	}
 
-	msg := provider.UtilityMessage{Role: provider.UtilityMessageUser, Text: "Personality system prompt:\n\n" + systemPrompt}
+	req := provider.UtilityRequest{
+		Role:            provider.UtilityRoleSimple,
+		Instructions:    expressionLikenessInstructions,
+		Input:           "Personality system prompt:\n\n" + systemPrompt,
+		MaxOutputTokens: 768,
+	}
 	if len(referenceImageBytes) > 0 {
 		// mimeType carries the attachment's actual media type (e.g. "image/jpeg", "image/png").
 		// Defaulting to "image/png" only as a last resort; correct type matters for
@@ -287,17 +292,7 @@ func (a *Agent) inferExpressionGridLikeness(ctx context.Context, systemPrompt st
 		if mimeType == "" {
 			mimeType = "image/png"
 		}
-		msg.ImageDataURL = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(referenceImageBytes)
-	}
-	req := provider.UtilityRequest{
-		Role:            provider.UtilityRoleSimple,
-		Instructions:    expressionLikenessInstructions,
-		MaxOutputTokens: 768,
-	}
-	if msg.ImageDataURL != "" {
-		req.Messages = []provider.UtilityMessage{msg}
-	} else {
-		req.Input = msg.Text
+		req.InputImageDataURL = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(referenceImageBytes)
 	}
 	out, err := a.CallUtility(ctx, req)
 	if err != nil {

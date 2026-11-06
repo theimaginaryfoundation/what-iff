@@ -58,7 +58,7 @@ func buildCheckpointSummaryRequest(userID uuid.UUID, existingSummary string, src
 		req.Input = updatePrompt
 	case src.ModelContext != nil:
 		req.Context = checkpointArchivalContext(src.ModelContext, src.AssistantReply)
-		req.Messages = []provider.UtilityMessage{{Role: provider.UtilityMessageUser, Text: updatePrompt}}
+		req.Input = updatePrompt
 	default:
 		return provider.UtilityRequest{}, fmt.Errorf("checkpoint summary requires PreviousResponseID or ModelContext")
 	}
