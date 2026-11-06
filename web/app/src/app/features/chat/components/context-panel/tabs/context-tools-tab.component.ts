@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnChanges, SimpleChanges, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnChanges, SimpleChanges, computed, inject, input, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
@@ -17,13 +17,15 @@ import { friendlyToolName, summarizeToolInput } from '../../../helpers/tool-call
 import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../../../../shared/ui/tooltip/tooltip.directive';
 import { CheckboxComponent } from '../../../../../shared/ui/checkbox/checkbox.component';
+import { matchesQuery } from '../../../helpers/panel-search.helpers';
+import { ImageModelPickerComponent } from './image-model-picker.component';
 
 type ToolContextTab = 'available' | 'history';
 
 @Component({
   selector: 'app-context-tools-tab',
   standalone: true,
-  imports: [CheckboxComponent, CommonModule, HelpHintComponent, TooltipDirective],
+  imports: [CheckboxComponent, CommonModule, HelpHintComponent, ImageModelPickerComponent, TooltipDirective],
   template: `
     <section class="tab-body">
       <div class="context-tabs" role="tablist" aria-label="Tools view">
@@ -48,6 +50,24 @@ type ToolContextTab = 'available' | 'history';
       </div>
 
       @if (activeToolTab() === 'available') {
+        <div class="finder" role="search">
+          <label class="visually-hidden" for="context-panel-search">Search tools, skills and MCP servers</label>
+          <input
+            id="context-panel-search"
+            type="search"
+            class="finder__input"
+            data-testid="context-panel-search"
+            placeholder="Search tools, skills, MCP servers"
+            autocomplete="off"
+            [value]="searchText()"
+            (input)="searchText.set($any($event.target).value)"
+            (keydown.escape)="clearSearch($event)"
+          />
+          <p class="finder__count" role="status">{{ resultsSummary() }}</p>
+        </div>
+      }
+
+      @if (activeToolTab() === 'available') {
         @if (toolsLoading()) {
           <p class="state">Loading tools…</p>
         } @else {
@@ -59,8 +79,8 @@ type ToolContextTab = 'available' | 'history';
             </ui-help-hint>
           </div>
           <ul class="list">
-            @for (tool of tools(); track tool.name) {
-              <li>
+            @for (tool of visibleTools(); track tool.name) {
+              <li [class.list__item--with-extra]="tool.name === 'generate_image'">
                 <label class="tool-item" [uiTooltip]="tool.guide ?? ''" placement="left">
                   <ui-checkbox
                     [checked]="isToolEnabled(tool.name)"
@@ -69,9 +89,15 @@ type ToolContextTab = 'available' | 'history';
                   <span>{{ friendlyToolName(tool.name) }}</span>
                   <small>{{ tool.description }}</small>
                 </label>
+                @if (tool.name === 'generate_image') {
+                  <app-image-model-picker />
+                }
               </li>
             }
           </ul>
+          @if (query() && totalMatches() === 0) {
+            <p class="state">Nothing matches "{{ query() }}".</p>
+          }
         }
       } @else {
         @if (toolCalls().length === 0) {
@@ -89,6 +115,7 @@ type ToolContextTab = 'available' | 'history';
         }
       }
 
+      @if (!query() || visibleSkills().length > 0) {
       <details class="mcp-section" open>
         <summary>
           Loaded skills
@@ -107,7 +134,7 @@ type ToolContextTab = 'available' | 'history';
         } @else {
           <div class="mcp-grid">
             <ul>
-              @for (skill of loadedSkills(); track skill.id) {
+              @for (skill of visibleSkills(); track skill.id) {
                 <li>
                   <span class="skill-name" [uiTooltip]="skill.description">{{ skill.name }} <code>{{ skill.slug }}</code></span>
                   <button type="button" uiTooltip="Drop this skill's instructions from the thread" (click)="unloadSkill(skill)">Unload</button>
@@ -117,8 +144,10 @@ type ToolContextTab = 'available' | 'history';
           </div>
         }
       </details>
+      }
 
-      <details class="mcp-section">
+      @if (!query() || visibleConnected().length + visibleAvailable().length > 0) {
+      <details class="mcp-section" [open]="!!query()">
         <summary>
           MCP servers
           <!-- preventDefault keeps a click on the hint from also toggling the details. -->
@@ -136,7 +165,7 @@ type ToolContextTab = 'available' | 'history';
             <div>
               <h4>Connected</h4>
               <ul>
-                @for (server of connected(); track server.id) {
+                @for (server of visibleConnected(); track server.id) {
                   <li>
                     {{ server.name }}
                     <button type="button" uiTooltip="Stop using this server's tools in this thread" (click)="detach(server)">Detach</button>
@@ -147,7 +176,7 @@ type ToolContextTab = 'available' | 'history';
             <div>
               <h4>Available</h4>
               <ul>
-                @for (server of available(); track server.id) {
+                @for (server of visibleAvailable(); track server.id) {
                   <li>
                     {{ server.name }}
                     <button type="button" uiTooltip="Use this server's tools in this thread" (click)="attach(server)">Attach</button>
@@ -158,6 +187,7 @@ type ToolContextTab = 'available' | 'history';
           </div>
         }
       </details>
+      }
       @if (error(); as error) {
         <p class="error" role="alert">{{ error }}</p>
       }
@@ -225,6 +255,17 @@ type ToolContextTab = 'available' | 'history';
         padding: 0 0 0.5rem;
       }
 
+      /* A tool with extra controls under it: the divider goes below them, not between. */
+      .list__item--with-extra {
+        border-bottom: 1px solid var(--color-border-base);
+        padding-bottom: 0.5rem;
+      }
+
+      .list__item--with-extra .tool-item {
+        border-bottom: 0;
+        padding-bottom: 0;
+      }
+
       .tool-item ui-checkbox {
         grid-row: span 2;
         margin-top: 0.125rem;
@@ -238,6 +279,46 @@ type ToolContextTab = 'available' | 'history';
       .tool-item small {
         color: var(--color-text-muted);
         font-size: 0.75rem;
+      }
+
+      .visually-hidden {
+        border: 0;
+        clip: rect(0 0 0 0);
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        padding: 0;
+        position: absolute;
+        white-space: nowrap;
+        width: 1px;
+      }
+
+      /* 9.18:1 on the input background (WCAG AAA needs 7:1); the theme's own placeholder gray is 2.35:1. */
+      .finder__input::placeholder {
+        color: #b4bbc6;
+        opacity: 1;
+      }
+
+      .finder__input:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+      }
+
+      .finder__input {
+        min-height: 2.25rem;
+        background: var(--color-surface-base);
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.75rem;
+        color: var(--color-text-primary);
+        font-size: 0.8125rem;
+        padding: 0.5rem 0.75rem;
+        width: 100%;
+      }
+
+      .finder__count {
+        color: var(--color-text-muted);
+        font-size: 0.75rem;
+        margin: 0.25rem 0 0;
       }
 
       .history-list {
@@ -374,6 +455,37 @@ export class ContextToolsTabComponent implements OnChanges {
   readonly available = signal<MCPServer[]>([]);
   readonly skillsLoading = signal(false);
   readonly loadedSkills = signal<LoadedSkill[]>([]);
+
+  /** Raw text of the panel's search box. One box filters tools, loaded skills and MCP servers. */
+  readonly searchText = signal('');
+  /** The trimmed query, in effect only on the Available view (history is a different data set). */
+  readonly query = computed(() => (this.activeToolTab() === 'available' ? this.searchText().trim() : ''));
+  readonly visibleTools = computed(() =>
+    this.tools().filter(tool => matchesQuery(this.query(), friendlyToolName(tool.name), tool.description)),
+  );
+  readonly visibleSkills = computed(() =>
+    this.loadedSkills().filter(skill => matchesQuery(this.query(), skill.name, skill.slug, skill.description)),
+  );
+  readonly visibleConnected = computed(() => this.connected().filter(s => matchesQuery(this.query(), s.name, s.description)));
+  readonly visibleAvailable = computed(() => this.available().filter(s => matchesQuery(this.query(), s.name, s.description)));
+  readonly totalMatches = computed(
+    () => this.visibleTools().length + this.visibleSkills().length + this.visibleConnected().length + this.visibleAvailable().length,
+  );
+  /** Announced through the status region; empty while nothing is being searched. */
+  readonly resultsSummary = computed(() => {
+    if (!this.query()) return '';
+    const total = this.totalMatches();
+    if (total === 0) return `No results for ${this.query()}`;
+    const servers = this.visibleConnected().length + this.visibleAvailable().length;
+    const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+    return `${count(total, 'result', 'results')}: ${count(this.visibleTools().length, 'tool', 'tools')}, ${count(this.visibleSkills().length, 'skill', 'skills')}, ${count(servers, 'MCP server', 'MCP servers')}`;
+  });
+
+  clearSearch(event: Event): void {
+    if (!this.searchText()) return;
+    event.preventDefault();
+    this.searchText.set('');
+  }
 
   ngOnChanges(changes: SimpleChanges): void {
     const chatChange = changes['chat'];
