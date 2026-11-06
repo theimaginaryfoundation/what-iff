@@ -51,28 +51,33 @@ func settleBackgroundNoticesTx(ctx context.Context, tx *ent.Tx, userID, chatID u
 		}
 	}
 	for _, n := range outcome.Failed {
-		existing, err := tx.BackgroundNotice.Query().
-			Where(backgroundnotice.UserID(userID), backgroundnotice.ChatID(chatID), backgroundnotice.Step(string(n.Step))).
-			Only(ctx)
-		switch {
-		case ent.IsNotFound(err):
-			err = tx.BackgroundNotice.Create().
-				SetUserID(userID).SetChatID(chatID).SetStep(string(n.Step)).
-				SetCode(n.Code).SetProvider(n.Provider).SetModel(n.Model).
-				Exec(ctx)
-		case err != nil:
-		case existing.Code == n.Code:
-			err = existing.Update().SetProvider(n.Provider).SetModel(n.Model).AddCount(1).Exec(ctx)
-		default:
-			// A new cause: show it again, even if the old one was dismissed.
-			err = existing.Update().SetCode(n.Code).SetProvider(n.Provider).SetModel(n.Model).
-				SetCount(1).ClearDismissedAt().Exec(ctx)
-		}
-		if err != nil {
+		if err := upsertBackgroundNoticeTx(ctx, tx, userID, chatID, n); err != nil {
 			return fmt.Errorf("record background notice: %w", err)
 		}
 	}
 	return nil
+}
+
+// upsertBackgroundNoticeTx creates a step's notice, counts it again, or replaces its cause.
+func upsertBackgroundNoticeTx(ctx context.Context, tx *ent.Tx, userID, chatID uuid.UUID, n models.BackgroundNotice) error {
+	existing, err := tx.BackgroundNotice.Query().
+		Where(backgroundnotice.UserID(userID), backgroundnotice.ChatID(chatID), backgroundnotice.Step(string(n.Step))).
+		Only(ctx)
+	if ent.IsNotFound(err) {
+		return tx.BackgroundNotice.Create().
+			SetUserID(userID).SetChatID(chatID).SetStep(string(n.Step)).
+			SetCode(n.Code).SetProvider(n.Provider).SetModel(n.Model).
+			Exec(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	if existing.Code == n.Code {
+		return existing.Update().SetProvider(n.Provider).SetModel(n.Model).AddCount(1).Exec(ctx)
+	}
+	// A new cause: show it again, even if the old one was dismissed.
+	return existing.Update().SetCode(n.Code).SetProvider(n.Provider).SetModel(n.Model).
+		SetCount(1).ClearDismissedAt().Exec(ctx)
 }
 
 // ListBackgroundNotices returns a chat's notices the account hasn't dismissed, newest first.
