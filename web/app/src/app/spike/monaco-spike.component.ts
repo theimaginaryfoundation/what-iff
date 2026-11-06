@@ -5,7 +5,7 @@ type Monaco = typeof import('monaco-editor');
 let monacoPromise: Promise<Monaco> | undefined;
 
 /** Loads Monaco once and wires its workers. Mirrors loadKatex() in latex-math.helpers.ts. */
-function loadMonaco(): Promise<Monaco> {
+export function loadMonaco(): Promise<Monaco> {
   monacoPromise ??= (async () => {
     (self as unknown as { MonacoEnvironment: unknown }).MonacoEnvironment = {
       getWorker(_workerId: string, label: string): Worker {

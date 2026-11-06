@@ -13,6 +13,10 @@ export const routes: Routes = [
     loadComponent: () => import('./spike/monaco-spike.component').then(m => m.MonacoSpikeComponent)
   },
   {
+    path: 'spike/vfs',
+    loadComponent: () => import('./spike/vfs-editor-spike.component').then(m => m.VfsEditorSpikeComponent)
+  },
+  {
     path: 'auth',
     canActivate: [guestGuard],
     // Auth screens (local sign-in/registration), defined in the extensions
