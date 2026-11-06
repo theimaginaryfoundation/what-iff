@@ -3,7 +3,10 @@ import { TestBed } from '@angular/core/testing';
 import { AnnouncerService } from './announcer.service';
 
 describe('AnnouncerService', () => {
-  afterEach(() => document.querySelectorAll('[data-testid="announcer"]').forEach(n => n.remove()));
+  // Specs share one document, and other specs' components announce too: start and end with no regions.
+  const removeRegions = () => document.querySelectorAll('[data-testid="announcer"]').forEach(n => n.remove());
+  beforeEach(removeRegions);
+  afterEach(removeRegions);
 
   it('puts the message in one polite status region and reuses it', async () => {
     vi.useFakeTimers();

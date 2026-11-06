@@ -17,7 +17,11 @@ describe('ImageModelPickerComponent', () => {
     fixture.detectChanges();
   });
 
-  afterEach(() => window.localStorage.removeItem('whatiff.defaultImageModel'));
+  afterEach(() => {
+    window.localStorage.removeItem('whatiff.defaultImageModel');
+    // Choosing a model announces it; drop the live region so it doesn't leak into other specs.
+    document.querySelectorAll('[data-testid="announcer"]').forEach(n => n.remove());
+  });
 
   const el = (): HTMLElement => fixture.nativeElement;
   const trigger = () => el().querySelector('[data-testid="image-model-trigger"]') as HTMLButtonElement;
