@@ -111,6 +111,12 @@ func toMemoryModel(e *ent.Memory) *models.Memory {
 	if e.PinnedPersonalityID != nil {
 		memoryModel.PinnedPersonalityID = e.PinnedPersonalityID
 	}
+	if e.ArchivedAt != nil {
+		archivedAt := e.ArchivedAt.UTC()
+		memoryModel.ArchivedAt = &archivedAt
+		memoryModel.ArchivedByPersonalityID = e.ArchivedByPersonalityID
+		memoryModel.ArchivedByChatID = e.ArchivedByChatID
+	}
 
 	// Add source chat details if available.
 	if e.Edges.Chat != nil {
@@ -642,6 +648,16 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 		}
 	}
 
+	// Setting a memory an agent archived active again is the user restoring it: the archive marks go,
+	// and its archive event is closed so it cannot be undone later (ADR 0x036).
+	restoresArchival := existing.ArchivedAt != nil && normalizeMemoryStatus(nextStatus) == memory.StatusActive
+	if restoresArchival {
+		if err := closeArchiveEventsTx(ctx, tx, userID, memoryID, time.Now().UTC()); err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+	}
+
 	update := tx.Memory.UpdateOneID(memoryID).
 		SetContent(nextContent).
 		SetScope(scope).
@@ -654,6 +670,9 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 	if nextProvenance == models.MemoryProvenanceUser {
 		// A memory confirmed as the owner's has no outside speaker.
 		update.ClearSourceSpeaker()
+	}
+	if restoresArchival {
+		update.ClearArchivedAt().ClearArchivedByPersonalityID().ClearArchivedByChatID()
 	}
 
 	if nextChatID != nil && *nextChatID != uuid.Nil {

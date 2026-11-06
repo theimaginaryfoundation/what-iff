@@ -29,6 +29,7 @@ var sandboxedToolSurface = map[string]struct {
 	agenttools.EntityGetToolSpec.Name:         {false, "reads the owner's entity wiki, shared by their conversations"},
 	agenttools.EntityWriteToolSpec.Name:       {false, "writes the owner's entity wiki, shared by their conversations"},
 	agenttools.CreateMemoryToolSpec.Name:      {true, "always writes a Chat-scoped memory in a sandbox"},
+	agenttools.ArchiveMemoryToolSpec.Name:     {false, "changes the owner's memory; a sandbox strangers talk in must not erase what the owner's agent knows"},
 	agenttools.ListToolSpec.Name:              {true, "jobs, skills and personalities are refused; conversations is just this one; only this conversation's own files"},
 	agenttools.ListMoodsToolSpec.Name:         {true, "this chat's own personality moods"},
 	agenttools.ChangeMoodToolSpec.Name:        {true, "this chat's own mood"},
@@ -149,11 +150,12 @@ func TestSandboxedChatToolSurface_ExactOfferedSets(t *testing.T) {
 		require.Equal(t, wantSandboxed(showMood), offered(true, showMood), "sandboxed chat, mood tools %v", showMood)
 	}
 
-	// The concrete difference, spelled out: a sandboxed chat loses exactly these three.
+	// The concrete difference, spelled out: a sandboxed chat loses these.
 	require.Contains(t, offered(false, false), agenttools.CreateAgentJobToolSpec.Name)
 	require.NotContains(t, offered(true, false), agenttools.CreateAgentJobToolSpec.Name)
 	require.NotContains(t, offered(true, false), agenttools.UpdateScratchpadToolSpec.Name)
 	require.NotContains(t, offered(true, false), agenttools.MoveFilesToolSpec.Name)
+	require.NotContains(t, offered(true, false), agenttools.ArchiveMemoryToolSpec.Name)
 	require.NotContains(t, offered(true, false, "list"), "list", "the user's own disabled_tools still apply on top")
 }
 

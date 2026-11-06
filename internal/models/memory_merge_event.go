@@ -14,7 +14,21 @@ const (
 	// MemoryMergeTypeLink cross-references related-but-distinct memories that share a
 	// link_group_id. No rows are folded or de-indexed; every surface is preserved.
 	MemoryMergeTypeLink MemoryMergeType = "link"
+	// MemoryMergeTypeArchive records an agent archiving one memory with
+	// archive_memory (ADR 0x036). The memory row is kept, inactive; undo restores it.
+	MemoryMergeTypeArchive MemoryMergeType = "archive"
 )
+
+// MaxMemoryArchiveReasonRunes bounds the reason an agent gives for archiving a memory.
+const MaxMemoryArchiveReasonRunes = 500
+
+// MemoryArchival is who archived a memory, from which conversation, and why. PersonalityID is nil
+// for a conversation without a personality.
+type MemoryArchival struct {
+	PersonalityID *uuid.UUID `json:"personality_id,omitempty"`
+	ChatID        *uuid.UUID `json:"chat_id,omitempty"`
+	Reason        string     `json:"reason,omitempty"`
+}
 
 type MemoryMergeUndoSnapshot struct {
 	PriorConfidence          float64              `json:"prior_confidence,omitempty"`
@@ -56,7 +70,9 @@ type MemoryMergeEvent struct {
 	CompactionEventID *uuid.UUID                `json:"compaction_event_id,omitempty"`
 	SourceMembers     []MemoryMergeSourceMember `json:"source_members,omitempty"`
 	Snapshot          *MemoryMergeUndoSnapshot  `json:"snapshot,omitempty"`
-	RevertedAt        *time.Time                `json:"reverted_at,omitempty"`
-	CreatedAt         time.Time                 `json:"created_at"`
-	UpdatedAt         time.Time                 `json:"updated_at"`
+	// Archival is set on an archive event.
+	Archival   *MemoryArchival `json:"archival,omitempty"`
+	RevertedAt *time.Time      `json:"reverted_at,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+	UpdatedAt  time.Time       `json:"updated_at"`
 }

@@ -57,6 +57,9 @@ var (
 	// another personality, a sandboxed thread, a missing destination). The wrapped text is meant
 	// for the user.
 	ErrMemoryScopeMove = errors.New("memory cannot be moved there")
+	// ErrMemoryNotArchivable wraps why ArchiveMemory refused an archive (already inactive,
+	// a checkpoint summary, starred by the user). The wrapped text is meant for the model.
+	ErrMemoryNotArchivable = errors.New("memory cannot be archived")
 
 	// Personality-related errors
 	ErrPersonalityNotFound = errors.New("personality not found")
