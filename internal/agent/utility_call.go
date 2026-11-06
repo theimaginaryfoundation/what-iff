@@ -1,152 +1,29 @@
 package agent
 
+// A utility call (provider.UtilityRequest) runs in two steps:
+//
+//  1. Resolution (utility_target.go): the call's role picks its model. The account's choice
+//     comes first, where accounts bring their own keys; then the deployment's; then the
+//     role's built-in model. A choice that can't be used falls back to the next, logged and
+//     counted. Checkpoint steps whose model follows the chat pick theirs in
+//     archival_models.go instead.
+//  2. Dispatch (here): the request is validated, then rendered for the API the model speaks
+//     (Anthropic Messages, Chat Completions, or OpenAI's Responses) and sent through the
+//     same provider clients a chat turn on that model uses. A failure names the provider it
+//     went to, since the call site doesn't know which one that was.
+
 import (
 	"context"
 	"errors"
 	"fmt"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/google/uuid"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
-	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
-	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
-
-// utilityBuiltIn is the model a utility role runs on, and its provider: the fixed model each
-// role's call sites used before roles existed. It is the one place a role's model is decided;
-// roles become settings in a later step (ADR 0x027 section 6). The provider is named rather
-// than looked up from the catalog, so a call routes even if the catalog drops the model.
-func utilityBuiltIn(role provider.UtilityRole) (model string, modelProvider models.ModelProvider) {
-	switch role {
-	case provider.UtilityRoleMemory:
-		return archivalOpenAIModel, models.ModelProviderOpenAI
-	case provider.UtilityRolePersonality:
-		return generatePersonalityModel, models.ModelProviderOpenAI
-	default:
-		return models.UtilityModelName, models.ModelProviderOpenAI
-	}
-}
-
-// UtilityBuiltInModel names the model a utility role runs on when neither the account nor the
-// deployment chose one.
-func UtilityBuiltInModel(role models.UtilityRole) string {
-	name, _ := utilityBuiltIn(role)
-	return name
-}
-
-// utilityTarget is the model a utility call runs on.
-type utilityTarget struct {
-	name string
-	// provider is the model row's provider, the connection's preset for a connection model,
-	// or empty to infer it from the name.
-	provider string
-	// connection reaches a model from an OpenRouter, local or Custom connection; nil for a
-	// model on a built-in provider's own path.
-	connection *ConnectionEndpoint
-}
-
-// usesResponsesAPI reports whether the target is on OpenAI's own Responses API, the only one
-// that can continue a stored conversation.
-func (t utilityTarget) usesResponsesAPI() bool {
-	return t.connection == nil &&
-		!models.UsesAnthropicMessagesAPI(t.provider, t.name) &&
-		!models.UsesOpenAIChatCompletionsAPI(t.provider, t.name) &&
-		models.ProviderForModel(t.provider, t.name) == models.ModelProviderOpenAI
-}
-
-// chosenUtilityTarget is the model chosen for role by the account the context is for, or
-// else by the deployment (ADR 0x027 section 6), and whether either chose one that can be used.
-//
-// A choice that can't be used (turned off, deleted with its connection, its connection
-// unreachable) falls back to the next one, and past the last to the role's built-in model, so
-// background work keeps running; each fallback is logged and counted, so it shows. A failed
-// read of the settings falls back the same way.
-func (a *Agent) chosenUtilityTarget(ctx context.Context, role provider.UtilityRole) (utilityTarget, bool) {
-	if a.ds == nil {
-		return utilityTarget{}, false
-	}
-	userID, _ := middleware.GetUserIDFromContext(ctx)
-	settings, err := a.ds.ListUtilityModelSettings(ctx, userID)
-	if err != nil {
-		a.recordUtilityFallback(ctx, role, "", uuid.Nil, err)
-		return utilityTarget{}, false
-	}
-	for _, scope := range a.utilityScopes() {
-		for _, s := range settings {
-			if s.Role != role || s.Scope != scope {
-				continue
-			}
-			t, err := a.settingTarget(ctx, userID, s)
-			if err == nil {
-				return t, true
-			}
-			a.recordUtilityFallback(ctx, role, scope, s.ModelID, err)
-		}
-	}
-	return utilityTarget{}, false
-}
-
-// utilityScopes are the scopes whose choices count, first wins. An account chooses only where it
-// brings its own keys and so pays for its background work; where the deployment supplies the
-// keys, it pays, and only its choices count, whatever an account stored before.
-func (a *Agent) utilityScopes() []models.UtilityScope {
-	if a.keyResolver != nil && !a.keyResolver.AccountsSupplyKeys() {
-		return []models.UtilityScope{models.UtilityScopeDeployment}
-	}
-	return []models.UtilityScope{models.UtilityScopeAccount, models.UtilityScopeDeployment}
-}
-
-// settingTarget is the model a setting chose, if it can still be used.
-func (a *Agent) settingTarget(ctx context.Context, userID uuid.UUID, s models.UtilityModelSetting) (utilityTarget, error) {
-	m, err := a.ds.GetModel(ctx, s.ModelID)
-	if errors.Is(err, datastore.ErrModelNotFound) {
-		return utilityTarget{}, ErrModelDisabled
-	}
-	if err != nil {
-		return utilityTarget{}, err
-	}
-	conn, err := a.connectionFor(ctx, userID, m)
-	if err != nil {
-		return utilityTarget{}, err
-	}
-	t := utilityTarget{name: m.Name, provider: m.Provider, connection: conn}
-	if conn != nil {
-		t.provider = conn.Preset
-	}
-	return t, nil
-}
-
-// recordUtilityFallback logs and counts a role passing over a choice it couldn't use, or
-// settings it couldn't read (an empty scope).
-func (a *Agent) recordUtilityFallback(ctx context.Context, role provider.UtilityRole, scope models.UtilityScope, modelID uuid.UUID, err error) {
-	reason := "unreadable"
-	if scope != "" {
-		reason = "unavailable"
-	}
-	a.logger.Warn("utility role is falling back past its chosen model",
-		zap.String("role", string(role)),
-		zap.String("scope", string(scope)),
-		zap.String("model_id", modelID.String()),
-		zap.String("reason", reason),
-		zap.Error(err))
-	a.metrics().Add(ctx, telemetry.UtilityModelFallbacks, 1,
-		telemetry.AttrUtilityRole.String(string(role)),
-		telemetry.AttrUtilityScope.String(string(scope)),
-		telemetry.AttrReason.String(reason))
-}
-
-// utilityTargetFor is the model a role's calls run on: the chosen one, or its built-in model.
-func (a *Agent) utilityTargetFor(ctx context.Context, role provider.UtilityRole) utilityTarget {
-	if t, chosen := a.chosenUtilityTarget(ctx, role); chosen {
-		return t
-	}
-	name, modelProvider := utilityBuiltIn(role)
-	return utilityTarget{name: name, provider: string(modelProvider)}
-}
 
 // utilityReply is a utility call's reply.
 type utilityReply struct {
@@ -163,8 +40,12 @@ func (a *Agent) CallUtility(ctx context.Context, req provider.UtilityRequest) (s
 	return reply.Text, err
 }
 
-// callUtility is CallUtility returning the whole reply.
+// callUtility is CallUtility returning the whole reply. The request is checked before its
+// model is resolved, so a malformed one reads no settings and records no fallback.
 func (a *Agent) callUtility(ctx context.Context, req provider.UtilityRequest) (utilityReply, error) {
+	if err := req.Validate(); err != nil {
+		return utilityReply{}, err
+	}
 	return a.callUtilityTarget(ctx, a.utilityTargetFor(ctx, req.Role), req)
 }
 
@@ -190,7 +71,9 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 	if req.PreviousResponseID != "" && !t.usesResponsesAPI() {
 		return utilityReply{}, fmt.Errorf("model %q cannot continue a stored Responses conversation", t.name)
 	}
-	lite := &chatContext{model: t.name, modelProvider: t.provider, connection: t.connection}
+	lite := t.chatContext()
+	// A connection's flavor decides its API before anything about the model's name: a
+	// connection model is routed only by its connection, a built-in one only by its provider.
 	switch {
 	case t.connection != nil && t.connection.Flavor == ConnectionFlavorAnthropic,
 		t.connection == nil && models.UsesAnthropicMessagesAPI(t.provider, t.name):
@@ -210,7 +93,7 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 		}
 		return utilityReply{Text: provider.ExtractClaudeText(msg)}, nil
 	case t.connection != nil, models.UsesOpenAIChatCompletionsAPI(t.provider, t.name):
-		text, err := a.callUtilityChatCompletions(ctx, t, lite, req)
+		text, err := a.callUtilityChatCompletions(ctx, t, req)
 		if err != nil {
 			return utilityReply{}, err
 		}
@@ -235,7 +118,8 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 
 // callUtilityChatCompletions sends a utility call through the same Chat
 // Completions adapter a chat turn on the model would use, without tools.
-func (a *Agent) callUtilityChatCompletions(ctx context.Context, t utilityTarget, lite *chatContext, req provider.UtilityRequest) (string, error) {
+func (a *Agent) callUtilityChatCompletions(ctx context.Context, t utilityTarget, req provider.UtilityRequest) (string, error) {
+	lite := t.chatContext()
 	params := provider.UtilityChatCompletionParams(t.name, req)
 	var adapter provider.AgentAdapter
 	if t.connection == nil && models.IsGeminiModel(t.provider, t.name) {
