@@ -1,30 +1,29 @@
 package agent
 
+// A utility call (provider.UtilityRequest) runs in two steps:
+//
+//  1. Resolution (utility_target.go): the call's role picks its model. The account's choice
+//     comes first, where accounts bring their own keys; then the deployment's; then the
+//     role's built-in model. A choice that can't be used falls back to the next, logged and
+//     counted. Checkpoint steps whose model follows the chat pick theirs in
+//     archival_models.go instead.
+//  2. Dispatch (here): the request is validated, then rendered for the API the model speaks
+//     (Anthropic Messages, Chat Completions, or OpenAI's Responses) and sent through the
+//     same provider clients a chat turn on that model uses. A failure names the provider it
+//     went to, since the call site doesn't know which one that was.
+
 import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/anthropics/anthropic-sdk-go"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
-
-// utilityBuiltIn is the model a utility role runs on, and its provider: the fixed model each
-// role's call sites used before roles existed. It is the one place a role's model is decided;
-// roles become settings in a later step (ADR 0x027 section 6). The provider is named rather
-// than looked up from the catalog, so a call routes even if the catalog drops the model.
-func utilityBuiltIn(role provider.UtilityRole) (model string, modelProvider models.ModelProvider) {
-	switch role {
-	case provider.UtilityRoleMemory:
-		return archivalOpenAIModel, models.ModelProviderOpenAI
-	case provider.UtilityRolePersonality:
-		return generatePersonalityModel, models.ModelProviderOpenAI
-	default:
-		return models.UtilityModelName, models.ModelProviderOpenAI
-	}
-}
 
 // utilityReply is a utility call's reply.
 type utilityReply struct {
@@ -41,75 +40,96 @@ func (a *Agent) CallUtility(ctx context.Context, req provider.UtilityRequest) (s
 	return reply.Text, err
 }
 
-// callUtility is CallUtility returning the whole reply.
+// callUtility is CallUtility returning the whole reply. The request is checked before its
+// model is resolved, so a malformed one reads no settings and records no fallback.
 func (a *Agent) callUtility(ctx context.Context, req provider.UtilityRequest) (utilityReply, error) {
+	if err := req.Validate(); err != nil {
+		return utilityReply{}, err
+	}
+	return a.callUtilityTarget(ctx, a.utilityTargetFor(ctx, req.Role), req)
+}
+
+// callUtilityTarget makes a utility call on a given model rather than its role's, for the
+// calls whose model depends on the chat.
+func (a *Agent) callUtilityTarget(ctx context.Context, t utilityTarget, req provider.UtilityRequest) (utilityReply, error) {
 	if err := req.Validate(); err != nil {
 		return utilityReply{}, err
 	}
 	if req.CallPath != "" {
 		ctx = telemetry.WithCallPath(ctx, req.CallPath)
 	}
-	model, modelProvider := utilityBuiltIn(req.Role)
-	return a.callUtilityOn(ctx, model, string(modelProvider), req)
+	return a.callUtilityOn(ctx, t, req)
 }
 
-// callUtilityOn sends a utility call to a model. modelProvider is the model
-// row's provider, or empty to infer it from the name.
-func (a *Agent) callUtilityOn(ctx context.Context, model, modelProvider string, req provider.UtilityRequest) (utilityReply, error) {
-	responsesAPI := !models.UsesAnthropicMessagesAPI(modelProvider, model) &&
-		!models.UsesOpenAIChatCompletionsAPI(modelProvider, model) &&
-		models.ProviderForModel(modelProvider, model) == models.ModelProviderOpenAI
-	if req.PreviousResponseID != "" && !responsesAPI {
-		return utilityReply{}, fmt.Errorf("model %q cannot continue a stored Responses conversation", model)
+// callUtilityOn sends a utility call to a model through the API it speaks.
+func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider.UtilityRequest) (utilityReply, error) {
+	// A built-in model named without its provider gets it from the catalog here, once, so
+	// every helper below routes on the same explicit provider.
+	if t.connection == nil && t.provider == "" {
+		t.provider = string(models.ProviderForModel("", t.name))
 	}
+	if req.PreviousResponseID != "" && !t.usesResponsesAPI() {
+		return utilityReply{}, fmt.Errorf("model %q cannot continue a stored Responses conversation", t.name)
+	}
+	lite := t.chatContext()
+	// A connection's flavor decides its API before anything about the model's name: a
+	// connection model is routed only by its connection, a built-in one only by its provider.
 	switch {
-	case models.UsesAnthropicMessagesAPI(modelProvider, model):
-		prov, _, err := a.claudeProviderForModel(&chatContext{model: model, modelProvider: modelProvider})
+	case t.connection != nil && t.connection.Flavor == ConnectionFlavorAnthropic,
+		t.connection == nil && models.UsesAnthropicMessagesAPI(t.provider, t.name):
+		prov, _, err := a.claudeProviderForModel(lite)
 		if err != nil {
 			return utilityReply{}, err
 		}
-		msg, err := prov.Call(ctx, provider.UtilityClaudeParams(model, req))
+		params := provider.UtilityClaudeParams(t.name, req)
+		if t.connection == nil && models.IsZAIModel(t.provider, t.name) {
+			// GLM always reasons; left alone it can spend the whole cap and answer nothing.
+			// Background work wants little of it, as a chat turn with a low effort does.
+			provider.ApplyZAIReasoningEffort(&params, anthropic.OutputConfigEffortLow)
+		}
+		msg, err := prov.Call(ctx, params)
 		if err != nil {
-			return utilityReply{}, utilityCallError(modelProvider, model, err)
+			return utilityReply{}, t.callError(err)
 		}
 		return utilityReply{Text: provider.ExtractClaudeText(msg)}, nil
-	case models.UsesOpenAIChatCompletionsAPI(modelProvider, model):
-		text, err := a.callUtilityChatCompletions(ctx, model, modelProvider, req)
+	case t.connection != nil, models.UsesOpenAIChatCompletionsAPI(t.provider, t.name):
+		text, err := a.callUtilityChatCompletions(ctx, t, req)
 		if err != nil {
 			return utilityReply{}, err
 		}
 		return utilityReply{Text: text}, nil
-	case responsesAPI:
+	case t.usesResponsesAPI():
 		if a.OpenAIProvider == nil {
-			return utilityReply{}, fmt.Errorf("OpenAI model %q requested but no OpenAI provider is configured", model)
+			return utilityReply{}, fmt.Errorf("OpenAI model %q requested but no OpenAI provider is configured", t.name)
 		}
-		a.recordDroppedImages(ctx, model, req.Context)
-		resp, err := a.OpenAIProvider.CallWithRetry(ctx, provider.UtilityResponsesParams(model, req))
+		a.recordDroppedImages(ctx, t.name, req.Context)
+		resp, err := a.OpenAIProvider.CallWithRetry(ctx, provider.UtilityResponsesParams(t.name, req))
 		if err != nil {
-			return utilityReply{}, utilityCallError(modelProvider, model, err)
+			return utilityReply{}, t.callError(err)
 		}
 		if resp == nil {
 			return utilityReply{}, errors.New("utility call returned no response")
 		}
 		return utilityReply{Text: resp.OutputText(), ResponseID: resp.ID}, nil
 	default:
-		return utilityReply{}, fmt.Errorf("model %q has no API for utility calls", model)
+		return utilityReply{}, fmt.Errorf("model %q has no API for utility calls", t.name)
 	}
 }
 
 // callUtilityChatCompletions sends a utility call through the same Chat
 // Completions adapter a chat turn on the model would use, without tools.
-func (a *Agent) callUtilityChatCompletions(ctx context.Context, model, modelProvider string, req provider.UtilityRequest) (string, error) {
-	params := provider.UtilityChatCompletionParams(model, req)
+func (a *Agent) callUtilityChatCompletions(ctx context.Context, t utilityTarget, req provider.UtilityRequest) (string, error) {
+	lite := t.chatContext()
+	params := provider.UtilityChatCompletionParams(t.name, req)
 	var adapter provider.AgentAdapter
-	if models.IsGeminiModel(modelProvider, model) {
+	if t.connection == nil && models.IsGeminiModel(t.provider, t.name) {
 		if a.GeminiProvider == nil {
-			return "", fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", model)
+			return "", fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", t.name)
 		}
 		adapter = provider.NewGeminiAdapter(a.GeminiProvider, params, nil, nil, a.logger)
 	} else {
 		var err error
-		adapter, err = a.openAIChatCompletionsAdapter(&chatContext{model: model, modelProvider: modelProvider}, params, nil, nil)
+		adapter, err = a.openAIChatCompletionsAdapter(lite, params, nil, nil)
 		if err != nil {
 			return "", err
 		}
@@ -117,7 +137,7 @@ func (a *Agent) callUtilityChatCompletions(ctx context.Context, model, modelProv
 	// The adapter offers no tools, so it has no tool uses to return.
 	resp, _, err := adapter.Call(ctx)
 	if err != nil {
-		return "", utilityCallError(modelProvider, model, err)
+		return "", t.callError(err)
 	}
 	if resp == nil {
 		return "", errors.New("utility call returned no response")
@@ -125,10 +145,13 @@ func (a *Agent) callUtilityChatCompletions(ctx context.Context, model, modelProv
 	return resp.Text, nil
 }
 
-// utilityCallError names the provider a failed utility call went to, since a role's model,
-// and so its provider, is not fixed at the call site.
-func utilityCallError(modelProvider, model string, err error) error {
-	return fmt.Errorf("%s: %w", models.ProviderForModel(modelProvider, model).DisplayName(), err)
+// callError names the provider a failed utility call went to, since a role's model, and so
+// its provider, is not fixed at the call site. A connection model is named by its connection.
+func (t utilityTarget) callError(err error) error {
+	if t.connection != nil {
+		return fmt.Errorf("%s: %w", t.connection.Preset, err)
+	}
+	return fmt.Errorf("%s: %w", models.ProviderForModel(t.provider, t.name).DisplayName(), err)
 }
 
 // recordDroppedImages logs and counts the images a conversation loses on its way to the

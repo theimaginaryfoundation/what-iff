@@ -122,6 +122,7 @@ func TestPickGenerationExpression_StandaloneSuccessMatchesKey(t *testing.T) {
 	mock.ExpectQuery("SELECT .*").
 		WillReturnRows(personalityExpressionRows("happy"))
 	mock.ExpectCommit()
+	expectNoUtilitySettings(mock)
 
 	srv := jsonResponsesServer(t, responseTextJSONBody("resp_1", `{\"expression_key\":\"happy\",\"reasoning\":\"Warm tone.\"}`))
 	defer srv.Close()
@@ -147,6 +148,7 @@ func TestPickGenerationExpression_UnknownKeyReturnsNil(t *testing.T) {
 	mock.ExpectQuery("SELECT .*").
 		WillReturnRows(personalityExpressionRows("happy"))
 	mock.ExpectCommit()
+	expectNoUtilitySettings(mock)
 
 	srv := jsonResponsesServer(t, responseTextJSONBody("resp_1", `{\"expression_key\":\"nonexistent\",\"reasoning\":\"n/a\"}`))
 	defer srv.Close()

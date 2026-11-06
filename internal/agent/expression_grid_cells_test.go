@@ -373,6 +373,7 @@ func TestGenerateExpressionCandidates_UploadsNineUnassignedCandidates(t *testing
 
 	expectPersonalityLookup(mock, pid, "auto")
 	expectFileAttachmentLookup(mock, refID, "image/png")
+	expectNoUtilitySettings(mock)
 	attIDs := make([]uuid.UUID, len(customGridKeys))
 	for i := range customGridKeys {
 		attIDs[i] = uuid.New()
@@ -402,6 +403,7 @@ func TestGenerateExpressionCandidates_MidRunFailureDeletesEarlierCandidates(t *t
 	uid, pid := uuid.New(), uuid.New()
 	first, second := uuid.New(), uuid.New()
 	expectPersonalityLookup(mock, pid, "auto")
+	expectNoUtilitySettings(mock)
 	// Cell 1 uploads cleanly.
 	expectCreatePersonalityAttachment(mock, uid, pid, first)
 	mock.ExpectExec("UPDATE `file_attachments`").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -437,6 +439,7 @@ func TestGenerateExpressionCandidates_GridFailureUploadsNothing(t *testing.T) {
 
 	pid := uuid.New()
 	expectPersonalityLookup(mock, pid, "auto")
+	expectNoUtilitySettings(mock)
 
 	_, err := a.GenerateExpressionCandidates(context.Background(), uuid.New(), pid, ExpressionGridKeys, nil)
 	require.ErrorContains(t, err, "generate grid image")
@@ -504,6 +507,7 @@ func TestRunExpressionCandidatesJob_RecordsCandidatesOnProgress(t *testing.T) {
 
 	uid, pid, jobID := uuid.New(), uuid.New(), uuid.New()
 	expectPersonalityLookup(mock, pid, "auto")
+	expectNoUtilitySettings(mock)
 	ids := expectNineCandidateUploads(mock, uid, pid, customGridKeys)
 	mock.ExpectExec("UPDATE `jobs` SET .*`progress`").
 		WithArgs(sqlmock.AnyArg(), progressWithCandidate(ids[0]), sqlmock.AnyArg(), sqlmock.AnyArg()).
@@ -523,6 +527,7 @@ func TestRunExpressionCandidatesJob_UnrecordedCandidatesAreDeleted(t *testing.T)
 
 	uid, pid := uuid.New(), uuid.New()
 	expectPersonalityLookup(mock, pid, "auto")
+	expectNoUtilitySettings(mock)
 	ids := expectNineCandidateUploads(mock, uid, pid, ExpressionGridKeys)
 	mock.ExpectExec("UPDATE `jobs`").WillReturnError(errors.New("db gone"))
 	for _, id := range ids {
@@ -560,6 +565,7 @@ func TestGenerateDefaultExpressionGrid_GridFailure(t *testing.T) {
 
 	pid := uuid.New()
 	expectPersonalityLookup(mock, pid, "auto")
+	expectNoUtilitySettings(mock)
 
 	_, err := a.GenerateDefaultExpressionGrid(context.Background(), uuid.New(), pid)
 	require.ErrorContains(t, err, "generate grid image")

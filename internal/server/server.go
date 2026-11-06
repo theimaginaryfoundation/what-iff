@@ -45,6 +45,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/search"
 	toolshandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/user"
+	"github.com/theimaginaryfoundation/what-iff/internal/handlers/utilitymodel"
 	versionhandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/version"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/webhook"
 	"github.com/theimaginaryfoundation/what-iff/internal/mcpoauth"
@@ -312,6 +313,8 @@ func (s *Server) setupRoutes() {
 	memoryEmbeddingBackfillCfg := agent.MemoryEmbeddingBackfillConfig{
 		LockKey: s.config.MemoryEmbeddingBackfillLockKey,
 	}
+	// Taken before the variable below shadows the package.
+	utilityBuiltIn := agent.UtilityBuiltInModel
 	agent := agent.NewAgent(dataStore, s.logger, s.telemetry, fileStore, agentCfg)
 	s.chatAgent = agent
 	agent.StartMemoryEmbeddingBackfill(s.lifecycleCtx, memoryEmbeddingBackfillCfg)
@@ -459,6 +462,7 @@ func (s *Server) setupRoutes() {
 	)
 	mountAccountKeyRoutes(authRouter, keyResolver, accountKeys, connectionsHandler)
 	provideraccess.NewHandler(keyResolver, s.logger).RegisterRoutes(authRouter)
+	utilitymodel.NewHandler(dataStore, utilityBuiltIn, keyResolver, s.logger).RegisterRoutes(authRouter)
 	toolsHandler.RegisterRoutes(authRouter)
 	searchHandler.RegisterRoutes(authRouter)
 

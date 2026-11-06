@@ -180,10 +180,12 @@ func TestUtilityChatCompletionParams(t *testing.T) {
 
 	require.EqualValues(t, 200, body["max_completion_tokens"])
 	msgs := body["messages"].([]any)
-	require.Len(t, msgs, 3)
+	require.Len(t, msgs, 2)
 	require.Equal(t, "system", msgs[0].(map[string]any)["role"])
-	require.Equal(t, "system", msgs[1].(map[string]any)["role"], "developer turns are system messages")
-	parts := msgs[2].(map[string]any)["content"].([]any)
+	require.Equal(t, "extract\n\nskip duplicates", msgs[0].(map[string]any)["content"],
+		"one leading system message: some providers take a system message only first")
+	require.Equal(t, "user", msgs[1].(map[string]any)["role"])
+	parts := msgs[1].(map[string]any)["content"].([]any)
 	require.Equal(t, "image_url", parts[1].(map[string]any)["type"])
 	format := body["response_format"].(map[string]any)
 	require.Equal(t, "json_schema", format["type"])
@@ -311,4 +313,31 @@ func TestOpenAIRejectedImages_MatchesSanitizer(t *testing.T) {
 	noData, unsupported := OpenAIRejectedImages(mc)
 	require.Equal(t, count(mc)-count(SanitizeImagesForOpenAIInput(mc)), noData+unsupported)
 	require.Equal(t, 5, count(mc), "the sanitizer works on a clone")
+}
+
+// A conversation's own system messages (its system prompt, and a scratchpad rendered after its
+// turns) join the one leading system message rather than appearing mid-conversation.
+func TestUtilityChatCompletionParams_ConversationHasOneLeadingSystemMessage(t *testing.T) {
+	t.Parallel()
+	mc := &ModelContext{}
+	mc.Append(SegmentKindSystemPrompt, RoleDeveloper, "You are a helpful assistant.", false)
+	mc.Append(SegmentKindHistoryTurn, RoleUser, "hi", false)
+	mc.Append(SegmentKindHistoryTurn, RoleAssistant, "hello", false)
+	mc.Append(SegmentKindScratchpad, RoleDeveloper, "scratchpad notes", false)
+	raw, err := json.Marshal(UtilityChatCompletionParams("m", UtilityRequest{Instructions: "summarize", Context: mc}))
+	require.NoError(t, err)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+
+	msgs := body["messages"].([]any)
+	var roles []string
+	for _, m := range msgs {
+		roles = append(roles, m.(map[string]any)["role"].(string))
+	}
+	require.Equal(t, "system", roles[0])
+	require.NotContains(t, roles[1:], "system", "no system message after the first")
+	lead := msgs[0].(map[string]any)["content"].(string)
+	require.Contains(t, lead, "summarize")
+	require.Contains(t, lead, "You are a helpful assistant.")
+	require.Contains(t, lead, "scratchpad notes")
 }

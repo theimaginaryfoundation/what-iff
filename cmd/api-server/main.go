@@ -233,6 +233,18 @@ func init() {
 			zap.Error(err))
 	}
 
+	// Every utility call reads the utility model settings. A read that fails falls back to the
+	// built-in models, so a missing table would quietly ignore every choice and log a fallback
+	// on every call: stop here instead, with the remedy.
+	settingsCtx, cancelSettings := context.WithTimeout(context.Background(), 30*time.Second)
+	_, err = client.UtilityModelSetting.Query().Exist(settingsCtx)
+	cancelSettings()
+	if err != nil {
+		logger.Fatal("Failed to read utility model settings within 30s. If the utility_model_settings table is missing, "+
+			"run the migrations (AUTO_MIGRATE=true); otherwise check the database is reachable",
+			zap.Error(err))
+	}
+
 	// Where accounts bring their own keys, an older install's seeded models move
 	// onto their connections, once (ADR 0x027). A deployment that supplies the
 	// keys keeps its catalog as it is.
