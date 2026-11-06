@@ -245,6 +245,28 @@ func TestUtilityClaudeParams_SystemBlockOrderWithConversation(t *testing.T) {
 	require.Equal(t, mc.BuildClaudeParams("claude-x").System[0].CacheControl, got.System[1].CacheControl, "the conversation's cache marker is kept")
 }
 
+// An image-only ask sends just the image on every API: Anthropic rejects an empty text block,
+// and the others gain nothing from one.
+func TestUtilityParams_ImageAloneSendsNoEmptyText(t *testing.T) {
+	t.Parallel()
+	req := UtilityRequest{InputImageDataURL: "data:image/png;base64,AAAA"}
+
+	claude := UtilityClaudeParams("claude-x", req)
+	require.Len(t, claude.Messages, 1)
+	require.Len(t, claude.Messages[0].Content, 1)
+	require.NotNil(t, claude.Messages[0].Content[0].OfImage, "the image, and no text block")
+
+	chat, err := json.Marshal(UtilityChatCompletionParams("mistral-x", req))
+	require.NoError(t, err)
+	require.NotContains(t, string(chat), `"type":"text"`)
+	require.Contains(t, string(chat), `"type":"image_url"`)
+
+	resp, err := json.Marshal(UtilityResponsesParams("m", req))
+	require.NoError(t, err)
+	require.NotContains(t, string(resp), `"input_text"`)
+	require.Contains(t, string(resp), `"input_image"`)
+}
+
 func TestUtilityResponsesParams_ConversationKeepsServiceTier(t *testing.T) {
 	t.Parallel()
 	got := UtilityResponsesParams("m", UtilityRequest{Context: &ModelContext{}, ServiceTier: UtilityServiceTierFlex})

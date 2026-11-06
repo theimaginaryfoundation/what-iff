@@ -96,13 +96,14 @@ func utilityResponsesMessage(m utilityTurn) responses.ResponseInputItemUnionPara
 	if m.ImageDataURL == "" {
 		return responses.ResponseInputItemParamOfMessage(m.Text, role)
 	}
-	parts := responses.ResponseInputMessageContentListParam{
-		responses.ResponseInputContentParamOfInputText(m.Text),
-		{OfInputImage: &responses.ResponseInputImageParam{
-			ImageURL: openai.String(m.ImageDataURL),
-			Detail:   responses.ResponseInputImageDetailAuto,
-		}},
+	var parts responses.ResponseInputMessageContentListParam
+	if m.Text != "" {
+		parts = append(parts, responses.ResponseInputContentParamOfInputText(m.Text))
 	}
+	parts = append(parts, responses.ResponseInputContentUnionParam{OfInputImage: &responses.ResponseInputImageParam{
+		ImageURL: openai.String(m.ImageDataURL),
+		Detail:   responses.ResponseInputImageDetailAuto,
+	}})
 	return responses.ResponseInputItemParamOfMessage(parts, role)
 }
 
@@ -129,7 +130,11 @@ func UtilityClaudeParams(model string, req UtilityRequest) anthropic.MessageNewP
 			params.System = append(params.System, anthropic.TextBlockParam{Text: m.Text})
 			continue
 		}
-		blocks := []anthropic.ContentBlockParamUnion{anthropic.NewTextBlock(m.Text)}
+		// Anthropic rejects an empty text block, so an image-only turn sends just the image.
+		var blocks []anthropic.ContentBlockParamUnion
+		if m.Text != "" {
+			blocks = append(blocks, anthropic.NewTextBlock(m.Text))
+		}
 		if mediaType, data, ok := splitImageDataURL(m.ImageDataURL); ok {
 			blocks = append(blocks, anthropic.NewImageBlockBase64(mediaType, data))
 		}
@@ -169,10 +174,12 @@ func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCo
 			params.Messages = append(params.Messages, openai.UserMessage(m.Text))
 			continue
 		}
-		params.Messages = append(params.Messages, openai.UserMessage([]openai.ChatCompletionContentPartUnionParam{
-			openai.TextContentPart(m.Text),
-			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: m.ImageDataURL}),
-		}))
+		var parts []openai.ChatCompletionContentPartUnionParam
+		if m.Text != "" {
+			parts = append(parts, openai.TextContentPart(m.Text))
+		}
+		parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: m.ImageDataURL}))
+		params.Messages = append(params.Messages, openai.UserMessage(parts))
 	}
 	if req.Schema != nil {
 		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
