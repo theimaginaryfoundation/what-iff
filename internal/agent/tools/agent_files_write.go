@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/filechange"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
@@ -292,6 +293,8 @@ func (t *AgentFileTool) newFile(ctx context.Context, chat *models.Chat, p, conte
 		t.dropObject(ctx, key)
 		return nil, err
 	}
+	chatID := chat.ID
+	filechange.Notify(ctx, filechange.Event{Kind: filechange.KindCreate, UserID: chat.UserID, File: created, ChatID: &chatID})
 	return created, nil
 }
 
@@ -345,7 +348,10 @@ func (t *AgentFileTool) rewrite(ctx context.Context, chat *models.Chat, file str
 			continue
 		}
 		storage.ReleaseReplacedObject(context.WithoutCancel(ctx), t.logger, t.files, t.store, att.S3Key)
+		oldKey := att.S3Key
 		att.S3Key = key
+		chatID := chat.ID
+		filechange.Notify(ctx, filechange.Event{Kind: filechange.KindContent, UserID: chat.UserID, File: att, OldKey: oldKey, ChatID: &chatID})
 		ref := t.ref(chat, att, next)
 		return agentFileWriteResult{File: &ref}, nil
 	}

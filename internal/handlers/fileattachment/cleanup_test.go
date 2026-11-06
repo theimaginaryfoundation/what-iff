@@ -70,6 +70,12 @@ func (m *memRows) ExistingFileAttachmentIDs(_ context.Context, ids []uuid.UUID) 
 	return out, nil
 }
 
+func (m *memRows) SwapFileObject(context.Context, uuid.UUID, uuid.UUID, string, string, datastore.SwapFileObjectOptions) (bool, error) {
+	return false, errors.New("not used here")
+}
+
+func (m *memRows) ClearFileChunks(context.Context, uuid.UUID) error { return nil }
+
 func newLocalStore(t *testing.T) storage.FileStore {
 	t.Helper()
 	t.Setenv("LOCAL_FILE_STORE_DIR", t.TempDir())

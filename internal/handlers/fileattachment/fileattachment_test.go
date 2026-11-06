@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -24,6 +25,7 @@ type stubStore struct {
 	getFn            func(context.Context, uuid.UUID, uuid.UUID) (*models.FileAttachment, error)
 	deleteFn         func(context.Context, uuid.UUID, uuid.UUID) error
 	referencedKeysFn func(context.Context, []string) (map[string]bool, error)
+	swapFn           func(context.Context, uuid.UUID, uuid.UUID, string, string, datastore.SwapFileObjectOptions) (bool, error)
 }
 
 func (s stubStore) ReferencedFileAttachmentKeys(ctx context.Context, keys []string) (map[string]bool, error) {
@@ -49,11 +51,21 @@ func (s stubStore) ExistingFileAttachmentIDs(context.Context, []uuid.UUID) (map[
 	return map[uuid.UUID]bool{}, nil
 }
 
+func (s stubStore) SwapFileObject(ctx context.Context, userID, id uuid.UUID, oldKey, newKey string, opts datastore.SwapFileObjectOptions) (bool, error) {
+	if s.swapFn != nil {
+		return s.swapFn(ctx, userID, id, oldKey, newKey, opts)
+	}
+	return false, errors.New("swap not stubbed")
+}
+
+func (s stubStore) ClearFileChunks(context.Context, uuid.UUID) error { return nil }
+
 type stubAgent struct {
 	store storage.FileStore
 }
 
-func (a *stubAgent) FileStore() storage.FileStore { return a.store }
+func (a *stubAgent) FileStore() storage.FileStore                  { return a.store }
+func (a *stubAgent) ChunkPipeline() *filechunker.FileChunkPipeline { return nil }
 
 type stubFileStore struct {
 	contentByKey map[string][]byte

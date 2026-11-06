@@ -7,11 +7,15 @@ HTTP API for **file attachments** metadata and download flows at `/api/file-atta
 ## Responsibilities
 
 - **`Handler`:** CRUD/list for attachments per OpenAPI; coordinates with datastore and storage presigned URLs as implemented.
+- **`PUT /file-attachment/{id}/content` (`content.go`):** replaces a file's content from the file workspace (ADR 0x043 §3).
+  The body is the whole file; `If-Match` is the `content_version` the client loaded (bare or quoted, `*` or absent for an unconditional overwrite); `?chat_id=` names the conversation the save came from.
+  It returns the updated attachment with the new version as the `ETag`; a stale version is 412 with `details.content_version`, a skill file 403, a mismatched `Content-Type` 415, an invalid image 400, an oversized body 413, no object store 503.
+  The work is `filesave.Service.Replace`.
 
 ## Dependencies
 
 - **Inbound:** `internal/server`.
-- **Outbound:** `internal/datastore`, `internal/filedelete`, `internal/storage`, `internal/models`, `mux`.
+- **Outbound:** `internal/datastore`, `internal/filedelete`, `internal/filesave`, `internal/storage`, `internal/models`, `mux`.
 
 ## Non-obvious decisions
 
@@ -28,6 +32,7 @@ HTTP API for **file attachments** metadata and download flows at `/api/file-atta
 
 - *(See chat handler tests for upload quotas; add here if standalone behaviors grow.)*
 - `cleanup_test.go` — delete removes an unreferenced object and thumbnail, keeps one a reference copy shares, survives an object-store failure; legacy chat document download without `s3_key`.
+- `content_test.go` — the content route's statuses (200 with ETag, 412 with the current version, 400 If-Match, 404, 415) against stubs; the save itself is tested in `internal/filesave`.
 
 ## Related documentation
 

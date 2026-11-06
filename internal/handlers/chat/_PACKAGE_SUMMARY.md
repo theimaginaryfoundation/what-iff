@@ -27,6 +27,8 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
   Client-side zip extraction merges ChatGPT shards matching `conversations.json` / `conversations-NNN.json` (thread-complete chunks) before upload.
   Metrics (through `telemetry.Global()`): the staged payload size goes on `whatiff.file.size` (operation `chat_import`), the background run is tracked as a `chat_import` job (`TrackJob`, including a panic outcome), `parse` and `insert` are timed on `whatiff.file.operation.duration`, and conversation counts by outcome go on `whatiff.file.operation.items`.
 - **File attachments (`fileattachment.go`):** upload metrics are recorded inside the shared `handlerutils` upload helpers, so this handler does not count uploads itself.
+  An optional `folder` form field files the upload in a gallery folder (Save As from the chat-hosted file workspace, ADR 0x043 §3); an invalid or reserved folder is a 400 and the temp file is abandoned.
+  A stored upload is announced through `internal/filechange` with the chat id, so the private build can seed it into the conversation's container.
 - **Export (`export.go`):** the streamed ZIP's byte count is recorded on `whatiff.file.size` (operation `chat_export`); latency is left to the HTTP server metric.
 - **Lazy rehydration trigger (`GetChat`):** When an unarchived imported thread (`source` set, no checkpoint yet) is opened, the handler calls `agent.EnqueueThreadRehydration` to summarize it **and seed long-term memories** in the background (see `internal/agent`).
   Unarchiving alone does not start it, so a bulk restore costs nothing until a thread is opened; archived threads open read-only and never start it.
