@@ -11,17 +11,18 @@ import (
 	"go.uber.org/zap"
 )
 
-// utilityModelName is the model a utility role runs on. These are the fixed
-// choices each call site made before roles existed; roles become settings in a
-// later step (ADR 0x027 section 6).
-func utilityModelName(role provider.UtilityRole) string {
+// utilityBuiltIn is the model a utility role runs on, and its provider: the fixed model each
+// role's call sites used before roles existed. It is the one place a role's model is decided;
+// roles become settings in a later step (ADR 0x027 section 6). The provider is named rather
+// than looked up from the catalog, so a call routes even if the catalog drops the model.
+func utilityBuiltIn(role provider.UtilityRole) (model string, modelProvider models.ModelProvider) {
 	switch role {
 	case provider.UtilityRoleMemory:
-		return archivalOpenAIModel
+		return archivalOpenAIModel, models.ModelProviderOpenAI
 	case provider.UtilityRolePersonality:
-		return generatePersonalityModel
+		return generatePersonalityModel, models.ModelProviderOpenAI
 	default:
-		return models.UtilityModelName
+		return models.UtilityModelName, models.ModelProviderOpenAI
 	}
 }
 
@@ -42,19 +43,14 @@ func (a *Agent) CallUtility(ctx context.Context, req provider.UtilityRequest) (s
 
 // callUtility is CallUtility returning the whole reply.
 func (a *Agent) callUtility(ctx context.Context, req provider.UtilityRequest) (utilityReply, error) {
-	return a.callUtilityModel(ctx, utilityModelName(req.Role), req)
-}
-
-// callUtilityModel makes a utility call on a given model rather than its
-// role's, for the calls whose model depends on the chat.
-func (a *Agent) callUtilityModel(ctx context.Context, model string, req provider.UtilityRequest) (utilityReply, error) {
 	if err := req.Validate(); err != nil {
 		return utilityReply{}, err
 	}
 	if req.CallPath != "" {
 		ctx = telemetry.WithCallPath(ctx, req.CallPath)
 	}
-	return a.callUtilityOn(ctx, model, "", req)
+	model, modelProvider := utilityBuiltIn(req.Role)
+	return a.callUtilityOn(ctx, model, string(modelProvider), req)
 }
 
 // callUtilityOn sends a utility call to a model. modelProvider is the model

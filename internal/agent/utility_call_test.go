@@ -129,26 +129,26 @@ func TestCallUtilityOn_ErrorNamesProvider(t *testing.T) {
 }
 
 // A request that breaks UtilityRequest's rules is refused before it reaches any provider.
-func TestCallUtilityModel_RefusesInvalidRequest(t *testing.T) {
+func TestCallUtility_RefusesInvalidRequest(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
 	req := utilityTestRequest
 	req.PreviousResponseID = "resp_1"
 	req.Context = &provider.ModelContext{}
-	_, err := a.callUtilityModel(context.Background(), models.UtilityModelName, req)
+	_, err := a.callUtility(context.Background(), req)
 	require.ErrorIs(t, err, provider.ErrInvalidUtilityRequest)
 }
 
-// Every role's model must resolve to an API from its name alone, or every call on that role
-// fails; renaming one to a model outside the catalog would otherwise surface only at runtime.
-func TestUtilityModelName_EveryRoleResolvesToResponsesAPI(t *testing.T) {
+// Every role's built-in model is named with its provider and routes to the Responses API on
+// that alone, without needing the catalog to know the model.
+func TestUtilityBuiltIn_EveryRoleRoutesToResponsesAPI(t *testing.T) {
 	t.Parallel()
-	for _, role := range []provider.UtilityRole{provider.UtilityRoleSimple, provider.UtilityRoleMemory, provider.UtilityRolePersonality} {
-		model := utilityModelName(role)
-		require.Equal(t, models.ModelProviderOpenAI, models.ProviderForModel("", model), "%s -> %s", role, model)
-		require.False(t, models.UsesOpenAIChatCompletionsAPI("", model), model)
+	for _, role := range models.UtilityRoles {
+		model, modelProvider := utilityBuiltIn(role)
+		require.Equal(t, models.ModelProviderOpenAI, modelProvider, "%s -> %s", role, model)
+		require.False(t, models.UsesAnthropicMessagesAPI(string(modelProvider), model), model)
+		require.False(t, models.UsesOpenAIChatCompletionsAPI(string(modelProvider), model), model)
 	}
-	require.True(t, models.IsNativeAnthropicModel("", archivalClaudeModel), archivalClaudeModel)
 }
 
 // A conversation sent to the Responses API loses the images it can't take, and the call goes
