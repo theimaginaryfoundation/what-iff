@@ -1,0 +1,16 @@
+import { chromium } from 'playwright';
+import { serve } from './serve.mjs';
+const { url, close } = await serve(new URL('.', import.meta.url).pathname);
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1000, height: 1400 } });
+const errors = []; page.on('pageerror', e => errors.push(String(e))); page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+await page.goto(`${url}/docx.html`);
+await page.waitForFunction(() => typeof window.renderDocx === 'function');
+const chars = await page.evaluate(() => window.renderDocx('/sample.docx'));
+console.log('rendered text chars:', chars);
+const txt = await page.locator('#app').innerText();
+for (const probe of ['Spike header', 'Page', 'Fidelity sample', 'Merged cell', 'After the page break', 'A footnote body', 'A hyperlink']) console.log(`  has "${probe}":`, txt.includes(probe));
+console.log('pages:', await page.locator('#app section.docx').count(), 'images:', await page.locator('#app img').count(), 'tables:', await page.locator('#app table').count(), 'links:', await page.locator('#app a[href]').count());
+console.log('errors:', errors.length ? errors : 'none');
+await page.screenshot({ path: new URL('./docx.png', import.meta.url).pathname, fullPage: true });
+await browser.close(); close();

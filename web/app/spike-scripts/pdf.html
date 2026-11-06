@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8"><title>pdf spike</title></head><body>
+<canvas id="c"></canvas>
+<script type="module">
+import * as pdfjs from '/node_modules/pdfjs-dist/build/pdf.mjs';
+pdfjs.GlobalWorkerOptions.workerSrc = '/node_modules/pdfjs-dist/build/pdf.worker.mjs';
+window.pdfjs = pdfjs;
+window.annotateAndSave = async (url, extra) => {
+  const doc = await pdfjs.getDocument({ url }).promise;
+  const page = await doc.getPage(1);
+  const vp = page.getViewport({ scale: 1 });
+  const canvas = document.getElementById('c'); canvas.width = vp.width; canvas.height = vp.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+  const storage = doc.annotationStorage;
+  storage.setValue('pdfjs_internal_editor_0', { annotationType: pdfjs.AnnotationEditorType.FREETEXT, color: [204, 0, 0], fontSize: 14, value: 'Spike note', pageIndex: 0, rect: [60, vp.height - 120, 260, vp.height - 90], rotation: 0, structTreeParentId: null });
+  for (const [k, v] of Object.entries(extra ?? {})) storage.setValue(k, v);
+  const bytes = await doc.saveDocument();
+  const before = (await page.getAnnotations()).length;
+  return { before, pages: doc.numPages, w: vp.width, h: vp.height, bytes: Array.from(bytes) };
+};
+window.countAnnotations = async (bytesArr) => {
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(bytesArr) }).promise;
+  const page = await doc.getPage(1);
+  const annots = await page.getAnnotations();
+  const vp = page.getViewport({ scale: 1 });
+  const canvas = document.getElementById('c'); canvas.width = vp.width; canvas.height = vp.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp, annotationMode: pdfjs.AnnotationMode.ENABLE }).promise;
+  return annots.map(a => ({ subtype: a.subtype, contents: a.contentsObj?.str, rect: a.rect?.map(Math.round) }));
+};
+</script></body></html>
