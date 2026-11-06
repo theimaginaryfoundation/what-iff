@@ -2949,8 +2949,9 @@ func (a *Agent) finalizeChat(ctx context.Context, userID uuid.UUID, chatMessage,
 	defer func() {
 		a.recordTurnStage(ctx, turnStagePostProcess, time.Since(start))
 	}()
-	// Generate chat name if it's still the default
-	if isDefaultChatName(chatCtx.chat.Name) {
+	// Generate chat name if it's still the default. A message with no text, such as an image
+	// alone, leaves it for the next message that has some.
+	if isDefaultChatName(chatCtx.chat.Name) && strings.TrimSpace(chatMessage.Message) != "" {
 		doneChatName := a.timeTurnStage(ctx, turnStageChatName)
 		nameCtx, cancelName := context.WithTimeout(ctx, chatNameTimeout)
 		chatName, err := a.generateChatName(nameCtx, chatMessage.Message)

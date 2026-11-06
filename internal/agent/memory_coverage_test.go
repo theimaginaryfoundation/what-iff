@@ -178,6 +178,16 @@ func TestGetMemoryQuery_ProviderErrorIsReturned(t *testing.T) {
 	require.Error(t, err)
 }
 
+// A message with no text, such as an image alone, has nothing to search memories with, so no
+// call is made (the agent has no provider to make one with).
+func TestGetMemoryQuery_MessageWithoutTextSkipsTheCall(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()}
+	got, err := a.getMemoryQuery(context.Background(), uuid.New(), "instructions", " ")
+	require.NoError(t, err)
+	require.False(t, got.ShouldEnrich)
+}
+
 func TestGetMemoryQuery_UnmarshalErrorIsReturned(t *testing.T) {
 	t.Parallel()
 	srv := jsonResponsesServer(t, responseTextJSONBody("resp_1", "not valid json"))

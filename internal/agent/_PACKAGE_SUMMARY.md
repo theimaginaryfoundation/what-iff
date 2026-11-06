@@ -126,6 +126,7 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
   The gate opens at `inference_complete`, when the reply is saved, not when the earlier turn ends: its expression pick, checkpoint and memory work then overlap the next turn (`blocksLaterTurns`).
   That is safe because a turn builds its context from the saved checkpoint summary plus every message since the window start, and a checkpoint moves the window only to just after the reply it summarized (`checkpointWindowStart`): a turn that runs mid-checkpoint sees the old summary and all the intermediate turns.
   Each in-flight turn is tracked with a `replied` flag, set when it leaves pending/processing, so shutdown completes rather than fails a turn that already saved its reply.
+  A message with no text, such as an image alone, asks no utility call: chat naming waits for the next message with text (the chat keeps its placeholder name), and the memory query finds nothing to search for.
   A turn's own post-processing steps have budgets: the expression pick `expressionPickTimeout` (2m), chat naming `chatNameTimeout` (1m), the checkpoint `checkpointTimeout` (5m); a step that runs out loses only itself, and a lost checkpoint is redone by the next one.
   Waiting polls with backoff (250ms to 2s); a turn in this process finishing (`noteTurnJobStatus`, from the job phase helpers, or the turn's release) wakes that chat's waiters at once (`chatTurnTracker`, keyed per chat).
   Nothing is held while a turn runs: no advisory lock or pinned connection.

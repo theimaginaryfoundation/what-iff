@@ -437,7 +437,8 @@ func TestInferMemoryMergeGroupsOpenAI_UnparsableNonJSONReturnsError(t *testing.T
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	_, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "persona", nil)
+	candidates := []memoryMergeCandidate{{Content: "Likes tea", Scope: "User"}, {Content: "Enjoys tea", Scope: "User"}}
+	_, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "persona", candidates)
 	require.ErrorContains(t, err, "parse memory merge grouping")
 }
 
