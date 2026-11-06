@@ -8,6 +8,8 @@ package provider
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 )
@@ -44,9 +46,16 @@ type UtilitySchema struct {
 }
 
 // UtilityRequest is one utility call.
+//
+// What the call sends is, in order: the Instructions; the conversation it continues, either
+// Context or the stored response PreviousResponseID names (never both); then its own turns,
+// which are Messages, or Input as a single user turn. A request sets Input or Messages, not
+// both, and Input not alongside Context, which takes Messages; Validate enforces this, so no
+// field is ever silently left out.
 type UtilityRequest struct {
 	Role UtilityRole
-	// CallPath labels the call's telemetry; empty keeps the context's.
+	// CallPath labels the call's telemetry. Set it unless the context already carries the
+	// caller's label, which an empty CallPath keeps.
 	CallPath     telemetry.CallPath
 	Instructions string
 	// Context, when set, is a conversation the call continues; Messages follow it.
@@ -68,6 +77,43 @@ type UtilityRequest struct {
 	Priority bool
 	// Flex asks for slower, cheaper processing where an API offers it.
 	Flex bool
+}
+
+// ErrInvalidUtilityRequest is a utility request that breaks UtilityRequest's rules: a bug at
+// the call site, never something the account did.
+var ErrInvalidUtilityRequest = errors.New("invalid utility request")
+
+// Validate reports a request that would send something other than what it says. An empty
+// Input is allowed: a message can be all attachments, and its call sends an empty turn.
+func (r UtilityRequest) Validate() error {
+	invalid := func(format string, args ...any) error {
+		return fmt.Errorf("%w: %s", ErrInvalidUtilityRequest, fmt.Sprintf(format, args...))
+	}
+	switch {
+	case r.Role != UtilityRoleMemory && r.Role != UtilityRoleQuick && r.Role != UtilityRolePersonality:
+		return invalid("unknown role %q", r.Role)
+	case r.Context != nil && r.PreviousResponseID != "":
+		return invalid("continues both a conversation and a stored response")
+	case r.Input != "" && len(r.Messages) > 0:
+		return invalid("sets both Input and Messages")
+	case r.Input != "" && r.Context != nil:
+		return invalid("sets Input alongside a conversation, which takes Messages")
+	case r.Priority && r.Flex:
+		return invalid("asks for both priority and flex processing")
+	case r.MaxOutputTokens < 0:
+		return invalid("negative MaxOutputTokens")
+	}
+	for i, m := range r.Messages {
+		if m.Role != RoleUser && m.Role != RoleDeveloper {
+			return invalid("message %d has role %q, not user or developer", i, m.Role)
+		}
+		if m.ImageDataURL != "" {
+			if _, _, ok := splitImageDataURL(m.ImageDataURL); !ok {
+				return invalid("message %d has an image that is not a base64 data: URL", i)
+			}
+		}
+	}
+	return nil
 }
 
 // UtilityCaller makes utility calls. It returns the reply's text, which is JSON when
