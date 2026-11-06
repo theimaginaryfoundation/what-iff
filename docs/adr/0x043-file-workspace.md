@@ -58,7 +58,7 @@ Workers and wasm (Monaco language workers, the PDF.js worker, Pyodide) are copie
 | image | png, jpeg, gif, webp | As today | Crop, rotate, resize, annotate, filters; saves as PNG/JPEG/WebP | Filerobot Image Editor, vanilla adapter (MIT) |
 | pdf | `.pdf` | PDF.js viewer: pages, text layer, search, zoom. Replaces the browser-native viewer and so works in the Android WebView. | PDF.js annotation editor layer: highlight, free text, ink, stamp; `saveDocument()` writes the annotations into the file | `pdfjs-dist` (Apache-2.0) |
 | spreadsheet | `.xlsx .csv .tsv` | Grid, one tab per sheet | Grid editing with formulas; CSV saved back as CSV | Univer Sheets (Apache-2.0) for the grid; ExcelJS (MIT) to read and write `.xlsx`, because Univer's own xlsx import/export is a paid feature |
-| document | `.docx` | Rendered to HTML with page layout | A rich-text editor over an HTML round trip, with a fidelity warning (see §7) | `docx-preview` (MIT) to view; `mammoth` (BSD-2) + ProseMirror/TipTap (MIT) + `docx` (MIT) to edit |
+| document | `.docx` | Rendered to HTML with page layout | A rich-text editor over an HTML round trip, with a fidelity warning (see §7) | `docx-preview` (Apache-2.0) to view; `mammoth` (BSD-2) + ProseMirror/TipTap (MIT) + `docx` (MIT) to edit |
 | slides | `.pptx` | Rendered slides (SVG/HTML) | Text in place: the editor opens the OOXML (`jszip`, already present) and rewrites text runs; layout and media untouched | `pptx-glimpse` or `pptx-browser` (MIT) to view, chosen in the spike |
 | notebook | `.ipynb` | Cells with rendered Markdown, code and outputs (text, sanitized HTML, images, JSON) | Edit cells, add/remove/reorder, change cell type; saved as nbformat 4. **Run** opens the notebook in an embedded JupyterLite (§8). | our own component on `<markdown>` + Monaco; JupyterLite + `jupyterlite-pyodide-kernel` (BSD-3) |
 | none | archives, unknown binaries | Badge and download, as today | | |
@@ -179,7 +179,7 @@ Detailed in the private design doc. In short: hydration uses `ContextFilesForCha
 ## Consequences
 
 - Users can open, read and change every file in a conversation without leaving it, and the agent (and its container) sees the change on the next turn.
-- The initial bundle does not grow; each viewer is a lazy chunk. The heaviest (Monaco ~2 MB, PDF.js ~1 MB, Univer ~3 MB, JupyterLite ~tens of MB with Pyodide) load only when a file of that kind is opened, and JupyterLite only on *Run*.
+- The initial bundle does not grow; each viewer is a lazy chunk. The heaviest (Monaco 0.7 MB gzipped plus its language workers, PDF.js ~1 MB, Univer 2.9 MB gzipped, JupyterLite ~tens of MB with Pyodide) load only when a file of that kind is opened, Univer only on *Edit*, and JupyterLite only on *Run*.
 - Office editing is lossy and says so. Users who need full fidelity use the viewer and edit elsewhere, as today, until a better engine appears.
 - The gallery and the chat share one viewer; `FileViewerComponent` is retired.
 - `file_attachments` gains `content_version` by auto-migration; existing rows start at 1.
@@ -206,6 +206,33 @@ Stacked PRs on `design/file-workspace`, public unless marked. Each step is usabl
 
 Steps 5–10 are independent of each other once 2 is in; 4 depends on 3; everything else depends on 1 and 2.
 Overlay files the private build shadows (`extensions/*`, `api-pricing.helpers`) are not touched by these steps, so no port is needed beyond the private spec for the Context tab if its inputs change.
+
+## Step 0 results (2026-11-06)
+
+The four spikes ran on `spike/file-workspace` (throwaway; scripts under `web/app/spike-scripts/`, the Monaco route at `/spike/monaco`), in headless Chromium.
+Nothing here changes the decisions; the recipes and numbers below are what steps 2, 5, 6 and 8 build on.
+
+### Monaco 0.57 under the esbuild application builder: works
+
+- **Recipe.** Workers are local entry files (`src/.../workers/json.worker.ts` containing `import 'monaco-editor/language/json/json.worker'`; the package's exports map rewrites `monaco-editor/<p>` to `esm/vs/<p>.js`), referenced as `new Worker(new URL('./workers/json.worker', import.meta.url), { type: 'module' })`; `angular.json` gains `webWorkerTsConfig` (a `tsconfig.worker.json` with `noUncheckedSideEffectImports: false` for TypeScript 6) and `loader: { ".ttf": "file" }` for the codicon font. Monaco's stylesheet is a lazy global style (`styles` entry with `inject: false`, `bundleName: "monaco"`) that the loader links before the first editor, because CSS imported from TypeScript is emitted by esbuild but never loaded by the page. Language tokenizers are registered lazily by Monaco itself, so importing `monaco-editor` once costs nothing per language; each tokenizer is its own chunk.
+- **API note.** 0.57 moved the TypeScript service from `monaco.languages.typescript` to `monaco.typescript`.
+- **Verified.** JSON and TypeScript diagnostics from their workers, TypeScript completions and the suggest widget, Python tokenization, `editor.colorize` to static HTML for the phone view, codicon icons, no console errors. The initial bundle is unchanged (1.38 MB).
+- **Sizes** (raw / gzipped): editor chunk 2.76 MB / 717 kB; stylesheet 391 kB / 127 kB; workers: editor 307 kB / 95 kB, JSON 437 kB / 133 kB, CSS 1.08 MB / 251 kB, HTML 755 kB / 200 kB, TypeScript 7.0 MB / 1.56 MB. The TypeScript worker loads only for `.ts`/`.js` files.
+- **Open.** The Capacitor WebView was not exercised (no Android SDK on the build machine); module workers need Android System WebView 80 or newer, which Play keeps current on API 23+ devices. Step 2 checks it on a device before Monaco ships.
+
+### PDF.js 6.5 annotation save: real annotations
+
+- A FreeText note and an Ink stroke written through `annotationStorage` and `saveDocument()` come back as `/FreeText` and `/Ink` annotation objects in the saved file, read by pdf-lib (an independent parser) and by PDF.js on reload, and render. The claim that PDF.js editor annotations do not survive into the file is wrong for these types. Highlight and Stamp, and the viewer's editor UI layer (`web/pdf_viewer.mjs`), were not exercised; step 6 does that.
+
+### Univer 1.3.1 Sheets with ExcelJS: round trip holds for the §7 list
+
+- Packages are `@univerjs/presets` plus `@univerjs/preset-sheets-core` (Apache-2.0). A 90-line mapping between ExcelJS and Univer's `IWorkbookData` carried values, formulas (with cached results), number formats, bold and italic, fills, merges, column widths, dates and booleans through load, edit and save; Univer computed the formulas (including a cross-sheet one) and recomputed after an edit. Data validation was dropped, as §7 says.
+- **Size.** 12.0 MB raw / 2.9 MB gzipped plus 120 kB of CSS: the heaviest library in the plan. It loads only when the user enters edit mode; the spreadsheet *viewer* stays on ExcelJS to HTML (step 7).
+
+### docx-preview 0.4.1 and mammoth 1.13: viewer is faithful, the round trip is lossy as expected
+
+- `docx-preview` (Apache-2.0, 175 kB bundled) rendered headers, footers, footnotes, a page break into two pages, an image, a table with a merged cell, a hyperlink, a custom paragraph style, colour, underline and alignment with no errors.
+- `mammoth`'s HTML kept headings, bold, italic, lists, the table with its colspan, the image, the link and the footnote, and dropped the header and footer, colour, underline, font size, alignment and the custom style (it warns about the style). That is the loss the editor's first-save warning names, and why decision 8 defaults a lossy document to *Save As*.
 
 ## Later
 
