@@ -71,10 +71,11 @@ func TestUtilityResponsesParams_MatchesHandBuiltRequests(t *testing.T) {
 			},
 		},
 		{
-			name: "message list, flex",
+			name: "history and input, flex",
 			req: UtilityRequest{
 				Instructions: "pick", ServiceTier: UtilityServiceTierFlex, Schema: testUtilitySchema,
-				Messages: []UtilityMessage{{Role: RoleDeveloper, Text: "note"}, {Role: RoleUser, Text: "pick one"}},
+				History: []UtilityMessage{{Role: UtilityMessageDeveloper, Text: "note"}},
+				Input:   "pick one",
 			},
 			want: responses.ResponseNewParams{
 				Model:        "m",
@@ -90,8 +91,9 @@ func TestUtilityResponsesParams_MatchesHandBuiltRequests(t *testing.T) {
 		{
 			name: "image",
 			req: UtilityRequest{
-				Instructions: "describe",
-				Messages:     []UtilityMessage{{Role: RoleUser, Text: "this", ImageDataURL: "data:image/png;base64,AAAA"}},
+				Instructions:      "describe",
+				Input:             "this",
+				InputImageDataURL: "data:image/png;base64,AAAA",
 			},
 			want: responses.ResponseNewParams{
 				Model:        "m",
@@ -120,10 +122,11 @@ func TestUtilityResponsesParams_ContinuesConversation(t *testing.T) {
 	t.Parallel()
 	mc := &ModelContext{}
 	mc.Append(SegmentKindUserMessage, RoleUser, "earlier turn", false)
-	req := UtilityRequest{Context: mc, SafetyUserID: "u1", MaxOutputTokens: 384, Schema: testUtilitySchema}
+	req := UtilityRequest{Context: mc, Input: "go on", SafetyUserID: "u1", MaxOutputTokens: 384, Schema: testUtilitySchema}
 
 	got := UtilityResponsesParams("m", req)
 	want := SanitizeImagesForOpenAIInput(mc).BuildOpenAIResponseParams(OpenAIResponseParamsOptions{Model: "m", SafetyUserID: "u1", MaxOutputTokens: 384})
+	want.Input.OfInputItemList = append(want.Input.OfInputItemList, responses.ResponseInputItemParamOfMessage("go on", RoleUser))
 	want.Text = UtilityResponsesParams("m", UtilityRequest{Schema: testUtilitySchema}).Text
 	requireSameJSON(t, want, got)
 }
@@ -131,12 +134,11 @@ func TestUtilityResponsesParams_ContinuesConversation(t *testing.T) {
 func TestUtilityClaudeParams(t *testing.T) {
 	t.Parallel()
 	got := UtilityClaudeParams("claude-x", UtilityRequest{
-		Instructions: "extract",
-		Messages: []UtilityMessage{
-			{Role: RoleDeveloper, Text: "skip duplicates"},
-			{Role: RoleUser, Text: "look", ImageDataURL: "data:image/jpeg;base64,AAAA"},
-		},
-		Schema: testUtilitySchema,
+		Instructions:      "extract",
+		History:           []UtilityMessage{{Role: UtilityMessageDeveloper, Text: "skip duplicates"}},
+		Input:             "look",
+		InputImageDataURL: "data:image/jpeg;base64,AAAA",
+		Schema:            testUtilitySchema,
 	})
 	raw, err := json.Marshal(got)
 	require.NoError(t, err)
@@ -164,13 +166,12 @@ func TestUtilityClaudeParams(t *testing.T) {
 func TestUtilityChatCompletionParams(t *testing.T) {
 	t.Parallel()
 	got := UtilityChatCompletionParams("mistral-x", UtilityRequest{
-		Instructions:    "extract",
-		MaxOutputTokens: 200,
-		Messages: []UtilityMessage{
-			{Role: RoleDeveloper, Text: "skip duplicates"},
-			{Role: RoleUser, Text: "look", ImageDataURL: "data:image/png;base64,AAAA"},
-		},
-		Schema: testUtilitySchema,
+		Instructions:      "extract",
+		MaxOutputTokens:   200,
+		History:           []UtilityMessage{{Role: UtilityMessageDeveloper, Text: "skip duplicates"}},
+		Input:             "look",
+		InputImageDataURL: "data:image/png;base64,AAAA",
+		Schema:            testUtilitySchema,
 	})
 	raw, err := json.Marshal(got)
 	require.NoError(t, err)
@@ -225,12 +226,13 @@ func TestSplitImageDataURL(t *testing.T) {
 func TestUtilityClaudeParams_SystemBlockOrderWithConversation(t *testing.T) {
 	t.Parallel()
 	mc := &ModelContext{}
-	mc.Append(SegmentKindSystemPrompt, RoleDeveloper, "You are Vix.", true)
+	mc.Append(SegmentKindSystemPrompt, RoleDeveloper, "You are a helpful assistant.", true)
 	mc.Append(SegmentKindHistoryTurn, RoleUser, "hi", false)
 	got := UtilityClaudeParams("claude-x", UtilityRequest{
 		Instructions: "summarize",
 		Context:      mc,
-		Messages:     []UtilityMessage{{Role: RoleDeveloper, Text: "be brief"}, {Role: RoleUser, Text: "go"}},
+		History:      []UtilityMessage{{Role: UtilityMessageDeveloper, Text: "be brief"}},
+		Input:        "go",
 	})
 	var texts []string
 	for _, b := range got.System {
@@ -238,7 +240,7 @@ func TestUtilityClaudeParams_SystemBlockOrderWithConversation(t *testing.T) {
 	}
 	require.GreaterOrEqual(t, len(texts), 3)
 	require.Equal(t, "summarize", texts[0])
-	require.Contains(t, texts[1:len(texts)-1], "You are Vix.")
+	require.Contains(t, texts[1:len(texts)-1], "You are a helpful assistant.")
 	require.Equal(t, "be brief", texts[len(texts)-1])
 	require.Equal(t, mc.BuildClaudeParams("claude-x").System[0].CacheControl, got.System[1].CacheControl, "the conversation's cache marker is kept")
 }
