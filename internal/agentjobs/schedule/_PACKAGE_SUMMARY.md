@@ -15,12 +15,12 @@
 
 ## Non-obvious decisions
 
-- **Schedule interpretation is a utility call:** `Parse` sends a `provider.UtilityRequest` on the quick role through a `provider.UtilityCaller` (the agent), which picks the model and its API.
+- **Schedule interpretation is a utility call:** `Parse` sends a `provider.UtilityRequest` on the simple role through a `provider.UtilityCaller` (the agent), which picks the model and its API.
 
 ## Testing
 
 - `parse_test.go` — cron minimum-interval validation.
-- `parse_request_test.go` — `Parse` asks the quick role for the `AgentJobSchedule` structured output (recording `UtilityCaller`).
+- `parse_request_test.go` — `Parse` asks the simple role for the `AgentJobSchedule` structured output (recording `UtilityCaller`).
 
 ## Related documentation
 

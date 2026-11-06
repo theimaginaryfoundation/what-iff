@@ -11,21 +11,17 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 )
 
 // UtilityRole groups background work that runs on the same model.
-type UtilityRole string
+type UtilityRole = models.UtilityRole
 
 const (
-	// UtilityRoleMemory covers memory extraction and merge, the scratchpad, checkpoint
-	// summaries, recall and thread rehydration.
-	UtilityRoleMemory UtilityRole = "memory"
-	// UtilityRoleQuick covers short tasks: chat naming, expression and mood selection,
-	// schedule parsing and memory queries.
-	UtilityRoleQuick UtilityRole = "quick"
-	// UtilityRolePersonality covers generating a personality.
-	UtilityRolePersonality UtilityRole = "personality"
+	UtilityRoleMemory      = models.UtilityRoleMemory
+	UtilityRoleSimple      = models.UtilityRoleSimple
+	UtilityRolePersonality = models.UtilityRolePersonality
 )
 
 // UtilityMessage is one turn of a call's input.
@@ -90,7 +86,7 @@ func (r UtilityRequest) Validate() error {
 		return fmt.Errorf("%w: %s", ErrInvalidUtilityRequest, fmt.Sprintf(format, args...))
 	}
 	switch {
-	case r.Role != UtilityRoleMemory && r.Role != UtilityRoleQuick && r.Role != UtilityRolePersonality:
+	case !r.Role.Valid():
 		return invalid("unknown role %q", r.Role)
 	case r.Context != nil && r.PreviousResponseID != "":
 		return invalid("continues both a conversation and a stored response")

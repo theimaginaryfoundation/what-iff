@@ -307,7 +307,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - `expression_grid_generation_test.go` — 3×3 PNG grid splice (`SlicePNGGrid3x3`), key-driven canvas prompt.
 - `no_temperature_test.go` — wire-level check that the expression picker (both branches), grid likeness and chat name requests carry no `temperature`/`top_p`.
 - `memory_coverage_test.go` — includes `rebuiltCheckpointModel` per chat kind, and a Gemini chat's rebuilt-context memory extraction reaching the OpenAI archival model with no Anthropic provider (fails under the old always-Claude choice).
-- `utility_call_test.go` — `CallUtility` on the quick role reaching the Responses API with its schema, and `callUtilityOn` routing an Anthropic model to the Messages API and a Mistral model to Chat Completions without tools, naming a missing provider, and errors labelled with the provider called.
+- `utility_call_test.go` — `CallUtility` on the simple role reaching the Responses API with its schema, and `callUtilityOn` routing an Anthropic model to the Messages API and a Mistral model to Chat Completions without tools, naming a missing provider, and errors labelled with the provider called.
 - `message_context_builder_expression_test.go` — prior-turn expression snapshot selection for continuity text.
 - `conversation_summary_test.go`, `scratchpad_test.go`, `memory_test.go`, `postprocessing_policy_test.go` — maintenance prompts and checkpoints.
 - `thread_rehydration_test.go` — imported-thread split at n-5 turns, assistant counting, char-budget chunking, and transcript rendering.

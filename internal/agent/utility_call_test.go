@@ -37,13 +37,13 @@ func recordingServer(t *testing.T, body string) (*httptest.Server, *string, *map
 }
 
 var utilityTestRequest = provider.UtilityRequest{
-	Role:         provider.UtilityRoleQuick,
+	Role:         provider.UtilityRoleSimple,
 	Instructions: "name it",
 	Input:        "hello",
 	Schema:       &provider.UtilitySchema{Name: "Name", Schema: map[string]any{"type": "object"}},
 }
 
-func TestCallUtility_QuickRoleUsesResponsesAPI(t *testing.T) {
+func TestCallUtility_SimpleRoleUsesResponsesAPI(t *testing.T) {
 	t.Parallel()
 	srv, reqs := capturingResponsesServer(t, `{"id":"r","object":"response","status":"completed","output":[{"type":"message","id":"m","role":"assistant","status":"completed","content":[{"type":"output_text","text":"named","annotations":[]}]}]}`)
 	client := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL(srv.URL))
@@ -143,7 +143,7 @@ func TestCallUtilityModel_RefusesInvalidRequest(t *testing.T) {
 // fails; renaming one to a model outside the catalog would otherwise surface only at runtime.
 func TestUtilityModelName_EveryRoleResolvesToResponsesAPI(t *testing.T) {
 	t.Parallel()
-	for _, role := range []provider.UtilityRole{provider.UtilityRoleQuick, provider.UtilityRoleMemory, provider.UtilityRolePersonality} {
+	for _, role := range []provider.UtilityRole{provider.UtilityRoleSimple, provider.UtilityRoleMemory, provider.UtilityRolePersonality} {
 		model := utilityModelName(role)
 		require.Equal(t, models.ModelProviderOpenAI, models.ProviderForModel("", model), "%s -> %s", role, model)
 		require.False(t, models.UsesOpenAIChatCompletionsAPI("", model), model)

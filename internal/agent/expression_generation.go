@@ -82,7 +82,7 @@ func (a *Agent) PickGenerationExpression(ctx context.Context, userID, personalit
 	catalog := buildExpressionPickCatalog(slots)
 
 	req := provider.UtilityRequest{
-		Role:            provider.UtilityRoleQuick,
+		Role:            provider.UtilityRoleSimple,
 		CallPath:        telemetry.CallPathExpressionPick,
 		MaxOutputTokens: 384,
 		Schema:          expressionPickSchema,

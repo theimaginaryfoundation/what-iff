@@ -290,7 +290,7 @@ func (a *Agent) inferExpressionGridLikeness(ctx context.Context, systemPrompt st
 		msg.ImageDataURL = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(referenceImageBytes)
 	}
 	req := provider.UtilityRequest{
-		Role:            provider.UtilityRoleQuick,
+		Role:            provider.UtilityRoleSimple,
 		Instructions:    expressionLikenessInstructions,
 		MaxOutputTokens: 768,
 	}
