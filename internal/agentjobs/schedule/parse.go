@@ -103,7 +103,7 @@ func Parse(ctx context.Context, caller provider.UtilityCaller, userID uuid.UUID,
 	}, "\n")
 
 	out, err := caller.CallUtility(ctx, provider.UtilityRequest{
-		Role:            provider.UtilityRoleQuick,
+		Role:            provider.UtilityRoleSimple,
 		CallPath:        telemetry.CallPathScheduleParse,
 		Instructions:    instructions,
 		Input:           scheduleInput,

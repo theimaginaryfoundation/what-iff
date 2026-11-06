@@ -29,6 +29,9 @@
   The total uses vendor-reported input usage when available; named context/tool estimates are cl100k and `vendor_prompt_other` reconciles vendor framing, image input, and other un-attributable usage.
 - **Webhook surface (`webhook_token.go`, `webhook_message.go`):** `WebhookScope` (`messages:write`, `chat:read`) with `NormalizeWebhookScopes` (validates a request; empty means the write-only default) and `EffectiveWebhookScopes` (a token stored with no scopes, i.e. created before scopes existed, is write-only).
   `WebhookMessage` and `WebhookPersonality` are the allow-listed shapes the webhook read routes return, built by `NewWebhookMessage` and `NewWebhookPersonality`; they deliberately omit tool calls, model reasoning, thumbnails, storage keys and a persona's prompt and scratchpad.
+- **Utility roles (`utility.go`):** `UtilityRole` (`memory`, `simple`, `personality`) groups background work that runs on the same model (ADR 0x027 section 6).
+  `UtilityRoles` lists them in display order and `Valid` checks one.
+  They live here, not in `agent/provider`, so code that can't import the agent, such as the datastore, can name a role.
 - **Error envelope (`error.go`):** `ErrorResponse` plus the error-code registry — `ErrCode*` constants and `GenericErrorCode(status)`.
   This is the single source of truth for the taxonomy; the `ErrorCode` enum in `openapi.yaml` mirrors it and must be updated alongside.
   Adding a provider connection that fails answers with `provider_unreachable`, `provider_key_rejected`, `provider_incompatible` or `provider_unavailable`, `custom_address_not_allowed` when the deployment does not let accounts choose an address, `provider_connection_exists` for a second connection to a built-in provider, and `default_model_in_use` when a change would take away the account's default model (ADR 0x027).

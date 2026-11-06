@@ -22,14 +22,14 @@ func (r *requestRecorder) CallUtility(_ context.Context, req provider.UtilityReq
 	return "", errors.New("recorded")
 }
 
-// Parse is a quick task with structured output. Utility requests carry no sampling settings,
+// Parse is a simple task with structured output. Utility requests carry no sampling settings,
 // so the call never sends a temperature (see provider.TestUtilityParams_NoSampling).
-func TestParse_AsksForStructuredScheduleOnQuickRole(t *testing.T) {
+func TestParse_AsksForStructuredScheduleOnSimpleRole(t *testing.T) {
 	t.Parallel()
 	rec := &requestRecorder{}
 	_, err := Parse(context.Background(), rec, uuid.New(), "every day at 9am", "UTC", time.Now())
 	require.Error(t, err)
-	require.Equal(t, provider.UtilityRoleQuick, rec.req.Role)
+	require.Equal(t, provider.UtilityRoleSimple, rec.req.Role)
 	require.NotNil(t, rec.req.Schema)
 	require.Equal(t, "AgentJobSchedule", rec.req.Schema.Name)
 }
