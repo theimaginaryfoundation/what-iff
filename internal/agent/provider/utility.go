@@ -24,11 +24,42 @@ const (
 	UtilityRolePersonality = models.UtilityRolePersonality
 )
 
+// UtilityMessageRole is who a turn of a call's input is from.
+type UtilityMessageRole string
+
+const (
+	UtilityMessageUser UtilityMessageRole = RoleUser
+	// UtilityMessageDeveloper is a note from the app, not the person. APIs without a
+	// developer role receive developer turns as system text.
+	UtilityMessageDeveloper UtilityMessageRole = RoleDeveloper
+)
+
+// Valid reports whether r is a role a turn can have.
+func (r UtilityMessageRole) Valid() bool {
+	return r == UtilityMessageUser || r == UtilityMessageDeveloper
+}
+
+// UtilityServiceTier is how fast, and at what price, a call asks to be processed, where an
+// API offers a choice.
+type UtilityServiceTier string
+
+const (
+	// UtilityServiceTierDefault leaves the API's default.
+	UtilityServiceTierDefault UtilityServiceTier = ""
+	// UtilityServiceTierPriority asks for faster, pricier processing.
+	UtilityServiceTierPriority UtilityServiceTier = "priority"
+	// UtilityServiceTierFlex asks for slower, cheaper processing.
+	UtilityServiceTierFlex UtilityServiceTier = "flex"
+)
+
+// Valid reports whether t is a known tier.
+func (t UtilityServiceTier) Valid() bool {
+	return t == UtilityServiceTierDefault || t == UtilityServiceTierPriority || t == UtilityServiceTierFlex
+}
+
 // UtilityMessage is one turn of a call's input.
 type UtilityMessage struct {
-	// Role is "user" or "developer". APIs without a developer role receive
-	// developer turns as system text.
-	Role string
+	Role UtilityMessageRole
 	Text string
 	// ImageDataURL, when set, attaches one image (a data: URL) after the text.
 	ImageDataURL string
@@ -69,10 +100,7 @@ type UtilityRequest struct {
 	MaxOutputTokens int64
 	// SafetyUserID identifies the account to APIs that take one.
 	SafetyUserID string
-	// Priority asks for faster, pricier processing where an API offers it.
-	Priority bool
-	// Flex asks for slower, cheaper processing where an API offers it.
-	Flex bool
+	ServiceTier  UtilityServiceTier
 }
 
 // ErrInvalidUtilityRequest is a utility request that breaks UtilityRequest's rules: a bug at
@@ -94,13 +122,13 @@ func (r UtilityRequest) Validate() error {
 		return invalid("sets both Input and Messages")
 	case r.Input != "" && r.Context != nil:
 		return invalid("sets Input alongside a conversation, which takes Messages")
-	case r.Priority && r.Flex:
-		return invalid("asks for both priority and flex processing")
+	case !r.ServiceTier.Valid():
+		return invalid("unknown service tier %q", r.ServiceTier)
 	case r.MaxOutputTokens < 0:
 		return invalid("negative MaxOutputTokens")
 	}
 	for i, m := range r.Messages {
-		if m.Role != RoleUser && m.Role != RoleDeveloper {
+		if !m.Role.Valid() {
 			return invalid("message %d has role %q, not user or developer", i, m.Role)
 		}
 		if m.ImageDataURL != "" {

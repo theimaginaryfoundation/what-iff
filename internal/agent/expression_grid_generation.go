@@ -278,7 +278,7 @@ func (a *Agent) inferExpressionGridLikeness(ctx context.Context, systemPrompt st
 		return "", nil
 	}
 
-	msg := provider.UtilityMessage{Role: provider.RoleUser, Text: "Personality system prompt:\n\n" + systemPrompt}
+	msg := provider.UtilityMessage{Role: provider.UtilityMessageUser, Text: "Personality system prompt:\n\n" + systemPrompt}
 	if len(referenceImageBytes) > 0 {
 		// mimeType carries the attachment's actual media type (e.g. "image/jpeg", "image/png").
 		// Defaulting to "image/png" only as a last resort; correct type matters for

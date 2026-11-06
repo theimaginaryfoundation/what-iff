@@ -63,10 +63,10 @@ func utilityResponsesParamsFromContext(model string, req UtilityRequest) respons
 
 // utilityServiceTier is the Responses service tier a request asks for, if any.
 func utilityServiceTier(req UtilityRequest) responses.ResponseNewParamsServiceTier {
-	switch {
-	case req.Priority:
+	switch req.ServiceTier {
+	case UtilityServiceTierPriority:
 		return responses.ResponseNewParamsServiceTierPriority
-	case req.Flex:
+	case UtilityServiceTierFlex:
 		return responses.ResponseNewParamsServiceTierFlex
 	}
 	return ""
