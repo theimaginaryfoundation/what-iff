@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3"
@@ -181,4 +183,47 @@ func TestUtilityClientError_OnlyAMissingKeyIsANotice(t *testing.T) {
 	_, ok = backgroundNoticeFor(models.BackgroundStepMemory,
 		target.clientError(errors.New(`unsupported OpenAI Chat Completions provider "mistral" for model "mistral-small-latest"`)))
 	require.False(t, ok, "a routing bug is not the account's to fix")
+}
+
+// A step that runs out of time must stay a timeout through every API's client and retries, so
+// the run drops it rather than blaming the provider; one that flattened the deadline into text
+// would show as a provider_error notice.
+func TestUtilityCall_TimeoutStaysATimeoutOnEveryAPI(t *testing.T) {
+	t.Parallel()
+	release := make(chan struct{})
+	stall := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(stall.Close)
+	t.Cleanup(func() { close(release) }) // runs first, so Close isn't left waiting on a handler
+	a := &Agent{
+		logger:          zap.NewNop(),
+		OpenAIProvider:  newHTTPTestOpenAIProvider(stall.URL),
+		ClaudeProvider:  newHTTPTestClaudeProvider(stall.URL),
+		MistralProvider: provider.NewMistralProvider("k", stall.URL, nil, nil),
+		GeminiProvider:  provider.NewGeminiProvider("k", stall.URL, nil, nil),
+	}
+	targets := map[string]utilityTarget{
+		"Responses":        {name: "gpt-5.6-luna", provider: string(models.ModelProviderOpenAI)},
+		"Messages":         {name: "claude-haiku-4-5", provider: string(models.ModelProviderAnthropic)},
+		"Chat Completions": {name: "mistral-small-latest", provider: string(models.ModelProviderMistral)},
+		"Gemini":           {name: "gemini-3.5", provider: string(models.ModelProviderGoogle)},
+	}
+	for name, target := range targets {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+			defer cancel()
+			_, err := a.callUtilityTarget(ctx, target, provider.UtilityRequest{Role: provider.UtilityRoleMemory, Input: "summarize"})
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			runCtx, run := withBackgroundRun(context.Background())
+			backgroundRunFrom(runCtx).step(models.BackgroundStepSummary, err)
+			out := run.outcome()
+			require.Empty(t, out.Failed, "a timeout is not the provider's failure")
+			require.Empty(t, out.Succeeded, "nor a success: the next checkpoint redoes the step")
+		})
+	}
 }
