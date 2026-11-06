@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -12,6 +13,22 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/utilitymodelsetting"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
+
+// ErrInvalidUtilitySetting is a utility model setting that can't exist: an unknown role or
+// scope, or a scope written with the wrong owner (the deployment's has no user; an account's
+// has one). Handlers check the role before calling and choose the scope and owner themselves,
+// so reaching it means a caller has a bug.
+var ErrInvalidUtilitySetting = errors.New("invalid utility model setting")
+
+// validateUtilitySetting refuses a role, scope and owner no setting can have. Writing and
+// clearing both check, so neither can touch a row that shouldn't exist.
+func validateUtilitySetting(scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole) error {
+	if !role.Valid() || (scope != models.UtilityScopeDeployment && scope != models.UtilityScopeAccount) ||
+		(scope == models.UtilityScopeDeployment) != (userID == uuid.Nil) {
+		return fmt.Errorf("%w: role %q, scope %q, user %s", ErrInvalidUtilitySetting, role, scope, userID)
+	}
+	return nil
+}
 
 // utilityScopeOwner selects the settings of one scope: an account's, or, for
 // userID uuid.Nil, the deployment's.
@@ -76,8 +93,8 @@ func (ds *Datastore) setUtilityModel(ctx context.Context, scope models.UtilitySc
 }
 
 func setUtilityModelTx(ctx context.Context, tx *ent.Tx, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID uuid.UUID) error {
-	if (scope == models.UtilityScopeDeployment) != (userID == uuid.Nil) {
-		return fmt.Errorf("a %s utility model setting with user %s", scope, userID)
+	if err := validateUtilitySetting(scope, userID, role); err != nil {
+		return err
 	}
 	if userID == uuid.Nil {
 		catalog, err := tx.Model.Query().
@@ -113,6 +130,9 @@ func setUtilityModelTx(ctx context.Context, tx *ent.Tx, scope models.UtilityScop
 // ClearUtilityModel removes the choice for role at scope, so the role falls back
 // to the next scope's choice or its built-in default.
 func (ds *Datastore) ClearUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole) error {
+	if err := validateUtilitySetting(scope, userID, role); err != nil {
+		return err
+	}
 	if _, err := ds.dbClient.UtilityModelSetting.Delete().
 		Where(utilityScopeOwner(scope, userID), utilitymodelsetting.Role(string(role))).
 		Exec(ctx); err != nil {

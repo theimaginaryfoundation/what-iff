@@ -28,7 +28,8 @@ func (UtilityModelSetting) Fields() []ent.Field {
 	return []ent.Field{
 		field.UUID("id", uuid.UUID{}).Default(uuid.New).Immutable(),
 		// "deployment" or "account" (models.UtilityScope). A string rather than an
-		// enum so that adding a scope needs no migration.
+		// enum, so adding a scope changes no column type; the CHECK constraint in
+		// Annotations names each scope, though, and must gain the new one.
 		field.String("scope").NotEmpty().Immutable(),
 		// The account, for an account setting; empty for the deployment's.
 		field.UUID("user_id", uuid.UUID{}).Optional().Nillable().Immutable(),
@@ -69,6 +70,11 @@ func (UtilityModelSetting) Annotations() []schema.Annotation {
 	return []schema.Annotation{
 		schema.Comment("The model each utility role runs on, per scope. A row with no user_id is the deployment's."),
 		entsql.WithComments(true),
+		// The datastore checks this before writing; the database holds to it too, so no
+		// write path can leave a deployment setting with an owner or an account's without one.
+		entsql.Checks(map[string]string{
+			"utility_model_setting_scope_owner": "((scope = 'deployment' AND user_id IS NULL) OR (scope = 'account' AND user_id IS NOT NULL))",
+		}),
 	}
 }
 
