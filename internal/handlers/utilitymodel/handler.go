@@ -180,12 +180,19 @@ func (h *Handler) utilityModels(ctx context.Context, userID uuid.UUID) (models.U
 }
 
 // hasKeyFor answers the request and reports false when the account holds no key for the
-// provider of the catalog model it chose, which would only fail at every call. A connection
-// model carries its connection's key, and a model the account can't use at all is the
-// store's to refuse.
+// provider of the catalog model it chose, which would only fail at every call, or when the
+// model can't be read. A connection model carries its connection's key, and a model that
+// doesn't exist is the store's to refuse.
 func (h *Handler) hasKeyFor(w http.ResponseWriter, r *http.Request, modelID uuid.UUID) bool {
 	m, err := h.store.GetModel(r.Context(), modelID)
-	if err != nil || m.ConnectionID != nil {
+	if errors.Is(err, datastore.ErrModelNotFound) {
+		return true
+	}
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error saving the utility model", err)
+		return false
+	}
+	if m.ConnectionID != nil {
 		return true
 	}
 	p := models.ProviderForModel(m.Provider, m.Name)
