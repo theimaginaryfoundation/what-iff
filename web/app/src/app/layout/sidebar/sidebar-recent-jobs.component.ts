@@ -1,5 +1,6 @@
 import { AsyncPipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 
 import { AgentJobService } from '../../core/services/agent-job.service';
@@ -195,20 +196,27 @@ export class SidebarRecentJobsComponent implements OnInit {
   private readonly jobsApi = inject(AgentJobService);
   private readonly personalityApi = inject(PersonalityService);
   private readonly imageGallery = inject(ImageGalleryService);
+  private readonly destroyRef = inject(DestroyRef);
 
   private readonly jobs = signal<AgentJob[]>([]);
   private readonly personas = signal<Map<string, Personality>>(new Map());
   readonly rows = computed(() => pickRecentJobs(this.jobs()).map(toSidebarJobRow));
 
   ngOnInit(): void {
-    this.jobsApi.listAgentJobs(1, FETCH_LIMIT).subscribe({
-      next: response => this.jobs.set(response.results ?? []),
-      error: () => this.jobs.set([]),
-    });
-    this.personalityApi.listPersonalities(1, 100).subscribe({
-      next: response => this.personas.set(new Map((response.results ?? []).map(p => [p.id, p] as const))),
-      error: () => this.personas.set(new Map()),
-    });
+    this.jobsApi
+      .listAgentJobs(1, FETCH_LIMIT)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: response => this.jobs.set(response.results ?? []),
+        error: () => this.jobs.set([]),
+      });
+    this.personalityApi
+      .listPersonalities(1, 100)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: response => this.personas.set(new Map((response.results ?? []).map(p => [p.id, p] as const))),
+        error: () => this.personas.set(new Map()),
+      });
   }
 
   avatarFor(personalityId: string | null, fallbackName: string) {
@@ -218,7 +226,12 @@ export class SidebarRecentJobsComponent implements OnInit {
       coverUrl: persona ? personalityCoverUrl(persona, [], this.imageGallery.getImageUrl.bind(this.imageGallery)) : null,
       accent,
       surface: personalityAccentSurface(accent),
-      transform: thumbnailCircleToCirclePreviewTransform(persona?.thumbnail_circle, PORTRAIT_SOURCE_WIDTH, PORTRAIT_SOURCE_HEIGHT, AVATAR_SIZE),
+      transform: thumbnailCircleToCirclePreviewTransform(
+        persona?.thumbnail_circle,
+        PORTRAIT_SOURCE_WIDTH,
+        PORTRAIT_SOURCE_HEIGHT,
+        AVATAR_SIZE,
+      ),
     };
   }
 }
