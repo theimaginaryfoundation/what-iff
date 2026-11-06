@@ -152,7 +152,16 @@ func UtilityClaudeParams(model string, req UtilityRequest) anthropic.MessageNewP
 // Chat Completions API. Some of those APIs accept a system message only first,
 // so the instructions, the developer turns and a conversation's own system
 // messages form one leading system message, and the conversation's other
-// messages follow it in order.
+// messages follow it in order. A utility call never sends tools or sampling
+// settings; anything that needs them belongs on the chat adapters, not here.
+//
+// For example, instructions "Summarize.", a developer turn "Be brief." and a
+// conversation [system "You are Vix.", user "hi", assistant "hello", system
+// "<scratchpad>"] send:
+//
+//	system:    "Summarize.\n\nBe brief.\n\nYou are Vix.\n\n<scratchpad>"
+//	user:      "hi"
+//	assistant: "hello"
 func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCompletionNewParams {
 	params := openai.ChatCompletionNewParams{
 		Model: shared.ChatModel(model),
@@ -173,7 +182,9 @@ func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCo
 		// messages, some after its turns; they join the leading one instead.
 		for _, m := range req.Context.BuildOpenAIChatCompletionParams(model).Messages {
 			if m.OfSystem != nil {
-				system = append(system, chatSystemText(m.OfSystem))
+				if text := chatSystemText(m.OfSystem); text != "" {
+					system = append(system, text)
+				}
 				continue
 			}
 			conversation = append(conversation, m)
@@ -217,7 +228,9 @@ func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCo
 	return params
 }
 
-// chatSystemText is a system message's text, whichever form its content takes.
+// chatSystemText is a system message's text, whichever form its content takes. A system
+// message's parts are text by type (ChatCompletionContentPartTextParam), so nothing else can be
+// dropped here.
 func chatSystemText(m *openai.ChatCompletionSystemMessageParam) string {
 	if m.Content.OfString.Valid() {
 		return m.Content.OfString.Value
