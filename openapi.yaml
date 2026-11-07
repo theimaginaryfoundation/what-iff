@@ -8652,6 +8652,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /chat/{chatId}/context-files:
+    get:
+      summary: The files in a thread's context
+      description: >-
+        Lists the files an agent working in the thread is expected to see (ADR 0x043 §4), newest
+        first: the attachments on every message since the last checkpoint and the files
+        `find_context` pulled in for them, the attachments on the last ten user messages, the
+        agent's own files written in this thread, and the active skills' bundle files. The same rule
+        hydrates the thread's container in builds that have one. Files that share a workspace path
+        are all listed; the newest takes the path and the others say which one shadows them.
+      tags: [Chats]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The thread's files
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatContextFilesResponse'
+        '400':
+          description: Invalid chat ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /chat/{chatId}/file-attachment:
     post:
       summary: Upload file attachment to chat
@@ -12038,6 +12087,53 @@ components:
       required: [moved]
       example:
         moved: 7
+    ChatContextFile:
+      type: object
+      description: One file in a thread's context and why it is there.
+      properties:
+        file:
+          $ref: '#/components/schemas/FileAttachment'
+        workspace_path:
+          type: string
+          description: >-
+            Where a container mounts it, relative to `/workspace`: a message attachment or agent
+            file by its name alone (gallery folders are labels), a bundle file under `skills/<slug>/`.
+        reasons:
+          type: array
+          items:
+            type: string
+            enum: [attached_recent, attached_since_checkpoint, recalled, produced_this_turn, agent_written, skill_bundle]
+          description: Why the file is in context. More values may be added; show an unknown one as is.
+        shadowed_by:
+          type: string
+          format: uuid
+          description: >-
+            The newer file that takes the same workspace path, so this one is not mounted. Absent
+            for a file that holds its path.
+      required: [file, workspace_path, reasons]
+    ChatContainerStatus:
+      type: object
+      description: What the build knows about the thread's container, when it has one.
+      properties:
+        state:
+          type: string
+          description: "`none`, `running` or `stopped`."
+        files:
+          type: object
+          additionalProperties:
+            type: string
+          description: Per workspace path, whether the container's copy is `current` or `stale`.
+      required: [state]
+    ChatContextFilesResponse:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatContextFile'
+        container:
+          $ref: '#/components/schemas/ChatContainerStatus'
+      required: [files]
     FileAttachment:
       type: object
       properties:

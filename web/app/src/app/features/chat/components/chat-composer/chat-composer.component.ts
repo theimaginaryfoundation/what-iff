@@ -21,12 +21,8 @@ import { catchError, finalize, map, switchMap } from 'rxjs/operators';
 import { EmojiSearch, PickerComponent } from '@ctrl/ngx-emoji-mart';
 import { EmojiEvent } from '@ctrl/ngx-emoji-mart/ngx-emoji';
 
-import {
-  FileAttachment,
-  PendingFileAttachment,
-  isPendingImageAttachment,
-  pendingAttachmentKey,
-} from '../../../../core/models/file-attachment.model';
+import { FileAttachment, PendingFileAttachment, isPendingImageAttachment, pendingAttachmentKey, isImageAttachment } from '../../../../core/models/file-attachment.model';
+import { fileBadge } from '../../../gallery/helpers/file-preview.helpers';
 import { Chat } from '../../../../core/models/chat.model';
 import { Model } from '../../../../core/models/model.model';
 import { Personality } from '../../../../core/models/personality.model';
@@ -475,23 +471,36 @@ let nextPreviewId = 0;
                   @if (galleryLoading()) {
                     <p class="composer__gallery-status">Loading gallery…</p>
                   } @else if (galleryImages().length === 0) {
-                    <p class="composer__gallery-status">No images in your gallery yet.</p>
+                    <p class="composer__gallery-status">Nothing in your gallery yet.</p>
                   } @else {
                     <div class="composer__gallery-grid">
                       @for (image of galleryImages(); track image.id) {
-                        <button
-                          type="button"
-                          class="composer__gallery-thumb"
-                          [disabled]="galleryBusy()"
-                          [attr.aria-label]="'Attach ' + (image.name || 'image')"
-                          (click)="selectGalleryImage(image)"
-                        >
-                          <img
-                            [src]="(imageGallery.getImageUrl(image.id, 'thumbnail') | authImage | async) ?? ''"
-                            [alt]="image.name"
-                            loading="lazy"
-                          />
-                        </button>
+                        @if (isImageAttachment(image)) {
+                          <button
+                            type="button"
+                            class="composer__gallery-thumb"
+                            [disabled]="galleryBusy()"
+                            [attr.aria-label]="'Attach ' + (image.name || 'image')"
+                            (click)="selectGalleryImage(image)"
+                          >
+                            <img
+                              [src]="(imageGallery.getImageUrl(image.id, 'thumbnail') | authImage | async) ?? ''"
+                              [alt]="image.name"
+                              loading="lazy"
+                            />
+                          </button>
+                        } @else {
+                          <button
+                            type="button"
+                            class="composer__gallery-file"
+                            [disabled]="galleryBusy()"
+                            [attr.aria-label]="'Attach ' + image.name"
+                            (click)="selectGalleryImage(image)"
+                          >
+                            <span class="composer__gallery-badge" aria-hidden="true">{{ fileBadge(image) }}</span>
+                            <span class="composer__gallery-file-name">{{ image.name }}</span>
+                          </button>
+                        }
                       }
                     </div>
                   }
@@ -1130,6 +1139,38 @@ let nextPreviewId = 0;
       overflow: hidden;
       padding: 0;
       width: 100%;
+    }
+
+    .composer__gallery-file {
+      align-items: center;
+      background: var(--color-surface-muted);
+      border: 1px solid var(--color-border-base);
+      border-radius: 0.375rem;
+      color: var(--color-text-primary);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      font-size: 0.6875rem;
+      gap: 0.25rem;
+      justify-content: center;
+      min-height: 4rem;
+      overflow: hidden;
+      padding: 0.35rem;
+      width: 100%;
+    }
+
+    .composer__gallery-badge {
+      color: var(--color-accent);
+      font-size: 0.625rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .composer__gallery-file-name {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .composer__gallery-thumb:disabled {
@@ -1840,6 +1881,9 @@ export class ChatComposerComponent {
     this.openGalleryPicker();
   }
 
+  readonly isImageAttachment = isImageAttachment;
+  readonly fileBadge = fileBadge;
+
   openGalleryPicker(): void {
     this.slashOpen.set(false);
     this.emojiOpen.set(false);
@@ -1851,7 +1895,7 @@ export class ChatComposerComponent {
     this.galleryBusy.set(false);
     this.galleryImages.set([]);
     this.imageGallery
-      .listImages(1, 30)
+      .listImages(1, 30, { kind: 'all' })
       .pipe(
         takeUntilDestroyed(this.destroyRef),
         finalize(() => this.galleryLoading.set(false)),

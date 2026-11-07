@@ -3,11 +3,12 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 
 import { Chat } from '../../../core/models/chat.model';
 import { ContextBreakdown } from '../../../core/models/message.model';
+import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { RightPanelService } from '../../../core/services/right-panel.service';
 import { ToolCall } from '../../../core/models/toolcall.model';
 import { formatThreadReferences } from '../helpers/thread-reference.helpers';
 
-export type ContextPanelTab = 'scratchpad' | 'memories' | 'tools' | 'context';
+export type ContextPanelTab = 'scratchpad' | 'memories' | 'tools' | 'files' | 'context';
 
 const TAB_STORAGE_KEY = 'contextPanel.tabsByChat.v1';
 /**
@@ -25,6 +26,16 @@ export class ContextPanelService {
   private readonly _activeChat = signal<Chat | null>(null);
   private readonly _mobileOpen = signal(false);
   private readonly _composerInsert = signal<string | null>(null);
+  // A file the Files tab wants attached to the next message (an upload from the tab, or a gallery
+  // pick), consumed by the chat page into the composer's pending attachments.
+  private readonly _composerAttachment = signal<FileAttachment | null>(null);
+  // The files attached to the message being composed, published by the chat page so the Files tab
+  // can show them as "next message" before they are sent.
+  private readonly _composerPending = signal<readonly FileAttachment[]>([]);
+  // Bumped when the Files tab should reload: a reply landed, the app regained focus, a file changed.
+  private readonly _filesVersion = signal(0);
+  // Bumped when the Files tab asks the composer to open its gallery picker.
+  private readonly _galleryPickerRequests = signal(0);
   private readonly _composerThreadReferences = signal<Chat[]>([]);
   private readonly _toolCalls = signal<readonly ToolCall[]>([]);
   private readonly _latestBreakdown = signal<ContextBreakdown | null>(null);
@@ -43,6 +54,10 @@ export class ContextPanelService {
   readonly threadUpdate = this._threadUpdate.asReadonly();
   readonly mobileOpen = this._mobileOpen.asReadonly();
   readonly composerInsert = this._composerInsert.asReadonly();
+  readonly composerAttachment = this._composerAttachment.asReadonly();
+  readonly filesVersion = this._filesVersion.asReadonly();
+  readonly composerPending = this._composerPending.asReadonly();
+  readonly galleryPickerRequests = this._galleryPickerRequests.asReadonly();
   /** Threads attached to the message being composed; rendered as chips above the composer. */
   readonly composerThreadReferences = this._composerThreadReferences.asReadonly();
   readonly toolCalls = this._toolCalls.asReadonly();
@@ -120,6 +135,31 @@ export class ContextPanelService {
   setComposerThreadReferences(threads: readonly Chat[]): void {
     const activeId = this.activeChatId();
     this._composerThreadReferences.set(threads.filter(thread => !!thread.id && thread.id !== activeId));
+  }
+
+  /** Asks the chat page to add attachment to the message being composed (ADR 0x043 §4). */
+  requestComposerAttachment(attachment: FileAttachment): void {
+    this._composerAttachment.set(attachment);
+  }
+
+  consumeComposerAttachment(): FileAttachment | null {
+    const attachment = this._composerAttachment();
+    this._composerAttachment.set(null);
+    return attachment;
+  }
+
+  setComposerPending(files: readonly FileAttachment[]): void {
+    this._composerPending.set(files);
+  }
+
+  /** Tells the Files tab to reload the thread's files. */
+  refreshFiles(): void {
+    this._filesVersion.update(n => n + 1);
+  }
+
+  /** Asks the composer to open its "Add from gallery" picker. */
+  requestGalleryPicker(): void {
+    this._galleryPickerRequests.update(n => n + 1);
   }
 
   clearComposerThreadReferences(): void {
