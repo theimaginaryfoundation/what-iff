@@ -69,6 +69,14 @@ func FileKeyForAttachment(userID, attachmentID uuid.UUID, filename, fileType str
 	return FileKeyFallback(userID, attachmentID, filename)
 }
 
+// FileKeyForUserFile constructs the S3 object key for one version of a user's file that is not an
+// image: a gallery import, or the new object a save in the file workspace writes (ADR 0x043 §3).
+// Each version is stored under a new objectID and the row's s3_key swapped to it, like agent files.
+// Format: users/{userID}/files/{objectID_filename}
+func FileKeyForUserFile(userID, objectID uuid.UUID, filename string) string {
+	return path.Join("users", userID.String(), "files", filenameWithFallback(sanitizeFilename(filename), objectID.String()))
+}
+
 // FileKeyForAgentFile constructs the S3 object key for one version of an agent-authored file
 // (ADR 0x034). Each change is stored under a new objectID and the row's s3_key swapped to it, so a
 // reader never sees a half-written object and a reference copy keeps the version it was made from.

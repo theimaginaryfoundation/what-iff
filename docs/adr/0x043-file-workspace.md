@@ -74,8 +74,8 @@ The file viewer carries the version it loaded, and every save sends it back.
 | Action | API | Semantics |
 |---|---|---|
 | **Save** | `PUT /file-attachment/{id}/content` (bytes; `If-Match: <content_version>`) | Uploads a new object and swaps the row's `s3_key` with the conditional update that `SwapAgentFileObject` already does for agent files, generalized to any file the user owns. A version mismatch is `412`, and the editor offers *Reload*, *Overwrite* or *Save as*. |
-| **Save As** | `POST /file-attachment` (bytes, `folder`, `name`, optional `chat_id`) | A new file in the gallery. With `chat_id`, it is also attached to the conversation: a reference row on a system message in that chat (so it meets the §4 rule), and in the private build seeded into the live container. |
-| **Rename** | `PATCH /image-gallery/{id}` (exists) | Hardened: refuses a path clash in the folder, refuses skill-bundle files, updates `file_type` when the extension changes, sets `updated_at`. |
+| **Save As** | `POST /image-gallery/import` (exists: multipart with `folder`) from the gallery; `POST /chat/{chatId}/file-attachment` (gains `folder`) from a chat | A new file in the gallery, filed where the user chose. From a chat it is a chat upload like any other: the workspace puts it in the composer's pending attachments, so it is attached to the next message and, in the private build, seeded into the live container. No new endpoint: step 1 found the two existing uploads cover it. |
+| **Rename** | `PATCH /image-gallery/{id}` (exists) | Hardened: refuses a path clash in the folder (409), refuses skill-bundle files (403), normalizes the name, follows a changed extension with `file_type` when the allowlist knows it and the file stays an image or stays a non-image, and renames the chat copies sharing the object (the object-graph rule below). `updated_at` stays a content-change time and is not set by a rename. |
 
 "The same file" is the **object graph**, not the row.
 A message attachment is often a reference row that shares `s3_key` with the gallery original (chat reuse and `find_context` copies).
@@ -156,7 +156,7 @@ Known limit: JupyterLite needs a service worker for the kernel to read files fro
 
 - `file_attachments.content_version` and `content_sha256`; `updated_at`, `size_bytes` and the hash set by every content write; older rows get `size_bytes` and the hash lazily on first read.
 - A seam `onFileContentChanged` (nil in public) raised after every content write, rename and save-as, which the private build uses to push into live containers.
-- `PUT /file-attachment/{id}/content`, `POST /file-attachment` (gallery create with optional chat attach), hardened rename; the gallery routes the web app already uses but `openapi.yaml` lacks (`GET/PATCH/DELETE /image-gallery/{id}`, `/import`, `/reference`) are documented in the same change, since the SDK is generated from the spec.
+- `PUT /file-attachment/{id}/content`, `folder` on the chat upload, hardened rename, imports of non-images keyed under `users/{uid}/files/`; the gallery routes the web app already uses but `openapi.yaml` lacks (`GET /image-gallery`, `GET/PATCH/DELETE /image-gallery/{id}`, `/import`, `/reference`) are documented in the same change, since the SDK is generated from the spec.
 - `SwapAgentFileObject` becomes `SwapFileObject(ctx, userID, id, oldKey, newKey, opts)` with the origin check as an option; agent writes keep theirs.
 - Re-chunking: `ReplaceFileChunks` deletes and re-runs the pipeline.
 - `ContextFilesForChat` and `GET /chat/{chatId}/context-files`.
@@ -260,5 +260,5 @@ All twelve confirmed by the user on 2026-11-06, with one change to §5: attachme
 8. **Document editing via an HTML round trip with a lossy-save warning**, rather than view-only docx until a non-AGPL engine exists. Alternative: ship docx view only in v1 and evaluate EigenPal's MIT `docx-editor` later.
 9. **Slides are text-in-place only** in v1.
 10. **Notebooks: our own viewer/editor, JupyterLite only for Run**, web only at first.
-11. **Save As from chat attaches via a system message** so it meets the existing rule, rather than a new chat-level files table. Alternative: add `chat_file_attachments` (chat-level, message-less) and teach the rule about it; cleaner, more schema.
+11. **Save As from chat attaches via a system message** so it meets the existing rule, rather than a new chat-level files table. Alternative: add `chat_file_attachments` (chat-level, message-less) and teach the rule about it; cleaner, more schema. *Step 1 note:* the file is created as a chat upload (`POST /chat/{chatId}/file-attachment` with `folder`) and lands in the composer's pending attachments, so it is attached to the next message; whether a system-message link is still needed before the user sends is decided in step 3, where the rule is written.
 12. **PR shape:** ten stacked steps as above; steps 5–10 can be parallelized across people.

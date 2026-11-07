@@ -8659,7 +8659,7 @@ paths:
         Uploads a file attachment to a specific chat. The file is processed and stored,
         and can be referenced in subsequent chat messages.
 
-        **Supported file types**: .c, .cpp, .cs, .css, .csv, .doc, .docx, .gif, .go, .html, .java, .jpeg, .jpg, .js, .json, .md, .pdf, .php, .png, .pptx, .py, .rb, .sh, .tar, .tex, .tgz, .ts, .txt, .xlsx, .xml, .zip
+        **Supported file types**: .c, .cpp, .cs, .css, .csv, .doc, .docx, .gif, .go, .html, .ipynb, .java, .jpeg, .jpg, .js, .json, .jsonl, .md, .pdf, .php, .png, .pptx, .py, .rb, .sh, .tar, .tex, .tgz, .ts, .tsv, .txt, .xlsx, .xml, .yaml, .yml, .zip
 
         **Maximum file size**: 30 MB
       tags: [File Attachments]
@@ -8682,6 +8682,12 @@ paths:
                   type: string
                   format: binary
                   description: The file to upload
+                folder:
+                  type: string
+                  description: >-
+                    Optional gallery folder to file the upload in (a path such as `charts/oura`;
+                    omitted or empty is the top level). Used by Save As from the chat-hosted file
+                    workspace (ADR 0x043). The reserved `skills/` folder is refused.
               required:
                 - attachment
       responses:
@@ -8861,6 +8867,465 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /file-attachment/{id}/content:
+    put:
+      summary: Replace a file's content
+      description: >-
+        Saves a file from the file workspace (ADR 0x043 §3). The body is the whole new content and
+        `Content-Type`, when sent, must be the file's own type (parameters such as charset are
+        ignored): a save never changes a file's type or name. `If-Match` carries the
+        `content_version` the client loaded, bare or quoted; a mismatch is a 412 whose
+        `details.content_version` is the current version, and no `If-Match` (or `*`) overwrites
+        unconditionally. A new object is stored and the file's chat copies move with it; what a
+        reply already showed is kept. Images get a new thumbnail; files indexed for search are
+        re-indexed in the background. Skill bundle files are changed in the skill editor, not here.
+      tags: [File Attachments]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: File attachment ID
+          schema:
+            type: string
+            format: uuid
+        - name: If-Match
+          in: header
+          required: false
+          description: The `content_version` the client loaded, bare or quoted. Omit (or send `*`) to overwrite unconditionally.
+          schema:
+            type: string
+        - name: chat_id
+          in: query
+          required: false
+          description: The conversation the save was made from, so the change can reach its container.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          '*/*':
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: The file as it is after the save; the `ETag` header is its new `content_version`.
+          headers:
+            ETag:
+              description: The new `content_version`, quoted.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileAttachment'
+        '400':
+          description: Invalid attachment ID, an unreadable body, a malformed `If-Match`, or an image file whose body is not a valid image
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: The file belongs to a skill bundle
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: File attachment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '412':
+          description: The file changed since the client loaded it; `details.content_version` is the current version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The body is over the 30 MB limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The body's content type is not the file's
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: No object store is configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error while saving
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /image-gallery:
+    get:
+      summary: List gallery files
+      description: >-
+        Lists the user's gallery files, newest first: images by default, or every other kind of
+        file, or both. Chat-reuse copies and the reference rows a reply shows for a file it looked
+        at are left out, so each stored object is listed once through its original row. `folder`
+        is a presence check: absent lists every file of the kind, empty is the top level.
+      tags: [Image Gallery]
+      parameters:
+        - name: kind
+          in: query
+          required: false
+          description: "`images` (the default), `files` (everything that is not `image/*`) or `all`."
+          schema:
+            type: string
+            enum: [images, files, all]
+        - name: folder
+          in: query
+          required: false
+          description: Only files directly in this folder (a path such as `charts/oura`; empty is the top level).
+          schema:
+            type: string
+        - name: name
+          in: query
+          required: false
+          description: Case-insensitive substring of the file name.
+          schema:
+            type: string
+        - name: personality_id
+          in: query
+          required: false
+          description: Only files of this personality (its documents and expression images).
+          schema:
+            type: string
+            format: uuid
+        - name: global_only
+          in: query
+          required: false
+          description: Only files that belong to no personality.
+          schema:
+            type: boolean
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: A page of files
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse'
+        '400':
+          description: Invalid kind, personality id or global_only
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /image-gallery/import:
+    post:
+      summary: Import a file into the gallery
+      description: >-
+        Uploads a file into the gallery without attaching it to a conversation or a personality.
+        Any type the chat upload accepts, 30 MB at most. Images are normalized and get a thumbnail
+        and land in the image store; other files are stored under the user's files. This is also
+        Save As from the gallery-hosted file workspace (ADR 0x043 §3).
+      tags: [Image Gallery]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                attachment:
+                  type: string
+                  format: binary
+                  description: The file to upload
+                title:
+                  type: string
+                  description: Optional display name; without an extension it keeps the upload's.
+                description:
+                  type: string
+                  description: Optional caption stored on the file.
+                folder:
+                  type: string
+                  description: Optional gallery folder to file it in. The reserved `skills/` folder is refused.
+              required:
+                - attachment
+      responses:
+        '201':
+          description: The new file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileAttachment'
+        '400':
+          description: Unsupported type, a file over 30 MB, an invalid image, or an invalid or reserved folder
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /image-gallery/{id}:
+    get:
+      summary: Get an image's bytes
+      description: >-
+        Streams one of the user's images, full size or as its thumbnail (`size=thumbnail`,
+        generated on demand when missing). Only images: other files are downloaded with
+        `GET /file-attachment/{id}`.
+      tags: [Image Gallery]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: File attachment ID
+          schema:
+            type: string
+            format: uuid
+        - name: size
+          in: query
+          required: false
+          description: "`full` (the default) or `thumbnail`."
+          schema:
+            type: string
+            enum: [full, thumbnail]
+      responses:
+        '200':
+          description: The image bytes
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid image ID, or the file is not an image
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such image for this user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      summary: Rename a gallery file
+      description: >-
+        Changes a file's display name (any kind of file). The name is normalized (a name without an
+        extension keeps the current one) and must be free in the file's folder; when the extension
+        changes to one the upload allowlist knows, and the file stays an image or stays a
+        non-image, the type follows it. The chat copies sharing the stored object are renamed with
+        it. The stored object and `content_version` are unchanged. Skill bundle files are renamed
+        in the skill editor.
+      tags: [Image Gallery]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: File attachment ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+              required:
+                - name
+      responses:
+        '200':
+          description: The file after the rename
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileAttachment'
+        '400':
+          description: Invalid file ID or an invalid name (empty, too long, control characters, or a path)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: The file belongs to a skill bundle
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such file for this user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Another of the user's files already has that name in the folder
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Delete an image
+      description: >-
+        Deletes one of the user's images: the stored object (unless a copy still references it),
+        its thumbnail, then the row. Only images; other files go through
+        `DELETE /file-attachment/{id}` or the bulk `POST /image-gallery/delete`.
+      tags: [Image Gallery]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: File attachment ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          description: Invalid image ID, or the file is not an image
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such image for this user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /image-gallery/{id}/reference:
+    post:
+      summary: Reference a gallery file in a chat
+      description: >-
+        Creates a lightweight copy of one of the user's files that shares its stored object, for
+        attaching an existing gallery file to a new message without uploading it again. The copy
+        is hidden from the gallery and moves, renames and saves with the original.
+      tags: [Image Gallery]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: File attachment ID of the source
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '201':
+          description: The reference copy, to send as an attachment id on a message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileAttachment'
+        '400':
+          description: Invalid file ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such file for this user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /image-gallery/folders:
     get:
       summary: List gallery folders
@@ -11655,7 +12120,21 @@ components:
         size_bytes:
           type: integer
           format: int64
-          description: Bytes in the stored object, for origin "skill" (counted against the bundle's 30 MB limit).
+          description: >-
+            Bytes in the stored object. Set for origin "skill" (counted against the bundle's 30 MB
+            limit) and by every content save in the file workspace; omitted for older uploads that
+            were never changed.
+        content_version:
+          type: integer
+          description: >-
+            The file workspace's concurrency token (ADR 0x043). Starts at 1 and is bumped by every
+            content write (a save, or an agent's file tools). Send it back as `If-Match` on
+            `PUT /file-attachment/{id}/content`; a mismatch is a 412.
+        content_sha256:
+          type: string
+          description: >-
+            Hex SHA-256 of the stored object, set by every content write; omitted for older uploads
+            that were never changed.
         created_by_personality_id:
           type: string
           format: uuid
@@ -11667,7 +12146,9 @@ components:
         updated_at:
           type: string
           format: date-time
-          description: When an agent last changed the file's content. Omitted for files never changed.
+          description: >-
+            When the file's content was last changed, by an agent's file tools or by a save in the
+            file workspace. A rename does not set it. Omitted for files never changed.
       required:
         - id
         - user_id

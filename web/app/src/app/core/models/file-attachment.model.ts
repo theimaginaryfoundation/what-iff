@@ -24,6 +24,14 @@ export interface FileAttachment {
   origin?: 'user' | 'agent' | 'skill';
   /** For origin "skill", the skill whose bundle the file belongs to. */
   skill_id?: string;
+  /** The file workspace's concurrency token (ADR 0x043): sent back as If-Match on a content save. */
+  content_version?: number;
+  /** Hex SHA-256 of the stored object, set by every content write. */
+  content_sha256?: string;
+  /** Bytes in the stored object; absent for older uploads never changed. */
+  size_bytes?: number;
+  /** When the content was last changed; absent for files never changed. */
+  updated_at?: string;
 }
 
 export interface FileAttachmentPersonalityRef {

@@ -9,6 +9,8 @@
 - **`ChunkText`:** Size/overlap splitting with Unicode awareness (`chunker.go`; well tested).
 - **`FileChunkPipeline`:** Orchestrates processing after upload (`pipeline.go`) — uses OpenAI embeddings and datastore.
 - **`IsTextType` / `IsTextFileByExtension`:** Gate whether to run the text pipeline vs skip.
+  The lists include YAML, JSON Lines and TSV (ADR 0x043), which the upload allowlist accepts.
+- A file workspace save re-runs `ProcessAndStore` after `datastore.ClearFileChunks` (`internal/filesave`), since `CreateFileChunks` is idempotent on `chunk_status`.
 
 ## Dependencies
 
