@@ -1,0 +1,53 @@
+.sheets-editor__bar {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.3rem 0.75rem;
+}
+
+.sheets-editor__tool {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  padding: 0.3rem 0.55rem;
+
+  &:hover {
+    border-color: var(--border-hover, var(--accent));
+  }
+
+  &[aria-pressed='true'] {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+}
+
+.sheets-editor__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.sheets-editor__stage {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sheets-editor__panel {
+  background: var(--bg-base);
+  border-left: 1px solid var(--border);
+  flex: 0 0 20rem;
+  max-width: 45%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sheets-editor__placeholder {
+  color: var(--text-secondary);
+  padding: 1rem;
+}

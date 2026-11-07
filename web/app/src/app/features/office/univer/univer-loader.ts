@@ -70,6 +70,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       sort,
       find,
       note,
+      threadComment,
       enUS,
       dvUS,
       cfUS,
@@ -79,6 +80,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       sortUS,
       findUS,
       noteUS,
+      threadCommentUS,
     ] = await Promise.all([
       import('@univerjs/presets'),
       import('@univerjs/preset-sheets-core'),
@@ -90,6 +92,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       import('@univerjs/preset-sheets-sort'),
       import('@univerjs/preset-sheets-find-replace'),
       import('@univerjs/preset-sheets-note'),
+      import('@univerjs/preset-sheets-thread-comment'),
       import('@univerjs/preset-sheets-core/locales/en-US'),
       import('@univerjs/preset-sheets-data-validation/locales/en-US'),
       import('@univerjs/preset-sheets-conditional-formatting/locales/en-US'),
@@ -99,6 +102,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       import('@univerjs/preset-sheets-sort/locales/en-US'),
       import('@univerjs/preset-sheets-find-replace/locales/en-US'),
       import('@univerjs/preset-sheets-note/locales/en-US'),
+      import('@univerjs/preset-sheets-thread-comment/locales/en-US'),
       linkStylesheet(document, UNIVER_SHEETS_STYLESHEET, 'univerSheets'),
     ]);
     const strings = presets.merge(
@@ -112,6 +116,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       sortUS.default,
       findUS.default,
       noteUS.default,
+      threadCommentUS.default,
     );
     return {
       createUniver: presets.createUniver,
@@ -141,6 +146,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
           sort.UniverSheetsSortPreset(),
           find.UniverSheetsFindReplacePreset(),
           note.UniverSheetsNotePreset(),
+          threadComment.UniverSheetsThreadCommentPreset(),
         ],
       }),
     };

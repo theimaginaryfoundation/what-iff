@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { csvDelimiterFor, previewKindFor } from '../../gallery/helpers/file-preview.helpers';
@@ -9,14 +9,23 @@ import { FUniver, UNIVER_SHEETS_LOADER, UniverSheetsKit } from '../univer/univer
 import { UniverWorkbook } from '../xlsx/univer-sheet-types';
 import { sheetToCsv, workbookToXlsx } from '../xlsx/xlsx-export';
 import { delimitedTextToWorkbook, xlsxToWorkbook } from '../xlsx/xlsx-import';
+import { FacadeSheetGrid, SheetGrid } from './sheet-grid';
 import { PreservedParts, XLSM_MIME, XLSX_MIME, hasMacros } from '../xlsx/xlsx-preserve';
 
 export { MUTATION } from '../univer/univer-editor-base';
+
+export type SheetPanel = 'charts' | 'pivots' | 'slicers';
 export { XLSX_MIME } from '../xlsx/xlsx-preserve';
 
 interface Workbook extends UniverUnit<UniverWorkbook> {
   setEditable(value: boolean): unknown;
 }
+
+const PANELS: readonly { id: SheetPanel; label: string }[] = [
+  { id: 'charts', label: 'Charts' },
+  { id: 'pivots', label: 'Pivot tables' },
+  { id: 'slicers', label: 'Slicers' },
+];
 
 /**
  * The spreadsheet editor (ADR 0x043, office suite): Univer Sheets over the workbook our xlsx
@@ -26,8 +35,8 @@ interface Workbook extends UniverUnit<UniverWorkbook> {
   selector: 'app-sheets-editor',
   standalone: true,
   imports: [FidelityNoticeComponent],
-  templateUrl: '../univer/univer-editor.component.html',
-  styleUrl: '../univer/univer-editor.component.scss',
+  templateUrl: './sheets-editor.component.html',
+  styleUrls: ['../univer/univer-editor.component.scss', './sheets-editor.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SheetsEditorComponent extends UniverEditorBase<UniverWorkbook, Workbook> {
@@ -38,6 +47,18 @@ export class SheetsEditorComponent extends UniverEditorBase<UniverWorkbook, Work
   private preserved: PreservedParts | null = null;
   /** The formula engine of the open instance, off the main thread. */
   private formulaWorker: Worker | null = null;
+
+  readonly panels = PANELS;
+  readonly panel = signal<SheetPanel | null>(null);
+  readonly panelLabel = computed(() => PANELS.find(p => p.id === this.panel())?.label ?? '');
+  /** The open sheet, for the panels; null until a unit exists. */
+  readonly grid = signal<SheetGrid | null>(null);
+  /** Charts, pivots and slicers belong to .xlsx files, and are edited in edit mode. */
+  readonly showObjectsBar = computed(() => !this.readOnly() && !this.isCsv() && this.state() === 'ready');
+
+  togglePanel(id: SheetPanel): void {
+    this.panel.update(current => (current === id ? null : id));
+  }
 
   protected loadKit(): Promise<UniverKit> {
     return this.load(this.document);
@@ -50,6 +71,7 @@ export class SheetsEditorComponent extends UniverEditorBase<UniverWorkbook, Work
   }
 
   protected override onDispose(): void {
+    this.grid.set(null);
     this.formulaWorker?.terminate();
     this.formulaWorker = null;
   }
@@ -69,6 +91,7 @@ export class SheetsEditorComponent extends UniverEditorBase<UniverWorkbook, Work
   protected createUnit(univerAPI: FUniver, data: UniverWorkbook, readOnly: boolean): Workbook {
     const api = univerAPI as FUniver & { createWorkbook(data: unknown): Workbook };
     const workbook = api.createWorkbook(data);
+    this.grid.set(new FacadeSheetGrid(workbook as never, univerAPI as never));
     workbook.setEditable(!readOnly);
     // The unit's permission points register as it comes up, so the lock is set again once it has.
     if (readOnly) setTimeout(() => workbook.setEditable(false), 1200);
