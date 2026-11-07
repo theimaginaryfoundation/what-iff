@@ -48,6 +48,17 @@
         <button
           type="button"
           class="image-detail-modal__icon-btn"
+          uiTooltip="Edit this image: crop, adjust, annotate"
+          placement="bottom"
+          aria-label="Edit image"
+          [disabled]="!image()"
+          (click)="image() && edit.emit(image()!.id)"
+        >
+          <ui-adjustments-horizontal-icon [size]="14" />
+        </button>
+        <button
+          type="button"
+          class="image-detail-modal__icon-btn"
           uiTooltip="Download the full-size image"
           placement="bottom"
           aria-label="Download image"
