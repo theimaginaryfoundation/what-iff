@@ -59,6 +59,8 @@
         </div>
       } @else if (text() === '') {
         <p class="text-viewer__placeholder">This file is empty.</p>
+      } @else if (highlighted(); as html) {
+        <pre class="text-viewer__text text-viewer__text--highlighted" [class.text-viewer__text--wrap]="wrapLines()" tabindex="0" [innerHTML]="html"></pre>
       } @else {
         <pre class="text-viewer__text" [class.text-viewer__text--wrap]="wrapLines()" tabindex="0">{{ text() }}</pre>
       }

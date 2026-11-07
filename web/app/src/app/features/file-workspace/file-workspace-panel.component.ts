@@ -5,6 +5,7 @@ import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
+import { ContextPanelService } from '../chat/services/context-panel.service';
 import { OverlayComponent } from '../../shared/ui/overlay/overlay.component';
 import { FileWorkspaceComponent } from './file-workspace.component';
 import { DOCKED_WIDTH_MAX_FRACTION, DOCKED_WIDTH_MIN_FRACTION, FileWorkspaceService } from './file-workspace.service';
@@ -51,10 +52,14 @@ import { DOCKED_WIDTH_MAX_FRACTION, DOCKED_WIDTH_MIN_FRACTION, FileWorkspaceServ
           [expandable]="workspace.band() === 'large'"
           [expanded]="workspace.expanded()"
           [showGalleryLink]="true"
+          [canEdit]="workspace.canEdit()"
+          [chatId]="workspace.chatId()"
           (close)="close()"
           (toggleExpand)="workspace.toggleExpanded()"
           (rename)="rename($event)"
           (delete)="remove($event)"
+          (fileChanged)="onFileChanged($event)"
+          (saveAs)="onSaveAs($event)"
         />
       } @else {
         <div class="workspace-panel__missing" [attr.role]="workspace.error() ? 'alert' : 'status'">
@@ -116,6 +121,7 @@ export class FileWorkspacePanelComponent {
   private readonly gallery = inject(ImageGalleryService);
   private readonly files = inject(FileAttachmentService);
   private readonly confirmationService = inject(ConfirmationService);
+  private readonly contextPanel = inject(ContextPanelService);
   private readonly document = inject(DOCUMENT);
 
   readonly minWidth = computed(() => Math.round((this.document.defaultView?.innerWidth ?? 1280) * DOCKED_WIDTH_MIN_FRACTION));
@@ -123,6 +129,31 @@ export class FileWorkspacePanelComponent {
 
   close(): void {
     this.workspace.requestClose();
+  }
+
+  /** A save: adopt the new version and let the Files tab show the change. */
+  onFileChanged(file: FileAttachment): void {
+    this.workspace.update(file);
+    this.contextPanel.refreshFiles();
+  }
+
+  /**
+   * Save As from a thread (ADR 0x043 §3): an upload into the chosen folder that joins the next
+   * message, then the new file opens in the workspace.
+   */
+  onSaveAs(payload: { name: string; folder: string; blob: Blob }): void {
+    const chatId = this.workspace.chatId();
+    if (!chatId) return;
+    const file = new File([payload.blob], payload.name, { type: payload.blob.type });
+    this.files.uploadChatFileAttachment(chatId, file, payload.folder).subscribe({
+      next: created => {
+        this.contextPanel.requestComposerAttachment(created);
+        this.workspace.requestOpen(created.id);
+      },
+      error: async () => {
+        await this.confirmationService.alert({ title: 'Save failed', message: 'Could not save the new file. Please try again.', type: 'danger' });
+      },
+    });
   }
 
   rename(payload: { id: string; name: string }): void {

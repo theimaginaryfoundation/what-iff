@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { FileAttachment, FileAttachmentFilters, ChatContextFilesResponse } from '../models/file-attachment.model';
@@ -18,11 +18,31 @@ export class FileAttachmentService {
    * @param file The file to upload
    * @returns Observable of the created file attachment
    */
-  uploadChatFileAttachment(chatId: string, file: File): Observable<FileAttachment> {
+  uploadChatFileAttachment(chatId: string, file: File, folder?: string): Observable<FileAttachment> {
     const formData = new FormData();
     formData.append('attachment', file);
+    if (folder?.trim()) {
+      formData.append('folder', folder.trim());
+    }
 
     return this.http.post<FileAttachment>(`${this.apiUrl}/chat/${chatId}/file-attachment`, formData);
+  }
+
+  /**
+   * Replaces a file's content from the workspace (ADR 0x043 §3). ifMatch is the content_version
+   * the editor loaded; null overwrites unconditionally. A stale version is a 412 whose
+   * `details.content_version` is the current one (see conflictVersionOf).
+   */
+  replaceContent(attachmentId: string, content: Blob, contentType: string, ifMatch: number | null, chatId?: string | null): Observable<FileAttachment> {
+    let headers = new HttpHeaders({ 'Content-Type': contentType || 'application/octet-stream' });
+    if (ifMatch !== null) {
+      headers = headers.set('If-Match', String(ifMatch));
+    }
+    let params = new HttpParams();
+    if (chatId) {
+      params = params.set('chat_id', chatId);
+    }
+    return this.http.put<FileAttachment>(`${this.apiUrl}/file-attachment/${attachmentId}/content`, content, { headers, params });
   }
 
   /**

@@ -191,3 +191,44 @@
     width: 100%;
   }
 }
+
+.file-workspace__save-error {
+  color: var(--danger, #dc2626);
+  font-size: 0.8125rem;
+  margin: 0;
+  padding: 0.35rem 1rem;
+}
+
+.file-workspace__dialog-title {
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.file-workspace__dialog-text {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.file-workspace__dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.file-workspace__dialog-label {
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  font-size: 0.8125rem;
+  gap: 0.25rem;
+}
+
+.file-workspace__dialog-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  width: 100%;
+}

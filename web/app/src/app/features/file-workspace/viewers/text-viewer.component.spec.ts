@@ -4,6 +4,8 @@ import { MARKED_EXTENSIONS, provideMarkdown } from 'ngx-markdown';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { latexMathExtension } from '../../../core/utils/latex-math.helpers';
+import { fakeMonaco } from '../editors/fake-monaco.spec-helper';
+import { MONACO_LOADER } from '../editors/monaco/monaco-loader';
 import { TextViewerComponent } from './text-viewer.component';
 
 function file(overrides: Partial<FileAttachment> = {}): FileAttachment {
@@ -12,13 +14,16 @@ function file(overrides: Partial<FileAttachment> = {}): FileAttachment {
 
 describe('TextViewerComponent', () => {
   let fixture: ComponentFixture<TextViewerComponent>;
+  let fake: ReturnType<typeof fakeMonaco>;
 
   beforeEach(async () => {
+    fake = fakeMonaco();
     await TestBed.configureTestingModule({
       imports: [TextViewerComponent],
       providers: [
         provideZonelessChangeDetection(),
         provideMarkdown({ markedExtensions: [{ provide: MARKED_EXTENSIONS, useFactory: latexMathExtension, multi: true }] }),
+        { provide: MONACO_LOADER, useValue: () => Promise.resolve(fake.monaco) },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(TextViewerComponent);
@@ -42,6 +47,14 @@ describe('TextViewerComponent', () => {
     const el = await show(file({ name: 'page.html', file_type: 'text/html' }), '<b>bold?</b>\nline two');
     expect(el.querySelector('pre.text-viewer__text')?.textContent).toBe('<b>bold?</b>\nline two');
     expect(el.querySelector('b')).toBeNull();
+    expect(fake.state.colorized).toEqual([]);
+  });
+
+  it('highlights code with a known language into static spans', async () => {
+    const el = await show(file({ name: 'main.go', file_type: 'text/x-golang' }), 'package main');
+    await vi.waitFor(() => expect(el.querySelector('pre.text-viewer__text--highlighted')).not.toBeNull());
+    expect(fake.state.colorized).toEqual(['go']);
+    expect(el.querySelector('pre.text-viewer__text span.mtk1')?.textContent).toBe('package main');
   });
 
   it('renders Markdown, with the raw text a click away', async () => {
