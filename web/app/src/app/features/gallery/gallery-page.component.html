@@ -42,9 +42,12 @@
 
   @if (mode() === 'gallery' && viewerOpen()) {
     @if (openFile(); as file) {
-      <app-file-viewer
+      <app-file-workspace
         [file]="file"
         [personalityName]="file.personality_id ? personalityNames()[file.personality_id] ?? null : null"
+        backLabel="Gallery"
+        [showNavigation]="true"
+        [showMove]="true"
         [hasPrev]="hasPrevFile()"
         [hasNext]="hasNextFile()"
         (close)="closeFile()"

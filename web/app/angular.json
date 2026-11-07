@@ -29,11 +29,17 @@
             "styles": [
               "src/styles.scss",
               "node_modules/@ctrl/ngx-emoji-mart/picker.css",
-              "node_modules/katex/dist/katex.min.css"
+              "node_modules/katex/dist/katex.min.css",
+              {
+                "input": "node_modules/pdfjs-dist/web/pdf_viewer.css",
+                "bundleName": "pdfjs",
+                "inject": false
+              }
             ],
             "scripts": [
               "node_modules/clipboard/dist/clipboard.min.js"
-            ]
+            ],
+            "webWorkerTsConfig": "tsconfig.worker.json"
           },
           "configurations": {
             "production": {
@@ -94,7 +100,10 @@
             "tsConfig": "tsconfig.spec.json",
             "setupFiles": ["src/test-setup.ts"],
             "coverageExclude": ["**/*.html"],
-            "coverageReporters": ["lcovonly", "text-summary"]
+            "coverageReporters": [
+              "lcovonly",
+              "text-summary"
+            ]
           }
         }
       }
