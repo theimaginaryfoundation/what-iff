@@ -3,7 +3,8 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { RightPanelService } from '../../core/services/right-panel.service';
 import { ContextPanelService } from '../../features/chat/services/context-panel.service';
 import { ContextPanelComponent } from '../../features/chat/components/context-panel/context-panel.component';
-import { SheetComponent } from '../../shared/ui/sheet/sheet.component';
+import { FileWorkspacePanelComponent } from '../../features/file-workspace/file-workspace-panel.component';
+import { FileWorkspaceService } from '../../features/file-workspace/file-workspace.service';
 
 /**
  * Empty right-context-panel slot. Phase 7 (Conversation Context) replaces the
@@ -14,7 +15,7 @@ import { SheetComponent } from '../../shared/ui/sheet/sheet.component';
 @Component({
   selector: 'app-right-panel-host',
   standalone: true,
-  imports: [ContextPanelComponent, SheetComponent],
+  imports: [ContextPanelComponent, FileWorkspacePanelComponent],
   templateUrl: './right-panel-host.component.html',
   styleUrl: './right-panel-host.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -22,5 +23,6 @@ import { SheetComponent } from '../../shared/ui/sheet/sheet.component';
 export class RightPanelHostComponent {
   private readonly service = inject(RightPanelService);
   readonly context = inject(ContextPanelService);
+  readonly workspace = inject(FileWorkspaceService);
   readonly visible = computed(() => this.service.visible());
 }

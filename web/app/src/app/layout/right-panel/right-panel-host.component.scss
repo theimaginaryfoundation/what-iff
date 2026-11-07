@@ -15,3 +15,27 @@
     display: block;
   }
 }
+
+// A docked file workspace takes the column; the context panel then opens as a flyout over its
+// right edge (ADR 0x043 §1), so the rail's tabs stay one click away.
+.app-right-panel--workspace {
+  display: flex;
+  max-width: none;
+  overflow: visible;
+  position: relative;
+  width: auto;
+}
+
+.app-right-panel__flyout {
+  background-color: var(--color-surface-elevated, var(--color-surface-base));
+  border-left: 1px solid var(--color-border-base);
+  bottom: 0;
+  box-shadow: -8px 0 24px rgb(0 0 0 / 0.2);
+  overflow-x: hidden;
+  overflow-y: auto;
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 320px;
+  z-index: 2;
+}

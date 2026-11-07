@@ -54,6 +54,7 @@ import { SlackComposerToggleComponent } from '../slack/slack-composer-toggle.com
 import { ThreadListService } from '../../core/services/thread-list.service';
 import { ThreadListPanelComponent } from './components/thread-list-panel/thread-list-panel.component';
 import { ContextPanelService, ContextPanelTab } from './services/context-panel.service';
+import { FileWorkspaceService } from '../file-workspace/file-workspace.service';
 import { ScratchpadService } from './services/scratchpad.service';
 import { ContextPanelToggleComponent } from './components/context-panel/context-panel-toggle.component';
 import { ThreadSandboxedChipComponent } from './components/thread-sandboxed-chip/thread-sandboxed-chip.component';
@@ -293,6 +294,9 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     this.session.syncActiveThread(nearBottom);
   };
   private readonly activeHotkeyListeners = new Map<string, (event: KeyboardEvent) => void>();
+  readonly workspace = inject(FileWorkspaceService);
+  /** Threads whose remembered file was already restored this visit, so closing it is not undone. */
+  private readonly restoredWorkspaceFor = new Set<string>();
   private readonly hotkeySequenceState = new Map<string, { keys: string[]; currentIndex: number; timeout?: ReturnType<typeof setTimeout> }>();
 
   private readonly syncContextPanelChat = effect(() => {
@@ -533,6 +537,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     this.subscriptions.add(
       this.route.queryParamMap.subscribe(params => {
         this.checkpointMessageId.set(params.get('checkpoint')?.trim() || null);
+        this.syncWorkspaceWithRoute(params.get('file')?.trim() || null);
         const galleryImageId = params.get('galleryImageId')?.trim();
         const welcomeFlag = params.get('welcome')?.trim().toLowerCase() === 'true';
         const routeChatId = this.route.snapshot.paramMap.get('id')?.trim();
@@ -564,6 +569,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    if (this.workspace.host() === 'chat') this.workspace.hide();
     if (this.clearCopyFeedbackTimer) {
       clearTimeout(this.clearCopyFeedbackTimer);
       this.clearCopyFeedbackTimer = null;
@@ -736,6 +742,27 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     }
     this.threadList.setActiveThreadId(threadId);
     await this.router.navigate(['/chat', threadId]);
+  }
+
+  /**
+   * The file workspace follows `?file=` (ADR 0x043 §1): the URL is what is open, so a link opens it
+   * and Back closes it. Without the parameter, the file last open in this thread is restored.
+   */
+  private syncWorkspaceWithRoute(fileId: string | null): void {
+    const chatId = this.route.snapshot.paramMap.get('id')?.trim() || null;
+    if (fileId) {
+      this.workspace.show('chat', fileId, { chatId });
+      return;
+    }
+    if (this.workspace.host() === 'chat') {
+      // Closed in this thread: forget it. Moving to another thread keeps the old thread's memory.
+      this.workspace.hide({ forget: this.workspace.chatId() === chatId });
+    }
+    const remembered = chatId ? this.workspace.rememberedFileFor(chatId) : null;
+    if (remembered && !this.restoredWorkspaceFor.has(chatId!)) {
+      this.restoredWorkspaceFor.add(chatId!);
+      this.workspace.requestOpen(remembered, { replaceUrl: true });
+    }
   }
 
   openContextPanelMobile(): void {

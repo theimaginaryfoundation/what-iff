@@ -1,0 +1,133 @@
+<section class="file-workspace" aria-labelledby="file-workspace-title">
+  <header class="file-workspace__bar">
+    @if (backLabel(); as label) {
+      <button type="button" class="file-workspace__back" (click)="close.emit()" [attr.aria-label]="'Back to the ' + label.toLowerCase()">
+        <ui-arrow-left-icon [size]="16" />
+        <span>{{ label }}</span>
+      </button>
+    }
+
+    <div class="file-workspace__title-block">
+      @if (isRenaming()) {
+        <div class="file-workspace__rename-row">
+          <input
+            type="text"
+            class="file-workspace__rename-input"
+            [value]="renameDraft()"
+            (input)="renameDraft.set($any($event.target).value)"
+            (keydown.enter)="submitRename()"
+            (keydown.escape)="cancelRename()"
+            aria-label="File name"
+            autofocus
+          />
+          <button type="button" class="file-workspace__button file-workspace__button--primary" (click)="submitRename()">Save</button>
+          <button type="button" class="file-workspace__button" (click)="cancelRename()">Cancel</button>
+        </div>
+      } @else {
+        <h2
+          #titleEl
+          id="file-workspace-title"
+          class="file-workspace__title"
+          [uiTooltip]="title()"
+          truncatedOnly
+          [truncationTarget]="titleEl"
+          placement="bottom"
+        >{{ title() }}</h2>
+      }
+      <p class="file-workspace__meta">
+        <span>{{ typeLabel() }}</span>
+        @if (origin()) {
+          <span>{{ origin() }}</span>
+        }
+        <span>
+          {{ folderName() }}
+          @if (showMove()) {
+            <button type="button" class="file-workspace__link" uiTooltip="File this in a folder" (click)="moveToFolder.emit(file().id)">Move to…</button>
+          }
+        </span>
+        <span>{{ file().created_at | date: 'medium' }}</span>
+        @if (file().chat_id && !showGalleryLink()) {
+          <a class="file-workspace__link" [routerLink]="['/chat', file().chat_id]">Open its thread</a>
+        }
+        @if (showGalleryLink()) {
+          <a class="file-workspace__link" [routerLink]="['/gallery']" [queryParams]="{ file: file().id }">Open in gallery</a>
+        }
+      </p>
+    </div>
+
+    <div class="file-workspace__actions">
+      @if (!isRenaming()) {
+        <button type="button" class="file-workspace__icon-btn" uiTooltip="Rename this file" placement="bottom" aria-label="Rename file" (click)="startRename()">
+          <ui-edit-icon [size]="14" />
+        </button>
+      }
+      <button
+        type="button"
+        class="file-workspace__icon-btn"
+        uiTooltip="Download this file"
+        placement="bottom"
+        aria-label="Download file"
+        [disabled]="downloading()"
+        (click)="download()"
+      >
+        <ui-download-icon [size]="14" />
+      </button>
+      <button type="button" class="file-workspace__button file-workspace__button--danger" (click)="delete.emit(file())">Delete</button>
+      @if (showNavigation()) {
+        <button type="button" class="file-workspace__button" [disabled]="!hasPrev()" (click)="previous.emit()">Prev</button>
+        <button type="button" class="file-workspace__button" [disabled]="!hasNext()" (click)="next.emit()">Next</button>
+      }
+      @if (expandable()) {
+        <button
+          type="button"
+          class="file-workspace__icon-btn"
+          [uiTooltip]="expanded() ? 'Back to the side panel' : 'Expand to full screen'"
+          placement="bottom"
+          [attr.aria-label]="expanded() ? 'Collapse file' : 'Expand file'"
+          (click)="toggleExpand.emit()"
+        >
+          @if (expanded()) {
+            <ui-contract-icon [size]="14" />
+          } @else {
+            <ui-expand-icon [size]="14" />
+          }
+        </button>
+      }
+      @if (!backLabel()) {
+        <button type="button" class="file-workspace__icon-btn" uiTooltip="Close" placement="bottom" aria-label="Close file" (click)="close.emit()">
+          <ui-x-icon [size]="14" />
+        </button>
+      }
+    </div>
+  </header>
+
+  <div class="file-workspace__body">
+    @switch (state()) {
+      @case ('loading') {
+        <p class="file-workspace__placeholder" role="status">Loading {{ title() }}…</p>
+      }
+      @case ('error') {
+        <div class="file-workspace__placeholder" role="alert">
+          <p>Could not load this file.</p>
+          <button type="button" class="file-workspace__button" (click)="download()">Try downloading it</button>
+        </div>
+      }
+      @case ('ready') {
+        @if (viewer(); as type) {
+          <ng-container *ngComponentOutlet="type; inputs: viewerInputs() ?? undefined" />
+        } @else {
+          <p class="file-workspace__placeholder" role="status">Loading the viewer…</p>
+        }
+      }
+      @default {
+        <div class="file-workspace__placeholder">
+          <p class="file-workspace__placeholder-badge" aria-hidden="true">{{ typeLabel() }}</p>
+          <p>There is no preview for this kind of file.</p>
+          <button type="button" class="file-workspace__button file-workspace__button--primary" [disabled]="downloading()" (click)="download()">
+            {{ downloading() ? 'Downloading…' : 'Download' }}
+          </button>
+        </div>
+      }
+    }
+  </div>
+</section>
