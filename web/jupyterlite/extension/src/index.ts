@@ -3,7 +3,7 @@ import { PageConfig } from '@jupyterlab/coreutils';
 import { IDocumentManager } from '@jupyterlab/docmanager';
 
 /**
- * The bridge between WhatIff and the JupyterLite embedded in it (ADR 0x043 §8). The host sends the
+ * The bridge between WhatIff and the JupyterLite embedded in it (ADR 0x043 §11). The host sends the
  * notebook; it goes in the default drive, so a kernel can read it and its neighbours with plain
  * `open()`, and opens. Saves go back to the host, which persists them through its usual save.
  *
