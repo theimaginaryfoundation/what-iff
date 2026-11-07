@@ -32,9 +32,17 @@ import {
   DocTextRun,
   DocTextStyle,
   LAYOUT,
+  NOTE_REFERENCE,
   TOKEN,
 } from './univer-doc-types';
-import { ParagraphProps, listTypeForNum, paragraphPropsFromPPr, resolveTextStyle, textStyleFromRPr } from './docx-styles';
+import {
+  ParagraphProps,
+  listTypeForNum,
+  paragraphPropsFromPPr,
+  resolveTextStyle,
+  stripRootNamespaces,
+  textStyleFromRPr,
+} from './docx-styles';
 
 /**
  * Walks WordprocessingML block content (a document body, a header, a footer or a table cell)
@@ -59,6 +67,44 @@ export interface BodyContext {
   nextId: (prefix: string) => string;
   /** Called for each w:sectPr met inside a paragraph (a section ending). */
   onSection?: (sectPr: Element, startIndex: number) => void;
+  /** Resolves a footnote or endnote reference (w:id) to the note id its story is kept under; null drops it. */
+  noteFor?: (kind: 'footnote' | 'endnote', wordId: string) => string | null;
+  /** Whether the package has a comments part; without one, comment marks are dropped. */
+  hasComments?: boolean;
+}
+
+/** The Office Math namespace. */
+const NS_M = 'http://schemas.openxmlformats.org/officeDocument/2006/math';
+
+const MODELLED_PPR = new Set([
+  'pStyle',
+  'jc',
+  'spacing',
+  'ind',
+  'keepLines',
+  'keepNext',
+  'pageBreakBefore',
+  'widowControl',
+  'contextualSpacing',
+  'outlineLvl',
+  'shd',
+  'pBdr',
+  'bidi',
+  'numPr',
+  'rPr',
+  'sectPr',
+  'pPrChange',
+]);
+const MODELLED_TCPR = new Set(['tcW', 'gridSpan', 'hMerge', 'vMerge', 'tcBorders', 'shd', 'tcMar', 'vAlign', 'tcPrChange']);
+const MODELLED_TRPR = new Set(['trHeight', 'cantSplit', 'tblHeader', 'gridBefore', 'gridAfter', 'trPrChange', 'ins', 'del']);
+
+/** The children of a properties element the model does not carry, serialised so they can go back verbatim. */
+export function extrasXml(el: Element | null | undefined, modelled: Set<string>): string | undefined {
+  if (!el) return undefined;
+  const out = elementChildren(el)
+    .filter(c => c.namespaceURI !== NS.w || !modelled.has(c.localName))
+    .map(c => stripRootNamespaces(serializeXml(c)));
+  return out.length ? out.join('') : undefined;
 }
 
 export class BodyBuilder {
@@ -71,11 +117,15 @@ export class BodyBuilder {
     customRanges: [],
     tables: [],
     docxRawBlocks: [],
+    docxRawCustomBlocks: [],
   };
   readonly tableSource: Record<string, DocTable> = {};
   readonly drawings: Record<string, DocDrawing> = {};
   readonly drawingsOrder: string[] = [];
   private pendingRun: { start: number; ts?: DocTextStyle; sId?: string } | null = null;
+  private readonly openBookmarks = new Map<string, { name: string; start: number }>();
+  private readonly openComments = new Map<string, number>();
+  private readonly closedComments = new Set<string>();
 
   constructor(private readonly ctx: BodyContext) {}
 
@@ -111,11 +161,13 @@ export class BodyBuilder {
       }
       case 'bookmarkStart':
       case 'bookmarkEnd':
+      case 'commentRangeStart':
+      case 'commentRangeEnd':
+        this.rangeMark(el);
+        return;
       case 'proofErr':
       case 'permStart':
       case 'permEnd':
-      case 'commentRangeStart':
-      case 'commentRangeEnd':
         return;
       case 'ins':
       case 'moveTo':
@@ -147,6 +199,7 @@ export class BodyBuilder {
     const b = this.body;
     const out: DocBody = { dataStream: b.dataStream, textRuns: b.textRuns, paragraphs: b.paragraphs, sectionBreaks: b.sectionBreaks };
     if (b.customBlocks?.length) out.customBlocks = b.customBlocks;
+    if (b.docxRawCustomBlocks?.length) out.docxRawCustomBlocks = b.docxRawCustomBlocks;
     if (b.customRanges?.length) out.customRanges = b.customRanges;
     if (b.tables?.length) out.tables = b.tables;
     if (b.docxRawBlocks?.length) out.docxRawBlocks = b.docxRawBlocks;
@@ -156,10 +209,11 @@ export class BodyBuilder {
   // --- paragraphs --------------------------------------------------------------------------------
 
   private paragraph(p: Element): void {
-    const props = paragraphPropsFromPPr(child(p, NS.w, 'pPr'));
+    const pPr = child(p, NS.w, 'pPr');
+    const props = paragraphPropsFromPPr(pPr);
     const baseTs = this.paragraphBaseTextStyle(props);
     this.inlineContent(p, baseTs);
-    this.endParagraph(props);
+    this.endParagraph(props, extrasXml(pPr, MODELLED_PPR));
     if (props.sectPr) this.ctx.onSection?.(props.sectPr, this.length);
   }
 
@@ -169,9 +223,10 @@ export class BodyBuilder {
     return Object.keys(resolved).length ? resolved : undefined;
   }
 
-  private endParagraph(props: ParagraphProps): void {
+  private endParagraph(props: ParagraphProps, extras?: string): void {
     this.flushRun();
     const paragraph: DocParagraph = { startIndex: this.length, paragraphId: this.ctx.nextId('p') };
+    if (extras) paragraph.docxPPr = extras;
     const style: DocParagraphStyle = { ...(props.style ?? {}) };
     if (props.styleId && this.ctx.styles[props.styleId]) {
       paragraph.styleId = props.styleId;
@@ -198,14 +253,21 @@ export class BodyBuilder {
 
   private inline(el: Element, baseTs: DocTextStyle | undefined): void {
     if (el.namespaceURI !== NS.w) {
-      if (el.namespaceURI === 'http://schemas.openxmlformats.org/officeDocument/2006/math')
-        this.ctx.fidelity.drop('Equations', this.ctx.where);
-      else if (el.namespaceURI === NS.mc && el.localName === 'AlternateContent')
-        this.inlineContent(child(el, NS.mc, 'Choice') ?? child(el, NS.mc, 'Fallback') ?? el, baseTs);
+      if (el.namespaceURI === NS_M) this.rawInline(serializeXml(el), 'equation');
+      else if (el.namespaceURI === NS.mc && el.localName === 'AlternateContent') {
+        if (hasPicture(el)) this.inlineContent(child(el, NS.mc, 'Choice') ?? child(el, NS.mc, 'Fallback') ?? el, baseTs);
+        else this.rawInline(serializeXml(el), 'shape');
+      }
       return;
     }
     switch (el.localName) {
       case 'pPr':
+        return;
+      case 'bookmarkStart':
+      case 'bookmarkEnd':
+      case 'commentRangeStart':
+      case 'commentRangeEnd':
+        this.rangeMark(el);
         return;
       case 'r':
         this.run(el, baseTs);
@@ -245,71 +307,82 @@ export class BodyBuilder {
     const charStyle = sId ? resolveTextStyle(this.ctx.styles, sId) : {};
     const direct = textStyleFromRPr(rPr);
     const ts = mergeTs(baseTs, charStyle, direct);
-    for (const el of this.runChildren(r)) {
-      if (el.namespaceURI !== NS.w) continue;
-      switch (el.localName) {
-        case 't':
-        case 'delText':
-          this.text(el.textContent ?? '', ts, sId);
-          break;
-        case 'tab':
-          this.text(TOKEN.TAB, ts, sId);
-          break;
-        case 'br': {
-          const type = attr(el, NS.w, 'type');
-          if (type === 'page') this.text(TOKEN.PAGE_BREAK, ts, sId);
-          else if (type === 'column') this.text(TOKEN.COLUMN_BREAK, ts, sId);
-          else this.lineBreak();
-          break;
-        }
-        case 'cr':
-          this.lineBreak();
-          break;
-        case 'sym': {
-          const code = attr(el, NS.w, 'char');
-          const n = code ? parseInt(code, 16) : NaN;
-          if (!Number.isNaN(n)) this.text(String.fromCodePoint(n >= 0xf000 ? n - 0xf000 : n), ts, sId);
-          break;
-        }
-        case 'noBreakHyphen':
-          this.text('‑', ts, sId);
-          break;
-        case 'softHyphen':
-          this.text('­', ts, sId);
-          break;
-        case 'drawing':
-          this.drawing(el);
-          break;
-        case 'pict':
-        case 'object':
-          this.ctx.fidelity.drop('Legacy drawings and embedded objects', this.ctx.where);
-          break;
-        case 'footnoteReference':
-        case 'endnoteReference':
-          this.ctx.fidelity.drop('Footnotes and endnotes', this.ctx.where);
-          break;
-        case 'fldChar':
-          this.fieldChar(attr(el, NS.w, 'fldCharType'));
-          break;
-        case 'instrText':
-          if (this.field) this.field.instruction += el.textContent ?? '';
-          break;
-        default:
-          break;
+    // An opaque child (a shape, an object, an equation) is kept as a run of its own, with this run's formatting.
+    const rawRun = (el: Element, what: string) => this.rawInline(`<w:r>${rPr ? serializeXml(rPr) : ''}${serializeXml(el)}</w:r>`, what);
+    for (const el of elementChildren(r)) {
+      if (el.namespaceURI === NS.mc && el.localName === 'AlternateContent') {
+        if (hasPicture(el))
+          for (const c of elementChildren(child(el, NS.mc, 'Choice') ?? child(el, NS.mc, 'Fallback')!)) this.runChild(c, ts, sId, rawRun);
+        else rawRun(el, 'shape');
+        continue;
       }
+      if (el.namespaceURI === NS_M) {
+        rawRun(el, 'equation');
+        continue;
+      }
+      if (el.namespaceURI !== NS.w) continue;
+      this.runChild(el, ts, sId, rawRun);
     }
   }
 
-  /** A run's children, looking through mc:AlternateContent (Word wraps newer drawings in it). */
-  private runChildren(r: Element): Element[] {
-    const out: Element[] = [];
-    for (const el of elementChildren(r)) {
-      if (el.namespaceURI === NS.mc && el.localName === 'AlternateContent') {
-        const choice = child(el, NS.mc, 'Choice') ?? child(el, NS.mc, 'Fallback');
-        if (choice) out.push(...elementChildren(choice));
-      } else out.push(el);
+  private runChild(el: Element, ts: DocTextStyle | undefined, sId: string | undefined, rawRun: (el: Element, what: string) => void): void {
+    switch (el.localName) {
+      case 't':
+      case 'delText':
+        this.text(el.textContent ?? '', ts, sId);
+        break;
+      case 'tab':
+      case 'ptab':
+        this.text(TOKEN.TAB, ts, sId);
+        break;
+      case 'br': {
+        const type = attr(el, NS.w, 'type');
+        if (type === 'page') this.text(TOKEN.PAGE_BREAK, ts, sId);
+        else if (type === 'column') this.text(TOKEN.COLUMN_BREAK, ts, sId);
+        else this.lineBreak();
+        break;
+      }
+      case 'cr':
+        this.lineBreak();
+        break;
+      case 'sym': {
+        const code = attr(el, NS.w, 'char');
+        const n = code ? parseInt(code, 16) : NaN;
+        if (!Number.isNaN(n)) this.text(String.fromCodePoint(n >= 0xf000 ? n - 0xf000 : n), ts, sId);
+        break;
+      }
+      case 'noBreakHyphen':
+        this.text('‑', ts, sId);
+        break;
+      case 'softHyphen':
+        this.text('­', ts, sId);
+        break;
+      case 'drawing':
+        if (!this.drawing(el)) rawRun(el, drawingKind(el));
+        break;
+      case 'pict':
+      case 'object':
+        rawRun(el, el.localName === 'object' ? 'embedded object' : 'legacy drawing');
+        break;
+      case 'ruby':
+        rawRun(el, 'phonetic guide');
+        break;
+      case 'footnoteReference':
+      case 'endnoteReference':
+        this.noteReference(el.localName === 'footnoteReference' ? 'footnote' : 'endnote', attr(el, NS.w, 'id'), ts, sId);
+        break;
+      case 'commentReference':
+        this.commentReference(attr(el, NS.w, 'id'));
+        break;
+      case 'fldChar':
+        this.fieldChar(attr(el, NS.w, 'fldCharType'));
+        break;
+      case 'instrText':
+        if (this.field) this.field.instruction += el.textContent ?? '';
+        break;
+      default:
+        break;
     }
-    return out;
   }
 
   /** A soft line break has no Univer token, so the paragraph is split and its style carried on. */
@@ -427,26 +500,16 @@ export class BodyBuilder {
 
   // --- drawings ----------------------------------------------------------------------------------
 
-  private drawing(el: Element): void {
+  /** Reads a picture into a drawing; false when the drawing is something else (kept raw by the caller). */
+  private drawing(el: Element): boolean {
     const inline = child(el, NS.wp, 'inline');
     const anchor = child(el, NS.wp, 'anchor');
     const holder = inline ?? anchor;
-    if (!holder) return;
+    if (!holder) return true;
     const blip = holder.getElementsByTagNameNS(NS.a, 'blip')[0];
     const relId = blip ? attr(blip, NS.r, 'embed') : null;
     const source = relId ? this.ctx.media(relId) : null;
-    if (!source) {
-      const kind = holder.getElementsByTagNameNS(NS.a, 'graphicData')[0]?.getAttribute('uri') ?? '';
-      this.ctx.fidelity.drop(
-        kind.includes('chart')
-          ? 'Charts'
-          : kind.includes('wordprocessingShape') || kind.includes('wordprocessingGroup')
-            ? 'Shapes'
-            : 'Linked or unsupported images',
-        this.ctx.where,
-      );
-      return;
-    }
+    if (!source) return false;
     const extent = child(holder, NS.wp, 'extent');
     const width = emuToPx(num(extent?.getAttribute('cx')) ?? 914400);
     const height = emuToPx(num(extent?.getAttribute('cy')) ?? 914400);
@@ -507,6 +570,104 @@ export class BodyBuilder {
     this.body.dataStream += TOKEN.CUSTOM_BLOCK;
     this.drawings[drawingId] = drawing;
     this.drawingsOrder.push(drawingId);
+    return true;
+  }
+
+  // --- notes, bookmarks and comments ------------------------------------------------------------
+
+  /** A note reference is one object character; Univer draws the note's label over it and lays the story out. */
+  private noteReference(kind: 'footnote' | 'endnote', wordId: string | null, ts: DocTextStyle | undefined, sId: string | undefined): void {
+    const noteId = wordId ? (this.ctx.noteFor?.(kind, wordId) ?? null) : null;
+    if (!noteId) {
+      this.ctx.fidelity.drop('Footnotes and endnotes', this.ctx.where);
+      return;
+    }
+    const start = this.length;
+    // The reference keeps the run's formatting minus the superscript, which Univer adds itself.
+    const refTs = ts ? { ...ts } : undefined;
+    if (refTs) delete refTs.va;
+    this.text(NOTE_REFERENCE, refTs && Object.keys(refTs).length ? refTs : undefined, sId);
+    this.range({
+      startIndex: start,
+      endIndex: start,
+      rangeId: this.ctx.nextId('note'),
+      rangeType: kind === 'footnote' ? CUSTOM_RANGE.FOOTNOTE : CUSTOM_RANGE.ENDNOTE,
+      properties: { noteId },
+    });
+  }
+
+  /** Bookmark and comment boundaries become ranges over the text between them. */
+  private rangeMark(el: Element): void {
+    const id = attr(el, NS.w, 'id') ?? '';
+    switch (el.localName) {
+      case 'bookmarkStart': {
+        const name = attr(el, NS.w, 'name') ?? '';
+        if (name && name !== '_GoBack') this.openBookmarks.set(id, { name, start: this.length });
+        return;
+      }
+      case 'bookmarkEnd': {
+        const open = this.openBookmarks.get(id);
+        if (!open) return;
+        this.openBookmarks.delete(id);
+        this.range({
+          startIndex: open.start,
+          endIndex: Math.max(open.start, this.length - 1),
+          rangeId: this.ctx.nextId('bm'),
+          rangeType: CUSTOM_RANGE.BOOKMARK,
+          properties: this.length > open.start ? { name: open.name } : { name: open.name, collapsed: true },
+        });
+        return;
+      }
+      case 'commentRangeStart':
+        if (this.ctx.hasComments) this.openComments.set(id, this.length);
+        return;
+      case 'commentRangeEnd': {
+        const start = this.openComments.get(id);
+        if (start === undefined) return;
+        this.openComments.delete(id);
+        this.closedComments.add(id);
+        this.range({
+          startIndex: start,
+          endIndex: Math.max(start, this.length - 1),
+          rangeId: this.ctx.nextId('cm'),
+          rangeType: CUSTOM_RANGE.COMMENT,
+          properties: this.length > start ? { commentId: id } : { commentId: id, collapsed: true },
+        });
+        return;
+      }
+    }
+  }
+
+  /** A comment with no range is anchored to the character before its reference. */
+  private commentReference(id: string | null): void {
+    if (!id || !this.ctx.hasComments) {
+      if (!this.ctx.hasComments) this.ctx.fidelity.drop('Comments', this.ctx.where);
+      return;
+    }
+    if (this.closedComments.has(id) || this.openComments.has(id)) return;
+    const at = Math.max(0, this.length - 1);
+    this.range({
+      startIndex: at,
+      endIndex: at,
+      rangeId: this.ctx.nextId('cm'),
+      rangeType: CUSTOM_RANGE.COMMENT,
+      properties: { commentId: id, collapsed: true },
+    });
+  }
+
+  // --- opaque inline content --------------------------------------------------------------------
+
+  /** Run-level content with no Univer counterpart rides on a custom-block sentinel and is written back verbatim. */
+  private rawInline(xml: string, what: string): void {
+    this.flushRun();
+    this.ctx.fidelity.warn(`Kept but not shown: ${what}`, this.ctx.where);
+    this.body.docxRawCustomBlocks!.push({
+      startIndex: this.length,
+      blockId: this.ctx.nextId('raw'),
+      blockType: 1,
+      docxRawXml: stripRootNamespaces(xml),
+    });
+    this.body.dataStream += TOKEN.CUSTOM_BLOCK;
   }
 
   // --- tables ------------------------------------------------------------------------------------
@@ -555,6 +716,7 @@ export class BodyBuilder {
     };
     const caption = wval(child(tblPr, NS.w, 'tblCaption')) ?? wval(child(tblPr, NS.w, 'tblDescription'));
     if (caption) table.description = caption;
+    if (tblPr) table.docxTblPr = stripRootNamespaces(serializeXml(tblPr));
     const startIndex = this.length;
     this.body.dataStream += TOKEN.TABLE_START;
     // Vertical merges: a cell with vMerge="restart" spans the following rows whose cell at the same
@@ -573,6 +735,8 @@ export class BodyBuilder {
       };
       if (toggle(child(trPr, NS.w, 'tblHeader'))) row.repeatHeaderRow = 1;
       if (toggle(child(trPr, NS.w, 'cantSplit'))) row.cantSplit = 1;
+      const trExtras = extrasXml(trPr, MODELLED_TRPR);
+      if (trExtras) row.docxTrPr = trExtras;
       this.body.dataStream += TOKEN.TABLE_ROW_START;
       let col = 0;
       const gridBefore = num(wval(child(trPr, NS.w, 'gridBefore'))) ?? 0;
@@ -678,6 +842,8 @@ export class BodyBuilder {
     if (vAlign === 'center') cell.vAlign = 3;
     else if (vAlign === 'bottom') cell.vAlign = 4;
     else if (vAlign === 'top') cell.vAlign = 2;
+    const tcExtras = extrasXml(tcPr, MODELLED_TCPR);
+    if (tcExtras) cell.docxTcPr = tcExtras;
     this.body.dataStream += TOKEN.TABLE_CELL_START;
     const start = this.length;
     for (const el of elementChildren(tc)) {
@@ -698,7 +864,7 @@ export class BodyBuilder {
     this.flushRun();
     const name = el.namespaceURI === NS.w ? el.localName : el.tagName;
     this.ctx.fidelity.warn(`Unsupported "${name}" content kept but not shown`, this.ctx.where);
-    this.body.docxRawBlocks!.push({ startIndex: this.length, xml: serializeXml(el) });
+    this.body.docxRawBlocks!.push({ startIndex: this.length, xml: stripRootNamespaces(serializeXml(el)) });
   }
 }
 
@@ -794,6 +960,23 @@ function objectPosition(
   const align = child(el, NS.wp, 'align');
   if (align?.textContent && aligns[align.textContent] !== undefined) return { relativeFrom, align: aligns[align.textContent] };
   return { relativeFrom, posOffset: emuToPx(num(offset?.textContent) ?? 0) };
+}
+
+/** Whether an mc:AlternateContent holds a picture we read (anything else stays raw). */
+function hasPicture(ac: Element): boolean {
+  const choice = child(ac, NS.mc, 'Choice') ?? child(ac, NS.mc, 'Fallback');
+  return !!choice && choice.getElementsByTagNameNS(NS.pic, 'pic').length > 0;
+}
+
+/** What a non-picture drawing holds, for the notice. */
+function drawingKind(drawing: Element): string {
+  const uri = drawing.getElementsByTagNameNS(NS.a, 'graphicData')[0]?.getAttribute('uri') ?? '';
+  if (uri.includes('chart')) return 'chart';
+  if (uri.includes('wordprocessingGroup')) return 'group of shapes';
+  if (uri.includes('wordprocessingShape')) return 'shape or text box';
+  if (uri.includes('diagram')) return 'SmartArt';
+  if (uri.includes('picture')) return 'linked picture';
+  return 'drawing';
 }
 
 function anchorLayout(anchor: Element): number {

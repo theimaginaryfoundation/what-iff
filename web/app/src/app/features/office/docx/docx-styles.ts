@@ -12,6 +12,7 @@ import {
   highlightName,
   num,
   ptToHalfPoints,
+  serializeXml,
   pxToEighths,
   pxToTwips,
   toggle,
@@ -262,27 +263,177 @@ export interface PPrXmlOptions {
   numbering?: { numId: string; level: number };
   markTextStyle?: DocTextStyle;
   sectPrXml?: string;
+  /** Properties kept from the original (see DocParagraph.docxPPr), merged in schema order. */
+  extras?: string;
+}
+
+/** CT_PPr child order; Word rejects properties out of order. */
+const PPR_ORDER = [
+  'pStyle',
+  'keepNext',
+  'keepLines',
+  'pageBreakBefore',
+  'framePr',
+  'widowControl',
+  'numPr',
+  'suppressLineNumbers',
+  'pBdr',
+  'shd',
+  'tabs',
+  'suppressAutoHyphens',
+  'kinsoku',
+  'wordWrap',
+  'overflowPunct',
+  'topLinePunct',
+  'autoSpaceDE',
+  'autoSpaceDN',
+  'bidi',
+  'adjustRightInd',
+  'snapToGrid',
+  'spacing',
+  'ind',
+  'contextualSpacing',
+  'mirrorIndents',
+  'suppressOverlap',
+  'jc',
+  'textDirection',
+  'textAlignment',
+  'textboxTightWrap',
+  'outlineLvl',
+  'divId',
+  'cnfStyle',
+  'rPr',
+  'sectPr',
+  'pPrChange',
+];
+export const TCPR_ORDER = [
+  'cnfStyle',
+  'tcW',
+  'gridSpan',
+  'hMerge',
+  'vMerge',
+  'tcBorders',
+  'shd',
+  'noWrap',
+  'tcMar',
+  'textDirection',
+  'tcFitText',
+  'vAlign',
+  'hideMark',
+  'headers',
+  'cellIns',
+  'cellDel',
+  'cellMerge',
+  'tcPrChange',
+];
+export const TRPR_ORDER = [
+  'cnfStyle',
+  'divId',
+  'gridBefore',
+  'gridAfter',
+  'wBefore',
+  'wAfter',
+  'cantSplit',
+  'trHeight',
+  'tblHeader',
+  'tblCellSpacing',
+  'jc',
+  'hidden',
+  'ins',
+  'del',
+  'trPrChange',
+];
+export const SECTPR_ORDER = [
+  'headerReference',
+  'footerReference',
+  'footnotePr',
+  'endnotePr',
+  'type',
+  'pgSz',
+  'pgMar',
+  'paperSrc',
+  'pgBorders',
+  'lnNumType',
+  'pgNumType',
+  'cols',
+  'formProt',
+  'vAlign',
+  'noEndnote',
+  'titlePg',
+  'textDirection',
+  'bidi',
+  'rtlGutter',
+  'docGrid',
+  'printerSettings',
+  'sectPrChange',
+];
+
+/** The namespaces every part we write declares on its root; fragments need not repeat them. */
+const ROOT_NAMESPACES: [string, string][] = [
+  ['w', NS.w],
+  ['r', NS.r],
+  ['wp', NS.wp],
+  ['a', NS.a],
+  ['pic', NS.pic],
+  ['mc', NS.mc],
+  ['v', NS.v],
+];
+
+/** Drops xmlns declarations the serialiser adds for prefixes the part's root already declares. */
+export function stripRootNamespaces(xml: string): string {
+  let out = xml;
+  for (const [prefix, uri] of ROOT_NAMESPACES) out = out.split(` xmlns:${prefix}="${uri}"`).join('');
+  return out;
+}
+
+/** Top-level elements of a serialised fragment, by local name, so kept properties can be slotted into schema order. */
+export function splitExtras(xml: string | undefined): { name: string; xml: string }[] {
+  if (!xml) return [];
+  const doc = new DOMParser().parseFromString(
+    `<x xmlns:w="${NS.w}" xmlns:r="${NS.r}" xmlns:mc="${NS.mc}" xmlns:v="${NS.v}">${xml}</x>`,
+    'application/xml',
+  );
+  if (doc.getElementsByTagName('parsererror').length) return [];
+  return Array.from(doc.documentElement.childNodes)
+    .filter((n): n is Element => n.nodeType === 1)
+    .map(el => ({ name: el.localName, xml: stripRootNamespaces(serializeXml(el)) }));
+}
+
+/** Property children in CT order: the ones we build, then the kept extras, each where the schema puts it. */
+export function orderedProperties(built: { name: string; xml: string }[], extras: string | undefined, order: string[]): string {
+  const all = [...built, ...splitExtras(extras)];
+  const rank = (name: string) => {
+    const i = order.indexOf(name);
+    return i === -1 ? order.length : i;
+  };
+  return all
+    .map((p, i) => ({ ...p, i }))
+    .sort((a, b) => rank(a.name) - rank(b.name) || a.i - b.i)
+    .map(p => p.xml)
+    .join('');
 }
 
 export function pPrXml(style: DocParagraphStyle | undefined, opts: PPrXmlOptions = {}): string {
-  const parts: string[] = [];
-  if (opts.styleId) parts.push(`<w:pStyle w:val="${escapeXml(opts.styleId)}"/>`);
+  const parts: { name: string; xml: string }[] = [];
+  const add = (name: string, xml: string) => parts.push({ name, xml });
+  if (opts.styleId) add('pStyle', `<w:pStyle w:val="${escapeXml(opts.styleId)}"/>`);
   const s = style ?? {};
-  if (s.keepNext !== undefined) parts.push(s.keepNext ? '<w:keepNext/>' : '<w:keepNext w:val="0"/>');
-  if (s.keepLines !== undefined) parts.push(s.keepLines ? '<w:keepLines/>' : '<w:keepLines w:val="0"/>');
-  if (s.pageBreakBefore !== undefined) parts.push(s.pageBreakBefore ? '<w:pageBreakBefore/>' : '<w:pageBreakBefore w:val="0"/>');
-  if (s.widowControl !== undefined) parts.push(s.widowControl ? '<w:widowControl/>' : '<w:widowControl w:val="0"/>');
+  if (s.keepNext !== undefined) add('keepNext', s.keepNext ? '<w:keepNext/>' : '<w:keepNext w:val="0"/>');
+  if (s.keepLines !== undefined) add('keepLines', s.keepLines ? '<w:keepLines/>' : '<w:keepLines w:val="0"/>');
+  if (s.pageBreakBefore !== undefined)
+    add('pageBreakBefore', s.pageBreakBefore ? '<w:pageBreakBefore/>' : '<w:pageBreakBefore w:val="0"/>');
+  if (s.widowControl !== undefined) add('widowControl', s.widowControl ? '<w:widowControl/>' : '<w:widowControl w:val="0"/>');
   if (opts.numbering)
-    parts.push(`<w:numPr><w:ilvl w:val="${opts.numbering.level}"/><w:numId w:val="${escapeXml(opts.numbering.numId)}"/></w:numPr>`);
+    add('numPr', `<w:numPr><w:ilvl w:val="${opts.numbering.level}"/><w:numId w:val="${escapeXml(opts.numbering.numId)}"/></w:numPr>`);
   const borders = [
     borderXml('top', s.borderTop),
     borderXml('left', s.borderLeft),
     borderXml('bottom', s.borderBottom),
     borderXml('right', s.borderRight),
   ].join('');
-  if (borders) parts.push(`<w:pBdr>${borders}</w:pBdr>`);
+  if (borders) add('pBdr', `<w:pBdr>${borders}</w:pBdr>`);
   const shd = colorHex(s.shading?.backgroundColor.rgb);
-  if (shd) parts.push(`<w:shd w:val="clear" w:color="auto" w:fill="${shd}"/>`);
+  if (shd) add('shd', `<w:shd w:val="clear" w:color="auto" w:fill="${shd}"/>`);
   const spacing: string[] = [];
   if (s.spaceAbove) spacing.push(`w:before="${pxToTwips(s.spaceAbove.v)}"`);
   if (s.spaceBelow) spacing.push(`w:after="${pxToTwips(s.spaceBelow.v)}"`);
@@ -290,22 +441,24 @@ export function pPrXml(style: DocParagraphStyle | undefined, opts: PPrXmlOptions
     if (!s.spacingRule) spacing.push(`w:line="${Math.round(s.lineSpacing * 240)}" w:lineRule="auto"`);
     else spacing.push(`w:line="${pxToTwips(s.lineSpacing)}" w:lineRule="${s.spacingRule === 2 ? 'exact' : 'atLeast'}"`);
   }
-  if (spacing.length) parts.push(`<w:spacing ${spacing.join(' ')}/>`);
-  if (s.contextualSpacing !== undefined) parts.push(s.contextualSpacing ? '<w:contextualSpacing/>' : '<w:contextualSpacing w:val="0"/>');
+  if (spacing.length) add('spacing', `<w:spacing ${spacing.join(' ')}/>`);
+  if (s.contextualSpacing !== undefined)
+    add('contextualSpacing', s.contextualSpacing ? '<w:contextualSpacing/>' : '<w:contextualSpacing w:val="0"/>');
   const ind: string[] = [];
   if (s.indentStart) ind.push(`w:left="${pxToTwips(s.indentStart.v)}"`);
   if (s.indentEnd) ind.push(`w:right="${pxToTwips(s.indentEnd.v)}"`);
   if (s.indentFirstLine) ind.push(`w:firstLine="${pxToTwips(s.indentFirstLine.v)}"`);
   if (s.hanging) ind.push(`w:hanging="${pxToTwips(s.hanging.v)}"`);
-  if (ind.length) parts.push(`<w:ind ${ind.join(' ')}/>`);
-  if (s.direction === 2) parts.push('<w:bidi/>');
+  if (ind.length) add('ind', `<w:ind ${ind.join(' ')}/>`);
+  if (s.direction === 2) add('bidi', '<w:bidi/>');
   const jc = s.horizontalAlign !== undefined ? JC_FROM_UNIVER[s.horizontalAlign] : undefined;
-  if (jc) parts.push(`<w:jc w:val="${jc}"/>`);
-  if (s.outlineLevel !== undefined) parts.push(`<w:outlineLvl w:val="${s.outlineLevel}"/>`);
+  if (jc) add('jc', `<w:jc w:val="${jc}"/>`);
+  if (s.outlineLevel !== undefined) add('outlineLvl', `<w:outlineLvl w:val="${s.outlineLevel}"/>`);
   const mark = rPrXml(opts.markTextStyle);
-  if (mark) parts.push(mark);
-  if (opts.sectPrXml) parts.push(opts.sectPrXml);
-  return parts.length ? `<w:pPr>${parts.join('')}</w:pPr>` : '';
+  if (mark) add('rPr', mark);
+  if (opts.sectPrXml) add('sectPr', opts.sectPrXml);
+  if (!parts.length && !opts.extras) return '';
+  return `<w:pPr>${orderedProperties(parts, opts.extras, PPR_ORDER)}</w:pPr>`;
 }
 
 // --- styles part ---------------------------------------------------------------------------------
@@ -556,13 +709,27 @@ export function parseNumbering(doc: Document | null): ParsedNumbering {
   return { lists };
 }
 
-export function numberingXml(lists: Record<string, DocList>): { xml: string; numIdFor: (listType: string) => string } | null {
+export interface NumberingXmlOptions {
+  /** First num and abstractNum ids to use, when appending to an existing part. */
+  firstNumId?: number;
+  firstAbstractId?: number;
+  /** Only the definitions, without the part wrapper, for appending. */
+  fragment?: boolean;
+}
+
+export function numberingXml(
+  lists: Record<string, DocList>,
+  opts: NumberingXmlOptions = {},
+): { xml: string; numIdFor: (listType: string) => string } | null {
   const types = Object.keys(lists);
   if (!types.length) return null;
   const numIds = new Map<string, string>();
-  types.forEach((t, i) => numIds.set(t, String(i + 1)));
+  const firstNum = opts.firstNumId ?? 1;
+  const firstAbstract = opts.firstAbstractId ?? 0;
+  types.forEach((t, i) => numIds.set(t, String(firstNum + i)));
   const abstracts = types
-    .map((t, i) => {
+    .map((t, i0) => {
+      const i = firstAbstract + i0;
       const list = lists[t];
       const levels = list.nestingLevel
         .slice(0, 9)
@@ -581,10 +748,12 @@ export function numberingXml(lists: Record<string, DocList>): { xml: string; num
       return `<w:abstractNum w:abstractNumId="${i}"><w:multiLevelType w:val="hybridMultilevel"/>${levels}</w:abstractNum>`;
     })
     .join('');
-  const nums = types.map((t, i) => `<w:num w:numId="${numIds.get(t)}"><w:abstractNumId w:val="${i}"/></w:num>`).join('');
+  const nums = types.map((t, i) => `<w:num w:numId="${numIds.get(t)}"><w:abstractNumId w:val="${firstAbstract + i}"/></w:num>`).join('');
   return {
-    xml: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering xmlns:w="${NS.w}" xmlns:r="${NS.r}">${abstracts}${nums}</w:numbering>`,
-    numIdFor: (listType: string) => numIds.get(listType) ?? '1',
+    xml: opts.fragment
+      ? `${abstracts}${nums}`
+      : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering xmlns:w="${NS.w}" xmlns:r="${NS.r}">${abstracts}${nums}</w:numbering>`,
+    numIdFor: (listType: string) => numIds.get(listType) ?? String(firstNum),
   };
 }
 

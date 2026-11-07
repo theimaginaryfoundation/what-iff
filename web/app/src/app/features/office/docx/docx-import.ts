@@ -12,13 +12,15 @@ import {
   resolveTarget,
   twipsToPx,
 } from '../shared/ooxml';
-import { BodyBuilder, BodyContext } from './docx-body';
+import { BodyBuilder, BodyContext, extrasXml } from './docx-body';
+import { noteIdFor, parseNotes } from './docx-notes';
 import { ParsedStyles, parseNumbering, parseStyles, paragraphPropsFromPPr } from './docx-styles';
 import {
   DocDocument,
   DocDocumentStyle,
   DocFooter,
   DocHeader,
+  DocNote,
   DocPageSetup,
   DocSectionBreak,
   DocTable,
@@ -92,7 +94,8 @@ export async function packageToDocument(pkg: OoxmlPackage, opts: DocxImportOptio
     if (mime === 'application/octet-stream') fidelity.drop('Images of an unsupported type');
   }
 
-  if (partFor(REL_TYPE.comments)) fidelity.drop('Comments');
+  const hasComments = !!partFor(REL_TYPE.comments);
+  const notes: Record<string, DocNote> = {};
   const baseContext = (partPath: string, partRels: Map<string, Relationship>, where: string): BodyContext => ({
     unitId: opts.id,
     partPath,
@@ -104,6 +107,11 @@ export async function packageToDocument(pkg: OoxmlPackage, opts: DocxImportOptio
     fidelity,
     where,
     nextId,
+    hasComments,
+    noteFor: (kind, wordId) => {
+      const id = noteIdFor(kind, wordId);
+      return notes[id] ? id : null;
+    },
   });
 
   const headers: Record<string, DocHeader> = {};
@@ -112,12 +120,28 @@ export async function packageToDocument(pkg: OoxmlPackage, opts: DocxImportOptio
   const drawings: Record<string, DocDrawing> = {};
   const drawingsOrder: string[] = [];
 
+  // Note stories first, so body references can find them.
+  for (const kind of ['footnote', 'endnote'] as const) {
+    const path = partFor(kind === 'footnote' ? REL_TYPE.footnotes : REL_TYPE.endnotes);
+    const doc = path ? await pkg.xml(path) : null;
+    if (!doc) continue;
+    const partRels = await pkg.rels(path!);
+    const parsed = parseNotes(
+      doc,
+      kind,
+      ctx => new BodyBuilder({ ...baseContext(path!, partRels, kind === 'footnote' ? 'Footnotes' : 'Endnotes'), ...ctx }),
+    );
+    Object.assign(notes, parsed.notes);
+    Object.assign(drawings, parsed.drawings);
+    drawingsOrder.push(...parsed.drawingsOrder);
+  }
+
   const loadHeaderFooter = async (relId: string, kind: 'header' | 'footer'): Promise<string | null> => {
     const rel = rels.get(relId);
     if (!rel) return null;
     const path = resolveTarget(mainPath, rel.target);
     const existing =
-      kind === 'header' ? Object.values(headers).find(h => h.headerId === path) : Object.values(footers).find(f => f.footerId === path);
+      kind === 'header' ? Object.values(headers).find(h => h.docxPath === path) : Object.values(footers).find(f => f.docxPath === path);
     if (existing) return kind === 'header' ? (existing as DocHeader).headerId : (existing as DocFooter).footerId;
     const doc = await pkg.xml(path);
     if (!doc) return null;
@@ -130,8 +154,8 @@ export async function packageToDocument(pkg: OoxmlPackage, opts: DocxImportOptio
     Object.assign(drawings, builder.drawings);
     drawingsOrder.push(...builder.drawingsOrder);
     const tables = Object.keys(builder.tableSource).length ? { tableSource: builder.tableSource } : {};
-    if (kind === 'header') headers[id] = { headerId: id, body, ...tables };
-    else footers[id] = { footerId: id, body, ...tables };
+    if (kind === 'header') headers[id] = { headerId: id, body, docxPath: path, ...tables };
+    else footers[id] = { footerId: id, body, docxPath: path, ...tables };
     return id;
   };
 
@@ -206,6 +230,7 @@ export async function packageToDocument(pkg: OoxmlPackage, opts: DocxImportOptio
   if (Object.keys(numbering.lists).length) document.lists = numbering.lists;
   if (Object.keys(headers).length) document.headers = headers;
   if (Object.keys(footers).length) document.footers = footers;
+  if (Object.keys(notes).length) document.notes = notes;
   if (Object.keys(tableSource).length) document.tableSource = tableSource;
   if (drawingsOrder.length) {
     document.drawings = drawings;
@@ -309,8 +334,22 @@ async function sectionSetup(
     else out.defaultFooterId = id;
   }
   if (child(sectPr, NS.w, 'titlePg')) out.useFirstPageHeaderFooter = 1;
+  const extras = extrasXml(sectPr, MODELLED_SECTPR);
+  if (extras) out.docxSectPr = extras;
   return out;
 }
+
+const MODELLED_SECTPR = new Set([
+  'headerReference',
+  'footerReference',
+  'type',
+  'pgSz',
+  'pgMar',
+  'pgNumType',
+  'cols',
+  'titlePg',
+  'sectPrChange',
+]);
 
 /** After inserting one character at `at`, every recorded offset at or past it moves by one. */
 function shiftOffsets(body: DocDocument['body'], at: number): void {
@@ -331,4 +370,5 @@ function shiftOffsets(body: DocDocument['body'], at: number): void {
     t.endIndex = bump(t.endIndex);
   }
   for (const r of body.docxRawBlocks ?? []) r.startIndex = bump(r.startIndex);
+  for (const b of body.docxRawCustomBlocks ?? []) b.startIndex = bump(b.startIndex);
 }

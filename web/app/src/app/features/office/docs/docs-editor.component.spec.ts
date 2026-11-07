@@ -3,6 +3,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Document as DocxDocument, Packer, Paragraph, TextRun } from 'docx';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
+import { OoxmlPackage } from '../shared/ooxml';
 import { DOCX_MIME } from '../docx/docx-export';
 import { docxToDocument } from '../docx/docx-import';
 import { DocDocument } from '../docx/univer-doc-types';
@@ -114,6 +115,18 @@ describe('DocsEditorComponent', () => {
     const back = await docxToDocument(await blob.arrayBuffer(), { id: 'x', name: 'x.docx' });
     expect(back.document.body.dataStream).toBe('Hello there\r\n');
     expect(back.document.body.textRuns).toEqual([{ st: 0, ed: 5, ts: { bl: 1 } }]);
+  });
+
+  it('saves over the original package, keeping parts it does not model', async () => {
+    const pkg = await OoxmlPackage.open(await (await docxBlob()).arrayBuffer());
+    pkg.put('customXml/item1.xml', '<root xmlns="urn:test">kept</root>');
+    const bytes = await pkg.save(DOCX_MIME);
+    await open(attachment(), new Blob([bytes as BlobPart], { type: DOCX_MIME }), false);
+    fake.state.data!.body.dataStream = 'Hello again\r\n';
+    const saved = await OoxmlPackage.open(await (await fixture.componentInstance.content()).arrayBuffer());
+    expect(await saved.text('customXml/item1.xml')).toBe('<root xmlns="urn:test">kept</root>');
+    expect(await saved.text('word/document.xml')).toContain('> again</w:t>');
+    expect(await saved.text('word/styles.xml')).toBe(await pkg.text('word/styles.xml'));
   });
 
   it('reports bytes it cannot read', async () => {

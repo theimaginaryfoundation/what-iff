@@ -73,6 +73,8 @@ export interface DocParagraph {
   styleId?: string;
   paragraphStyle?: DocParagraphStyle;
   bullet?: DocBullet;
+  /** Paragraph properties the model does not carry (tabs, frames, grid settings), as XML, written back as they were. */
+  docxPPr?: string;
 }
 
 export interface DocTextRun {
@@ -87,7 +89,7 @@ export interface DocCustomRange {
   startIndex: number;
   endIndex: number;
   rangeId: string;
-  /** CustomRangeType: 0 hyperlink, 1 field, 3 bookmark. */
+  /** CustomRangeType: 0 hyperlink, 1 field, 2 content control, 3 bookmark, 4 comment, 8 footnote, 9 endnote. */
   rangeType: number;
   wholeEntity?: boolean;
   properties?: Record<string, unknown>;
@@ -96,8 +98,10 @@ export interface DocCustomRange {
 export interface DocCustomBlock {
   startIndex: number;
   blockId: string;
-  /** BlockType.DRAWING is 0. */
+  /** BlockType: 0 drawing, 1 custom. */
   blockType?: number;
+  /** An opaque run (a shape, an equation, an embedded object) kept verbatim for export; Univer draws nothing for it. */
+  docxRawXml?: string;
 }
 
 export interface DocCustomTable {
@@ -127,12 +131,16 @@ export interface DocBody {
   paragraphs?: DocParagraph[];
   sectionBreaks?: DocSectionBreak[];
   customBlocks?: DocCustomBlock[];
+  /** Opaque runs on custom-block sentinels; they move with edits like custom blocks but are not drawings. */
+  docxRawCustomBlocks?: DocCustomBlock[];
   customRanges?: DocCustomRange[];
   tables?: DocCustomTable[];
   docxRawBlocks?: DocRawBlock[];
 }
 
 export interface DocPageSetup {
+  /** Section properties the model does not carry (page borders, line numbers, the document grid), as XML. */
+  docxSectPr?: string;
   /** 96-dpi pixels. */
   pageSize?: { width: number; height: number };
   /** PageOrientType: 0 portrait, 1 landscape. */
@@ -199,10 +207,23 @@ export interface DocHeaderFooter {
 
 export interface DocHeader extends DocHeaderFooter {
   headerId: string;
+  /** The part the header came from, so it is written back there. */
+  docxPath?: string;
 }
 
 export interface DocFooter extends DocHeaderFooter {
   footerId: string;
+  docxPath?: string;
+}
+
+/** IDocumentNote: a footnote or endnote story, laid out by Univer at the page bottom or the document end. */
+export interface DocNote {
+  noteId: string;
+  type: 'footnote' | 'endnote';
+  body: DocBody;
+  tableSource?: Record<string, DocTable>;
+  drawings?: Record<string, DocDrawing>;
+  drawingsOrder?: string[];
 }
 
 export interface DocTableCellBorder {
@@ -231,6 +252,8 @@ export interface DocTableCell {
   size?: { type: number; width: NumberUnit };
   /** VerticalAlignmentType: 2 top, 3 center, 4 bottom. */
   vAlign?: number;
+  /** Cell properties the model does not carry, as XML. */
+  docxTcPr?: string;
 }
 
 export interface DocTableRow {
@@ -239,6 +262,8 @@ export interface DocTableRow {
   trHeight: { val: NumberUnit; hRule: number };
   cantSplit?: 0 | 1;
   repeatHeaderRow?: 0 | 1;
+  /** Row properties the model does not carry, as XML. */
+  docxTrPr?: string;
 }
 
 export interface DocTable {
@@ -258,6 +283,8 @@ export interface DocTable {
   /** TableLayoutType: 0 auto fit, 1 fixed. */
   layout?: number;
   description?: string;
+  /** The table's original w:tblPr (table style, look, borders), written back whole. */
+  docxTblPr?: string;
 }
 
 export interface DocDrawing {
@@ -305,6 +332,8 @@ export interface DocDocument {
   tableSource?: Record<string, DocTable>;
   drawings?: Record<string, DocDrawing>;
   drawingsOrder?: string[];
+  /** Footnote and endnote stories by note id; the body refers to them through FOOTNOTE and ENDNOTE ranges. */
+  notes?: Record<string, DocNote>;
   settings?: { zoomRatio?: number };
   /** Plugin data, as Univer's resource manager loads it; the drawing plugin reads its pictures from here. */
   resources?: { name: string; data: string }[];
@@ -331,7 +360,9 @@ export const TOKEN = {
   CUSTOM_BLOCK: '\b',
 } as const;
 
-export const CUSTOM_RANGE = { HYPERLINK: 0, FIELD: 1, SDT: 2, BOOKMARK: 3 } as const;
+export const CUSTOM_RANGE = { HYPERLINK: 0, FIELD: 1, SDT: 2, BOOKMARK: 3, COMMENT: 4, CUSTOM: 5, FOOTNOTE: 8, ENDNOTE: 9 } as const;
+/** The character a footnote or endnote reference occupies in the stream; Univer draws the note's label over it. */
+export const NOTE_REFERENCE = '\uFFFC';
 export const DOC_HALIGN = { left: 1, center: 2, right: 3, justified: 4, distributed: 6 } as const;
 export const NAMED_STYLE = { title: 2, subtitle: 3, heading1: 4, heading2: 5, heading3: 6, heading4: 7, heading5: 8 } as const;
 export const GLYPH = {

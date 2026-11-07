@@ -15,7 +15,8 @@ interface Document extends UniverUnit<DocDocument> {
 
 /**
  * The document editor (ADR 0x043, office suite): Univer Docs over the document our docx
- * converter reads. Saving hands back a .docx.
+ * converter reads. Saving hands back a .docx written over the original package (patch mode), so
+ * every part the editor does not model is kept as it was.
  */
 @Component({
   selector: 'app-docs-editor',
@@ -28,13 +29,18 @@ interface Document extends UniverUnit<DocDocument> {
 export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document> {
   private readonly load = inject(UNIVER_DOCS_LOADER);
   readonly noun = 'document';
+  /** The bytes the open document came from; the exporter patches them rather than writing from scratch. */
+  private original: ArrayBuffer | null = null;
 
   protected loadKit(): Promise<UniverKit> {
     return this.load(this.document);
   }
 
   protected async parse(blob: Blob, file: FileAttachment): Promise<{ data: DocDocument; report: FidelityReport }> {
-    const result = await docxToDocument(await blob.arrayBuffer(), { id: `doc-${file.id}`, name: file.name });
+    const bytes = await blob.arrayBuffer();
+    this.original = null;
+    const result = await docxToDocument(bytes, { id: `doc-${file.id}`, name: file.name });
+    this.original = bytes;
     return { data: result.document, report: result.report };
   }
 
@@ -47,7 +53,7 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
   }
 
   protected async serialize(data: DocDocument): Promise<Blob> {
-    const { bytes } = await documentToDocx(data);
+    const { bytes } = await documentToDocx(data, this.original ?? undefined);
     return new Blob([bytes as BlobPart], { type: DOCX_MIME });
   }
 }
