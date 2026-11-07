@@ -9,6 +9,7 @@ import { FUniver, UNIVER_SHEETS_LOADER } from '../univer/univer-loader';
 import { UniverWorkbook } from '../xlsx/univer-sheet-types';
 import { sheetToCsv, workbookToXlsx } from '../xlsx/xlsx-export';
 import { delimitedTextToWorkbook, xlsxToWorkbook } from '../xlsx/xlsx-import';
+import { PreservedParts } from '../xlsx/xlsx-preserve';
 
 export { MUTATION } from '../univer/univer-editor-base';
 
@@ -34,6 +35,8 @@ export class SheetsEditorComponent extends UniverEditorBase<UniverWorkbook, Work
   private readonly load = inject(UNIVER_SHEETS_LOADER);
   readonly noun = 'spreadsheet';
   readonly isCsv = computed(() => previewKindFor(this.file()) === 'csv');
+  /** Charts and pivot tables of the open file, written back on save. */
+  private preserved: PreservedParts | null = null;
 
   protected loadKit(): Promise<UniverKit> {
     return this.load(this.document);
@@ -41,10 +44,13 @@ export class SheetsEditorComponent extends UniverEditorBase<UniverWorkbook, Work
 
   protected async parse(blob: Blob, file: FileAttachment): Promise<{ data: UniverWorkbook; report: FidelityReport }> {
     const id = `wb-${file.id}`;
-    const result =
-      previewKindFor(file) === 'csv'
-        ? delimitedTextToWorkbook(await blob.text(), csvDelimiterFor(file), { id, name: file.name })
-        : await xlsxToWorkbook(await blob.arrayBuffer(), { id, name: file.name });
+    this.preserved = null;
+    if (previewKindFor(file) === 'csv') {
+      const result = delimitedTextToWorkbook(await blob.text(), csvDelimiterFor(file), { id, name: file.name });
+      return { data: result.workbook, report: result.report };
+    }
+    const result = await xlsxToWorkbook(await blob.arrayBuffer(), { id, name: file.name });
+    this.preserved = result.preserved ?? null;
     return { data: result.workbook, report: result.report };
   }
 
@@ -60,7 +66,7 @@ export class SheetsEditorComponent extends UniverEditorBase<UniverWorkbook, Work
       const first = data.sheets[data.sheetOrder[0]];
       return new Blob([sheetToCsv(first, csvDelimiterFor(file))], { type: file.file_type || 'text/csv' });
     }
-    const { bytes } = await workbookToXlsx(data);
+    const { bytes } = await workbookToXlsx(data, this.preserved);
     return new Blob([bytes as BlobPart], { type: XLSX_MIME });
   }
 }

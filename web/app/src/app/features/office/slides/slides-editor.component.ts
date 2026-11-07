@@ -5,6 +5,7 @@ import {
   DestroyRef,
   ElementRef,
   afterNextRender,
+  afterRenderEffect,
   computed,
   effect,
   inject,
@@ -144,9 +145,11 @@ export class SlidesEditorComponent implements FileEditor {
   private resizeObserver: ResizeObserver | null = null;
 
   constructor() {
-    afterNextRender(() => {
-      this.rendered.set(true);
-      this.observeStage();
+    afterNextRender(() => this.rendered.set(true));
+    // The stage exists only once a deck is shown; watch it from then on and fit the slide to it.
+    afterRenderEffect(() => {
+      const stage = this.stage()?.nativeElement ?? null;
+      if (stage !== this.observedStage) this.observeStage(stage);
     });
     effect(() => {
       if (!this.rendered()) return;
@@ -211,11 +214,17 @@ export class SlidesEditorComponent implements FileEditor {
     }
   }
 
-  private observeStage(): void {
-    const stage = this.stage()?.nativeElement;
-    if (!stage || typeof ResizeObserver === 'undefined') return;
-    this.resizeObserver = new ResizeObserver(() => this.fit());
-    this.resizeObserver.observe(stage);
+  private observedStage: HTMLElement | null = null;
+
+  private observeStage(stage: HTMLElement | null): void {
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    this.observedStage = stage;
+    if (!stage) return;
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => this.fit());
+      this.resizeObserver.observe(stage);
+    }
     this.fit();
   }
 
@@ -232,6 +241,11 @@ export class SlidesEditorComponent implements FileEditor {
 
   zoomBy(factor: number): void {
     this.zoom.set(Math.max(0.1, Math.min(4, this.scale() * factor)));
+  }
+
+  setZoomPercent(percent: number): void {
+    if (!Number.isFinite(percent)) return;
+    this.zoom.set(Math.max(0.1, Math.min(4, percent / 100)));
   }
 
   zoomToFit(): void {

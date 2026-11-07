@@ -1,7 +1,9 @@
 import { NgStyle, NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, computed, inject, input, output, signal } from '@angular/core';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 
 import { Border, ChartElement, Fill, Paragraph, Slide, SlideElement, TableCell, TextBody } from '../pptx/deck-model';
+import { chartSvgDataUrl } from '../shared/chart-svg';
 import { isLinePreset, shapePath } from './shape-paths';
 import { domToParagraphs, paragraphsToHtml } from './text-dom';
 
@@ -33,6 +35,7 @@ export interface ElementGeometry {
 })
 export class SlideCanvasComponent {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly sanitizer = inject(DomSanitizer);
 
   readonly slide = input.required<Slide>();
   readonly size = input.required<{ width: number; height: number }>();
@@ -118,8 +121,8 @@ export class SlideCanvasComponent {
   svgFill(el: SlideElement): string {
     if (el.kind !== 'shape' || !el.fill) return 'none';
     if (el.fill.type === 'color') return el.fill.color;
-    if (el.fill.type === 'gradient') return el.fill.stops[0]?.color ?? 'none';
-    return '#CCCCCC';
+    if (el.fill.type === 'gradient') return `url(#grad-${el.id})`;
+    return 'none';
   }
 
   strokeOf(border: Border | null): { color: string; width: number; dash: string | null } {
@@ -127,8 +130,23 @@ export class SlideCanvasComponent {
     return { color: border.color, width: border.width, dash: border.style === 'dashed' ? '6 4' : border.style === 'dotted' ? '2 3' : null };
   }
 
-  textHtml(body: TextBody | null): string {
-    return body ? paragraphsToHtml(body.paragraphs) : '';
+  /**
+   * The text as HTML. It is built from the model (text escaped, styles from known fields), so
+   * it bypasses the sanitiser, which would otherwise strip the inline styles that carry colours
+   * and sizes.
+   */
+  textHtml(body: TextBody | null): SafeHtml {
+    return this.sanitizer.bypassSecurityTrustHtml(body ? paragraphsToHtml(body.paragraphs) : '');
+  }
+
+  imageFillOf(el: SlideElement): { src: string; opacity: number } | null {
+    if (el.kind !== 'shape' || el.fill?.type !== 'image') return null;
+    return { src: el.fill.src, opacity: el.fill.opacity ?? 1 };
+  }
+
+  gradientOf(el: SlideElement): { id: string; angle: number; stops: { pos: number; color: string }[] } | null {
+    if (el.kind !== 'shape' || el.fill?.type !== 'gradient') return null;
+    return { id: `grad-${el.id}`, angle: el.fill.angle, stops: el.fill.stops };
   }
 
   textStyle(body: TextBody): Record<string, string> {
@@ -162,75 +180,18 @@ export class SlideCanvasComponent {
 
   // --- charts (a plain rendering; the data is what gets saved) ------------------------------------
 
-  chartBars(el: ChartElement, g: ElementGeometry): { x: number; y: number; w: number; h: number; color: string }[] {
-    const series = el.series;
-    const n = Math.max(1, ...series.map(s => s.values.length));
-    const max = Math.max(1, ...series.flatMap(s => s.values));
-    const out: { x: number; y: number; w: number; h: number; color: string }[] = [];
-    const pad = 8;
-    const plotW = g.width - pad * 2;
-    const plotH = g.height - pad * 2;
-    const groupW = plotW / n;
-    const barW = (groupW * 0.8) / Math.max(1, series.length);
-    series.forEach((s, si) => {
-      s.values.forEach((v, i) => {
-        const h = (Math.max(0, v) / max) * plotH;
-        out.push({
-          x: pad + i * groupW + groupW * 0.1 + si * barW,
-          y: pad + plotH - h,
-          w: barW,
-          h,
-          color: el.colors[si % el.colors.length] ?? '#4472C4',
-        });
-      });
-    });
-    return out;
-  }
-
-  chartLines(el: ChartElement, g: ElementGeometry): { points: string; color: string }[] {
-    const pad = 8;
-    const plotW = g.width - pad * 2;
-    const plotH = g.height - pad * 2;
-    const max = Math.max(1, ...el.series.flatMap(s => s.values));
-    return el.series.map((s, si) => ({
-      color: el.colors[si % el.colors.length] ?? '#4472C4',
-      points: s.values
-        .map(
-          (v, i) =>
-            `${pad + (s.values.length > 1 ? (i / (s.values.length - 1)) * plotW : plotW / 2)},${pad + plotH - (Math.max(0, v) / max) * plotH}`,
-        )
-        .join(' '),
-    }));
-  }
-
-  chartSlices(el: ChartElement, g: ElementGeometry): { d: string; color: string }[] {
-    const values = el.series[0]?.values ?? [];
-    const total = values.reduce((a, b) => a + Math.max(0, b), 0) || 1;
-    const cx = g.width / 2;
-    const cy = g.height / 2;
-    const radius = Math.max(1, Math.min(g.width, g.height) / 2 - 4);
-    const inner = el.chartType === 'doughnut' ? radius * ((el.holeSize ?? 50) / 100) : 0;
-    let angle = -Math.PI / 2;
-    return values.map((v, i) => {
-      const sweep = (Math.max(0, v) / total) * Math.PI * 2;
-      const a0 = angle;
-      const a1 = angle + sweep;
-      angle = a1;
-      const large = sweep > Math.PI ? 1 : 0;
-      const p = (a: number, rr: number) => `${(cx + rr * Math.cos(a)).toFixed(2)},${(cy + rr * Math.sin(a)).toFixed(2)}`;
-      const d = inner
-        ? `M${p(a0, radius)}A${radius},${radius} 0 ${large},1 ${p(a1, radius)}L${p(a1, inner)}A${inner},${inner} 0 ${large},0 ${p(a0, inner)}Z`
-        : `M${cx},${cy}L${p(a0, radius)}A${radius},${radius} 0 ${large},1 ${p(a1, radius)}Z`;
-      return { d, color: el.colors[i % el.colors.length] ?? '#4472C4' };
-    });
-  }
-
-  isPie(el: ChartElement): boolean {
-    return el.chartType === 'pie' || el.chartType === 'doughnut';
-  }
-
-  isLineChart(el: ChartElement): boolean {
-    return el.chartType === 'line' || el.chartType === 'area' || el.chartType === 'scatter' || el.chartType === 'radar';
+  chartImage(el: ChartElement, g: ElementGeometry): string {
+    return chartSvgDataUrl(
+      {
+        type: el.chartType,
+        barDirection: el.barDirection,
+        series: el.series,
+        colors: el.colors,
+        holeSize: el.holeSize,
+        grouping: el.grouping,
+      },
+      { width: Math.max(40, g.width), height: Math.max(30, g.height) },
+    );
   }
 
   // --- interaction -------------------------------------------------------------------------------

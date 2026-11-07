@@ -58,7 +58,7 @@ describe('SlidesEditorComponent', () => {
     expect(fixture.componentInstance.state()).toBe('ready');
     expect(el.querySelectorAll('.slides__thumb')).toHaveLength(2);
     expect(el.querySelector('.slides__toolbar')).toBeNull();
-    expect(el.querySelector('.slides__pager')?.textContent).toContain('1 / 2');
+    expect(el.querySelector('.slides__status-text')?.textContent).toContain('Slide 1 of 2');
     expect(el.querySelector('.slides__canvas .slide__text')?.textContent).toBe('Title one');
     expect(el.querySelector('.slides__notes-text')?.textContent).toBe('Notes for one');
     key(el, 'ArrowRight');

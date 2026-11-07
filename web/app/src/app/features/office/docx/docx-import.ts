@@ -121,7 +121,7 @@ export async function packageToDocument(pkg: OoxmlPackage, opts: DocxImportOptio
     const doc = await pkg.xml(path);
     if (!doc) return null;
     const partRels = await pkg.rels(path);
-    const builder = new BodyBuilder(baseContext(path, partRels, kind === 'header' ? 'Header' : 'Footer'));
+    const builder = new BodyBuilder({ ...baseContext(path, partRels, kind === 'header' ? 'Header' : 'Footer'), headerFooter: true });
     builder.blocks(doc.documentElement);
     const body = builder.finish();
     const id = nextId(kind === 'header' ? 'h' : 'f');

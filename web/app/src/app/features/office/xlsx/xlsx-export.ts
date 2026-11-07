@@ -22,6 +22,7 @@ import {
   readResource,
 } from './univer-sheet-types';
 import { serialToDate } from './xlsx-import';
+import { PreservedParts, hasPreservedParts, injectPreservedParts } from './xlsx-preserve';
 import { UniverStyle, colorToArgb, styleToExcel } from './xlsx-styles';
 
 export interface XlsxExportResult {
@@ -29,15 +30,24 @@ export interface XlsxExportResult {
   report: FidelityReport;
 }
 
-/** Writes a Univer workbook snapshot as an .xlsx; the mirror of xlsxToWorkbook. */
-export async function workbookToXlsx(workbook: UniverWorkbook): Promise<XlsxExportResult> {
+/**
+ * Writes a Univer workbook snapshot as an .xlsx; the mirror of xlsxToWorkbook. With `preserved`
+ * (from the import), the original's charts and pivot tables go back into the file.
+ */
+export async function workbookToXlsx(workbook: UniverWorkbook, preserved?: PreservedParts | null): Promise<XlsxExportResult> {
   const fidelity = new FidelityCollector();
-  const excel = workbookToExcel(workbook, fidelity);
+  const excel = workbookToExcel(workbook, fidelity, preserved ?? undefined);
   const buffer = await excel.xlsx.writeBuffer();
-  return { bytes: new Uint8Array(buffer as ArrayBuffer), report: fidelity.report() };
+  let bytes: Uint8Array = new Uint8Array(buffer as ArrayBuffer);
+  if (preserved && hasPreservedParts(preserved)) bytes = await injectPreservedParts(bytes, preserved);
+  return { bytes, report: fidelity.report() };
 }
 
-export function workbookToExcel(workbook: UniverWorkbook, fidelity = new FidelityCollector()): ExcelJS.Workbook {
+export function workbookToExcel(
+  workbook: UniverWorkbook,
+  fidelity = new FidelityCollector(),
+  preserved?: PreservedParts,
+): ExcelJS.Workbook {
   const excel = new ExcelJS.Workbook();
   const validation = readResource<Record<string, UniverDataValidationRule[]>>(workbook, RESOURCE_DATA_VALIDATION) ?? {};
   const formatting = readResource<Record<string, UniverCfRule[]>>(workbook, RESOURCE_CONDITIONAL_FORMATTING) ?? {};
@@ -53,7 +63,13 @@ export function workbookToExcel(workbook: UniverWorkbook, fidelity = new Fidelit
     exportDataValidations(ws, validation[sheetId] ?? []);
     exportConditionalFormatting(ws, formatting[sheetId] ?? [], fidelity);
     exportNotes(ws, notes[sheetId] ?? {});
-    exportImages(ws, excel, drawings[sheetId], sheet, fidelity);
+    // A sheet whose original drawing holds charts gets that drawing back whole on save.
+    if (preserved?.bySheet[sheet.name]?.drawing) {
+      if ((drawings[sheetId]?.order ?? []).some(id => !id.startsWith('chart-')))
+        fidelity.warn('Pictures on a sheet with charts are saved as they were in the original', sheet.name);
+    } else {
+      exportImages(ws, excel, drawings[sheetId], sheet, fidelity);
+    }
     const filter = filters[sheetId];
     if (filter?.ref) ws.autoFilter = rangeA1(filter.ref);
   }
@@ -295,6 +311,8 @@ function exportImages(
   for (const id of drawings.order) {
     const image = drawings.data[id];
     if (!image) continue;
+    // Charts drawn from their data (xlsx-import) are pictures of the real chart, which goes back as itself.
+    if (id.startsWith('chart-')) continue;
     if (image.drawingType !== 0 || image.imageSourceType !== 'BASE64' || !image.source.startsWith('data:')) {
       fidelity.drop('Shapes and linked images', sheet.name);
       continue;

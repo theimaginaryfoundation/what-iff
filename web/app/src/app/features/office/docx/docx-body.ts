@@ -43,6 +43,8 @@ import { ParagraphProps, listTypeForNum, paragraphPropsFromPPr, resolveTextStyle
 
 export interface BodyContext {
   unitId: string;
+  /** Header and footer drawings are repeated on every page; Univer keeps one transform per page. */
+  headerFooter?: boolean;
   /** The part the content came from, for relationship lookups. */
   partPath: string;
   rels: Map<string, Relationship>;
@@ -198,6 +200,8 @@ export class BodyBuilder {
     if (el.namespaceURI !== NS.w) {
       if (el.namespaceURI === 'http://schemas.openxmlformats.org/officeDocument/2006/math')
         this.ctx.fidelity.drop('Equations', this.ctx.where);
+      else if (el.namespaceURI === NS.mc && el.localName === 'AlternateContent')
+        this.inlineContent(child(el, NS.mc, 'Choice') ?? child(el, NS.mc, 'Fallback') ?? el, baseTs);
       return;
     }
     switch (el.localName) {
@@ -241,7 +245,7 @@ export class BodyBuilder {
     const charStyle = sId ? resolveTextStyle(this.ctx.styles, sId) : {};
     const direct = textStyleFromRPr(rPr);
     const ts = mergeTs(baseTs, charStyle, direct);
-    for (const el of elementChildren(r)) {
+    for (const el of this.runChildren(r)) {
       if (el.namespaceURI !== NS.w) continue;
       switch (el.localName) {
         case 't':
@@ -294,6 +298,18 @@ export class BodyBuilder {
           break;
       }
     }
+  }
+
+  /** A run's children, looking through mc:AlternateContent (Word wraps newer drawings in it). */
+  private runChildren(r: Element): Element[] {
+    const out: Element[] = [];
+    for (const el of elementChildren(r)) {
+      if (el.namespaceURI === NS.mc && el.localName === 'AlternateContent') {
+        const choice = child(el, NS.mc, 'Choice') ?? child(el, NS.mc, 'Fallback');
+        if (choice) out.push(...elementChildren(choice));
+      } else out.push(el);
+    }
+    return out;
   }
 
   /** A soft line break has no Univer token, so the paragraph is split and its style carried on. */
@@ -481,6 +497,10 @@ export class BodyBuilder {
         angle: 0,
       };
     }
+    if (this.ctx.headerFooter) {
+      drawing.isMultiTransform = 1;
+      drawing.transforms = drawing.transform ? [drawing.transform] : [];
+    }
     this.flushRun();
     const block: DocCustomBlock = { startIndex: this.length, blockId: drawingId, blockType: 0 };
     this.body.customBlocks!.push(block);
@@ -495,7 +515,7 @@ export class BodyBuilder {
     this.flushRun();
     const tblPr = child(tbl, NS.w, 'tblPr');
     const grid = children(child(tbl, NS.w, 'tblGrid'), NS.w, 'gridCol').map(c => twipsToPx(num(attr(c, NS.w, 'w')) ?? 1440));
-    const rowsEl = children(tbl, NS.w, 'tr');
+    const rowsEl = tableRows(tbl);
     const columnCount = Math.max(grid.length, ...rowsEl.map(tr => gridWidthOfRow(tr)), 1);
     while (grid.length < columnCount) grid.push(96);
     const tableId = this.ctx.nextId('tbl');
@@ -557,7 +577,7 @@ export class BodyBuilder {
       let col = 0;
       const gridBefore = num(wval(child(trPr, NS.w, 'gridBefore'))) ?? 0;
       for (let i = 0; i < gridBefore && col < columnCount; i++, col++) this.coveredCell(row);
-      for (const tc of children(tr, NS.w, 'tc')) {
+      for (const tc of tableCells(tr)) {
         if (col >= columnCount) break;
         const tcPr = child(tc, NS.w, 'tcPr');
         const span = Math.max(1, num(wval(child(tcPr, NS.w, 'gridSpan'))) ?? 1);
@@ -698,8 +718,30 @@ function sameTs(a: DocTextStyle | undefined, b: DocTextStyle | undefined): boole
 function gridWidthOfRow(tr: Element): number {
   const trPr = child(tr, NS.w, 'trPr');
   let n = (num(wval(child(trPr, NS.w, 'gridBefore'))) ?? 0) + (num(wval(child(trPr, NS.w, 'gridAfter'))) ?? 0);
-  for (const tc of children(tr, NS.w, 'tc')) n += Math.max(1, num(wval(child(child(tc, NS.w, 'tcPr'), NS.w, 'gridSpan'))) ?? 1);
+  for (const tc of tableCells(tr)) n += Math.max(1, num(wval(child(child(tc, NS.w, 'tcPr'), NS.w, 'gridSpan'))) ?? 1);
   return n;
+}
+
+/** Word wraps rows and cells in content controls (w:sdt/w:sdtContent) and tracked changes; look through them. */
+function unwrapped(parent: Element, localName: 'tr' | 'tc'): Element[] {
+  const out: Element[] = [];
+  for (const el of elementChildren(parent)) {
+    if (el.namespaceURI !== NS.w) continue;
+    if (el.localName === localName) out.push(el);
+    else if (el.localName === 'sdt') {
+      const content = child(el, NS.w, 'sdtContent');
+      if (content) out.push(...unwrapped(content, localName));
+    } else if (el.localName === 'ins' || el.localName === 'customXml') out.push(...unwrapped(el, localName));
+  }
+  return out;
+}
+
+function tableRows(tbl: Element): Element[] {
+  return unwrapped(tbl, 'tr');
+}
+
+function tableCells(tr: Element): Element[] {
+  return unwrapped(tr, 'tc');
 }
 
 function coveredCellOf(margin: DocTable['cellMargin'] | undefined): DocTableCell {

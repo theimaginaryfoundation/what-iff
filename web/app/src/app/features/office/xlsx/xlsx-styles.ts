@@ -1,5 +1,7 @@
 import type ExcelJS from 'exceljs';
 
+import { ExcelThemeColors, parseThemeColors, resolveExcelColor } from './xlsx-theme';
+
 /**
  * Cell style mapping between ExcelJS (the OOXML view of a cell) and Univer's IStyleData, both
  * ways. Numbers for enums are Univer's own values (HorizontalAlign, VerticalAlign, WrapStrategy,
@@ -74,12 +76,13 @@ const BORDER_FROM_UNIVER: Record<number, ExcelJS.BorderStyle> = Object.fromEntri
   Object.entries(BORDER_TO_UNIVER).map(([k, v]) => [v, k as ExcelJS.BorderStyle]),
 );
 
-/** "FFRRGGBB" or "RRGGBB" from ExcelJS to "#RRGGBB"; theme and indexed colours have no rgb and map to null. */
-export function colorFromArgb(color: Partial<ExcelJS.Color> | undefined): UniverColor | null {
-  const argb = color?.argb;
-  if (!argb || argb.length < 6) return null;
-  const rgb = argb.slice(-6).toUpperCase();
-  return { rgb: `#${rgb}` };
+/** The Office defaults, for callers that have no workbook theme to hand. */
+export const DEFAULT_THEME: ExcelThemeColors = parseThemeColors(null);
+
+/** "#RRGGBB" for an ExcelJS colour: literal ARGB, a theme reference with its tint, or an indexed colour. */
+export function colorFromArgb(color: Partial<ExcelJS.Color> | undefined, theme: ExcelThemeColors = DEFAULT_THEME): UniverColor | null {
+  const rgb = resolveExcelColor(color as { argb?: string; theme?: number; tint?: number; indexed?: number } | undefined, theme);
+  return rgb ? { rgb } : null;
 }
 
 export function colorToArgb(color: UniverColor | null | undefined): Partial<ExcelJS.Color> | undefined {
@@ -91,7 +94,7 @@ export function colorToArgb(color: UniverColor | null | undefined): Partial<Exce
   return undefined;
 }
 
-export function styleFromExcel(style: Partial<ExcelJS.Style> | undefined): UniverStyle | null {
+export function styleFromExcel(style: Partial<ExcelJS.Style> | undefined, theme: ExcelThemeColors = DEFAULT_THEME): UniverStyle | null {
   if (!style) return null;
   const out: UniverStyle = {};
   const font = style.font;
@@ -103,14 +106,14 @@ export function styleFromExcel(style: Partial<ExcelJS.Style> | undefined): Unive
     if (font.underline)
       out.ul = { s: 1, t: font.underline === 'double' || font.underline === 'doubleAccounting' ? UNDERLINE_DOUBLE : UNDERLINE_SINGLE };
     if (font.strike) out.st = { s: 1 };
-    const cl = colorFromArgb(font.color);
+    const cl = colorFromArgb(font.color, theme);
     if (cl) out.cl = cl;
     if (font.vertAlign === 'superscript') out.va = BASELINE.superscript;
     if (font.vertAlign === 'subscript') out.va = BASELINE.subscript;
   }
   const fill = style.fill;
   if (fill && fill.type === 'pattern' && fill.pattern !== 'none') {
-    const bg = colorFromArgb(fill.fgColor) ?? colorFromArgb(fill.bgColor);
+    const bg = colorFromArgb(fill.fgColor, theme) ?? colorFromArgb(fill.bgColor, theme);
     if (bg) out.bg = bg;
   }
   if (style.numFmt) out.n = { pattern: style.numFmt };
@@ -127,7 +130,7 @@ export function styleFromExcel(style: Partial<ExcelJS.Style> | undefined): Unive
   if (bd) {
     const side = (b: Partial<ExcelJS.Border> | undefined): UniverBorderSide | null => {
       if (!b?.style) return null;
-      return { s: BORDER_TO_UNIVER[b.style] ?? 1, cl: colorFromArgb(b.color) ?? { rgb: '#000000' } };
+      return { s: BORDER_TO_UNIVER[b.style] ?? 1, cl: colorFromArgb(b.color, theme) ?? { rgb: '#000000' } };
     };
     const t = side(bd.top),
       r = side(bd.right),

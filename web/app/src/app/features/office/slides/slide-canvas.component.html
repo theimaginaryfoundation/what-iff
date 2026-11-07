@@ -50,6 +50,30 @@
       @case ("shape") {
         @let stroke = strokeOf(el.border);
         <svg class="slide__svg" [attr.viewBox]="viewBoxOf(el, g)" preserveAspectRatio="none" aria-hidden="true">
+          @if (gradientOf(el); as grad) {
+            <defs>
+              <linearGradient [attr.id]="grad.id" [attr.gradientTransform]="'rotate(' + grad.angle + ' 0.5 0.5)'">
+                @for (stop of grad.stops; track $index) {
+                  <stop [attr.offset]="stop.pos + '%'" [attr.stop-color]="stop.color" />
+                }
+              </linearGradient>
+            </defs>
+          }
+          @if (imageFillOf(el); as img) {
+            <defs>
+              <clipPath [attr.id]="'clip-' + el.id">
+                <path [attr.d]="pathOf(el, g)" />
+              </clipPath>
+            </defs>
+            <image
+              [attr.href]="img.src"
+              [attr.clip-path]="'url(#clip-' + el.id + ')'"
+              width="100%"
+              height="100%"
+              preserveAspectRatio="xMidYMid slice"
+              [attr.opacity]="img.opacity"
+            />
+          }
           <path
             [attr.d]="pathOf(el, g)"
             [attr.fill]="svgFill(el)"
@@ -123,33 +147,7 @@
         </table>
       }
       @case ("chart") {
-        <svg
-          class="slide__svg"
-          [attr.viewBox]="'0 0 ' + g.width + ' ' + g.height"
-          preserveAspectRatio="none"
-          role="img"
-          [attr.aria-label]="el.chartType + ' chart'"
-        >
-          @if (isPie(el)) {
-            @for (slice of chartSlices(el, g); track $index) {
-              <path [attr.d]="slice.d" [attr.fill]="slice.color" />
-            }
-          } @else if (isLineChart(el)) {
-            @for (line of chartLines(el, g); track $index) {
-              <polyline
-                [attr.points]="line.points"
-                fill="none"
-                [attr.stroke]="line.color"
-                stroke-width="2"
-                vector-effect="non-scaling-stroke"
-              />
-            }
-          } @else {
-            @for (bar of chartBars(el, g); track $index) {
-              <rect [attr.x]="bar.x" [attr.y]="bar.y" [attr.width]="bar.w" [attr.height]="bar.h" [attr.fill]="bar.color" />
-            }
-          }
-        </svg>
+        <img class="slide__chart" [src]="chartImage(el, g)" [alt]="el.chartType + ' chart'" draggable="false" />
       }
       @case ("group") {
         @for (child of el.children; track child.id) {

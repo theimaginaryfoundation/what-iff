@@ -7,6 +7,7 @@ import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { renderLatexMath } from '../../../core/utils/latex-math.helpers';
 import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 import { MONACO_LOADER, monacoLanguageFor } from '../editors/monaco/monaco-loader';
+import { appTheme, monacoThemeFor } from '../editors/monaco/monaco-themes';
 import {
   csvDelimiterFor,
   DecodedText,
@@ -99,6 +100,8 @@ export class TextViewerComponent {
       const monaco = await this.loadMonaco(this.document);
       const language = monacoLanguageFor(monaco, this.file().name);
       if (language === 'plaintext' || generation !== this.generation) return;
+      // colorize paints with the active theme; follow the app's.
+      monaco.editor.setTheme(monacoThemeFor(appTheme(this.document)));
       const html = await monaco.editor.colorize(text, language, { tabSize: 4 });
       // Monaco escapes the text and emits only spans with token classes; nothing from the file
       // reaches the DOM as markup.
