@@ -1,8 +1,9 @@
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, inject, input, output, signal } from '@angular/core';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { MarkdownModule } from 'ngx-markdown';
 
 import { NotebookOutput } from './nbformat';
+import { NotebookInteractiveFrameComponent } from './notebook-interactive-frame.component';
 import { MAX_OUTPUT_CHARS, OutputView, outputViews } from './notebook-outputs';
 
 interface ShownOutput {
@@ -11,18 +12,31 @@ interface ShownOutput {
   trusted?: SafeHtml;
   text?: string;
   truncated?: boolean;
+  /** The frame's document, when the reader has allowed it to run. */
+  frame?: string;
+  /** Script-driven output the reader can ask to see. */
+  offer?: boolean;
 }
 
 /** A code cell's outputs. Encapsulation is off because the sanitized HTML inside needs these styles too. */
 @Component({
   selector: 'app-notebook-output',
   standalone: true,
-  imports: [MarkdownModule],
+  imports: [MarkdownModule, NotebookInteractiveFrameComponent],
   encapsulation: ViewEncapsulation.None,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @for (item of shown(); track $index) {
+      @if (item.frame) {
+        <app-notebook-interactive-frame class="nb-output" [document]="item.frame" />
+      }
       @switch (item.view.kind) {
+        @case ('interactive') {
+          <!-- Nothing static to show; the frame or the offer below stands in. -->
+        }
+        @case ('widget') {
+          <p class="nb-output nb-output--note">This widget needs Python running. Open the notebook in Run to use it.</p>
+        }
         @case ('html') {
           <div class="nb-output nb-output--html" [innerHTML]="item.trusted"></div>
         }
@@ -47,6 +61,9 @@ interface ShownOutput {
         @default {
           <pre class="nb-output nb-output--text" [class.nb-output--stderr]="item.view.kind === 'text' && item.view.stderr">{{ item.text }}</pre>
         }
+      }
+      @if (item.offer) {
+        <button type="button" class="nb-output__more" (click)="allow($event)">Show interactive output (runs this notebook's scripts)</button>
       }
       @if (item.truncated) {
         <button type="button" class="nb-output__more" (click)="showAll.set(true)">Show all output</button>
@@ -104,7 +121,11 @@ interface ShownOutput {
         color: var(--text-secondary);
         font-style: italic;
       }
+      app-notebook-interactive-frame {
+        display: block;
+      }
       .nb-output__more {
+        display: block;
         border: 1px solid var(--border);
         border-radius: 0.4rem;
         color: var(--text-primary);
@@ -135,11 +156,25 @@ export class NotebookOutputComponent {
   private readonly sanitizer = inject(DomSanitizer);
 
   readonly outputs = input.required<readonly NotebookOutput[]>();
+  /** The notebook's library-loading outputs, included in each frame. */
+  readonly loaders = input('');
+  /** The reader has allowed this notebook's script-driven output to run. */
+  readonly interactive = input(false);
+  readonly allowInteractive = output<void>();
   readonly showAll = signal(false);
   // A computed, so the trusted values only change with the outputs and Angular leaves the DOM alone.
-  readonly shown = computed<ShownOutput[]>(() => outputViews(this.outputs()).map(view => this.show(view)));
+  readonly shown = computed<ShownOutput[]>(() => outputViews(this.outputs(), this.loaders()).map(view => this.show(view)));
+
+  allow(event: Event): void {
+    event.stopPropagation();
+    this.allowInteractive.emit();
+  }
 
   private show(view: OutputView): ShownOutput {
+    if (view.kind === 'interactive') {
+      if (this.interactive()) return { view, frame: view.document };
+      return { ...(view.fallback ? this.show(view.fallback) : { view }), offer: true };
+    }
     if (view.kind === 'html' || view.kind === 'ansi') {
       // Both are safe by construction: sanitizeOutputHtml, or escaped text in fixed spans.
       return { view, trusted: this.sanitizer.bypassSecurityTrustHtml(view.html) };

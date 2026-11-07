@@ -2,3 +2,5 @@
 jupyterlite-core==0.8.7
 jupyterlite-pyodide-kernel==0.8.7
 jupyterlab==4.6.6
+# Live ipywidgets in the Lab UI.
+jupyterlab_widgets==3.0.17

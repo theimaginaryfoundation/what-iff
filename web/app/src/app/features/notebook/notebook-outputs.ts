@@ -4,8 +4,9 @@ import { NotebookOutput, isDataOutput, isErrorOutput, isStreamOutput, joinSource
 
 /**
  * What a cell's outputs show (ADR 0x043 §8), chosen by MIME type from the richest representation we
- * can display safely. Notebooks come from anywhere: scripts never run here, HTML is sanitized, and
- * SVG is shown through an image, where it cannot script.
+ * can display safely. Notebooks come from anywhere: HTML is sanitized, and SVG is shown through an
+ * image, where it cannot script. Script-driven output runs only in a sandboxed frame with an opaque
+ * origin, and only after the reader asks (see notebook-interactive-frame.component.ts).
  */
 export type OutputView =
   | { kind: 'text'; text: string; stderr?: boolean }
@@ -14,18 +15,32 @@ export type OutputView =
   | { kind: 'image'; src: string; width?: number; height?: number }
   | { kind: 'markdown'; text: string }
   | { kind: 'json'; text: string }
+  | { kind: 'interactive'; document: string; fallback: OutputView | null }
+  | { kind: 'widget' }
   | { kind: 'unsupported'; mime: string };
 
 /** The order Jupyter prefers, among what we can show; scripted HTML steps aside when there is a fallback. */
 const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'];
 const SVG = 'image/svg+xml';
+const WIDGET_VIEW = 'application/vnd.jupyter.widget-view+json';
+const PLOTLY = 'application/vnd.plotly.v1+json';
+const BOKEH_LOAD = 'application/vnd.bokehjs_load.v0+json';
+const JAVASCRIPT = 'application/javascript';
+const CDN = 'https://cdn.jsdelivr.net/npm';
+const PLOTLY_JS = `${CDN}/plotly.js-dist-min@3.7.0/plotly.min.js`;
+const REQUIRE_JS = `${CDN}/requirejs@2.3.8/require.js`;
+const VEGA_STACKS: Record<string, readonly string[]> = {
+  '5': [`${CDN}/vega@5.33.1`, `${CDN}/vega-lite@5.23.0`, `${CDN}/vega-embed@6.29.0`],
+  '6': [`${CDN}/vega@6.4.0`, `${CDN}/vega-lite@6.5.0`, `${CDN}/vega-embed@7.3.0`],
+};
 /** Long streams are cut in the view, not in the file. */
 export const MAX_OUTPUT_CHARS = 200_000;
 
-export function outputViews(outputs: readonly NotebookOutput[]): OutputView[] {
+/** `loaders`: the notebook's library-loading outputs (notebookLoaders), which a plot's frame needs too. */
+export function outputViews(outputs: readonly NotebookOutput[], loaders = ''): OutputView[] {
   const views: OutputView[] = [];
   for (const output of mergeStreams(outputs)) {
-    const view = outputView(output);
+    const view = outputView(output, loaders);
     if (view) views.push(view);
   }
   return views;
@@ -43,13 +58,13 @@ function mergeStreams(outputs: readonly NotebookOutput[]): NotebookOutput[] {
   return merged;
 }
 
-function outputView(output: NotebookOutput): OutputView | null {
+function outputView(output: NotebookOutput, loaders: string): OutputView | null {
   if (isStreamOutput(output)) return textView(applyCarriageReturns(joinSource(output.text)), output.name === 'stderr');
   if (isErrorOutput(output)) {
     const trace = Array.isArray(output.traceback) ? output.traceback.map(String).join('\n') : `${String(output.ename ?? 'Error')}: ${String(output.evalue ?? '')}`;
     return textView(trace, true);
   }
-  if (isDataOutput(output)) return dataView(recordField(output.data), recordField(output.metadata));
+  if (isDataOutput(output)) return dataView(recordField(output.data), recordField(output.metadata), loaders);
   return null;
 }
 
@@ -59,13 +74,19 @@ function textView(text: string, stderr = false): OutputView {
   return { kind: 'text', text, stderr };
 }
 
-function dataView(data: Record<string, unknown>, metadata: Record<string, unknown>): OutputView | null {
+function dataView(data: Record<string, unknown>, metadata: Record<string, unknown>, loaders: string): OutputView | null {
   const mimes = Object.keys(data);
-  if (!mimes.length) return null;
-  const hasFallback = mimes.some(m => m === 'text/plain' || m.startsWith('image/'));
-  const html = data['text/html'] !== undefined ? joinSource(data['text/html']) : null;
-  // A plotting library's HTML is a script and an empty div; its picture or repr says more.
-  if (html !== null && !(hasFallback && /<script\b/i.test(html))) return { kind: 'html', html: sanitizeOutputHtml(html) };
+  if (!mimes.length || loaderHtml(data) !== null) return null;
+  // A widget is a view of objects in a live kernel; its repr says nothing useful without one.
+  if (data[WIDGET_VIEW] !== undefined) return { kind: 'widget' };
+  const scripted = interactiveBody(data);
+  if (scripted !== null) return { kind: 'interactive', document: frameDocument(scripted, loaders), fallback: staticView(data, metadata, true) };
+  return staticView(data, metadata, false);
+}
+
+/** The richest representation that runs nothing; scripted HTML is left out when asked. */
+function staticView(data: Record<string, unknown>, metadata: Record<string, unknown>, skipHtml: boolean): OutputView | null {
+  if (!skipHtml && data['text/html'] !== undefined) return { kind: 'html', html: sanitizeOutputHtml(joinSource(data['text/html'])) };
   for (const mime of IMAGE_MIMES) {
     if (data[mime] !== undefined) return imageView(mime, joinSource(data[mime]).replace(/\s+/g, ''), metadata[mime]);
   }
@@ -76,7 +97,7 @@ function dataView(data: Record<string, unknown>, metadata: Record<string, unknow
   }
   if (data['application/json'] !== undefined) return { kind: 'json', text: JSON.stringify(data['application/json'], null, 2) };
   if (data['text/plain'] !== undefined) return textView(joinSource(data['text/plain']));
-  return { kind: 'unsupported', mime: mimes[0] };
+  return skipHtml ? null : { kind: 'unsupported', mime: Object.keys(data)[0] };
 }
 
 function imageView(mime: string, base64: string, metadata: unknown): OutputView {
@@ -85,6 +106,104 @@ function imageView(mime: string, base64: string, metadata: unknown): OutputView 
   if (typeof size.width === 'number') view.width = size.width;
   if (typeof size.height === 'number') view.height = size.height;
   return view;
+}
+
+// --- script-driven output --------------------------------------------------------------------
+
+/** Text safe inside a script element. */
+function inScript(code: string): string {
+  return code.replace(/<\/(script)/gi, '<\\/$1').replace(/<!--/g, '<\\!--');
+}
+
+/** JSON safe inside a script element. */
+function jsonInScript(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, '\\u003c');
+}
+
+/** Whether HTML holds no visible content beyond scripts and styles. */
+function onlyScripts(html: string): boolean {
+  return /<script\b/i.test(html) && !html.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, '').replace(/<!--[\s\S]*?-->/g, '').trim();
+}
+
+/**
+ * An output that only loads a library for later outputs (Plotly's init_notebook_mode, Bokeh's
+ * output_notebook) has nothing to show, and the plots after it need what it loads.
+ */
+function loaderHtml(data: Record<string, unknown>): string | null {
+  const js = data[JAVASCRIPT] !== undefined ? `<script>${inScript(joinSource(data[JAVASCRIPT]))}</script>` : '';
+  if (data[BOKEH_LOAD] !== undefined) return js;
+  const rest = Object.keys(data).filter(m => m !== 'text/plain' && m !== JAVASCRIPT);
+  if (js && !rest.length) return js;
+  if (rest.length === 1 && rest[0] === 'text/html') {
+    const html = joinSource(data['text/html']);
+    if (onlyScripts(html)) return html + js;
+  }
+  return null;
+}
+
+/** Every loader in the notebook, in order, to include in each interactive frame. */
+export function notebookLoaders(cells: readonly { outputs: readonly NotebookOutput[] }[]): string {
+  let out = '';
+  for (const cell of cells) {
+    for (const output of cell.outputs) {
+      if (output.output_type !== 'display_data' && output.output_type !== 'execute_result') continue;
+      out += loaderHtml((output['data'] ?? {}) as Record<string, unknown>) ?? '';
+    }
+  }
+  return out;
+}
+
+/** The markup that draws an output with script, or null when it runs nothing. */
+function interactiveBody(data: Record<string, unknown>): string | null {
+  if (data[PLOTLY] !== undefined) {
+    const figure = data[PLOTLY] as { data?: unknown; layout?: unknown; config?: unknown };
+    return (
+      `<div id="plot" style="width:100%;height:100vh;min-height:420px"></div><script src="${PLOTLY_JS}"></script>` +
+      `<script>Plotly.newPlot('plot',${jsonInScript(figure.data ?? [])},${jsonInScript(figure.layout ?? {})},` +
+      `Object.assign({responsive:true},${jsonInScript(figure.config ?? {})}));</script>`
+    );
+  }
+  for (const mime of Object.keys(data)) {
+    const vega = /^application\/vnd\.vega(?:lite)?\.v(\d+)(?:\.\d+)?\+json$/.exec(mime);
+    if (!vega) continue;
+    const stack = VEGA_STACKS[vega[1]] ?? VEGA_STACKS['5'];
+    return (
+      `<div id="vis"></div>${stack.map(src => `<script src="${src}"></script>`).join('')}` +
+      `<script>vegaEmbed('#vis',${jsonInScript(data[mime])},{actions:false});</script>`
+    );
+  }
+  const html = data['text/html'] !== undefined ? joinSource(data['text/html']) : '';
+  const js = data[JAVASCRIPT] !== undefined ? `<script>${inScript(joinSource(data[JAVASCRIPT]))}</script>` : '';
+  return /<script\b/i.test(html) || js ? html + js : null;
+}
+
+/**
+ * The whole document for one sandboxed frame. The sandbox gives it an opaque origin, so it reaches
+ * neither this page nor its storage; the policy keeps it to https and stops forms and <base>. It
+ * tells the host its height, the only thing the host listens for.
+ */
+function frameDocument(body: string, loaders: string): string {
+  const policy = [
+    "default-src 'none'",
+    "script-src 'unsafe-inline' 'unsafe-eval' https:",
+    "style-src 'unsafe-inline' https:",
+    'img-src data: blob: https:',
+    'font-src data: https:',
+    'connect-src https:',
+    'worker-src blob:',
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join('; ');
+  const needsRequire = /\brequire(?:js)?\s*[.(]/.test(loaders + body);
+  return (
+    `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}">` +
+    `<style>html,body{margin:0;background:#fff;color:#111;font:13px sans-serif}</style>` +
+    (needsRequire ? `<script src="${REQUIRE_JS}"></script>` : '') +
+    `</head><body>` +
+    `<script>var element=document.body;(function(){var post=function(){parent.postMessage({type:'nb-output-height',height:Math.ceil(document.body.getBoundingClientRect().height)},'*')};` +
+    `addEventListener('load',function(){post();new ResizeObserver(post).observe(document.body)});})();</script>` +
+    `${loaders}${body}</body></html>`
+  );
 }
 
 /** A carriage return rewrites its line, which is how progress bars print. */

@@ -3,6 +3,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, e
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { FileEditor } from '../file-workspace/editors/file-editor';
 import { CellType, Notebook, NotebookCell, NotebookFormatError, notebookLanguage, parseNotebook, serializeNotebook } from './nbformat';
+import { notebookLoaders } from './notebook-outputs';
 import { clearOutputs, deleteCell, duplicateCell, insertCell, moveCell, setCellType, setSource } from './notebook-commands';
 import { NotebookCellComponent } from './notebook-cell.component';
 import { NotebookRunComponent } from './notebook-run.component';
@@ -48,6 +49,8 @@ export class NotebookEditorComponent implements FileEditor {
   readonly canRedo = signal(false);
   /** Run mode: JupyterLite takes the cells' place, holding the notebook as it was when entered. */
   readonly running = signal(false);
+  /** The reader chose to run this notebook's script-driven output; it lasts until another file opens. */
+  readonly interactiveAllowed = signal(false);
   readonly runNotebook = signal<unknown>(null);
   readonly cellTypes: readonly { value: CellType; label: string }[] = [
     { value: 'code', label: 'Code' },
@@ -60,6 +63,8 @@ export class NotebookEditorComponent implements FileEditor {
     const notebook = this.notebook();
     return notebook ? notebookLanguage(notebook) : 'python';
   });
+  /** Only worked out once allowed: the frames are the only thing that use it. */
+  readonly loaders = computed(() => (this.interactiveAllowed() ? notebookLoaders(this.cells()) : ''));
   readonly activeCell = computed(() => this.cells().find(c => c.uid === this.activeUid()) ?? null);
   readonly activeIndex = computed(() => this.cells().findIndex(c => c.uid === this.activeUid()));
   readonly hasOutputs = computed(() => this.cells().some(c => c.outputs.length > 0 || c.executionCount !== null));
@@ -332,6 +337,7 @@ export class NotebookEditorComponent implements FileEditor {
     this.activeUid.set(null);
     this.editingUid.set(null);
     this.running.set(false);
+    this.interactiveAllowed.set(false);
     try {
       const text = await blob.text();
       if (generation !== this.generation) return;

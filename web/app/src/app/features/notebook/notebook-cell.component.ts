@@ -53,7 +53,10 @@ export class NotebookCellComponent {
   readonly active = input(false);
   readonly editing = input(false);
   readonly readOnly = input(true);
+  readonly loaders = input('');
+  readonly interactive = input(false);
 
+  readonly allowInteractive = output<void>();
   readonly sourceChange = output<string>();
   readonly saveRequested = output<void>();
   readonly runNext = output<void>();

@@ -199,6 +199,51 @@ describe('NotebookEditorComponent', () => {
     expect(c.dirty()).toBe(false);
   });
 
+  it('runs script-driven output only after the reader asks, sandboxed, until another file opens', async () => {
+    const scripted = { output_type: 'display_data', metadata: {}, data: { 'text/html': '<div></div><script>window.x=1</script>', 'text/plain': '<Figure>' } };
+    const el = await open(nb([code('a', 'plot()', [scripted]), code('b', 'plot()', [scripted])]));
+    expect(el.querySelector('iframe')).toBeNull();
+    expect(el.querySelector('.nb-output--text')?.textContent).toContain('<Figure>');
+    const offers = el.querySelectorAll<HTMLButtonElement>('.nb-output__more');
+    expect(offers).toHaveLength(2);
+    offers[0].click();
+    await settle();
+    const frames = el.querySelectorAll('iframe');
+    expect(frames).toHaveLength(2);
+    expect(frames[0].getAttribute('sandbox')).toBe('allow-scripts');
+    expect(frames[0].getAttribute('srcdoc')).toContain('window.x=1');
+    expect(el.querySelector('.nb-output__more')).toBeNull();
+    fixture.componentRef.setInput('blob', nb([code('c', 'plot()', [scripted])]));
+    fixture.detectChanges();
+    await vi.waitFor(() => expect(fixture.componentInstance.cells()[0].raw['id']).toBe('c'));
+    await settle();
+    expect(el.querySelector('iframe')).toBeNull();
+  });
+
+  it('sizes a frame from its own messages only', async () => {
+    const scripted = { output_type: 'display_data', metadata: {}, data: { 'text/html': '<script>x()</script><p>a</p>' } };
+    const el = await open(nb([code('a', 'p', [scripted])]));
+    (el.querySelector('.nb-output__more') as HTMLButtonElement).click();
+    await settle();
+    const frame = el.querySelector('iframe') as HTMLIFrameElement;
+    const own = {} as Window;
+    Object.defineProperty(frame, 'contentWindow', { value: own });
+    const height = (source: unknown, value: unknown) =>
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'nb-output-height', height: value }, source: source as MessageEventSource }));
+    height(window, 500);
+    await settle();
+    expect(frame.style.height).toBe('360px');
+    height(own, 500);
+    await settle();
+    expect(frame.style.height).toBe('500px');
+    height(own, 99999);
+    await settle();
+    expect(frame.style.height).toBe('1600px');
+    height(own, 'x');
+    await settle();
+    expect(frame.style.height).toBe('1600px');
+  });
+
   describe('Run', () => {
     const ORIGIN = 'https://notebooks.example.test';
 
