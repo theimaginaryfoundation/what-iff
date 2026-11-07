@@ -170,6 +170,16 @@ describe('SheetsEditorComponent', () => {
     expect(fake.state.disposed).toBe(2);
   });
 
+  it('keeps the instance when the host hands back the bytes it just saved', async () => {
+    await open(attachment(), await xlsxBlob(), false);
+    const saved = await fixture.componentInstance.content();
+    fixture.componentRef.setInput('blob', saved);
+    fixture.detectChanges();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(fake.state.created).toHaveLength(1);
+    expect(fake.state.disposed).toBe(0);
+  });
+
   it('reports bytes it cannot read', async () => {
     const el = await open(attachment(), new Blob(['not a workbook']));
     expect(fixture.componentInstance.state()).toBe('error');

@@ -72,6 +72,8 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
   /** Set once the view exists; the effect waits for it before reading inputs. */
   private readonly rendered = signal(false);
   private generation = 0;
+  private lastContent: Blob | null = null;
+  private openedReadOnly: boolean | null = null;
 
   /** The thing being edited, for messages: "spreadsheet", "document". */
   abstract readonly noun: string;
@@ -86,7 +88,9 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
       if (!this.rendered()) return;
       const blob = this.blob();
       this.file();
-      this.readOnly();
+      const readOnly = this.readOnly();
+      // After a save the host hands back the bytes this editor produced; the instance already shows them.
+      if (blob === this.lastContent && readOnly === this.openedReadOnly) return;
       untracked(() => void this.open(blob));
     });
     this.hostEl.nativeElement.addEventListener(
@@ -109,7 +113,9 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
   async content(): Promise<Blob> {
     const unit = this.unit;
     if (!unit) throw new Error(`The ${this.noun} is not loaded`);
-    return this.serialize(unit.save(), this.file());
+    const blob = await this.serialize(unit.save(), this.file());
+    this.lastContent = blob;
+    return blob;
   }
 
   markSaved(): void {
@@ -133,6 +139,7 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
       if (generation !== this.generation) return;
       this.report.set(parsed.report);
       const readOnly = this.readOnly();
+      this.openedReadOnly = readOnly;
       const { univer, univerAPI } = kit.createUniver(kit.options(this.container().nativeElement, { readOnly }));
       this.univer = univer;
       this.univerAPI = univerAPI;

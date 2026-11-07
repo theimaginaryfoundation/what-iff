@@ -2,15 +2,18 @@
   @if (!noticeDismissed()) {
     <app-fidelity-notice [losses]="losses()" [warnings]="warnings()" (dismiss)="dismissNotice()" />
   }
-  @if (state() === "error") {
-    <p class="univer-editor__placeholder" role="alert">{{ error() }}</p>
-  } @else if (state() === "loading") {
-    <p class="univer-editor__placeholder" role="status">Loading the {{ noun }}…</p>
-  }
-  <div
-    #container
-    class="univer-editor__univer"
-    [attr.aria-label]="(readOnly() ? '' : 'Editor for ') + file().name"
-    [hidden]="state() !== 'ready'"
-  ></div>
+  <div class="univer-editor__stage">
+    <!-- Univer measures its container when created, so the container stays visible while loading. -->
+    <div
+      #container
+      class="univer-editor__univer"
+      [attr.aria-label]="(readOnly() ? '' : 'Editor for ') + file().name"
+      [attr.aria-busy]="state() === 'loading'"
+    ></div>
+    @if (state() === "error") {
+      <p class="univer-editor__placeholder" role="alert">{{ error() }}</p>
+    } @else if (state() === "loading") {
+      <p class="univer-editor__placeholder" role="status">Loading the {{ noun }}…</p>
+    }
+  </div>
 </div>

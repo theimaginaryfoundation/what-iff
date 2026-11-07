@@ -54,7 +54,11 @@ export class SlideCanvasComponent {
   readonly handles = HANDLES;
   readonly cssWidth = computed(() => this.size().width * PX_PER_PT * this.scale());
   readonly cssHeight = computed(() => this.size().height * PX_PER_PT * this.scale());
-  readonly background = computed(() => fillCss(this.slide().background));
+  /** A slide with no background of its own is white, whatever the app's theme. */
+  readonly background = computed(() => {
+    const bg = this.slide().background;
+    return bg ? fillCss(bg) : '#FFFFFF';
+  });
   /** Geometry overrides while a drag or resize is in flight, so the deck is updated once at the end. */
   readonly liveGeometry = signal<{ id: string; geometry: ElementGeometry } | null>(null);
 
