@@ -326,7 +326,8 @@ Hosting requirements for production:
 - `frame-ancestors` limited to the app.
 - A correct WASM MIME type.
 
-Python itself loads from the jsDelivr CDN at run time, which is the kernel's default. Self-hosting it would add hundreds of megabytes, and that remains an option if the outbound dependency is unwanted.
+Production hosts: `notebooks.whatiff.chat` and `notebooks.dev.whatiff.chat`, each an S3 bucket behind CloudFront, deployed from the private repo.
+Python loads from the jsDelivr CDN at run time, the kernel's default, which was accepted on 2026-11-07 rather than self-hosting hundreds of megabytes.
 
 Verified in Chromium against the composed stack: the frame could not read the app's token, Python ran, read its own notebook with `open()`, a save reached `PUT …/content`, and the output showed in our cells.
 
