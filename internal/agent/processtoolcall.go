@@ -204,7 +204,8 @@ func (a *Agent) dispatchMCPToolUse(ctx context.Context, chatCtx *chatContext, us
 		}
 		return "", nil, fmt.Errorf("mcp tool %q is not loaded for this chat; call %q first", use.Name, tools.LoadToolsToolSpec.Name)
 	}
-	out, err := a.mcpClient.CallToolByFullNameWithSessionStateDetailed(ctx, servers, use.Name, use.Input, sessionStateFromChatContext(chatCtx))
+	// A server may ask the person for input while its tool runs (elicitation, ADR 0x042).
+	out, err := a.mcpClient.CallToolByFullNameWithSessionStateDetailed(a.elicitationContext(ctx, chatCtx), servers, use.Name, use.Input, sessionStateFromChatContext(chatCtx))
 	if err != nil {
 		return "", nil, err
 	}

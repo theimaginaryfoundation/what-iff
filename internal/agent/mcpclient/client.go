@@ -46,8 +46,11 @@ type DiscoveryResult struct {
 
 type Client struct {
 	httpClient *http.Client
-	logger     *zap.Logger
-	ttl        time.Duration
+	// streamClient makes tools/call requests: the same transport without an overall timeout,
+	// since a streamed call may wait on the person (elicitation). An idle timeout bounds it instead.
+	streamClient *http.Client
+	logger       *zap.Logger
+	ttl          time.Duration
 
 	mu    sync.RWMutex
 	cache map[string]cacheEntry
@@ -65,11 +68,14 @@ func New(httpClient *http.Client, logger *zap.Logger) *Client {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
+	streamClient := *httpClient
+	streamClient.Timeout = 0
 	return &Client{
-		httpClient: httpClient,
-		logger:     logger,
-		ttl:        defaultDiscoveryTTL,
-		cache:      make(map[string]cacheEntry),
+		httpClient:   httpClient,
+		streamClient: &streamClient,
+		logger:       logger,
+		ttl:          defaultDiscoveryTTL,
+		cache:        make(map[string]cacheEntry),
 	}
 }
 
@@ -336,8 +342,9 @@ type rpcResponse struct {
 }
 
 type rpcError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data,omitempty"`
 }
 
 type mcpToolDefinition struct {
@@ -364,16 +371,23 @@ func (c *Client) listToolsRPC(ctx context.Context, server *models.MCPServer, ses
 }
 
 func (c *Client) initializeRPC(ctx context.Context, server *models.MCPServer, sessions SessionState) error {
-	_, err := c.rpcCall(ctx, server, "initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
+	result, err := c.rpcCall(ctx, server, "initialize", map[string]any{
+		"protocolVersion": ProtocolVersion,
 		"clientInfo": map[string]any{
 			"name":    "what-iff",
 			"version": "1.0.0",
 		},
-		"capabilities": map[string]any{},
+		"capabilities": clientCapabilities(),
 	}, sessions)
 	if err != nil {
 		return err
+	}
+	// Later requests carry the version the server chose (it may be older than ours).
+	var init struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	if json.Unmarshal(result, &init) == nil {
+		setProtocolVersion(sessions, server, init.ProtocolVersion)
 	}
 	// Best-effort notification: some servers expect this, others ignore it.
 	_ = c.rpcNotify(ctx, server, "notifications/initialized", map[string]any{}, sessions)
@@ -390,12 +404,20 @@ func (c *Client) callToolRPC(ctx context.Context, server *models.MCPServer, tool
 		// such as empty strings are not transformed by intermediate map decoding.
 		args = json.RawMessage(trimmed)
 	}
-	result, err := c.rpcCall(ctx, server, "tools/call", map[string]any{
+	params := map[string]any{
 		"name":      toolName,
 		"arguments": args,
-	}, sessions)
+	}
+	result, err := c.rpcCallTool(ctx, server, params, sessions, toolName)
 	if err != nil {
-		return CallToolResult{}, err
+		// A server that needs the person to do something on its own site first (sign in, enter a
+		// key) refuses the call with URL elicitations to complete; once they have, try once more.
+		if c.completeURLElicitations(ctx, server, toolName, err) {
+			result, err = c.rpcCallTool(ctx, server, params, sessions, toolName)
+		}
+		if err != nil {
+			return CallToolResult{}, err
+		}
 	}
 	if parsed, ok := c.parseToolCallResult(result); ok {
 		return parsed, nil
@@ -486,21 +508,9 @@ func (c *Client) rpcNotify(ctx context.Context, server *models.MCPServer, method
 	if err != nil {
 		return err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSpace(server.ServerURL), bytes.NewReader(payload))
+	httpReq, err := c.newRPCRequest(ctx, server, payload, sessions)
 	if err != nil {
 		return err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", streamableAccept)
-	if sessionID := getSessionID(sessions, server); sessionID != "" {
-		httpReq.Header.Set(mcpSessionHeader, sessionID)
-	}
-	token, err := authHeaderForServer(server, time.Now().UTC())
-	if err != nil {
-		return err
-	}
-	if token != "" {
-		httpReq.Header.Set("Authorization", token)
 	}
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -513,7 +523,35 @@ func (c *Client) rpcNotify(ctx context.Context, server *models.MCPServer, method
 	return nil
 }
 
+// RPCError is a JSON-RPC error the server answered a request with.
+type RPCError struct {
+	Method  string
+	Code    int
+	Message string
+	Data    json.RawMessage
+}
+
+func (e *RPCError) Error() string {
+	return fmt.Sprintf("mcp rpc %s failed: %s (%d)", e.Method, e.Message, e.Code)
+}
+
 func (c *Client) rpcCall(ctx context.Context, server *models.MCPServer, method string, params any, sessions SessionState) (json.RawMessage, error) {
+	return c.rpcExchange(ctx, c.httpClient, nil, server, method, params, sessions, "")
+}
+
+// rpcCallTool makes a tools/call: on the client without an overall timeout, bounded instead by
+// streamIdleTimeout of silence (paused while the person answers an elicitation) and by ctx.
+func (c *Client) rpcCallTool(ctx context.Context, server *models.MCPServer, params any, sessions SessionState, toolName string) (json.RawMessage, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	idle := newIdleTimer(streamIdleTimeout, cancel)
+	defer idle.stop()
+	return c.rpcExchange(ctx, c.streamClient, idle, server, "tools/call", params, sessions, toolName)
+}
+
+// rpcExchange sends one request and reads its response: a JSON body, or an SSE stream read event
+// by event, answering the server's own requests on the way (readStreamedResponse).
+func (c *Client) rpcExchange(ctx context.Context, client *http.Client, idle *idleTimer, server *models.MCPServer, method string, params any, sessions SessionState, toolName string) (json.RawMessage, error) {
 	req := rpcRequest{
 		JSONRPC: "2.0",
 		ID:      uuid.NewString(),
@@ -524,24 +562,15 @@ func (c *Client) rpcCall(ctx context.Context, server *models.MCPServer, method s
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSpace(server.ServerURL), bytes.NewReader(payload))
+	httpReq, err := c.newRPCRequest(ctx, server, payload, sessions)
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", streamableAccept)
-	if sessionID := getSessionID(sessions, server); sessionID != "" {
-		httpReq.Header.Set(mcpSessionHeader, sessionID)
-	}
-	token, err := authHeaderForServer(server, time.Now().UTC())
+	resp, err := client.Do(httpReq)
 	if err != nil {
-		return nil, err
-	}
-	if token != "" {
-		httpReq.Header.Set("Authorization", token)
-	}
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
+		if idle.fired() {
+			return nil, fmt.Errorf("mcp server sent nothing for %s", streamIdleTimeout)
+		}
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -559,16 +588,25 @@ func (c *Client) rpcCall(ctx context.Context, server *models.MCPServer, method s
 		}
 		return nil, fmt.Errorf("mcp server returned status %d for %s", resp.StatusCode, method)
 	}
-	body, err := readBoundedBody(resp.Body, maxRPCResponseBytes)
-	if err != nil {
-		return nil, err
-	}
-	rpcResp, err := parseRPCResponse(body, resp.Header.Get("Content-Type"))
-	if err != nil {
-		return nil, err
+	var rpcResp rpcResponse
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		stream := &streamCall{c: c, server: server, sessions: sessions, toolName: toolName, handler: elicitationHandlerFrom(ctx), idle: idle}
+		rpcResp, err = stream.readStreamedResponse(ctx, resp.Body)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		body, err := readBoundedBody(resp.Body, maxRPCResponseBytes)
+		if err != nil {
+			return nil, err
+		}
+		rpcResp, err = parseRPCResponse(body, resp.Header.Get("Content-Type"))
+		if err != nil {
+			return nil, err
+		}
 	}
 	if rpcResp.Error != nil {
-		return nil, fmt.Errorf("mcp rpc %s failed: %s (%d)", method, rpcResp.Error.Message, rpcResp.Error.Code)
+		return nil, &RPCError{Method: method, Code: rpcResp.Error.Code, Message: rpcResp.Error.Message, Data: rpcResp.Error.Data}
 	}
 	return rpcResp.Result, nil
 }
