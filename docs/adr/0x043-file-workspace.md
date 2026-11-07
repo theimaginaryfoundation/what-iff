@@ -258,6 +258,20 @@ Shared decisions:
 - Specs fake the Univer kits through injection tokens; the slides specs run the real pptxgenjs and pptxtojson, which both work under the jsdom runner.
 - A Playwright pass in Chromium against the branch's own API (mock LLM, throwaway Postgres) drove all three: open from the gallery, read-only view, Edit, a typed change, Save (`PUT …/content` 200), and the saved bytes read back with the change (ExcelJS for the sheet, `document.xml` for the document, pptxtojson for the deck, plus a reopen of the deck). It found three things the unit specs could not: Univer measured its container while the loading placeholder still hid it and drew a zero-height sheet; a host that does not constrain the height (the gallery page) gave it nothing to measure; slides inherited the app's dark theme as their text colour. All three are fixed on the branch.
 
+### Fidelity pass against real documents (2026-11-07)
+
+Three real files (a territory spreadsheet, a copay enrolment fax, a pitch deck) were opened side by side with Excel, Word and PowerPoint, and the differences fixed:
+
+- **Theme colours.** Most fills and font colours in real workbooks are theme references with a tint, not literal RGB; they came through as nothing. The importer now reads `theme1.xml` and resolves theme indices (with the dk1/lt1 pair swap SpreadsheetML uses), tints in HSL, and the legacy indexed palette. Conditional-formatting colours go the same way.
+- **Charts and pivot tables.** ExcelJS reads and writes neither. The importer collects the original chart parts (with their drawing anchors, style parts and media) and pivot parts (tables and caches) from the package, draws each chart from its cached series at its anchor through a shared SVG renderer, and the exporter writes the parts back under names ExcelJS never uses, re-linking sheet, drawing and workbook relationships and content types. The notice says charts and pivots are kept but not editable here; Excel refreshes pivots from their cache. A sheet whose drawing holds a chart gets its original drawing back whole, so pictures on that sheet are saved as they were.
+- **Office fonts.** Aptos, Calibri, Cambria, Segoe UI, Poppins and the rest alias to local lookalikes through `@font-face` `local()` rules (`src/styles/office-fonts.scss`), so canvas and DOM text stops falling back to the browser serif. Nothing is fetched.
+- **Docs.** Word wraps cells and rows in content controls; the table walker now looks through them (the fax form's table had lost half its cells). Header and footer pictures are registered in the document-level drawings map, which is where Univer lays them out, with the per-page transform it expects. Drawings inside `mc:AlternateContent` are read. A read-only document is a disabled snapshot rather than a permission lock, which keeps Univer's "content is protected" toast out of the viewer.
+- **Slides.** Run colours and sizes never reached the canvas: Angular's sanitiser strips inline styles from `[innerHTML]`, so the model-built HTML (escaped text, styles from known fields) is marked trusted. Picture and gradient fills render on shapes. The slide fits its stage from the moment the deck shows (the stage only exists once there is a deck), a status bar carries paging and zoom in both modes, and a rotation handle rotates elements about their centre.
+- **Saving across origins.** The dev app on :4200 saving to the API on :8080 failed the CORS preflight: `If-Match` was not an allowed request header and `ETag` not exposed. Fixed in the server's CORS policy; the earlier harness had fulfilled CORS itself and hidden it.
+- **Monaco** gets light and dark themes on the app palette, following `<html data-theme>`, and the code editor the same minimum height as the office editors on the gallery page.
+- **Start-up mutations.** A Univer unit runs mutations of its own as it settles; the editor marks dirty only after that.
+
+
 ## Step 0 results (2026-11-06)
 
 The four spikes ran on `spike/file-workspace` (throwaway; scripts under `web/app/spike-scripts/`, the Monaco route at `/spike/monaco`), in headless Chromium.
