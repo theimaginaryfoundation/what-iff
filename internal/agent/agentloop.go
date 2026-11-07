@@ -184,6 +184,7 @@ func (a *Agent) executeToolUses(ctx context.Context, chatCtx *chatContext, round
 			tc.ToolError = r.Output
 		} else {
 			tc.ToolOutput = r.Output
+			tc.App = chatCtx.takeMCPApp(uses[i].ID)
 		}
 		modelToolCalls[i] = tc
 	}

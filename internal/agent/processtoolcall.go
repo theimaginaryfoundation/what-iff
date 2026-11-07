@@ -215,6 +215,10 @@ func (a *Agent) dispatchMCPToolUse(ctx context.Context, chatCtx *chatContext, us
 		// and keeping them would send them to the model, the sandbox turn files and the saved reply.
 		return "", nil, err
 	}
+	if out.UIResourceURI != "" {
+		// The tool has an MCP App (ADR 0x042): the saved call carries what the chat needs to show it.
+		chatCtx.recordMCPApp(toolUseIDFrom(ctx), mcpAppForResult(out))
+	}
 	return out.Output, out.GeneratedAttachments, nil
 }
 

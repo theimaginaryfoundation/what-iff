@@ -37,6 +37,8 @@ type ConnectorTool struct {
 	Description     string
 	Properties      map[string]any
 	Required        []string
+	// UIResourceURI is the tool's MCP App view (ui://), when it has one (ADR 0x042).
+	UIResourceURI string
 }
 
 type DiscoveryResult struct {
@@ -57,7 +59,10 @@ type Client struct {
 }
 
 type cacheEntry struct {
-	tools   []ConnectorTool
+	// tools are the tools the model may call (a tool visible only to apps is left out).
+	tools []ConnectorTool
+	// meta is every tool's MCP App metadata by its own name, app-only tools included.
+	meta    map[string]toolUIMeta
 	expires time.Time
 }
 
@@ -169,9 +174,16 @@ func (c *Client) discoverConnectorTools(ctx context.Context, userID uuid.UUID, s
 
 	prefix := connectorPrefix(server)
 	out := make([]ConnectorTool, 0, len(rawTools))
+	meta := make(map[string]toolUIMeta, len(rawTools))
 	for _, t := range rawTools {
 		name := strings.TrimSpace(t.Name)
 		if name == "" {
+			continue
+		}
+		ui := parseToolUIMeta(t.Meta)
+		meta[name] = ui
+		if !ui.visibleTo("model") {
+			// An MCP App's helper tool, for its view to call: never offered to the model.
 			continue
 		}
 		fullName := "mcp__" + prefix + "__" + sanitizeForToolName(name)
@@ -185,12 +197,14 @@ func (c *Client) discoverConnectorTools(ctx context.Context, userID uuid.UUID, s
 			Description:     mcpToolDescription(server, t),
 			Properties:      props,
 			Required:        req,
+			UIResourceURI:   ui.ResourceURI,
 		})
 	}
 
 	c.mu.Lock()
 	c.cache[cacheKey] = cacheEntry{
 		tools:   out,
+		meta:    meta,
 		expires: now.Add(c.ttl),
 	}
 	c.mu.Unlock()
@@ -235,13 +249,25 @@ func (c *Client) CallToolByFullNameWithSessionStateDetailed(ctx context.Context,
 		return CallToolResult{}, err
 	}
 	original := toolName
+	uiResource := ""
 	for _, t := range tools {
 		if t.FullName == fullName {
 			original = t.Name
+			uiResource = t.UIResourceURI
 			break
 		}
 	}
-	return c.callToolRPC(ctx, server, original, rawArgs, sessions)
+	if c.appOnlyTool(server, original) {
+		return CallToolResult{}, fmt.Errorf("tool %q is only for its MCP App, not for the model", original)
+	}
+	res, err := c.callToolRPC(ctx, server, original, rawArgs, sessions)
+	if err != nil {
+		return res, err
+	}
+	res.ToolName = original
+	res.UIResourceURI = uiResource
+	res.ServerID = server.ID
+	return res, nil
 }
 
 func findServerByPrefix(servers []*models.MCPServer, prefix string) *models.MCPServer {
@@ -351,6 +377,7 @@ type mcpToolDefinition struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
+	Meta        map[string]any `json:"_meta,omitempty"`
 }
 
 func (c *Client) listToolsRPC(ctx context.Context, server *models.MCPServer, sessions SessionState) ([]mcpToolDefinition, error) {
@@ -420,9 +447,10 @@ func (c *Client) callToolRPC(ctx context.Context, server *models.MCPServer, tool
 		}
 	}
 	if parsed, ok := c.parseToolCallResult(result); ok {
+		parsed.Raw = result
 		return parsed, nil
 	}
-	return CallToolResult{Output: string(result)}, nil
+	return CallToolResult{Output: string(result), Raw: result}, nil
 }
 
 func (c *Client) attachmentFromContentBlock(blockType string, block map[string]any) *models.FileAttachment {

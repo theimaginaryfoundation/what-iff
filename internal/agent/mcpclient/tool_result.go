@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -17,6 +19,12 @@ type CallToolResult struct {
 	IsError              bool
 	StructuredContent    json.RawMessage
 	GeneratedAttachments []*models.FileAttachment
+	// Raw is the result as the server sent it, for an MCP App's view (ADR 0x042).
+	Raw json.RawMessage
+	// ToolName is the tool's own name on its server; UIResourceURI its MCP App view, if any.
+	ToolName      string
+	UIResourceURI string
+	ServerID      uuid.UUID
 }
 
 // ToolReportedError is a failure the MCP server reported in a successful reply (isError: true),

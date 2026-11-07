@@ -969,6 +969,9 @@ type chatContext struct {
 	promptWaited time.Duration
 	// awaitingUser is set when a prompt went unanswered: the turn should end and ask in its reply.
 	awaitingUser bool
+	// mcpApps are the MCP Apps of this turn's MCP tool calls, by provider tool-call id (ADR 0x042),
+	// until executeToolUses puts them on the saved calls.
+	mcpApps map[string]*models.ToolCallApp
 	// elicitations counts the MCP elicitation requests shown this turn (maxElicitationsPerTurn).
 	elicitations int
 	// steerNotes are the follow-ups the person sent while the turn ran and it took in (ADR 0x042),

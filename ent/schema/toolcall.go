@@ -6,6 +6,8 @@ import (
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
 	"github.com/google/uuid"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 )
 
 // ToolCall holds the schema definition for the ToolCall entity.
@@ -31,6 +33,9 @@ func (ToolCall) Fields() []ent.Field {
 		field.Text("tool_error").
 			Optional().
 			Comment("The error from the tool call execution"),
+		field.JSON("app", &modeltypes.ToolCallApp{}).
+			Optional().
+			Comment("The MCP App (ui:// view) of an MCP tool that has one, with the tool's raw result (ADR 0x042); null otherwise"),
 		field.Int("step").
 			Optional().
 			Default(0).

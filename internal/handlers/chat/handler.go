@@ -41,7 +41,9 @@ type Handler struct {
 	welcomeAgent WelcomeMessageAgent
 	// promptAgent answers a running turn's questions (ADR 0x042); defaults to agent.
 	promptAgent PromptAgent
-	cfg         HandlerConfig
+	// appAgent serves MCP Apps' views and tool calls (ADR 0x042); defaults to agent.
+	appAgent MCPAppAgent
+	cfg      HandlerConfig
 	// importTimeout bounds one background chat import (chatImportJobTimeout; tests shorten it).
 	importTimeout time.Duration
 	// files overrides agent.FileStore() for object cleanup; tests set it, nil uses the agent's.
@@ -73,6 +75,7 @@ func NewHandler(ds Store, logger *zap.Logger, agent *agent.Agent, cfg HandlerCon
 	}
 	if agent != nil {
 		h.promptAgent = agent
+		h.appAgent = agent
 	}
 	return h
 }
@@ -91,6 +94,8 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	chatRouter.HandleFunc("/{chatId}/bookmarks", h.GetChatMessageBookmarks).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/active-job", h.GetActiveChatJob).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/prompts/{promptId}/answer", h.AnswerPrompt).Methods("POST")
+	chatRouter.HandleFunc("/{chatId}/tool-calls/{toolCallId}/app", h.GetMCPAppView).Methods("GET")
+	chatRouter.HandleFunc("/{chatId}/tool-calls/{toolCallId}/app/tools/call", h.CallMCPAppTool).Methods("POST")
 	chatRouter.HandleFunc("/{chatId}/chat-message", h.GetChatMessages).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/chat-message", h.CreateChatMessage).Methods("POST")
 	chatRouter.HandleFunc("/{chatId}/welcome-message", h.CreateWelcomeMessage).Methods("POST")
