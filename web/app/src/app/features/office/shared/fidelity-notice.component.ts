@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 
-/** What the converter could not carry, above an office editor; dismissable (ADR 0x043 §7). */
+/** What the converter could not carry, above an office editor; dismissable (ADR 0x043 §6). */
 @Component({
   selector: 'app-fidelity-notice',
   standalone: true,

@@ -1,4 +1,4 @@
-// Package filechange announces changes to a user's files (ADR 0x043 §9): a content write, a
+// Package filechange announces changes to a user's files (ADR 0x043 §3): a content write, a
 // rename, or a new file saved from the file workspace. The public build only records subscribers;
 // the private build subscribes in an init() to push the change into the conversation's container.
 //

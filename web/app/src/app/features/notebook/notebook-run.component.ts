@@ -9,7 +9,7 @@ const START_TIMEOUT_MS = 90_000;
 const CLOSE_TIMEOUT_MS = 5_000;
 
 /**
- * JupyterLite in a frame (ADR 0x043 §8): hands it the notebook once it says it is ready, and passes
+ * JupyterLite in a frame (ADR 0x043 §11): hands it the notebook once it says it is ready, and passes
  * its saves up. It runs in the browser on an origin of its own; only the notebook crosses over.
  */
 @Component({

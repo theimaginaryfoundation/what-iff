@@ -1,5 +1,5 @@
 /**
- * nbformat 4 read and written by hand (ADR 0x043 §8): it is JSON. The model exposes what the editor
+ * nbformat 4 read and written by hand (ADR 0x043 §11): it is JSON. The model exposes what the editor
  * changes (type, source, outputs) and keeps everything else in `raw`, so metadata, attachments and
  * fields we have never heard of survive, and a notebook nobody edited serializes to the bytes Jupyter
  * wrote: one-space indent, keys in their original order, a trailing newline.

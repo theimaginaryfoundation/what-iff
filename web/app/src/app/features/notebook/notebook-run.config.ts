@@ -4,7 +4,7 @@ import { InjectionToken, inject } from '@angular/core';
 import { environment } from '../../../environments/environment';
 
 /**
- * Where the JupyterLite that runs notebooks lives (ADR 0x043 §8), or null when Run is not offered.
+ * Where the JupyterLite that runs notebooks lives (ADR 0x043 §11), or null when Run is not offered.
  * It must be another origin: a same-origin iframe shares `sessionStorage` with this page, so a
  * notebook's code or output could read the session token. A URL on this origin is refused outright,
  * and this check is what makes `allow-same-origin` on the Run iframe safe: the two change together.

@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify';
 import { NotebookOutput, isDataOutput, isErrorOutput, isStreamOutput, joinSource, recordField } from './nbformat';
 
 /**
- * What a cell's outputs show (ADR 0x043 §8), chosen by MIME type from the richest representation we
+ * What a cell's outputs show (ADR 0x043 §11), chosen by MIME type from the richest representation we
  * can display safely. Notebooks come from anywhere: HTML is sanitized, and SVG is shown through an
  * image, where it cannot script. Script-driven output runs only in a sandboxed frame with an opaque
  * origin, and only after the reader asks (see notebook-interactive-frame.component.ts).

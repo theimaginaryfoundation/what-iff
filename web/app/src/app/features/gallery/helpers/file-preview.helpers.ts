@@ -7,7 +7,7 @@ import { FileAttachment, isImageAttachment } from '../../../core/models/file-att
  * - pdf: the browser's own PDF viewer, where it has one.
  * - image: the bytes as an image (only reached by a direct ?file= link; the grid opens images in the image popup).
  * - spreadsheet / document / slides: the office suite (ADR 0x043): Univer Sheets, Univer Docs, our Slides editor.
- * - notebook: Jupyter notebooks, our own cells (ADR 0x043 §8).
+ * - notebook: Jupyter notebooks, our own cells (ADR 0x043 §11).
  * - none: no preview (archives, unknown binaries); download only.
  */
 export type FilePreviewKind = 'markdown' | 'csv' | 'text' | 'pdf' | 'image' | 'spreadsheet' | 'document' | 'slides' | 'notebook' | 'none';

@@ -237,7 +237,7 @@ local-llm-up: ## Start the Ollama server (if not running) and pull LOCAL_LLM_MOD
 web: $(WEB_DIR)/node_modules/.stamp ## Run the Angular dev server (:4200)
 	@cd $(WEB_DIR) && npm start
 
-# The JupyterLite site that runs notebooks (ADR 0x043 §8). It must be served from an origin other
+# The JupyterLite site that runs notebooks (ADR 0x043 §11). It must be served from an origin other
 # than the app's; JUPYTERLITE_HOST_ORIGINS lists the app origins allowed to talk to it.
 JUPYTERLITE_DIR := web/jupyterlite
 JUPYTERLITE_HOST_ORIGINS ?= http://localhost:4200,http://127.0.0.1:4200
