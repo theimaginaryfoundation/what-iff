@@ -17,6 +17,7 @@ import { Model } from '../../core/models/model.model';
 import { Ritual } from '../../core/models/ritual.model';
 import { AgentLoop, ReasoningEffort, TurnSettingValues, TurnSettingsPatch } from '../../core/models/turn-settings.model';
 import { apiErrorMessage } from '../../core/utils/api-error.helpers';
+import { AgentPromptResponse } from '../../core/models/job.model';
 import {
   AUTOSAVE_DEBOUNCE_MS,
   CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS,
@@ -98,6 +99,8 @@ export class ChatSessionService implements OnDestroy {
   readonly waitingOn = this.turn.waitingOn;
   /** The in-flight Advanced turn's step and plan, or null. */
   readonly advancedProgress = this.turn.advancedProgress;
+  /** The question the in-flight turn is waiting on the person to answer (ADR 0x042), or null. */
+  readonly pendingPrompt = this.turn.pendingPrompt;
   readonly pendingAssistantDraftReasoning = this.turn.pendingAssistantDraftReasoning;
   readonly draft: WritableSignal<string> = signal('');
   readonly model: Signal<Model | null> = this._model.asReadonly();
@@ -529,6 +532,30 @@ export class ChatSessionService implements OnDestroy {
 
   cancelGeneration(): void {
     this.turn.cancelGeneration();
+  }
+
+  /**
+   * Sends the answer to the question the in-flight turn is waiting on (ADR 0x042). The card hides
+   * at once; on failure it comes back and the error is shown (a 409 means the turn stopped
+   * waiting: it expired, was answered in another tab, or the turn ended).
+   */
+  answerPrompt(promptId: string, response: AgentPromptResponse): void {
+    const threadId = this.activeThreadId;
+    if (!threadId) return;
+    this.turn.markPromptAnswered(promptId, true);
+    this.subscriptions.add(
+      this.messageService.answerPrompt(threadId, promptId, response).pipe(take(1)).subscribe({
+        error: err => {
+          if (!this.isActiveThread(threadId)) return;
+          if (err?.status === 409) {
+            this._error.set('That question is no longer waiting for an answer.');
+            return;
+          }
+          this.turn.markPromptAnswered(promptId, false);
+          this._error.set(apiErrorMessage(err, 'Failed to send your answer'));
+        },
+      }),
+    );
   }
 
   /** Refetches the active thread's metadata (name, model, personality) without touching messages. */

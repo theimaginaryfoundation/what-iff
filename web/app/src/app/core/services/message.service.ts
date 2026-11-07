@@ -12,6 +12,7 @@ import {
   MessageReadStatus
 } from '../models/message.model';
 import { PaginatedResponse } from '../models/common.model';
+import { AgentPromptResponse } from '../models/job.model';
 
 @Injectable({
   providedIn: 'root'
@@ -235,6 +236,15 @@ export class MessageService {
     const next = [...current];
     next[idx] = { ...next[idx], ...patch };
     this.messagesSubject.next(next);
+  }
+
+  /**
+   * Answers a question the turn running in the chat asked (ADR 0x042): ask_user or an MCP
+   * server's elicitation. 409 means it no longer takes an answer (answered elsewhere, expired, or
+   * its turn ended).
+   */
+  answerPrompt(chatId: string, promptId: string, response: AgentPromptResponse): Observable<unknown> {
+    return this.http.post(`${this.apiUrl}/${chatId}/prompts/${promptId}/answer`, response);
   }
 
   /** Re-run async generation for an existing user message (same turn). */

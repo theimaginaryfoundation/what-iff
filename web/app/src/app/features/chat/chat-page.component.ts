@@ -25,6 +25,7 @@ import { UserPreferencesService } from '../../core/services/user-preferences.ser
 import { ToolCall } from '../../core/models/toolcall.model';
 import { ChatComposerComponent } from './components/chat-composer/chat-composer.component';
 import { MessageListComponent } from './components/message-list/message-list.component';
+import { AgentPromptCardComponent } from './components/agent-prompt-card/agent-prompt-card.component';
 import { ThreadBookmarksComponent } from './components/thread-bookmarks/thread-bookmarks.component';
 import { MessageService } from '../../core/services/message.service';
 import { PersonaPickerDialogComponent } from '../personality/picker/persona-picker-dialog.component';
@@ -77,6 +78,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
   selector: 'app-chat-page',
   standalone: true,
   imports: [
+    AgentPromptCardComponent,
     CommonModule,
     ChatSendOutletComponent,
     DiscordComposerToggleComponent,
