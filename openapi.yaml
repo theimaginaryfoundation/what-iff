@@ -11936,6 +11936,9 @@ components:
                       type: string
               multi_select:
                 type: boolean
+              optional:
+                type: boolean
+                description: The question can be left unanswered.
         schema:
           type: object
           additionalProperties: true

@@ -216,6 +216,12 @@ func TestValidatePromptResponse(t *testing.T) {
 		{name: "two options on single select", payload: questions, resp: models.AgentPromptResponse{Action: models.AgentPromptAccept,
 			Answers: map[string]models.AgentPromptAnswer{"q1": {Selected: []string{"A", "B"}}}}, wantErr: true},
 		{name: "nothing answered", payload: questions, resp: models.AgentPromptResponse{Action: models.AgentPromptAccept}, wantErr: true},
+		{name: "nothing answered when every question is optional", payload: models.AgentPromptPayload{Kind: models.AgentPromptKindQuestions,
+			Questions: []models.AgentPromptQuestion{{ID: "q1", Question: "Anything else?", Optional: true}}},
+			resp: models.AgentPromptResponse{Action: models.AgentPromptAccept},
+			check: func(t *testing.T, got models.AgentPromptResponse) {
+				assert.Empty(t, got.Answers)
+			}},
 		{name: "answers kept, unknown ids dropped", payload: questions, resp: models.AgentPromptResponse{Action: models.AgentPromptAccept,
 			Answers: map[string]models.AgentPromptAnswer{
 				"q2":    {Selected: []string{"X", "Y"}},

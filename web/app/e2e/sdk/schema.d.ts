@@ -15477,6 +15477,8 @@ export interface components {
                     description?: string;
                 }[];
                 multi_select?: boolean;
+                /** @description The question can be left unanswered. */
+                optional?: boolean;
             }[];
             /** @description An MCP elicitation form's requestedSchema. */
             schema?: {

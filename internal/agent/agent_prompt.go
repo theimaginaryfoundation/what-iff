@@ -293,7 +293,7 @@ func validatePromptResponse(payload models.AgentPromptPayload, resp models.Agent
 			}
 			out.Answers[q.ID] = clean
 		}
-		if len(out.Answers) == 0 {
+		if len(out.Answers) == 0 && !allQuestionsOptional(payload.Questions) {
 			return resp, fmt.Errorf("%w: answer at least one question", ErrInvalidPromptResponse)
 		}
 	case models.AgentPromptKindForm:
@@ -304,6 +304,15 @@ func validatePromptResponse(payload models.AgentPromptPayload, resp models.Agent
 		out.Content = content
 	}
 	return out, nil
+}
+
+func allQuestionsOptional(questions []models.AgentPromptQuestion) bool {
+	for _, q := range questions {
+		if !q.Optional {
+			return false
+		}
+	}
+	return true
 }
 
 func questionHasOption(q models.AgentPromptQuestion, label string) bool {

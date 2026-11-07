@@ -6,10 +6,16 @@ import {
   ElicitationSchema,
 } from '../../../../core/models/job.model';
 
-/** One answer being written: the options picked and the person's own text. */
+/**
+ * One answer being written: the options picked and the person's own text. The text only counts
+ * while `other` is on, so someone who starts typing, then picks an option, then changes their mind
+ * gets their words back without them being sent in between.
+ */
 export interface QuestionDraft {
   selected: string[];
   text: string;
+  /** The own-answer box is open: "Other", or an open question. */
+  other: boolean;
 }
 
 /** One choice of an elicitation enum field. */
@@ -35,13 +41,14 @@ export interface FormField {
   defaultValue: unknown;
 }
 
+/** A required open question has nothing to pick, so its box starts open. */
 export function emptyDrafts(questions: readonly AgentPromptQuestion[] | undefined): Record<string, QuestionDraft> {
   const out: Record<string, QuestionDraft> = {};
-  for (const q of questions ?? []) out[q.id] = { selected: [], text: '' };
+  for (const q of questions ?? []) out[q.id] = { selected: [], text: '', other: !q.options?.length && !q.optional };
   return out;
 }
 
-/** Toggles an option: single-select questions replace the pick (and clear own text), multi add/remove. */
+/** Picks an option: single-select questions replace the pick and close "Other", multi add/remove. */
 export function toggleOption(draft: QuestionDraft, question: AgentPromptQuestion, label: string): QuestionDraft {
   if (question.multi_select) {
     const selected = draft.selected.includes(label)
@@ -49,31 +56,57 @@ export function toggleOption(draft: QuestionDraft, question: AgentPromptQuestion
       : [...draft.selected, label];
     return { ...draft, selected };
   }
-  if (draft.selected[0] === label) return { ...draft, selected: [] };
-  return { selected: [label], text: '' };
+  return { ...draft, selected: [label], other: false };
 }
 
-/** Typing an own answer on a single-select question replaces the picked option. */
-export function setOwnText(draft: QuestionDraft, question: AgentPromptQuestion, text: string): QuestionDraft {
-  if (!question.multi_select && text.trim()) return { selected: [], text };
+/** Opens or closes the own-answer box. On a single-select question it replaces the picked option. */
+export function setOtherChosen(draft: QuestionDraft, question: AgentPromptQuestion, chosen: boolean): QuestionDraft {
+  if (chosen && !question.multi_select) return { ...draft, selected: [], other: true };
+  return { ...draft, other: chosen };
+}
+
+export function setOwnText(draft: QuestionDraft, text: string): QuestionDraft {
   return { ...draft, text };
 }
 
-export function questionAnswered(draft: QuestionDraft | undefined): boolean {
-  return !!draft && (draft.selected.length > 0 || draft.text.trim().length > 0);
+/** Clears a single-select optional question's answer. */
+export function skipQuestion(draft: QuestionDraft): QuestionDraft {
+  return { ...draft, selected: [], other: false };
 }
 
-/** The accept response for a questions prompt; unanswered questions are left out (skipped). */
+/** Whether the draft holds something that would be sent. */
+export function questionAnswered(draft: QuestionDraft | undefined): boolean {
+  return !!draft && (draft.selected.length > 0 || (draft.other && draft.text.trim().length > 0));
+}
+
+/** Whether the question no longer holds up sending. */
+export function questionComplete(question: AgentPromptQuestion, draft: QuestionDraft | undefined): boolean {
+  return !!question.optional || questionAnswered(draft);
+}
+
+/** The accept response for a questions prompt; unanswered optional questions are left out. */
 export function questionsResponse(drafts: Record<string, QuestionDraft>): AgentPromptResponse {
-  const answers: AgentPromptResponse['answers'] = {};
+  const answers: NonNullable<AgentPromptResponse['answers']> = {};
   for (const [id, draft] of Object.entries(drafts)) {
     if (!questionAnswered(draft)) continue;
+    const text = draft.other ? draft.text.trim() : '';
     answers[id] = {
       ...(draft.selected.length ? { selected: draft.selected } : {}),
-      ...(draft.text.trim() ? { text: draft.text.trim() } : {}),
+      ...(text ? { text } : {}),
     };
   }
   return { action: 'accept', answers };
+}
+
+/** A question's short name for its tab: the agent's header, or a question number. */
+export function questionTabLabel(question: AgentPromptQuestion, index: number): string {
+  return question.header?.trim() || `Question ${index + 1}`;
+}
+
+/** Splits the " (Recommended)" the agent is told to add to an option's label from its text. */
+export function optionLabelParts(label: string): { text: string; recommended: boolean } {
+  const text = label.replace(/\s*\(recommended\)\s*$/i, '');
+  return { text: text || label, recommended: !!text && text !== label };
 }
 
 /** The fields of an elicitation form, in schema order, with unsupported fields dropped. */

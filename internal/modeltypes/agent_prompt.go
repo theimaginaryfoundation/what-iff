@@ -84,6 +84,9 @@ type AgentPromptQuestion struct {
 	Question    string              `json:"question"`
 	Options     []AgentPromptOption `json:"options,omitempty"`
 	MultiSelect bool                `json:"multi_select,omitempty"`
+	// Optional questions can be left unanswered: the card doesn't wait on them before sending, and
+	// an open one keeps its text box hidden until the person says they want to answer it.
+	Optional bool `json:"optional,omitempty"`
 }
 
 // AgentPromptPayload is what a prompt shows.

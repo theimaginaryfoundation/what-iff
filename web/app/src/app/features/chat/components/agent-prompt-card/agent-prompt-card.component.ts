@@ -1,285 +1,244 @@
-import { ChangeDetectionStrategy, Component, computed, effect, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, input, output, signal, Injector, afterNextRender, inject, ElementRef } from '@angular/core';
 import { DatePipe } from '@angular/common';
 
-import { AgentPrompt, AgentPromptQuestion, AgentPromptResponse } from '../../../../core/models/job.model';
-import { ButtonComponent, CheckboxComponent } from '../../../../shared/ui';
+import { AgentPrompt, AgentPromptResponse } from '../../../../core/models/job.model';
+import { ButtonComponent, CheckboxComponent, IconButtonComponent, XIconComponent } from '../../../../shared/ui';
+import { AgentPromptChoiceComponent } from './agent-prompt-choice.component';
+import { AgentPromptQuestionsComponent } from './agent-prompt-questions.component';
 import {
   FormField,
-  QuestionDraft,
-  emptyDrafts,
   formError,
   formFields,
   formResponse,
   initialFormValues,
   linkHost,
   promptHeading,
-  questionAnswered,
-  questionsResponse,
-  setOwnText,
-  toggleOption,
 } from './agent-prompt-card.helpers';
+
+/** A form's enum field of up to this many choices is a stack of radios; a longer one is a dropdown. */
+const MAX_RADIO_CHOICES = 6;
 
 /**
  * The question a running turn is waiting on (ADR 0x042), docked above the composer: the agent's
- * ask_user questions or approval request, or an MCP server's elicitation (a form, or a link to
- * open). Emits the person's answer; the session sends it and hides the card.
+ * ask_user questions (AgentPromptQuestionsComponent) or approval request, or an MCP server's
+ * elicitation (a form, or a link to open). Emits the person's answer; the session sends it and
+ * hides the card.
  */
 @Component({
   selector: 'app-agent-prompt-card',
   standalone: true,
-  imports: [ButtonComponent, CheckboxComponent, DatePipe],
+  imports: [AgentPromptChoiceComponent, AgentPromptQuestionsComponent, ButtonComponent, CheckboxComponent, DatePipe, IconButtonComponent, XIconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styleUrl: './agent-prompt-card.shared.scss',
   template: `
     @let p = prompt();
     <section class="prompt" role="region" [attr.aria-label]="heading()" data-testid="agent-prompt-card">
       <header class="prompt__head">
         <span class="prompt__dot" aria-hidden="true"></span>
         <h2 class="prompt__title">{{ heading() }}</h2>
-        <span class="prompt__expiry">Waiting for you · until {{ p.expires_at | date: 'shortTime' }}</span>
+        <span class="prompt__expiry">Waiting until {{ p.expires_at | date: 'shortTime' }}</span>
+        @if (p.payload.kind !== 'approval') {
+          <ui-icon-button
+            size="xs"
+            ariaLabel="Dismiss without answering"
+            data-testid="agent-prompt-skip"
+            (activate)="emit({ action: p.payload.kind === 'questions' ? 'decline' : 'cancel' })"
+          >
+            <ui-x-icon [size]="14" />
+          </ui-icon-button>
+        }
       </header>
 
       @switch (p.payload.kind) {
         @case ('approval') {
-          <p class="prompt__action">{{ p.payload.title }}</p>
-          @if (p.payload.message) {
-            <p class="prompt__message">{{ p.payload.message }}</p>
-          }
-          <label class="prompt__note-label" for="prompt-note-{{ p.id }}">Note for the agent (optional)</label>
-          <textarea
-            id="prompt-note-{{ p.id }}"
-            class="prompt__input prompt__note"
-            rows="2"
-            [value]="note()"
-            (input)="note.set($any($event.target).value)"
-            placeholder="e.g. go ahead, but skip the archive folder"
-          ></textarea>
-          <div class="prompt__actions">
-            <ui-button variant="primary" (activate)="emit({ action: 'accept', note: note() })" data-testid="agent-prompt-approve">Approve</ui-button>
-            <ui-button variant="secondary" (activate)="emit({ action: 'decline', note: note() })" data-testid="agent-prompt-deny">Deny</ui-button>
+          <div class="prompt__body">
+            <p class="prompt__action">{{ p.payload.title }}</p>
+            @if (p.payload.message) {
+              <p class="prompt__message">{{ p.payload.message }}</p>
+            }
+            @if (noteOpen()) {
+              <textarea
+                class="prompt__input"
+                rows="2"
+                aria-label="Note for the agent"
+                placeholder="e.g. go ahead, but skip the archive folder"
+                [value]="note()"
+                (input)="note.set($any($event.target).value)"
+              ></textarea>
+            } @else {
+              <button type="button" class="prompt__add-note" (click)="openNote()" data-testid="agent-prompt-add-note">Add a note for the agent</button>
+            }
           </div>
+          <footer class="prompt__footer">
+            <ui-button size="xs" variant="ghost" (activate)="emit({ action: 'decline', note: note() })" data-testid="agent-prompt-deny">Deny</ui-button>
+            <ui-button size="xs" variant="primary" (activate)="emit({ action: 'accept', note: note() })" data-testid="agent-prompt-approve">Approve</ui-button>
+          </footer>
         }
 
         @case ('questions') {
-          @for (q of p.payload.questions ?? []; track q.id) {
-            @let d = drafts()[q.id];
-            <fieldset class="prompt__question">
-              <legend class="prompt__legend">
-                @if (q.header) {
-                  <span class="prompt__chip">{{ q.header }}</span>
-                }
-                {{ q.question }}
-              </legend>
-              @if (q.options?.length) {
-                <div class="prompt__options" [attr.role]="q.multi_select ? 'group' : 'radiogroup'">
-                  @for (o of q.options; track o.label) {
-                    <button
-                      type="button"
-                      class="prompt__option"
-                      [class.prompt__option--on]="d?.selected?.includes(o.label)"
-                      [attr.role]="q.multi_select ? 'checkbox' : 'radio'"
-                      [attr.aria-checked]="d?.selected?.includes(o.label) ?? false"
-                      (click)="pick(q, o.label)"
-                    >
-                      <span class="prompt__option-label">{{ o.label }}</span>
-                      @if (o.description) {
-                        <span class="prompt__option-desc">{{ o.description }}</span>
-                      }
-                    </button>
-                  }
-                </div>
-              }
-              <input
-                class="prompt__input"
-                type="text"
-                [attr.aria-label]="q.options?.length ? 'Your own answer to: ' + q.question : 'Answer to: ' + q.question"
-                [placeholder]="q.options?.length ? 'Or write your own answer…' : 'Your answer…'"
-                [value]="d?.text ?? ''"
-                (input)="type(q, $any($event.target).value)"
-                (keydown.enter)="submitQuestions()"
-              />
-            </fieldset>
-          }
-          <div class="prompt__actions">
-            <ui-button variant="primary" [disabled]="!anyAnswered()" (activate)="submitQuestions()" data-testid="agent-prompt-submit">Send answer</ui-button>
-            <ui-button variant="ghost" (activate)="emit({ action: 'decline' })" data-testid="agent-prompt-skip">Skip</ui-button>
-          </div>
+          <app-agent-prompt-questions [promptId]="p.id" [questions]="p.payload.questions ?? []" (answer)="answer.emit($event)" />
         }
 
         @case ('form') {
-          @if (p.payload.message) {
-            <p class="prompt__message">{{ p.payload.message }}</p>
-          }
-          @for (f of fields(); track f.name) {
-            <div class="prompt__field">
-              @switch (f.control) {
-                @case ('checkbox') {
-                  <label class="prompt__check">
-                    <ui-checkbox [checked]="!!values()[f.name]" (checkedChange)="setValue(f.name, $event)" />
-                    {{ f.label }}
-                  </label>
-                }
-                @case ('select') {
-                  <label class="prompt__field-label" [for]="fieldId(f)">{{ f.label }}@if (f.required) {<span aria-hidden="true"> *</span>}</label>
-                  <select class="prompt__input" [id]="fieldId(f)" [value]="values()[f.name] ?? ''" (change)="setValue(f.name, $any($event.target).value)">
-                    <option value="">Choose…</option>
-                    @for (c of f.choices; track c.value) {
-                      <option [value]="c.value" [selected]="values()[f.name] === c.value">{{ c.label }}</option>
-                    }
-                  </select>
-                }
-                @case ('multi') {
-                  <span class="prompt__field-label">{{ f.label }}</span>
-                  @for (c of f.choices; track c.value) {
+          <div class="prompt__body prompt__body--scroll">
+            @if (p.payload.message) {
+              <p class="prompt__message">{{ p.payload.message }}</p>
+            }
+            @for (f of fields(); track f.name) {
+              <div class="prompt__field">
+                @switch (f.control) {
+                  @case ('checkbox') {
                     <label class="prompt__check">
-                      <ui-checkbox [checked]="multiHas(f, c.value)" (checkedChange)="toggleMulti(f, c.value)" />
-                      {{ c.label }}
+                      <ui-checkbox [checked]="!!values()[f.name]" (checkedChange)="setValue(f.name, $event)" />
+                      {{ f.label }}
                     </label>
                   }
+                  @case ('select') {
+                    @if (f.choices.length <= maxRadioChoices) {
+                      <span class="prompt__field-label">{{ f.label }}@if (f.required) {<span aria-hidden="true"> *</span>}</span>
+                      <div class="prompt__choices" role="radiogroup" [attr.aria-label]="f.label">
+                        @for (c of f.choices; track c.value) {
+                          <app-prompt-choice [name]="fieldId(f)" [label]="c.label" [checked]="values()[f.name] === c.value" (picked)="setValue(f.name, c.value)" />
+                        }
+                        @if (!f.required) {
+                          <app-prompt-choice [name]="fieldId(f)" label="No answer" [checked]="!values()[f.name]" (picked)="setValue(f.name, '')" />
+                        }
+                      </div>
+                    } @else {
+                      <label class="prompt__field-label" [for]="fieldId(f)">{{ f.label }}@if (f.required) {<span aria-hidden="true"> *</span>}</label>
+                      <select class="prompt__input" [id]="fieldId(f)" [value]="values()[f.name] ?? ''" (change)="setValue(f.name, $any($event.target).value)">
+                        <option value="">Choose…</option>
+                        @for (c of f.choices; track c.value) {
+                          <option [value]="c.value" [selected]="values()[f.name] === c.value">{{ c.label }}</option>
+                        }
+                      </select>
+                    }
+                  }
+                  @case ('multi') {
+                    <span class="prompt__field-label">{{ f.label }}@if (f.required) {<span aria-hidden="true"> *</span>}</span>
+                    <div class="prompt__choices" role="group" [attr.aria-label]="f.label">
+                      @for (c of f.choices; track c.value) {
+                        <app-prompt-choice [multiple]="true" [label]="c.label" [checked]="multiHas(f, c.value)" (picked)="toggleMulti(f, c.value)" />
+                      }
+                    </div>
+                  }
+                  @default {
+                    <label class="prompt__field-label" [for]="fieldId(f)">{{ f.label }}@if (f.required) {<span aria-hidden="true"> *</span>}</label>
+                    <input
+                      class="prompt__input"
+                      [id]="fieldId(f)"
+                      [type]="f.control"
+                      [attr.min]="f.min ?? null"
+                      [attr.max]="f.max ?? null"
+                      [attr.step]="f.integer ? 1 : null"
+                      [value]="values()[f.name] ?? ''"
+                      (input)="setValue(f.name, $any($event.target).value)"
+                      (keydown.enter)="submitForm()"
+                    />
+                  }
                 }
-                @default {
-                  <label class="prompt__field-label" [for]="fieldId(f)">{{ f.label }}@if (f.required) {<span aria-hidden="true"> *</span>}</label>
-                  <input
-                    class="prompt__input"
-                    [id]="fieldId(f)"
-                    [type]="f.control"
-                    [attr.min]="f.min ?? null"
-                    [attr.max]="f.max ?? null"
-                    [attr.step]="f.integer ? 1 : null"
-                    [value]="values()[f.name] ?? ''"
-                    (input)="setValue(f.name, $any($event.target).value)"
-                  />
+                @if (f.description && f.control !== 'checkbox') {
+                  <span class="prompt__hint">{{ f.description }}</span>
                 }
-              }
-              @if (f.description && f.control !== 'checkbox') {
-                <span class="prompt__hint">{{ f.description }}</span>
-              }
-            </div>
-          }
-          @if (formProblem()) {
-            <p class="prompt__error" role="alert">{{ formProblem() }}</p>
-          }
-          <div class="prompt__actions">
-            <ui-button variant="primary" (activate)="submitForm()" data-testid="agent-prompt-submit">Send</ui-button>
-            <ui-button variant="secondary" (activate)="emit({ action: 'decline' })">Decline</ui-button>
-            <ui-button variant="ghost" (activate)="emit({ action: 'cancel' })">Cancel</ui-button>
+              </div>
+            }
+            @if (formProblem()) {
+              <p class="prompt__error" role="alert">{{ formProblem() }}</p>
+            }
           </div>
-          <p class="prompt__fineprint">Only what you enter here is sent back to {{ p.payload.server_name || 'the connector' }}.</p>
+          <footer class="prompt__footer">
+            <p class="prompt__footer-note">Only what you enter here goes to {{ p.payload.server_name || 'the connector' }}.</p>
+            <ui-button size="xs" variant="ghost" (activate)="emit({ action: 'decline' })">Decline</ui-button>
+            <ui-button size="xs" variant="primary" (activate)="submitForm()" data-testid="agent-prompt-submit">Send</ui-button>
+          </footer>
         }
 
         @case ('url') {
-          @if (p.payload.message) {
-            <p class="prompt__message">{{ p.payload.message }}</p>
-          }
-          @if (host(); as h) {
-            <p class="prompt__link">Opens <strong>{{ h }}</strong><br /><span class="prompt__link-url">{{ p.payload.url }}</span></p>
-            <div class="prompt__actions">
-              <ui-button variant="primary" (activate)="openLink()" data-testid="agent-prompt-open-link">Open {{ h }}</ui-button>
-              <ui-button variant="secondary" [disabled]="!opened()" (activate)="emit({ action: 'accept' })">I've finished</ui-button>
-              <ui-button variant="ghost" (activate)="emit({ action: 'decline' })">Decline</ui-button>
-            </div>
-          } @else {
-            <p class="prompt__error">The connector sent a link that can't be opened safely.</p>
-            <div class="prompt__actions">
-              <ui-button variant="secondary" (activate)="emit({ action: 'decline' })">Decline</ui-button>
-            </div>
-          }
+          <div class="prompt__body">
+            @if (p.payload.message) {
+              <p class="prompt__message">{{ p.payload.message }}</p>
+            }
+            @if (host(); as h) {
+              <p class="prompt__link"><strong>{{ h }}</strong><span class="prompt__link-url">{{ p.payload.url }}</span></p>
+            } @else {
+              <p class="prompt__error">The connector sent a link that can't be opened safely.</p>
+            }
+          </div>
+          <footer class="prompt__footer">
+            <ui-button size="xs" variant="ghost" (activate)="emit({ action: 'decline' })">Decline</ui-button>
+            @if (host(); as h) {
+              @if (opened()) {
+                <ui-button size="xs" variant="secondary" (activate)="openLink()" data-testid="agent-prompt-open-link">Open again</ui-button>
+                <ui-button size="xs" variant="primary" (activate)="emit({ action: 'accept' })" data-testid="agent-prompt-finished">I've finished</ui-button>
+              } @else {
+                <ui-button size="xs" variant="primary" (activate)="openLink()" data-testid="agent-prompt-open-link">Open {{ h }}</ui-button>
+              }
+            }
+          </footer>
         }
       }
     </section>
   `,
   styles: [`
-    :host { display: block; }
+    /* Lined up with the composer's message box below it (chat-composer: same insets and width). */
+    :host { display: block; padding: 0 3.25rem 0 1rem; }
+    @media (max-width: 1023px) { :host { padding-right: 1rem; } }
     .prompt {
       background: var(--bg-card);
-      border: 1px solid var(--accent);
+      border: 1px solid var(--border);
       border-radius: 0.75rem;
       box-shadow: var(--card-shadow);
       color: var(--text-primary);
-      display: grid;
-      gap: 0.625rem;
       margin: 0 auto 0.5rem;
-      max-height: min(60vh, 32rem);
-      overflow-y: auto;
-      padding: 0.875rem 1rem;
-      width: min(100%, 48rem);
+      overflow: hidden;
+      width: min(100%, 720px);
     }
-    .prompt__head { align-items: center; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .prompt__head { align-items: center; display: flex; gap: 0.5rem; min-height: 2.25rem; padding: 0.25rem 0.375rem 0.25rem 0.75rem; }
     .prompt__dot {
       animation: prompt-pulse 1.6s ease-in-out infinite;
       background: var(--accent);
       border-radius: 999px;
-      height: 0.5rem;
-      width: 0.5rem;
+      flex: none;
+      height: 0.4375rem;
+      width: 0.4375rem;
     }
     @keyframes prompt-pulse { 50% { opacity: 0.35; } }
     @media (prefers-reduced-motion: reduce) { .prompt__dot { animation: none; } }
-    .prompt__title { font-size: 0.9375rem; font-weight: 600; margin: 0; }
-    .prompt__expiry { color: var(--text-muted); font-size: 0.75rem; margin-left: auto; }
-    .prompt__action { font-weight: 600; margin: 0; }
-    .prompt__message { color: var(--text-secondary); margin: 0; white-space: pre-wrap; }
-    .prompt__question { border: 0; display: grid; gap: 0.5rem; margin: 0; min-width: 0; padding: 0; }
-    .prompt__legend { font-weight: 500; margin-bottom: 0.25rem; padding: 0; }
-    .prompt__chip {
-      background: var(--accent-bg);
-      border-radius: 999px;
-      color: var(--accent);
-      font-size: 0.6875rem;
-      font-weight: 600;
-      margin-right: 0.375rem;
-      padding: 0.125rem 0.5rem;
-      text-transform: uppercase;
-    }
-    .prompt__options { display: grid; gap: 0.375rem; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); }
-    .prompt__option {
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      border-radius: 0.5rem;
-      color: var(--text-primary);
-      cursor: pointer;
-      display: grid;
-      gap: 0.125rem;
-      padding: 0.5rem 0.75rem;
-      text-align: left;
-    }
-    .prompt__option:hover { border-color: var(--border-hover); }
-    .prompt__option:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-    .prompt__option--on { background: var(--accent-bg); border-color: var(--accent); }
-    .prompt__option-label { font-weight: 500; }
-    .prompt__option-desc { color: var(--text-muted); font-size: 0.8125rem; }
-    .prompt__input {
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      border-radius: 0.5rem;
-      color: var(--text-primary);
-      font: inherit;
-      padding: 0.5rem 0.625rem;
-      width: 100%;
-    }
-    .prompt__input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-    .prompt__note { resize: vertical; }
-    .prompt__note-label, .prompt__field-label { color: var(--text-secondary); font-size: 0.8125rem; }
+    .prompt__title { font-size: 0.8125rem; font-weight: 600; margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .prompt__expiry { color: var(--text-muted); flex: none; font-size: 0.75rem; margin-left: auto; padding-right: 0.375rem; }
+    .prompt__body { display: grid; gap: 0.5rem; padding: 0.25rem 0.75rem 0.75rem; }
+    .prompt__body--scroll { gap: 0.75rem; max-height: min(46vh, 24rem); overflow-y: auto; }
+    .prompt__action { font-size: 0.9375rem; font-weight: 500; margin: 0; }
+    .prompt__message { color: var(--text-secondary); font-size: 0.875rem; margin: 0; white-space: pre-wrap; }
+    .prompt__add-note { background: none; border: 0; color: var(--accent); cursor: pointer; font-size: 0.8125rem; justify-self: start; padding: 0; }
+    .prompt__add-note:hover { text-decoration: underline; }
+    .prompt__add-note:focus-visible { border-radius: 0.25rem; outline: 2px solid var(--focus-ring); outline-offset: 2px; }
     .prompt__field { display: grid; gap: 0.25rem; }
-    .prompt__check { align-items: center; display: flex; gap: 0.5rem; }
-    .prompt__hint, .prompt__fineprint { color: var(--text-muted); font-size: 0.75rem; margin: 0; }
+    .prompt__field-label { color: var(--text-secondary); font-size: 0.8125rem; font-weight: 500; }
+    .prompt__choices { display: grid; gap: 0.0625rem; margin-inline: -0.5rem; }
+    .prompt__check { align-items: center; display: flex; font-size: 0.875rem; gap: 0.625rem; }
+    .prompt__hint { color: var(--text-muted); font-size: 0.75rem; margin: 0; }
     .prompt__error { color: var(--danger); font-size: 0.8125rem; margin: 0; }
-    .prompt__link { margin: 0; overflow-wrap: anywhere; }
+    .prompt__link { display: grid; font-size: 0.875rem; gap: 0.125rem; margin: 0; overflow-wrap: anywhere; }
     .prompt__link-url { color: var(--text-muted); font-size: 0.8125rem; }
-    .prompt__actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
   `],
 })
 export class AgentPromptCardComponent {
   readonly prompt = input.required<AgentPrompt>();
   readonly answer = output<AgentPromptResponse>();
 
+  private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly injector = inject(Injector);
+
   readonly heading = computed(() => promptHeading(this.prompt().payload, this.prompt().source));
-  readonly drafts = signal<Record<string, QuestionDraft>>({});
+  readonly maxRadioChoices = MAX_RADIO_CHOICES;
   readonly note = signal('');
+  readonly noteOpen = signal(false);
   readonly fields = computed<FormField[]>(() => formFields(this.prompt().payload.schema));
   readonly values = signal<Record<string, unknown>>({});
   readonly formProblem = signal<string | null>(null);
   readonly host = computed(() => linkHost(this.prompt().payload.url));
   readonly opened = signal(false);
-  readonly anyAnswered = computed(() => Object.values(this.drafts()).some(questionAnswered));
 
   constructor() {
     // A new prompt starts from a clean card (and the form from its defaults).
@@ -288,25 +247,17 @@ export class AgentPromptCardComponent {
       const p = this.prompt();
       if (p.id === lastId) return;
       lastId = p.id;
-      this.drafts.set(emptyDrafts(p.payload.questions));
       this.note.set('');
+      this.noteOpen.set(false);
       this.values.set(initialFormValues(formFields(p.payload.schema)));
       this.formProblem.set(null);
       this.opened.set(false);
     });
   }
 
-  pick(q: AgentPromptQuestion, label: string): void {
-    this.drafts.update(all => ({ ...all, [q.id]: toggleOption(all[q.id] ?? { selected: [], text: '' }, q, label) }));
-  }
-
-  type(q: AgentPromptQuestion, text: string): void {
-    this.drafts.update(all => ({ ...all, [q.id]: setOwnText(all[q.id] ?? { selected: [], text: '' }, q, text) }));
-  }
-
-  submitQuestions(): void {
-    if (!this.anyAnswered()) return;
-    this.emit(questionsResponse(this.drafts()));
+  openNote(): void {
+    this.noteOpen.set(true);
+    afterNextRender(() => this.element.nativeElement.querySelector('textarea')?.focus(), { injector: this.injector });
   }
 
   setValue(name: string, value: unknown): void {

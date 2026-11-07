@@ -33,6 +33,8 @@ export interface McpAppBridgeDeps {
   /** Sends a message into the frame. */
   post(message: JsonRpcMessage): void;
   log?(level: string, data: unknown): void;
+  /** The view finished its handshake and has its data, so it is safe to show. */
+  ready?(): void;
 }
 
 export interface McpAppHostContext {
@@ -41,6 +43,8 @@ export interface McpAppHostContext {
   maxHeight: number;
   locale?: string;
   timeZone?: string;
+  /** The chat's theme in the spec's style variables. */
+  styleVariables?: Record<string, string>;
 }
 
 export class McpAppBridge {
@@ -49,7 +53,7 @@ export class McpAppBridge {
 
   constructor(
     private readonly deps: McpAppBridgeDeps,
-    private readonly context: McpAppHostContext,
+    private context: McpAppHostContext,
     private readonly toolInput: unknown,
     private toolResult: unknown,
   ) {}
@@ -60,6 +64,13 @@ export class McpAppBridge {
     if (this.initialized && this.toolSent && result !== undefined) {
       this.notify('ui/notifications/tool-result', result);
     }
+  }
+
+  /** The chat's theme changed; a view that has started hears about it, one that hasn't gets it on initialize. */
+  setTheme(theme: 'light' | 'dark', styleVariables: Record<string, string>): void {
+    this.context = { ...this.context, theme, styleVariables };
+    if (!this.initialized) return;
+    this.notify('ui/notifications/host-context-changed', { theme, styles: { variables: styleVariables } });
   }
 
   /** Asks the view to clean up before the frame goes away. */
@@ -90,6 +101,7 @@ export class McpAppBridge {
       case 'ui/notifications/initialized':
         this.initialized = true;
         this.sendTool();
+        this.deps.ready?.();
         return undefined;
       case 'tools/call': {
         const name = typeof p['name'] === 'string' ? p['name'] : '';
@@ -136,6 +148,7 @@ export class McpAppBridge {
       hostCapabilities: { openLinks: {}, serverTools: {}, logging: {} },
       hostContext: {
         theme: c.theme,
+        ...(c.styleVariables ? { styles: { variables: c.styleVariables } } : {}),
         displayMode: 'inline',
         availableDisplayModes: ['inline'],
         containerDimensions: { maxHeight: c.maxHeight },

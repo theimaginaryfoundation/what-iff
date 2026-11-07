@@ -28,6 +28,28 @@ describe('McpAppBridge', () => {
     expect(posted).toHaveLength(3);
   });
 
+  it('offers the style variables, reports ready, and passes on a theme change once started', async () => {
+    const { bridge, deps, posted } = setup();
+    const ready = vi.fn();
+    deps.ready = ready;
+    bridge.setTheme('light', { '--color-text-primary': '#111' });
+    expect(posted).toHaveLength(0);
+
+    await bridge.handle({ jsonrpc: '2.0', id: 1, method: 'ui/initialize', params: {} });
+    expect(posted[0]).toMatchObject({ result: { hostContext: { theme: 'light', styles: { variables: { '--color-text-primary': '#111' } } } } });
+
+    await bridge.handle({ jsonrpc: '2.0', method: 'ui/notifications/initialized' });
+    expect(ready).toHaveBeenCalledTimes(1);
+
+    posted.length = 0;
+    bridge.setTheme('dark', { '--color-text-primary': '#eee' });
+    expect(posted).toEqual([{
+      jsonrpc: '2.0',
+      method: 'ui/notifications/host-context-changed',
+      params: { theme: 'dark', styles: { variables: { '--color-text-primary': '#eee' } } },
+    }]);
+  });
+
   it('proxies tools/call and reports failures as JSON-RPC errors', async () => {
     const { bridge, deps, posted } = setup();
     await bridge.handle({ jsonrpc: '2.0', id: 'a', method: 'tools/call', params: { name: 'refresh', arguments: { n: 1 } } });

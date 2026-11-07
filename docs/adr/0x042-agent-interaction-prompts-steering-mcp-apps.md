@@ -45,9 +45,23 @@ That way two tabs cannot both answer, and an answer after expiry gets a 409.
 A turn-only tool (offered next to `update_plan` through `turnOnlyToolSpecs`), shaped like Claude Code's question tool:
 
 - either 1–4 questions, each with 2–4 options (single or multi-select) or none (free text); the person can always write their own answer;
+  a question can be marked `optional` (e.g. "Anything else I should know?"), and a prompt whose questions are all optional may be sent with no answers;
 - or an `approval` (`action`, `details`), answered Approve / Deny with an optional note.
 
 The result the model reads is JSON: the answers, `approved` with the note, `declined`, or `no_answer` with the instruction to stop.
+
+**The card** docks above the composer, at the composer's width, and is built like the question tools in Claude Code and Cursor:
+
+- **One question at a time.** With more than one, compact tabs carry each question's `header` (a tick once answered) above "Question 2 of 4"; Back and Next move between them and the tabs jump.
+  The send button appears on the last question, or as soon as everything is answered, and stays disabled (with "Still to answer: …") until every required question has an answer.
+- **Answers are stacked rows** with a radio or checkbox, the option's description underneath, and the agent's " (Recommended)" shown as a tag.
+  Clicking a single-select question's first answer moves on to the next question; arrow keys don't.
+  Enter moves on, and sends from the last question.
+- **Text boxes only when asked for.** "Other…" is the last row of every question with options and opens its box when picked.
+  An optional open question offers "Nothing to add" / "Add something…" and only shows a box for the second; a required open question has nothing to pick, so its box is there from the start.
+  An approval's note is behind "Add a note for the agent".
+- The header's ✕ dismisses without answering: `decline` for the agent's questions, `cancel` for an MCP elicitation, whose own footer keeps an explicit Decline.
+- Actions use the compact `xs` button size; the radio is the shared `ui-radio`, and the tabs are `ui-tabs` at `size="sm"`.
 
 **Approval gating is agent-asked only for now (Gori's call).**
 Enforced gating, where the app asks before certain tools run (MCP tools by annotation, built-in side-effect tools such as Discord/Slack posts and agent jobs), is the stretch goal and is not built here.
@@ -101,14 +115,18 @@ The claimed job's worker sees the cancel (`watchChatJobCancel`) and exits withou
   The spec's sandbox-proxy page on a separate origin is the hardened follow-up.
   Views that need `localStorage` will not work until then.
 - **The host bridge** (`McpAppBridge`) implements:
-  - `ui/initialize` (theme, inline display, max height, locale);
+  - `ui/initialize` (theme, inline display, max height, locale, and the chat's theme as the spec's `styles.variables`, resolved from the live theme tokens);
+  - `ui/notifications/host-context-changed` with the new theme and variables when the chat's theme changes;
   - after `ui/notifications/initialized`: `tool-input` then `tool-result`;
   - `tools/call`;
-  - `ui/open-link` (http/https only, after a confirm);
+  - `ui/open-link` (http/https only, after the person confirms in the app's dialog, which names the host);
   - `ui/message`, which goes **into the composer for the person to send**, never straight to the agent;
   - `size-changed`, logging and `ping`.
   `ui/update-model-context` is accepted and ignored. Only `inline` display is offered.
 - Views render under the saved reply and load when they scroll near the screen.
+  Each sits in a card with a header (the tool's name, the connector, and a button to fold it away), a placeholder until the view finishes its handshake (or 1.5 s after its document loads), and a retry on errors.
+  The frame's `color-scheme` follows the chat's theme, so a view that follows the theme it is given is transparent over the card rather than painted an opaque page color.
+  `prefersBorder: false` drops the card's border and background.
 
 ### 6. Mock LLM directives (development)
 

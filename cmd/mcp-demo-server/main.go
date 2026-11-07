@@ -258,16 +258,38 @@ func replyError(w http.ResponseWriter, id json.RawMessage, code int, message str
 // protocol, so the host's side of it is easy to follow.
 const counterHTML = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
-  body { font: 14px system-ui, sans-serif; margin: 0; padding: 16px; background: transparent; color: #222; }
-  body.dark { color: #eee; }
-  .n { font-size: 40px; font-weight: 700; margin: 4px 0 12px; }
-  button { font: inherit; padding: 6px 12px; margin-right: 6px; border-radius: 6px; border: 1px solid #888; background: #f4f4f4; cursor: pointer; }
-  body.dark button { background: #333; color: #eee; }
-  #log { color: #888; font-size: 12px; margin-top: 10px; min-height: 1em; }
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    background: transparent;
+    color: var(--color-text-primary, #111827);
+    font: var(--font-text-md-size, 14px) / 1.45 var(--font-sans, system-ui, sans-serif);
+    margin: 0;
+    padding: 12px 14px;
+  }
+  .label { color: var(--color-text-tertiary, #6b7280); font-size: var(--font-text-xs-size, 12px); }
+  .n { font-size: var(--font-heading-2xl-size, 30px); font-weight: var(--font-weight-semibold, 600); font-variant-numeric: tabular-nums; line-height: 1.25; margin: 0 0 10px; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  button {
+    background: transparent;
+    border: var(--border-width-regular, 1px) solid var(--color-border-primary, #d1d5db);
+    border-radius: var(--border-radius-md, 8px);
+    color: var(--color-text-primary, #111827);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--font-text-xs-size, 12px);
+    font-weight: var(--font-weight-medium, 500);
+    padding: 4px 10px;
+  }
+  button:hover { background: var(--color-background-tertiary, #f3f4f6); }
+  button:focus-visible { outline: 2px solid var(--color-ring-primary, #8c87ff); outline-offset: 1px; }
+  button.primary { background: var(--color-background-inverse, #111827); border-color: transparent; color: var(--color-text-inverse, #fff); }
+  button.primary:hover { opacity: .88; }
+  #log { color: var(--color-text-tertiary, #6b7280); font-size: var(--font-text-xs-size, 12px); margin-top: 8px; min-height: 1em; }
 </style></head><body>
-  <div>Demo counter</div>
+  <div class="label">Demo counter</div>
   <div class="n" id="n">…</div>
-  <button id="inc">+1</button><button id="tell">Tell the agent</button><button id="link">Open example.com</button>
+  <div class="row"><button class="primary" id="inc">Add one</button><button id="tell">Tell the agent</button><button id="link">Open example.com</button></div>
   <div id="log"></div>
 <script>
   let nextId = 1; const pending = {};
@@ -276,19 +298,26 @@ const counterHTML = `<!DOCTYPE html>
   const notify = (method, params) => send({ method, params });
   const log = (t) => { document.getElementById('log').textContent = t; };
   const show = (r) => { const c = r && r.structuredContent && r.structuredContent.count; if (c !== undefined) document.getElementById('n').textContent = c; };
-  const size = () => notify('ui/notifications/size-changed', { width: document.body.scrollWidth, height: document.documentElement.scrollHeight });
+  const applyHost = (c) => {
+    if (c.theme) document.documentElement.style.colorScheme = c.theme;
+    const vars = c.styles && c.styles.variables;
+    for (const k in vars || {}) document.documentElement.style.setProperty(k, vars[k]);
+  };
+  const size = () => notify('ui/notifications/size-changed', { width: document.body.scrollWidth, height: Math.ceil(document.body.getBoundingClientRect().height) });
+  new ResizeObserver(size).observe(document.body);
   window.addEventListener('message', (e) => {
     const m = e.data || {};
     if (m.id !== undefined && pending[m.id]) { const p = pending[m.id]; delete pending[m.id]; m.error ? p.reject(m.error) : p.resolve(m.result); return; }
     if (m.method === 'ui/notifications/tool-input') log('input: ' + JSON.stringify(m.params.arguments));
     if (m.method === 'ui/notifications/tool-result') show(m.params);
+    if (m.method === 'ui/notifications/host-context-changed') applyHost(m.params);
     if (m.method === 'ui/resource-teardown') send({ id: m.id, result: {} });
   });
   document.getElementById('inc').onclick = () => request('tools/call', { name: 'increment', arguments: {} }).then(show).catch(e => log('error: ' + e.message));
   document.getElementById('tell').onclick = () => request('ui/message', { role: 'user', content: { type: 'text', text: 'The counter is at ' + document.getElementById('n').textContent + '.' } }).then(() => log('sent to the composer'));
   document.getElementById('link').onclick = () => request('ui/open-link', { url: 'https://example.com' }).catch(e => log('link: ' + e.message));
   request('ui/initialize', { protocolVersion: '2026-01-26', appCapabilities: {}, clientInfo: { name: 'demo-counter', version: '0.1.0' } }).then((r) => {
-    if (r && r.hostContext && r.hostContext.theme === 'dark') document.body.classList.add('dark');
+    if (r && r.hostContext) applyHost(r.hostContext);
     notify('ui/notifications/initialized', {});
     size();
   });

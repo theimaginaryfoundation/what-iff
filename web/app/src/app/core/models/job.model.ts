@@ -75,6 +75,8 @@ export interface AgentPromptQuestion {
   /** Absent: an open question answered in free text. */
   options?: AgentPromptOption[];
   multi_select?: boolean;
+  /** Can be left unanswered; the card does not wait on it before sending. */
+  optional?: boolean;
 }
 
 export interface AgentPromptPayload {

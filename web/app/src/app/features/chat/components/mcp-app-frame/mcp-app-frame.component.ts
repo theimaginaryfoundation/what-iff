@@ -3,8 +3,10 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  Injector,
   afterNextRender,
   computed,
+  effect,
   inject,
   input,
   signal,
@@ -16,13 +18,31 @@ import { firstValueFrom } from 'rxjs';
 
 import { ToolCall } from '../../../../core/models/toolcall.model';
 import { McpAppService, McpAppView } from '../../../../core/services/mcp-app.service';
+import { ThemeService } from '../../../../core/services/theme.service';
 import { apiErrorMessage } from '../../../../core/utils/api-error.helpers';
+import {
+  ButtonComponent,
+  ChevDownIconComponent,
+  ChevUpIconComponent,
+  IconButtonComponent,
+  LayersIconComponent,
+  ModalComponent,
+} from '../../../../shared/ui';
 import { McpAppBridge, JsonRpcMessage } from './mcp-app-bridge';
+import { mcpHostStyleVariables, toolDisplayName } from './mcp-app-host-styles';
 
 /** The frame's height before the view reports its own, and the most it may grow to. */
 const INITIAL_HEIGHT_PX = 240;
 const MAX_HEIGHT_PX = 800;
 const MIN_HEIGHT_PX = 60;
+/** A view that never finishes its handshake is shown anyway this long after its document loads. */
+const REVEAL_FALLBACK_MS = 1500;
+
+interface PendingLink {
+  url: string;
+  host: string;
+  resolve(opened: boolean): void;
+}
 
 /**
  * An MCP App's view (ADR 0x042), rendered under the reply whose tool call produced it.
@@ -36,65 +56,107 @@ const MIN_HEIGHT_PX = 60;
 @Component({
   selector: 'app-mcp-app-frame',
   standalone: true,
+  imports: [ButtonComponent, ChevDownIconComponent, ChevUpIconComponent, IconButtonComponent, LayersIconComponent, ModalComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="app" [class.app--bordered]="bordered()" [attr.aria-label]="label()" data-testid="mcp-app-frame">
+    <section class="app" [class.app--flush]="!bordered()" [attr.aria-label]="ariaLabel()" data-testid="mcp-app-frame">
       <header class="app__head">
-        <span class="app__badge">App</span>
-        <span class="app__name">{{ label() }}</span>
+        <ui-layers-icon class="app__icon" [size]="14" />
+        <span class="app__name">{{ title() }}</span>
+        @if (view()?.server_name; as server) {
+          <span class="app__server">{{ server }}</span>
+        }
+        <ui-icon-button
+          class="app__toggle"
+          size="xs"
+          [ariaLabel]="collapsed() ? 'Show ' + title() : 'Hide ' + title()"
+          [attr.aria-expanded]="!collapsed()"
+          data-testid="mcp-app-toggle"
+          (activate)="collapsed.set(!collapsed())"
+        >
+          @if (collapsed()) {
+            <ui-chev-down-icon [size]="14" />
+          } @else {
+            <ui-chev-up-icon [size]="14" />
+          }
+        </ui-icon-button>
       </header>
-      @switch (state()) {
-        @case ('idle') {
-          <div class="app__placeholder" [style.height.px]="height()"></div>
+
+      <div class="app__stage" [hidden]="collapsed()" [style.height.px]="state() === 'error' ? null : height()">
+        @if (state() === 'error') {
+          <div class="app__problem">
+            <p role="alert">{{ error() }}</p>
+            <ui-button size="xs" (activate)="load()" data-testid="mcp-app-retry">Try again</ui-button>
+          </div>
+        } @else {
+          @if (!revealed()) {
+            <div class="app__skeleton" role="status" aria-label="Loading app" data-testid="mcp-app-loading">
+              <span></span><span></span><span></span>
+            </div>
+          }
+          @if (state() === 'ready') {
+            <iframe
+              #frame
+              class="app__frame"
+              [class.app__frame--shown]="revealed()"
+              [title]="title()"
+              sandbox="allow-scripts allow-forms"
+              referrerpolicy="no-referrer"
+              [style.color-scheme]="theme()"
+              [srcdoc]="srcdoc()"
+              (load)="onFrameLoaded()"
+            ></iframe>
+          }
         }
-        @case ('loading') {
-          <div class="app__placeholder" [style.height.px]="height()" role="status">Loading app…</div>
-        }
-        @case ('error') {
-          <p class="app__error" role="alert">{{ error() }}</p>
-          <button type="button" class="app__retry" (click)="load()">Try again</button>
-        }
-        @case ('ready') {
-          <iframe
-            #frame
-            class="app__frame"
-            title="{{ label() }}"
-            sandbox="allow-scripts allow-forms"
-            referrerpolicy="no-referrer"
-            [style.height.px]="height()"
-            [srcdoc]="srcdoc()"
-          ></iframe>
-        }
-      }
+      </div>
     </section>
+
+    <ui-modal [open]="!!pendingLink()" size="sm" labelledBy="mcp-app-link-title" (dismiss)="answerLink(false)">
+      <h2 modal-header id="mcp-app-link-title" class="app-link__title">Open this link?</h2>
+      @if (pendingLink(); as link) {
+        <p class="app-link__who">{{ title() }} wants to open a page on <strong>{{ link.host }}</strong>.</p>
+        <p class="app-link__url" data-testid="mcp-app-link-url">{{ link.url }}</p>
+      }
+      <div modal-footer class="app-link__actions">
+        <ui-button size="sm" variant="ghost" (activate)="answerLink(false)">Cancel</ui-button>
+        <ui-button size="sm" variant="primary" (activate)="answerLink(true)" data-testid="mcp-app-link-open">Open link</ui-button>
+      </div>
+    </ui-modal>
   `,
   styles: [`
-    :host { display: block; margin-top: 0.5rem; max-width: 100%; }
-    .app { display: grid; gap: 0.375rem; }
-    .app--bordered .app__frame { border: 1px solid var(--border); border-radius: 0.5rem; }
-    .app__head { align-items: center; color: var(--text-muted); display: flex; font-size: 0.75rem; gap: 0.375rem; }
-    .app__badge {
-      background: var(--accent-bg);
-      border-radius: 999px;
-      color: var(--accent);
-      font-size: 0.625rem;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      padding: 0.0625rem 0.375rem;
-      text-transform: uppercase;
+    :host { display: block; margin-top: 0.625rem; max-width: 100%; }
+    .app { background: var(--bg-card); border: 1px solid var(--border); border-radius: 0.75rem; overflow: hidden; }
+    .app--flush { background: transparent; border-color: transparent; }
+    .app__head { align-items: center; display: flex; gap: 0.375rem; min-height: 2rem; padding: 0.125rem 0.25rem 0.125rem 0.625rem; }
+    .app:not(.app--flush) .app__head { border-bottom: 1px solid var(--border); }
+    .app:has(.app__stage[hidden]) .app__head { border-bottom-color: transparent; }
+    .app__icon { color: var(--text-muted); display: inline-flex; flex: none; }
+    .app__name { color: var(--text-primary); font-size: 0.75rem; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .app__server { color: var(--text-muted); flex: none; font-size: 0.75rem; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .app__toggle { margin-left: auto; }
+    .app__stage { position: relative; transition: height 160ms ease; }
+    .app__stage[hidden] { display: none; }
+    @media (prefers-reduced-motion: reduce) { .app__stage { transition: none; } }
+    .app__frame { background: transparent; border: 0; display: block; height: 100%; opacity: 0; transition: opacity 160ms ease; width: 100%; }
+    .app__frame--shown { opacity: 1; }
+    .app__skeleton { display: grid; gap: 0.625rem; inset: 0; align-content: start; padding: 0.875rem; position: absolute; }
+    .app__skeleton span {
+      animation: app-shimmer 1.4s ease-in-out infinite;
+      background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+      border-radius: 0.375rem;
+      height: 0.75rem;
     }
-    .app__frame { background: var(--bg-card); border: 0; display: block; width: 100%; }
-    .app__placeholder {
-      align-items: center;
-      background: var(--bg-surface);
-      border-radius: 0.5rem;
-      color: var(--text-muted);
-      display: flex;
-      font-size: 0.8125rem;
-      justify-content: center;
-    }
-    .app__error { color: var(--danger); font-size: 0.8125rem; margin: 0; }
-    .app__retry { background: none; border: 0; color: var(--accent); cursor: pointer; font-size: 0.8125rem; justify-self: start; padding: 0; }
+    .app__skeleton span:nth-child(1) { width: 40%; }
+    .app__skeleton span:nth-child(2) { width: 85%; }
+    .app__skeleton span:nth-child(3) { width: 65%; }
+    @keyframes app-shimmer { 50% { opacity: 0.45; } }
+    @media (prefers-reduced-motion: reduce) { .app__skeleton span { animation: none; } }
+    .app__problem { align-items: center; display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: space-between; padding: 0.625rem 0.75rem; }
+    .app__problem p { color: var(--danger); font-size: 0.8125rem; margin: 0; }
+    .app-link__title { font-size: 1rem; font-weight: 600; margin: 0; }
+    .app-link__who { font-size: 0.875rem; margin: 0 0 0.5rem; }
+    .app-link__url { color: var(--text-muted); font-size: 0.8125rem; margin: 0; overflow-wrap: anywhere; }
+    .app-link__actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
   `],
 })
 export class McpAppFrameComponent {
@@ -106,16 +168,28 @@ export class McpAppFrameComponent {
   private readonly document = inject(DOCUMENT);
   private readonly host = inject(ElementRef<HTMLElement>);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly themes = inject(ThemeService);
+  private readonly injector = inject(Injector);
   private readonly frame = viewChild<ElementRef<HTMLIFrameElement>>('frame');
 
   readonly state = signal<'idle' | 'loading' | 'error' | 'ready'>('idle');
   readonly error = signal('');
   readonly view = signal<McpAppView | null>(null);
   readonly height = signal(INITIAL_HEIGHT_PX);
-  readonly label = computed(() => {
-    const v = this.view();
-    const tool = v?.tool_name || this.toolCall().app?.tool_name || 'app';
-    return v?.server_name ? `${tool} · ${v.server_name}` : tool;
+  /**
+   * The frame's color scheme follows the chat's, which is what the view is told to use: when the two
+   * differ the browser paints the frame an opaque page color instead of letting the card show through.
+   */
+  readonly theme = computed(() => this.themes.theme());
+  readonly collapsed = signal(false);
+  /** The view has its data (or had its chance): the placeholder gives way to it. */
+  readonly revealed = signal(false);
+  /** A link the view asked to open, waiting on the person. */
+  readonly pendingLink = signal<PendingLink | null>(null);
+  readonly title = computed(() => toolDisplayName(this.view()?.tool_name || this.toolCall().app?.tool_name || ''));
+  readonly ariaLabel = computed(() => {
+    const server = this.view()?.server_name;
+    return server ? `${this.title()}, from ${server}` : this.title();
   });
   readonly bordered = computed(() => this.view()?.prefers_border !== false);
   /**
@@ -126,6 +200,7 @@ export class McpAppFrameComponent {
   readonly srcdoc = computed<SafeHtml>(() => this.sanitizer.bypassSecurityTrustHtml(this.view()?.html ?? ''));
 
   private bridge: McpAppBridge | null = null;
+  private revealTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly onMessage = (event: MessageEvent) => {
     const frameWindow = this.frame()?.nativeElement.contentWindow;
     if (!frameWindow || event.source !== frameWindow || !this.bridge) return;
@@ -136,7 +211,17 @@ export class McpAppFrameComponent {
     afterNextRender(() => this.loadWhenVisible());
     const win = this.document.defaultView;
     win?.addEventListener('message', this.onMessage);
+    // Tell a running view when the theme flips. Read after render, once the new tokens apply.
+    let lastTheme = this.themes.theme();
+    effect(() => {
+      const theme = this.themes.theme();
+      if (theme === lastTheme) return;
+      lastTheme = theme;
+      afterNextRender(() => this.bridge?.setTheme(theme, this.styleVariables()), { injector: this.injector });
+    });
     this.destroyRef.onDestroy(() => {
+      this.clearRevealTimer();
+      this.pendingLink()?.resolve(false);
       this.bridge?.teardown('closed');
       win?.removeEventListener('message', this.onMessage);
       this.observer?.disconnect();
@@ -165,23 +250,22 @@ export class McpAppFrameComponent {
   async load(): Promise<void> {
     if (this.state() === 'loading') return;
     this.state.set('loading');
+    this.revealed.set(false);
     try {
       const view = await firstValueFrom(this.apps.getView(this.chatId(), this.toolCall().id));
       this.bridge = new McpAppBridge(
         {
           callTool: (name, args) => firstValueFrom(this.apps.callTool(this.chatId(), this.toolCall().id, name, args)),
-          openLink: async url => {
-            const ok = this.document.defaultView?.confirm(`This app wants to open:\n\n${url}\n\nOpen it in a new tab?`) ?? false;
-            if (ok) this.document.defaultView?.open(url, '_blank', 'noopener,noreferrer');
-            return ok;
-          },
+          openLink: url => this.askToOpen(url),
           proposeMessage: text => this.apps.proposeMessage(text),
           resize: h => this.height.set(Math.min(MAX_HEIGHT_PX, Math.max(MIN_HEIGHT_PX, Math.ceil(h)))),
           post: msg => this.post(msg),
           log: (level, data) => console.debug(`[mcp-app ${view.tool_name}] ${level}`, data),
+          ready: () => this.reveal(),
         },
         {
-          theme: this.document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light',
+          theme: this.themes.theme(),
+          styleVariables: this.styleVariables(),
           toolName: view.tool_name,
           maxHeight: MAX_HEIGHT_PX,
           locale: this.document.defaultView?.navigator.language,
@@ -196,6 +280,42 @@ export class McpAppFrameComponent {
       this.error.set(apiErrorMessage(err, 'This app could not be loaded.'));
       this.state.set('error');
     }
+  }
+
+  onFrameLoaded(): void {
+    this.clearRevealTimer();
+    if (!this.revealed()) this.revealTimer = setTimeout(() => this.reveal(), REVEAL_FALLBACK_MS);
+  }
+
+  /** The person's answer to the link dialog; the page opens from their click, so it isn't blocked. */
+  answerLink(open: boolean): void {
+    const link = this.pendingLink();
+    if (!link) return;
+    this.pendingLink.set(null);
+    if (open) this.document.defaultView?.open(link.url, '_blank', 'noopener,noreferrer');
+    link.resolve(open);
+  }
+
+  private askToOpen(url: string): Promise<boolean> {
+    this.pendingLink()?.resolve(false);
+    return new Promise(resolve => this.pendingLink.set({ url, host: new URL(url).host, resolve }));
+  }
+
+  private reveal(): void {
+    this.clearRevealTimer();
+    this.revealed.set(true);
+  }
+
+  private clearRevealTimer(): void {
+    if (this.revealTimer !== null) clearTimeout(this.revealTimer);
+    this.revealTimer = null;
+  }
+
+  private styleVariables(): Record<string, string> {
+    const win = this.document.defaultView;
+    if (!win) return {};
+    const computedStyle = win.getComputedStyle(this.document.documentElement);
+    return mcpHostStyleVariables(name => computedStyle.getPropertyValue(name));
   }
 
   private post(message: JsonRpcMessage): void {
