@@ -13,13 +13,17 @@ export interface FakeMonacoModel {
 
 export function fakeMonaco() {
   const models = new Map<string, FakeMonacoModel>();
-  const state = { created: 0, commands: [] as (() => void)[], options: [] as object[], colorized: [] as string[] };
+  const state = { created: 0, commands: [] as (() => void)[], options: [] as object[], colorized: [] as string[], themes: [] as string[] };
   const monaco = {
     languages: { getLanguages: () => [{ id: 'python', extensions: ['.py'] }, { id: 'markdown', extensions: ['.md'] }, { id: 'go', extensions: ['.go'] }] },
     Uri: { parse: (value: string) => ({ toString: () => value }) },
     KeyMod: { CtrlCmd: 2048 },
     KeyCode: { KeyS: 49 },
     editor: {
+      defineTheme: () => undefined,
+      setTheme: (name: string) => {
+        state.themes.push(name);
+      },
       getModel: (uri: { toString(): string }) => models.get(uri.toString()) ?? null,
       createModel: (value: string, _language: string, uri: { toString(): string }) => {
         const model: FakeMonacoModel = {

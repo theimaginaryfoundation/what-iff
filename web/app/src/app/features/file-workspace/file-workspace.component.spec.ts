@@ -21,9 +21,11 @@ class FakeViewerComponent {
 class FakeEditorComponent implements FileEditor {
   readonly file = input.required<FileAttachment>();
   readonly blob = input.required<Blob>();
+  readonly readOnly = input(true);
   readonly dirtyChange = output<boolean>();
   readonly saveRequested = output<void>();
   readonly dirty = signal(false);
+  readonly losses = signal<readonly string[]>([]);
   text = 'edited';
   marked = 0;
   content(): Promise<Blob> {
@@ -53,6 +55,7 @@ describe('FileWorkspaceComponent', () => {
   let alert: ReturnType<typeof vi.fn>;
   let replaceContent: ReturnType<typeof vi.fn>;
   let confirmDiscard: ReturnType<typeof vi.fn>;
+  let confirm: ReturnType<typeof vi.fn>;
   let loadViewer: ReturnType<typeof vi.fn<(kind: string) => Promise<unknown> | null>>;
 
   beforeEach(async () => {
@@ -60,6 +63,7 @@ describe('FileWorkspaceComponent', () => {
     alert = vi.fn().mockResolvedValue(undefined);
     replaceContent = vi.fn().mockImplementation((id: string) => of(file({ id, content_version: 2 })));
     confirmDiscard = vi.fn().mockResolvedValue(true);
+    confirm = vi.fn().mockResolvedValue(true);
     loadViewer = vi.fn((kind: string) => (kind === 'none' ? null : Promise.resolve(FakeViewerComponent)));
     await TestBed.configureTestingModule({
       imports: [FileWorkspaceComponent],
@@ -67,7 +71,7 @@ describe('FileWorkspaceComponent', () => {
         provideZonelessChangeDetection(),
         provideRouter([]),
         { provide: FileAttachmentService, useValue: { downloadFileAttachment: download, replaceContent } },
-        { provide: ConfirmationService, useValue: { alert, confirmDiscardChanges: confirmDiscard } },
+        { provide: ConfirmationService, useValue: { alert, confirmDiscardChanges: confirmDiscard, confirm } },
         { provide: VIEWER_LOADER, useValue: (kind: string) => loadViewer(kind) },
         { provide: EDITOR_LOADER, useValue: (kind: string) => (kind === 'none' ? null : Promise.resolve(FakeEditorComponent)) },
       ],
@@ -295,6 +299,40 @@ describe('FileWorkspaceComponent', () => {
     await fixture.componentInstance.requestClose();
     expect(closed).toHaveBeenCalledTimes(1);
     expect(fixture.componentInstance.mode()).toBe('view');
+  });
+
+  it('flips the viewer into an editor for kinds that edit in place', async () => {
+    download.mockReturnValue(of(new Blob(['a,b\n1,2'], { type: 'text/csv' })));
+    const el = await show(file({ name: 'data.csv', file_type: 'text/csv', content_version: 1 }));
+    button(el, 'Edit')!.click();
+    await fixture.whenStable();
+    await new Promise(resolve => setTimeout(resolve));
+    fixture.detectChanges();
+    const editor = fixture.componentInstance['editorRef']!.instance as FakeEditorComponent;
+    expect(editor.readOnly()).toBe(false);
+    const text = await show(file());
+    button(text, 'Edit')!.click();
+    await fixture.whenStable();
+    await new Promise(resolve => setTimeout(resolve));
+    expect((fixture.componentInstance['editorRef']!.instance as FakeEditorComponent).readOnly()).toBe(true);
+  });
+
+  it('asks before saving over an original the editor cannot keep whole', async () => {
+    const { editor } = await startEditing();
+    editor.losses.set(['Charts (Sales)']);
+    editor.edit('lossy');
+    confirm.mockResolvedValueOnce(false);
+    await fixture.componentInstance.save();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Save over the original?', message: expect.stringContaining('Charts (Sales)') }));
+    expect(replaceContent).not.toHaveBeenCalled();
+    confirm.mockResolvedValueOnce(true);
+    await fixture.componentInstance.save();
+    expect(replaceContent).toHaveBeenCalledTimes(1);
+    editor.losses.set([]);
+    editor.edit('clean');
+    await fixture.componentInstance.save();
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(replaceContent).toHaveBeenCalledTimes(2);
   });
 
   it('validates Save As and hands the content, name and folder to the host', async () => {

@@ -1,0 +1,277 @@
+<div class="slides" [class.slides--read-only]="readOnly()">
+  @if (!noticeDismissed()) {
+    <app-fidelity-notice [losses]="losses()" [warnings]="warnings()" (dismiss)="dismissNotice()" />
+  }
+  @if (state() === "error") {
+    <p class="slides__placeholder" role="alert">{{ error() }}</p>
+  } @else if (state() === "loading") {
+    <p class="slides__placeholder" role="status">Loading the presentation…</p>
+  } @else {
+    @if (!readOnly()) {
+      <div class="slides__toolbar" role="toolbar" aria-label="Presentation tools">
+        <div class="slides__group">
+          <button type="button" class="slides__tool" (click)="undo()" [disabled]="!canUndo()" title="Undo (Ctrl+Z)">Undo</button>
+          <button type="button" class="slides__tool" (click)="redo()" [disabled]="!canRedo()" title="Redo (Ctrl+Y)">Redo</button>
+        </div>
+        <div class="slides__group">
+          <button type="button" class="slides__tool" (click)="insertTextBox()">Text</button>
+          <div class="slides__menu-host">
+            <button
+              type="button"
+              class="slides__tool"
+              [attr.aria-expanded]="shapeMenuOpen()"
+              aria-haspopup="menu"
+              (click)="shapeMenuOpen.set(!shapeMenuOpen())"
+            >
+              Shape ▾
+            </button>
+            @if (shapeMenuOpen()) {
+              <div class="slides__menu" role="menu">
+                @for (preset of shapePresets; track preset.type) {
+                  <button type="button" role="menuitem" class="slides__menu-item" (click)="insertShape(preset.type)">
+                    {{ preset.label }}
+                  </button>
+                }
+              </div>
+            }
+          </div>
+          <button type="button" class="slides__tool" (click)="insertLine()">Line</button>
+          <button type="button" class="slides__tool" (click)="pickImage()">Picture</button>
+          <input
+            #imageInput
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            class="slides__file"
+            (change)="onImageChosen($event)"
+            aria-label="Choose a picture"
+          />
+        </div>
+        @if (selected(); as el) {
+          <div class="slides__group" aria-label="Arrange">
+            <button type="button" class="slides__tool" (click)="reorder('forward')" title="Bring forward">Forward</button>
+            <button type="button" class="slides__tool" (click)="reorder('backward')" title="Send backward">Backward</button>
+            <button type="button" class="slides__tool" (click)="duplicateSelected()" title="Duplicate (Ctrl+D)">Duplicate</button>
+            <button type="button" class="slides__tool slides__tool--danger" (click)="deleteSelected()" title="Delete">Delete</button>
+          </div>
+          @if (el.kind === "shape") {
+            <div class="slides__group" aria-label="Text">
+              <button
+                type="button"
+                class="slides__tool slides__tool--icon"
+                [class.slides__tool--on]="selectedBold()"
+                (mousedown)="$event.preventDefault()"
+                (click)="toggleRunStyle('bold')"
+                aria-label="Bold"
+              >
+                <b>B</b>
+              </button>
+              <button
+                type="button"
+                class="slides__tool slides__tool--icon"
+                [class.slides__tool--on]="selectedItalic()"
+                (mousedown)="$event.preventDefault()"
+                (click)="toggleRunStyle('italic')"
+                aria-label="Italic"
+              >
+                <i>I</i>
+              </button>
+              <button
+                type="button"
+                class="slides__tool slides__tool--icon"
+                [class.slides__tool--on]="selectedUnderline()"
+                (mousedown)="$event.preventDefault()"
+                (click)="toggleRunStyle('underline')"
+                aria-label="Underline"
+              >
+                <u>U</u>
+              </button>
+              <select
+                class="slides__select"
+                aria-label="Font size"
+                [value]="selectedFontSize()"
+                (change)="setFontSize(+$any($event.target).value)"
+              >
+                @for (size of fontSizes; track size) {
+                  <option [value]="size" [selected]="size === selectedFontSize()">{{ size }}</option>
+                }
+              </select>
+              <label class="slides__color" title="Text colour">
+                A
+                <input type="color" [value]="selectedColor()" (input)="setTextColor($any($event.target).value)" aria-label="Text colour" />
+              </label>
+              <button
+                type="button"
+                class="slides__tool slides__tool--icon"
+                [class.slides__tool--on]="selectedAlign() === 'left'"
+                (click)="setAlign('left')"
+                aria-label="Align left"
+              >
+                ⇤
+              </button>
+              <button
+                type="button"
+                class="slides__tool slides__tool--icon"
+                [class.slides__tool--on]="selectedAlign() === 'center'"
+                (click)="setAlign('center')"
+                aria-label="Align centre"
+              >
+                ↔
+              </button>
+              <button
+                type="button"
+                class="slides__tool slides__tool--icon"
+                [class.slides__tool--on]="selectedAlign() === 'right'"
+                (click)="setAlign('right')"
+                aria-label="Align right"
+              >
+                ⇥
+              </button>
+              <button
+                type="button"
+                class="slides__tool slides__tool--icon"
+                [class.slides__tool--on]="selectedBulleted()"
+                (click)="toggleBullets()"
+                aria-label="Bullets"
+              >
+                •≡
+              </button>
+            </div>
+            <div class="slides__group" aria-label="Shape">
+              <label class="slides__color" title="Fill">
+                Fill
+                <input type="color" [value]="selectedFill()" (input)="setFill($any($event.target).value)" aria-label="Fill colour" />
+              </label>
+              <button type="button" class="slides__tool" (click)="clearFill()">No fill</button>
+              <label class="slides__color" title="Outline">
+                Line
+                <input type="color" [value]="selectedBorder()" (input)="setBorder($any($event.target).value)" aria-label="Outline colour" />
+              </label>
+            </div>
+          } @else if (el.kind === "line" || el.kind === "image") {
+            <div class="slides__group">
+              <label class="slides__color" title="Line colour">
+                Line
+                <input type="color" [value]="selectedBorder()" (input)="setBorder($any($event.target).value)" aria-label="Line colour" />
+              </label>
+            </div>
+          }
+        } @else {
+          <div class="slides__group" aria-label="Slide">
+            <button type="button" class="slides__tool" (click)="addSlide()">New slide</button>
+            <button type="button" class="slides__tool" (click)="duplicateSlide()">Duplicate slide</button>
+            <button type="button" class="slides__tool" (click)="moveSlide(-1)" [disabled]="slideIndex() === 0">Move up</button>
+            <button type="button" class="slides__tool" (click)="moveSlide(1)" [disabled]="slideIndex() >= deck().slides.length - 1">
+              Move down
+            </button>
+            <button type="button" class="slides__tool slides__tool--danger" (click)="deleteSlide()">Delete slide</button>
+            <label class="slides__color" title="Background">
+              Background
+              <input
+                type="color"
+                [value]="slideBackground()"
+                (input)="setBackground($any($event.target).value)"
+                aria-label="Slide background colour"
+              />
+            </label>
+          </div>
+        }
+        <div class="slides__group slides__group--end">
+          <button type="button" class="slides__tool" (click)="notesOpen.set(!notesOpen())" [attr.aria-pressed]="notesOpen()">Notes</button>
+        </div>
+      </div>
+    }
+    <div class="slides__body">
+      <nav class="slides__rail" aria-label="Slides">
+        @for (s of deck().slides; track s.id; let i = $index) {
+          <button
+            type="button"
+            class="slides__thumb"
+            [class.slides__thumb--current]="i === slideIndex()"
+            [attr.aria-current]="i === slideIndex() ? 'true' : null"
+            (click)="goTo(i)"
+            [attr.aria-label]="'Slide ' + (i + 1)"
+          >
+            <span class="slides__thumb-number">{{ i + 1 }}</span>
+            <app-slide-canvas [slide]="s" [size]="deck().size" [scale]="thumbScale()" [interactive]="false" />
+          </button>
+        }
+      </nav>
+      <div #stage class="slides__stage" tabindex="0" [attr.aria-label]="'Slide ' + (slideIndex() + 1) + ' of ' + deck().slides.length">
+        <app-slide-canvas
+          class="slides__canvas"
+          [slide]="slide()"
+          [size]="deck().size"
+          [scale]="scale()"
+          [interactive]="!readOnly()"
+          [selectedId]="selectedId()"
+          [editingId]="editingId()"
+          [label]="readOnly() ? 'Slide ' + (slideIndex() + 1) : ''"
+          (select)="onSelect($event)"
+          (gestureStart)="onGestureStart()"
+          (geometryChange)="onGeometryChange($event)"
+          (rotationChange)="onRotationChange($event)"
+          (requestEdit)="onRequestEdit($event)"
+          (textCommit)="onTextCommit($event)"
+          (open)="openLink($event)"
+        />
+      </div>
+    </div>
+    <div class="slides__status" role="toolbar" aria-label="Slide navigation and zoom">
+      <div class="slides__status-group">
+        <button
+          type="button"
+          class="slides__tool slides__tool--icon"
+          (click)="goTo(slideIndex() - 1)"
+          [disabled]="slideIndex() === 0"
+          aria-label="Previous slide"
+        >
+          ‹
+        </button>
+        <span class="slides__status-text">Slide {{ slideIndex() + 1 }} of {{ deck().slides.length }}</span>
+        <button
+          type="button"
+          class="slides__tool slides__tool--icon"
+          (click)="goTo(slideIndex() + 1)"
+          [disabled]="slideIndex() >= deck().slides.length - 1"
+          aria-label="Next slide"
+        >
+          ›
+        </button>
+      </div>
+      <div class="slides__status-group">
+        <button type="button" class="slides__tool slides__tool--icon" (click)="zoomBy(1 / 1.25)" aria-label="Zoom out">−</button>
+        <input
+          type="range"
+          class="slides__zoom"
+          min="10"
+          max="400"
+          step="5"
+          [value]="(scale() * 100).toFixed(0)"
+          (input)="setZoomPercent(+$any($event.target).value)"
+          aria-label="Zoom"
+        />
+        <button type="button" class="slides__tool slides__tool--icon" (click)="zoomBy(1.25)" aria-label="Zoom in">+</button>
+        <button type="button" class="slides__tool" (click)="zoomToFit()" [class.slides__tool--on]="zoom() === null" title="Fit to window">
+          {{ (scale() * 100).toFixed(0) }}%
+        </button>
+      </div>
+    </div>
+    @if (notesOpen() || (readOnly() && slide().notes)) {
+      <div class="slides__notes">
+        @if (readOnly()) {
+          <p class="slides__notes-label">Speaker notes</p>
+          <p class="slides__notes-text">{{ slide().notes }}</p>
+        } @else {
+          <label class="slides__notes-label" for="slides-notes">Speaker notes</label>
+          <textarea
+            id="slides-notes"
+            class="slides__notes-input"
+            rows="3"
+            [value]="slide().notes"
+            (change)="setNotes($any($event.target).value)"
+          ></textarea>
+        }
+      </div>
+    }
+  }
+</div>
