@@ -7,9 +7,10 @@ import { FileAttachment, isImageAttachment } from '../../../core/models/file-att
  * - pdf: the browser's own PDF viewer, where it has one.
  * - image: the bytes as an image (only reached by a direct ?file= link; the grid opens images in the image popup).
  * - spreadsheet / document / slides: the office suite (ADR 0x043): Univer Sheets, Univer Docs, our Slides editor.
+ * - notebook: Jupyter notebooks, our own cells (ADR 0x043 §8).
  * - none: no preview (archives, unknown binaries); download only.
  */
-export type FilePreviewKind = 'markdown' | 'csv' | 'text' | 'pdf' | 'image' | 'spreadsheet' | 'document' | 'slides' | 'none';
+export type FilePreviewKind = 'markdown' | 'csv' | 'text' | 'pdf' | 'image' | 'spreadsheet' | 'document' | 'slides' | 'notebook' | 'none';
 
 /** Text bigger than this is cut off in the viewer (download for the rest). */
 export const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024;
@@ -59,6 +60,7 @@ export function previewKindFor(file: Pick<FileAttachment, 'name' | 'file_type'>)
   if (MARKDOWN_EXTENSIONS.has(ext) || mime === 'text/markdown' || mime === 'text/x-markdown') return 'markdown';
   if (CSV_EXTENSIONS.has(ext) || mime === 'text/csv' || mime === 'text/tab-separated-values') return 'csv';
   if (mime === 'application/pdf' || ext === '.pdf') return 'pdf';
+  if (ext === '.ipynb' || mime === 'application/x-ipynb+json') return 'notebook';
   if (SPREADSHEET_EXTENSIONS.has(ext) || SPREADSHEET_MIME_TYPES.has(mime)) return 'spreadsheet';
   if (DOCUMENT_EXTENSIONS.has(ext) || DOCUMENT_MIME_TYPES.has(mime)) return 'document';
   if (SLIDES_EXTENSIONS.has(ext) || SLIDES_MIME_TYPES.has(mime)) return 'slides';
@@ -98,6 +100,8 @@ export function fileTypeLabel(file: Pick<FileAttachment, 'name' | 'file_type'>):
       return 'Document';
     case 'slides':
       return 'Presentation';
+    case 'notebook':
+      return 'Notebook';
     case 'image':
       return 'Image';
     case 'text':

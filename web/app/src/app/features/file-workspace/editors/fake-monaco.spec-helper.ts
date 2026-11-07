@@ -17,8 +17,8 @@ export function fakeMonaco() {
   const monaco = {
     languages: { getLanguages: () => [{ id: 'python', extensions: ['.py'] }, { id: 'markdown', extensions: ['.md'] }, { id: 'go', extensions: ['.go'] }] },
     Uri: { parse: (value: string) => ({ toString: () => value }) },
-    KeyMod: { CtrlCmd: 2048 },
-    KeyCode: { KeyS: 49 },
+    KeyMod: { CtrlCmd: 2048, Shift: 1024 },
+    KeyCode: { KeyS: 49, Enter: 3, Escape: 9 },
     editor: {
       defineTheme: () => undefined,
       setTheme: (name: string) => {
@@ -63,6 +63,10 @@ export function fakeMonaco() {
             current = m;
           },
           getModel: () => current,
+          getContentHeight: () => 40,
+          onDidContentSizeChange: () => ({ dispose: () => undefined }),
+          layout: () => undefined,
+          focus: () => undefined,
           dispose: () => undefined,
         };
       },
