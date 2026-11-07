@@ -31,8 +31,16 @@ const VIEWERS: Partial<Record<FilePreviewKind, ViewerEntry>> = {
   text: { load: loadTextViewer, phoneView: true, edit: loadCodeEditor },
   markdown: { load: loadTextViewer, phoneView: true, edit: loadCodeEditor },
   csv: { load: loadTextViewer, phoneView: true, edit: loadCodeEditor },
-  image: { load: () => import('./image-viewer.component').then(m => m.ImageViewerComponent), phoneView: true },
-  pdf: { load: () => import('./pdf-viewer.component').then(m => m.PdfViewerComponent), phoneView: true },
+  image: {
+    load: () => import('./image-viewer.component').then(m => m.ImageViewerComponent),
+    phoneView: true,
+    edit: () => import('../editors/image-editor.component').then(m => m.ImageEditorComponent),
+  },
+  pdf: {
+    load: () => import('./pdf-viewer.component').then(m => m.PdfViewerComponent),
+    phoneView: true,
+    edit: () => import('../editors/pdf-editor.component').then(m => m.PdfEditorComponent),
+  },
 };
 
 const loaded = new Map<FilePreviewKind, Promise<Type<unknown>>>();
