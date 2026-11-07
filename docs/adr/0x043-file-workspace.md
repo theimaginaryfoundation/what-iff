@@ -238,6 +238,25 @@ Delivery, replacing steps 7 and 8 (each a stacked PR on step 6):
 
 The notebook steps (9 and 10 in the original plan) move to 11 and 12.
 
+### Steps 7–10 as built (2026-11-07)
+
+All four steps landed on one branch, `feat/files-7-office-suite`, as four commits, under `web/app/src/app/features/office/`:
+
+- `shared/`: the fidelity report and collector, A1 references, the OOXML package and XML helpers (JSZip plus the browser's DOMParser and XMLSerializer; twips, EMUs, half-points and eighths to and from 96-dpi pixels and points), and the dismissable fidelity notice every editor shows.
+- `xlsx/`: ExcelJS ↔ Univer `IWorkbookData` as planned, plus CSV and TSV both ways. Styles are deduplicated into the workbook's style table. Plugin data (validation, conditional formatting, notes, images, the auto-filter) goes through Univer's `resources` slots. Defined names, charts, pivots and macros are reported as dropped. ExcelJS writes no cell that has neither a value nor a style, so a note on an empty cell gets an empty font to survive the round trip.
+- `docx/`: our WordprocessingML ↔ `IDocumentData` layer. One finding changed the shape of it: Univer's renderer composes a run's text style from the document default, the paragraph's `textStyle` and the run, and does not look at `styles[styleId].textStyle`, while it does resolve paragraph properties through the named-style chain. The importer therefore bakes each named style's resolved text formatting into the paragraph's `textStyle` and the exporter subtracts it again, so Heading 1 renders as Heading 1 and exports as a style reference, not as direct formatting. Soft line breaks have no token in Univer's stream and become paragraphs (reported as a warning). Fields keep their last result and their instruction, so page numbers survive. Content with no counterpart is kept verbatim and written back at its position.
+- `pptx/`: the deck model (slides of positioned elements in points; rich text as paragraphs of runs; fills, borders, crops, tables, charts with their series, groups), `pptxtojson` in and `pptxgenjs` out. Two pptxgenjs habits are rewritten after writing so strict readers (pptxtojson among them) accept the file: one paragraph-properties node per paragraph, and single-level chart categories as a plain string reference. Charts therefore round-trip as charts, not pictures.
+- `univer/`: one lazy loader per suite (presets, English strings, and the preset stylesheets built as lazy global styles `univer-sheets.css` and `univer-docs.css`), and a shared editor base that owns the lifecycle: parse with the converter, create the Univer instance in the view, show the fidelity notice, mark dirty on content mutations (`CommandExecuted` with the mutation type, ignoring selection, scroll and zoom), hand the snapshot back through the converter on save, dispose.
+- `sheets/` and `docs/`: the Sheets and Docs editors on that base. Read-only, the sheet keeps its tabs and zoom and drops the toolbar, formula bar and context menu; the document is locked through its permission facade.
+- `slides/`: the Slides editor is ours end to end: a rail of thumbnails, the slide on a canvas laid out in CSS points and scaled to fit (a `ResizeObserver` keeps it fitted), shapes as SVG paths from a preset table or the imported path, text as HTML edited in place with `contenteditable` and read back by the same parser that reads pptxtojson's HTML, images with crops, tables edited per cell, charts drawn plainly from their data, groups nested. Selection, drag and resize use pointer events with eight handles; rotation is kept from the file but has no handle yet. Pure deck commands and a whole-deck undo history (slides are shared between versions) back the toolbar: text boxes, preset shapes, lines, pictures, bold/italic/underline, size, colour, alignment, bullets, fill and outline, arrangement, duplicate and delete, slide add/duplicate/move/delete, background, speaker notes, zoom.
+
+Shared decisions:
+
+- The registry marks these kinds `editInPlace`: the same component is the viewer and the editor, and the host flips its `readOnly` input rather than swapping components.
+- `FileEditor` gained an optional `losses` signal. The host asks before saving over an original the editor cannot keep whole, naming what would be dropped and pointing at Save As.
+- New preview kinds `spreadsheet`, `document` and `slides`; `.csv` and `.tsv` now open in the Sheets editor and save back as CSV.
+- Specs fake the Univer kits through injection tokens; the slides specs run the real pptxgenjs and pptxtojson, which both work under the jsdom runner. None of the three editors has been driven in a real browser yet; a manual pass is the next check.
+
 ## Step 0 results (2026-11-06)
 
 The four spikes ran on `spike/file-workspace` (throwaway; scripts under `web/app/spike-scripts/`, the Monaco route at `/spike/monaco`), in headless Chromium.
