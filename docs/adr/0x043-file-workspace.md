@@ -274,6 +274,28 @@ Three real files (a territory spreadsheet, a copay enrolment fax, a pitch deck) 
 - **Start-up mutations.** A Univer unit runs mutations of its own as it settles; the editor marks dirty only after that.
 
 
+### Preservation pass (2026-11-07)
+
+The rule for v1: saving a file here must not lose what the editor does not model. Each format now keeps the original package and changes only what the edit touched, which supersedes the converter descriptions above where they differ.
+
+- **`.pptx` saves by patching, not rebuilding.** Slides and shapes carry their source identity (`sourcePath`, `sourceId` from `p:cNvPr@id`). Every untouched part is copied byte for byte, so masters, layouts, theme, media, charts, animations, comments, sections and fonts survive. On a changed slide only the changed shapes are patched, using the original paragraph and run properties as templates. Slides added, copied, removed or reordered update the slide list, relationships, content types and sections. pptxgenjs remains only for a deck with no original. pptxtojson lists slides by part number rather than `p:sldIdLst`, so the importer now orders them itself.
+- **`.docx` saves by patching.** Only `document.xml`, the modelled headers and footers, numbering additions and note stories are regenerated. Styles, settings, theme, font table, comments, glossary, customXml and docProps stay byte-identical, and original style and numbering ids are kept. Text boxes, shapes, charts, objects and equations ride as opaque runs at their position (`docxRawCustomBlocks`). Footnotes and endnotes are native Univer notes (the renderer reads `snapshot.notes`, not `footnotes`). Bookmarks and comment anchors are ranges that move with edits.
+- **`.xlsx` keeps its package parts beside ExcelJS.** Because ExcelJS rewrites the workbook, what it cannot carry is reinjected: charts, pivots, tables, external links, VBA (with the macro-enabled content type and MIME), customXml, custom properties, printer settings, sparklines and drawings holding shapes. Page setup, headers and footers, views, protection, outline levels, workbook and document properties and the original theme pass through ExcelJS. Defined names, including formula-valued and sheet-scoped ones, are editable through Univer's `SHEET_DEFINED_NAME_PLUGIN` resource and written back to `workbook.xml`. Shared formulas keep their translated text, array formulas their `ref`. Every save sets `fullCalcOnLoad`, so Excel recomputes on open.
+- **Formulas run in a worker.** `univer-formula.worker.ts` runs `UniverSheetsCoreWorkerPreset`; the sheets editor creates one worker per instance, passes it to the preset as `workerURL`, and terminates it on dispose. Where workers are unavailable the engine stays on the main thread.
+- **Notices stay honest.** Anything kept but not editable is a warning that says so; only what is truly lost is a drop.
+
+Still lost or approximate: slicers (dropped, with a notice); threaded comments become notes; content-control properties and tracked changes (content kept, changes accepted); soft line breaks in documents become paragraphs; x14 conditional formatting and validation in `extLst` are not read; pictures moved on a sheet whose drawing is kept whole are saved where they were; charts and pivots stay view-only.
+
+Found by the browser pass:
+
+- **Slide text was wiped while typing.** `textHtml()` returned a new `SafeHtml` on each check, so Angular re-set `innerHTML` on the element being edited. It is now cached per text body, which the model replaces rather than mutates.
+- **Viewers painted through the context panel.** Univer's canvases carry high z-indexes and the docked panel made no stacking context. The docked panel and the Univer stage now use `isolation: isolate`.
+- **A reopened file showed its old bytes.** The download was cached for an hour under a URL whose bytes a save replaces, so a reload after saving showed the previous version. Gallery images had the same problem. Both routes now revalidate: `private, no-cache` with `content_version` as the ETag, and a 304 on a match. Earlier passes missed this because their harness forwarded requests outside the browser cache.
+- **A long deck pushed the slide down the gallery page.** The rail stretched the stage to its own height; it now scrolls inside the stage.
+- **The context panel covered an opening file.** Opening a file in a thread now hides it without changing the remembered open or closed choice; the rail brings it back over the file.
+
+Verification: the converters over the three real files and a fixture with a text box, footnote, bookmark, internal link and comment; the same files edited and saved in Chromium, with the saved bytes compared part by part; independent reads with openpyxl, python-docx, python-pptx and LibreOffice. Microsoft Office itself has not opened these files yet.
+
 ## Step 0 results (2026-11-06)
 
 The four spikes ran on `spike/file-workspace` (throwaway; scripts under `web/app/spike-scripts/`, the Monaco route at `/spike/monaco`), in headless Chromium.
