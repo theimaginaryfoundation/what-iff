@@ -137,30 +137,30 @@ describe('xlsx charts and pivot tables', () => {
     const paths = pkg.paths();
     expect(paths).toEqual(
       expect.arrayContaining([
-        'xl/charts/chartP1.xml',
+        'xl/charts/chart1.xml',
         'xl/drawings/drawingP1.xml',
         'xl/drawings/_rels/drawingP1.xml.rels',
-        'xl/pivotTables/pivotTableP1.xml',
-        'xl/pivotCache/pivotCacheDefinitionP1.xml',
-        'xl/pivotCache/pivotCacheRecordsP1.xml',
+        'xl/pivotTables/pivotTable1.xml',
+        'xl/pivotCache/pivotCacheDefinition1.xml',
+        'xl/pivotCache/pivotCacheRecords1.xml',
       ]),
     );
-    expect(await pkg.text('xl/drawings/_rels/drawingP1.xml.rels')).toContain('Target="../charts/chartP1.xml"');
+    expect(await pkg.text('xl/drawings/_rels/drawingP1.xml.rels')).toContain('Target="../charts/chart1.xml"');
     const sheet1 = (await pkg.text('xl/worksheets/sheet1.xml'))!;
     expect(sheet1).toMatch(/<drawing r:id="rId\d+"\/><\/worksheet>$/);
     const sheet1Rels = [...(await pkg.rels('xl/worksheets/sheet1.xml')).values()];
     expect(sheet1Rels.find(r => r.type.endsWith('/drawing'))?.target).toBe('../drawings/drawingP1.xml');
     const sheet2Rels = [...(await pkg.rels('xl/worksheets/sheet2.xml')).values()];
-    expect(sheet2Rels.find(r => r.type.endsWith('/pivotTable'))?.target).toBe('../pivotTables/pivotTableP1.xml');
+    expect(sheet2Rels.find(r => r.type.endsWith('/pivotTable'))?.target).toBe('../pivotTables/pivotTable1.xml');
     expect(await pkg.text('xl/workbook.xml')).toContain('<pivotCaches><pivotCache cacheId="1"');
-    expect(await pkg.text('[Content_Types].xml')).toContain('PartName="/xl/charts/chartP1.xml"');
+    expect(await pkg.text('[Content_Types].xml')).toContain('PartName="/xl/charts/chart1.xml"');
     // The edited cell is there, and the file reads again with everything still in place.
     const second = await xlsxToWorkbook(saved.bytes, { id: 'wb', name: 'cp.xlsx' });
     expect(second.workbook.sheets[second.workbook.sheetOrder[0]].cellData[1][1]).toMatchObject({ v: 11 });
-    expect(second.preserved?.bySheet['Data'].drawing?.charts[0].chartPath).toBe('xl/charts/chartP1.xml');
+    expect(second.preserved?.bySheet['Data'].drawing?.charts[0].chartPath).toBe('xl/charts/chart1.xml');
     const again = await workbookToXlsx(second.workbook, second.preserved);
     expect((await OoxmlPackage.open(again.bytes)).paths()).toEqual(
-      expect.arrayContaining(['xl/charts/chartP1.xml', 'xl/pivotTables/pivotTableP1.xml']),
+      expect.arrayContaining(['xl/charts/chart1.xml', 'xl/drawings/drawingP1.xml', 'xl/pivotTables/pivotTable1.xml']),
     );
     const excel = new ExcelJS.Workbook();
     await excel.xlsx.load(again.bytes as never);
@@ -171,7 +171,7 @@ describe('xlsx charts and pivot tables', () => {
     const wb = new ExcelJS.Workbook();
     wb.addWorksheet('S').getCell('A1').value = 1;
     const result = await xlsxToWorkbook(await wb.xlsx.writeBuffer(), { id: 'wb', name: 'plain.xlsx' });
-    expect(result.preserved).toBeUndefined();
+    expect(hasPreservedParts(result.preserved)).toBe(false);
     expect(result.report.warnings).toEqual([]);
   });
 });

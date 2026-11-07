@@ -51,6 +51,10 @@ export interface UniverCell {
   f?: string | null;
   /** The shared-formula id this cell belongs to. */
   si?: string | null;
+  /** FormulaType: 0 normal, 1 shared, 2 array. */
+  ft?: number | null;
+  /** The range an array formula fills, as A1. */
+  ref?: string | null;
   /** Rich text (and hyperlinks), as a document. */
   p?: UniverCellDoc | null;
 }
@@ -70,8 +74,8 @@ export interface UniverSheet {
   defaultRowHeight: number;
   mergeData: UniverRange[];
   cellData: Record<number, Record<number, UniverCell>>;
-  rowData: Record<number, { h?: number; hd?: 0 | 1; ah?: number; ia?: 0 | 1 }>;
-  columnData: Record<number, { w?: number; hd?: 0 | 1 }>;
+  rowData: Record<number, { h?: number; hd?: 0 | 1; ah?: number; ia?: 0 | 1; s?: string | null }>;
+  columnData: Record<number, { w?: number; hd?: 0 | 1; s?: string | null }>;
   rowHeader: { width: number; hidden?: 0 | 1 };
   columnHeader: { height: number; hidden?: 0 | 1 };
   showGridlines: 0 | 1;

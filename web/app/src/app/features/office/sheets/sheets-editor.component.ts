@@ -5,15 +5,14 @@ import { csvDelimiterFor, previewKindFor } from '../../gallery/helpers/file-prev
 import { FidelityReport } from '../shared/fidelity';
 import { FidelityNoticeComponent } from '../shared/fidelity-notice.component';
 import { UniverEditorBase, UniverKit, UniverUnit } from '../univer/univer-editor-base';
-import { FUniver, UNIVER_SHEETS_LOADER } from '../univer/univer-loader';
+import { FUniver, UNIVER_SHEETS_LOADER, UniverSheetsKit } from '../univer/univer-loader';
 import { UniverWorkbook } from '../xlsx/univer-sheet-types';
 import { sheetToCsv, workbookToXlsx } from '../xlsx/xlsx-export';
 import { delimitedTextToWorkbook, xlsxToWorkbook } from '../xlsx/xlsx-import';
-import { PreservedParts } from '../xlsx/xlsx-preserve';
+import { PreservedParts, XLSM_MIME, XLSX_MIME, hasMacros } from '../xlsx/xlsx-preserve';
 
 export { MUTATION } from '../univer/univer-editor-base';
-
-export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+export { XLSX_MIME } from '../xlsx/xlsx-preserve';
 
 interface Workbook extends UniverUnit<UniverWorkbook> {
   setEditable(value: boolean): unknown;
@@ -35,11 +34,24 @@ export class SheetsEditorComponent extends UniverEditorBase<UniverWorkbook, Work
   private readonly load = inject(UNIVER_SHEETS_LOADER);
   readonly noun = 'spreadsheet';
   readonly isCsv = computed(() => previewKindFor(this.file()) === 'csv');
-  /** Charts and pivot tables of the open file, written back on save. */
+  /** What the open file holds beyond Univer's model (charts, pivots, macros, …), written back on save. */
   private preserved: PreservedParts | null = null;
+  /** The formula engine of the open instance, off the main thread. */
+  private formulaWorker: Worker | null = null;
 
   protected loadKit(): Promise<UniverKit> {
     return this.load(this.document);
+  }
+
+  protected override univerOptions(kit: UniverKit, container: HTMLElement, readOnly: boolean): ReturnType<UniverKit['options']> {
+    const sheetsKit = kit as Partial<UniverSheetsKit>;
+    this.formulaWorker = sheetsKit.createFormulaWorker?.() ?? null;
+    return kit.options(container, { readOnly, formulaWorker: this.formulaWorker });
+  }
+
+  protected override onDispose(): void {
+    this.formulaWorker?.terminate();
+    this.formulaWorker = null;
   }
 
   protected async parse(blob: Blob, file: FileAttachment): Promise<{ data: UniverWorkbook; report: FidelityReport }> {
@@ -69,6 +81,7 @@ export class SheetsEditorComponent extends UniverEditorBase<UniverWorkbook, Work
       return new Blob([sheetToCsv(first, csvDelimiterFor(file))], { type: file.file_type || 'text/csv' });
     }
     const { bytes } = await workbookToXlsx(data, this.preserved);
-    return new Blob([bytes as BlobPart], { type: XLSX_MIME });
+    // A workbook with macros stays macro-enabled; the file type says so to the host.
+    return new Blob([bytes as BlobPart], { type: hasMacros(this.preserved) ? XLSM_MIME : XLSX_MIME });
   }
 }

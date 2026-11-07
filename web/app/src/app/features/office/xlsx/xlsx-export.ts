@@ -22,6 +22,8 @@ import {
   readResource,
 } from './univer-sheet-types';
 import { serialToDate } from './xlsx-import';
+import { definedNamesFromWorkbook } from './xlsx-defined-names';
+import { applySheetExtras, applyWorkbookExtras } from './xlsx-extras';
 import { PreservedParts, hasPreservedParts, injectPreservedParts } from './xlsx-preserve';
 import { UniverStyle, colorToArgb, styleToExcel } from './xlsx-styles';
 
@@ -32,14 +34,22 @@ export interface XlsxExportResult {
 
 /**
  * Writes a Univer workbook snapshot as an .xlsx; the mirror of xlsxToWorkbook. With `preserved`
- * (from the import), the original's charts and pivot tables go back into the file.
+ * (from the import), what the original held beyond Univer's model goes back into the file,
+ * and the defined names Univer edited are written into the workbook part.
  */
 export async function workbookToXlsx(workbook: UniverWorkbook, preserved?: PreservedParts | null): Promise<XlsxExportResult> {
   const fidelity = new FidelityCollector();
   const excel = workbookToExcel(workbook, fidelity, preserved ?? undefined);
   const buffer = await excel.xlsx.writeBuffer();
   let bytes: Uint8Array = new Uint8Array(buffer as ArrayBuffer);
-  if (preserved && hasPreservedParts(preserved)) bytes = await injectPreservedParts(bytes, preserved);
+  const definedNames = definedNamesFromWorkbook(workbook);
+  if ((preserved && hasPreservedParts(preserved)) || definedNames.length) {
+    bytes = await injectPreservedParts(
+      bytes,
+      preserved ?? { parts: {}, rels: {}, bySheet: {}, pivotCaches: [], externalLinks: [], customXml: [] },
+      { definedNames },
+    );
+  }
   return { bytes, report: fidelity.report() };
 }
 
@@ -54,24 +64,26 @@ export function workbookToExcel(
   const notes = readResource<Record<string, Record<number, Record<number, UniverNote>>>>(workbook, RESOURCE_NOTES) ?? {};
   const drawings = readResource<Record<string, UniverDrawingsForSheet>>(workbook, RESOURCE_DRAWINGS) ?? {};
   const filters = readResource<Record<string, UniverFilter>>(workbook, RESOURCE_FILTER) ?? {};
+  applyWorkbookExtras(excel, preserved?.extras);
   for (const sheetId of workbook.sheetOrder) {
     const sheet = workbook.sheets[sheetId];
     if (!sheet) continue;
     const ws = excel.addWorksheet(sheet.name || sheetId, sheetOptions(sheet));
+    exportLayout(ws, sheet, workbook.styles);
     exportCells(ws, sheet, workbook.styles, fidelity);
-    exportLayout(ws, sheet);
     exportDataValidations(ws, validation[sheetId] ?? []);
     exportConditionalFormatting(ws, formatting[sheetId] ?? [], fidelity);
     exportNotes(ws, notes[sheetId] ?? {});
-    // A sheet whose original drawing holds charts gets that drawing back whole on save.
+    // A sheet whose original drawing holds charts or shapes gets that drawing back whole on save.
     if (preserved?.bySheet[sheet.name]?.drawing) {
       if ((drawings[sheetId]?.order ?? []).some(id => !id.startsWith('chart-')))
-        fidelity.warn('Pictures on a sheet with charts are saved as they were in the original', sheet.name);
+        fidelity.warn('Pictures on a sheet with charts or shapes are saved as they were in the original', sheet.name);
     } else {
       exportImages(ws, excel, drawings[sheetId], sheet, fidelity);
     }
     const filter = filters[sheetId];
     if (filter?.ref) ws.autoFilter = rangeA1(filter.ref);
+    applySheetExtras(ws, preserved?.extras?.sheets[sheet.name]);
   }
   return excel;
 }
@@ -83,6 +95,7 @@ function sheetOptions(sheet: UniverSheet): Partial<ExcelJS.AddWorksheetOptions> 
   const tab = colorToArgb(sheet.tabColor ? { rgb: sheet.tabColor } : null);
   if (tab) opts.properties = { tabColor: tab } as ExcelJS.WorksheetProperties;
   const view: Partial<ExcelJS.WorksheetView> = { showGridLines: sheet.showGridlines !== 0, rightToLeft: sheet.rightToLeft === 1 };
+  if (sheet.zoomRatio && Math.round(sheet.zoomRatio * 100) !== 100) view.zoomScale = Math.round(sheet.zoomRatio * 100);
   if (sheet.freeze && (sheet.freeze.xSplit > 0 || sheet.freeze.ySplit > 0)) {
     Object.assign(view, { state: 'frozen', xSplit: sheet.freeze.xSplit, ySplit: sheet.freeze.ySplit });
   }
@@ -136,7 +149,15 @@ function cellValue(cell: UniverCell, style: UniverStyle | null | undefined, fide
   const plain = plainValue(cell, style);
   if (cell.f) {
     const formula = cell.f.replace(/^=/, '');
-    return { formula, result: plain === null ? undefined : (plain as ExcelJS.CellFormulaValue['result']) };
+    const value: ExcelJS.CellFormulaValue & { shareType?: string; ref?: string } = {
+      formula,
+      result: plain === null ? undefined : (plain as ExcelJS.CellFormulaValue['result']),
+    };
+    if (cell.ref) {
+      value.shareType = 'array';
+      value.ref = cell.ref;
+    }
+    return value;
   }
   if (cell.si && !cell.f) fidelity.warn('Shared formulas written as values', where);
   return plain;
@@ -158,18 +179,23 @@ function plainValue(cell: UniverCell, style: UniverStyle | null | undefined): Ex
   return cell.v;
 }
 
-function exportLayout(ws: ExcelJS.Worksheet, sheet: UniverSheet): void {
+/** Column and row geometry and default styles; before the cells, so a column style never overwrites a cell's own. */
+function exportLayout(ws: ExcelJS.Worksheet, sheet: UniverSheet, styles: Record<string, UniverStyle>): void {
   for (const [c, data] of Object.entries(sheet.columnData ?? {})) {
     if (!data) continue;
     const col = ws.getColumn(Number(c) + 1);
     if (data.w) col.width = pxToExcelWidth(data.w);
     if (data.hd) col.hidden = true;
+    const style = typeof data.s === 'string' ? styles[data.s] : null;
+    if (style) col.style = styleToExcel(style);
   }
   for (const [r, data] of Object.entries(sheet.rowData ?? {})) {
     if (!data) continue;
     const row = ws.getRow(Number(r) + 1);
     if (data.h) row.height = pxToPoints(data.h);
     if (data.hd) row.hidden = true;
+    const style = typeof data.s === 'string' ? styles[data.s] : null;
+    if (style) (row as unknown as { style: Partial<ExcelJS.Style> }).style = styleToExcel(style);
   }
 }
 

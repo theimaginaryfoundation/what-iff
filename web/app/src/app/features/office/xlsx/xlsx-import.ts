@@ -5,7 +5,9 @@ import { chartSvgDataUrl } from '../shared/chart-svg';
 import { FidelityCollector, FidelityReport } from '../shared/fidelity';
 import { OoxmlPackage, emuToPx, parseXml } from '../shared/ooxml';
 import { parseChartXml } from './xlsx-chart-xml';
-import { PreservedParts, collectPreservedParts, hasPreservedParts } from './xlsx-preserve';
+import { XlsxDefinedName, definedNamesToWorkbook, parseDefinedNames } from './xlsx-defined-names';
+import { collectExtras } from './xlsx-extras';
+import { PreservedParts, collectPreservedParts } from './xlsx-preserve';
 import {
   DEFAULT_COLUMN_WIDTH_PX,
   DEFAULT_ROW_HEIGHT_PX,
@@ -43,11 +45,13 @@ export interface XlsxImportOptions {
 export interface XlsxImportResult {
   workbook: UniverWorkbook;
   report: FidelityReport;
-  /** Charts and pivot tables from the original, to write back on save (see xlsx-preserve.ts). */
+  /** What the original holds that Univer has no model for, to write back on save (xlsx-preserve.ts, xlsx-extras.ts). */
   preserved?: PreservedParts;
 }
 
 export const UNIVER_APP_VERSION = '1.3.1';
+/** Univer's FormulaType.ARRAY. */
+export const FORMULA_TYPE_ARRAY = 2;
 /** Excel's epoch for date serials (the 1900 date system). */
 const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
 const MS_PER_DAY = 86_400_000;
@@ -63,40 +67,55 @@ export async function xlsxToWorkbook(bytes: ArrayBuffer | Uint8Array, opts: Xlsx
   const excel = new ExcelJS.Workbook();
   await excel.xlsx.load(bytes as never);
   const result = excelToWorkbook(excel, opts);
-  // Charts and pivot tables: ExcelJS reads neither, so they come from the package itself.
-  let preserved: PreservedParts | null = null;
+  // Charts, pivot tables, tables, macros and the rest: ExcelJS reads none of them, so they come
+  // from the package itself; what ExcelJS reads but Univer has no model for rides along as extras.
+  let preserved: PreservedParts;
+  let definedNames: XlsxDefinedName[] = [];
   try {
-    preserved = await collectPreservedParts(await OoxmlPackage.open(bytes));
+    const pkg = await OoxmlPackage.open(bytes);
+    preserved = await collectPreservedParts(pkg);
+    const wb = await pkg.xml('xl/workbook.xml');
+    if (wb) definedNames = parseDefinedNames(wb);
   } catch {
-    preserved = null;
+    preserved = { parts: {}, rels: {}, bySheet: {}, pivotCaches: [], externalLinks: [], customXml: [] };
   }
-  if (preserved && hasPreservedParts(preserved)) {
-    const fidelity = new FidelityCollector();
-    for (const item of result.report.dropped) for (let i = 0; i < (item.count ?? 1); i++) fidelity.drop(item.feature, item.where);
-    for (const item of result.report.warnings) for (let i = 0; i < (item.count ?? 1); i++) fidelity.warn(item.feature, item.where);
-    addPreservedCharts(result.workbook, preserved, fidelity, excel);
-    return { ...result, report: fidelity.report(), preserved };
-  }
-  return result;
+  preserved.extras = collectExtras(excel);
+  const fidelity = new FidelityCollector();
+  for (const item of result.report.dropped) for (let i = 0; i < (item.count ?? 1); i++) fidelity.drop(item.feature, item.where);
+  for (const item of result.report.warnings) for (let i = 0; i < (item.count ?? 1); i++) fidelity.warn(item.feature, item.where);
+  definedNamesToWorkbook(definedNames, result.workbook);
+  addPreservedCharts(result.workbook, preserved, excel);
+  notePreserved(preserved, fidelity);
+  return { ...result, report: fidelity.report(), preserved };
 }
 
-/** Draws each kept chart from its cached data as a picture at its anchor, and notes what is kept but not editable. */
-function addPreservedCharts(
-  workbook: UniverWorkbook,
-  preserved: PreservedParts,
-  fidelity: FidelityCollector,
-  excel: ExcelJS.Workbook,
-): void {
+/** What is carried but not shown or editable, and what is not carried. */
+function notePreserved(preserved: PreservedParts, fidelity: FidelityCollector): void {
+  for (const [name, entry] of Object.entries(preserved.bySheet)) {
+    if (entry.pivotTables.length) fidelity.warn('Pivot tables are kept in the file but not editable here; Excel refreshes them', name);
+    if (entry.drawing?.charts.length) fidelity.warn('Charts are shown as pictures and kept in the file; edit them in Excel', name);
+    if (entry.drawing?.shapes) fidelity.warn('Shapes and text boxes are kept in the file but not shown here', name);
+    if (entry.drawing && entry.drawing.shapes + entry.drawing.charts.length)
+      fidelity.warn('Pictures on a sheet with charts or shapes are saved as they were in the original', name);
+    if (entry.tables.length)
+      fidelity.warn('Tables are kept in the file but not editable here; edits to their headers do not update them', name);
+    if (entry.exts.length) fidelity.warn('Sparklines are kept in the file but not shown here', name);
+    if (entry.threadedComments) fidelity.warn('Threaded comments are saved as notes', name);
+    if (entry.slicers) fidelity.drop('Slicers', name);
+  }
+  if (preserved.externalLinks.length) fidelity.warn('Links to other workbooks are kept in the file');
+  if (preserved.vbaProject) fidelity.warn('Macros are kept in the file but cannot run here');
+}
+
+/** Draws each kept chart from its cached data as a picture at its anchor. */
+function addPreservedCharts(workbook: UniverWorkbook, preserved: PreservedParts, excel: ExcelJS.Workbook): void {
+  if (!Object.values(preserved.bySheet).some(s => s.drawing?.charts.length)) return;
   const theme = parseThemeColors((excel.model as unknown as { themes?: Record<string, string> }).themes?.['theme1']);
   const drawings = readResourceMap<UniverDrawingsForSheet>(workbook, RESOURCE_DRAWINGS);
   for (const sheetId of workbook.sheetOrder) {
     const sheet = workbook.sheets[sheetId];
     const entry = preserved.bySheet[sheet.name];
-    if (!entry) continue;
-    if (entry.pivotTables.length)
-      fidelity.warn('Pivot tables are kept in the file but not editable here; Excel refreshes them', sheet.name);
-    if (!entry.drawing) continue;
-    fidelity.warn('Charts are shown as pictures and kept in the file; edit them in Excel', sheet.name);
+    if (!entry?.drawing?.charts.length) continue;
     const colLeft = (col: number) => {
       let x = 0;
       for (let i = 0; i < col; i++) x += sheet.columnData[i]?.w ?? sheet.defaultColumnWidth;
@@ -184,9 +203,6 @@ export function excelToWorkbook(excel: ExcelJS.Workbook, opts: XlsxImportOptions
   const drawings: Record<string, UniverDrawingsForSheet> = {};
   const filters: Record<string, { ref: UniverRange }> = {};
 
-  if ((excel as unknown as { definedNames?: { model?: unknown[] } }).definedNames?.model?.length) {
-    fidelity.drop('Defined names');
-  }
   excel.eachSheet(ws => {
     const id = `sheet-${ws.id}`;
     workbook.sheetOrder.push(id);
@@ -261,6 +277,8 @@ function importSheet(ws: ExcelJS.Worksheet, id: string, styles: StyleTable, fide
     showGridlines: ws.views?.[0]?.showGridLines === false ? 0 : 1,
     rightToLeft: ws.views?.[0]?.rightToLeft ? 1 : 0,
   };
+  const zoom = (ws.views?.[0] as { zoomScale?: number } | undefined)?.zoomScale;
+  if (zoom && zoom > 0) sheet.zoomRatio = zoom / 100;
   const view = ws.views?.find(v => v.state === 'frozen') as (Partial<ExcelJS.WorksheetViewFrozen> & { state: 'frozen' }) | undefined;
   if (view) {
     const x = view.xSplit ?? 0;
@@ -269,15 +287,19 @@ function importSheet(ws: ExcelJS.Worksheet, id: string, styles: StyleTable, fide
   }
   ws.columns?.forEach((col, i) => {
     if (!col) return;
-    const data: { w?: number; hd?: 0 | 1 } = {};
+    const data: { w?: number; hd?: 0 | 1; s?: string } = {};
     if (col.width) data.w = excelWidthToPx(col.width);
     if (col.hidden) data.hd = 1;
+    const style = styles.idFor(styles.fromExcel(col.style));
+    if (style) data.s = style;
     if (Object.keys(data).length) sheet.columnData[i] = data;
   });
   ws.eachRow({ includeEmpty: true }, (row, r) => {
-    const data: { h?: number; hd?: 0 | 1 } = {};
+    const data: { h?: number; hd?: 0 | 1; s?: string } = {};
     if (row.height) data.h = pointsToPx(row.height);
     if (row.hidden) data.hd = 1;
+    const style = styles.idFor(styles.fromExcel((row as unknown as { style?: Partial<ExcelJS.Style> }).style));
+    if (style) data.s = style;
     if (Object.keys(data).length) sheet.rowData[r - 1] = data;
     row.eachCell({ includeEmpty: true }, (cell, c) => {
       const value = importCell(cell, r - 1, c - 1, styles, fidelity, ws.name);
@@ -308,10 +330,15 @@ function importCell(
     return styleId ? out : null;
   }
   if (typeof raw === 'object' && raw !== null && ('formula' in raw || 'sharedFormula' in raw)) {
-    const f = raw as ExcelJS.CellFormulaValue & ExcelJS.CellSharedFormulaValue;
-    const formula = f.formula ?? ('sharedFormula' in f ? undefined : undefined);
+    const f = raw as ExcelJS.CellFormulaValue & ExcelJS.CellSharedFormulaValue & { shareType?: string; ref?: string };
+    // ExcelJS translates a shared formula from its master for the dependent cells.
+    const formula = f.formula ?? cell.formula;
     if (formula) out.f = `=${formula}`;
     else fidelity.warn('Shared formulas kept as values', where);
+    if (f.shareType === 'array' && f.ref) {
+      out.ref = f.ref;
+      out.ft = FORMULA_TYPE_ARRAY;
+    }
     assignValue(out, f.result as ExcelJS.CellValue, cell, styles);
     return out;
   }

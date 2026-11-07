@@ -1,5 +1,8 @@
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
+
+import { OoxmlPackage } from '../shared/ooxml';
 
 import {
   RESOURCE_CONDITIONAL_FORMATTING,
@@ -14,7 +17,9 @@ import {
   UniverNote,
   UniverWorkbook,
   readResource,
+  writeResource,
 } from './univer-sheet-types';
+import { DEFINED_NAME_WORKBOOK_SCOPE, RESOURCE_DEFINED_NAMES, UniverDefinedName } from './xlsx-defined-names';
 import { sheetToCsv, workbookToExcel, workbookToXlsx } from './xlsx-export';
 import { dateToSerial, delimitedTextToWorkbook, excelToWorkbook, parseDelimited, serialToDate, xlsxToWorkbook } from './xlsx-import';
 import { HALIGN, VALIGN, WRAP } from './xlsx-styles';
@@ -151,7 +156,8 @@ describe('xlsx import', () => {
     expect(sales.freeze).toEqual({ xSplit: 1, ySplit: 1, startRow: 1, startColumn: 1 });
     expect(sales.columnData[0]).toEqual({ w: 145 });
     expect(sales.columnData[2]).toEqual({ w: 89, hd: 1 });
-    expect(sales.rowData[0]).toEqual({ h: 40 });
+    // The header row has its own font and fill, which Excel keeps as a row style.
+    expect(sales.rowData[0]).toEqual({ h: 40, s: sales.cellData[0][0].s });
     expect(sales.rowData[7]).toEqual({ hd: 1 });
     expect(sales.mergeData).toEqual([{ startRow: 8, startColumn: 0, endRow: 9, endColumn: 1 }]);
   });
@@ -264,11 +270,92 @@ describe('xlsx import', () => {
     });
   });
 
-  it('reports charts and defined names as dropped', () => {
+  it('carries defined names into the workbook resource and back, with the cached value of a formula over one', async () => {
     const wb = sampleWorkbook();
-    (wb as unknown as { definedNames: { model: unknown[] } }).definedNames.model = [{ name: 'Total', ranges: ['Sales!$D$2'] }];
-    const { report } = excelToWorkbook(wb, { id: 'wb', name: 'sample.xlsx' });
-    expect(report.dropped.map(d => d.feature)).toContain('Defined names');
+    wb.definedNames.add('Sales!$B$2:$B$3', 'Q1Sales');
+    wb.getWorksheet('Sales')!.getCell('F1').value = { formula: 'SUM(Q1Sales)', result: 150.5 };
+    const buffer = await wb.xlsx.writeBuffer();
+    const zip = await JSZip.loadAsync(buffer);
+    // A constant and a sheet-scoped formula name, which ExcelJS cannot carry.
+    zip.file(
+      'xl/workbook.xml',
+      (await zip.file('xl/workbook.xml')!.async('string')).replace(
+        '</definedNames>',
+        '<definedName name="Rate" comment="Tax">0.2</definedName><definedName name="Last" localSheetId="0" hidden="1">INDEX(Sales!$A:$A,COUNTA(Sales!$A:$A))</definedName></definedNames>',
+      ),
+    );
+    const first = await xlsxToWorkbook(await zip.generateAsync({ type: 'arraybuffer' }), { id: 'wb', name: 'names.xlsx' });
+    expect(first.report.dropped).toEqual([]);
+    const names = readResource<Record<string, UniverDefinedName>>(first.workbook, RESOURCE_DEFINED_NAMES)!;
+    const byName = Object.fromEntries(Object.values(names).map(n => [n.name, n]));
+    expect(byName['Q1Sales']).toMatchObject({ formulaOrRefString: 'Sales!$B$2:$B$3', localSheetId: DEFINED_NAME_WORKBOOK_SCOPE });
+    expect(byName['Rate']).toMatchObject({ formulaOrRefString: '=0.2', comment: 'Tax' });
+    expect(byName['Last']).toMatchObject({
+      formulaOrRefString: '=INDEX(Sales!$A:$A,COUNTA(Sales!$A:$A))',
+      hidden: true,
+      localSheetId: 'sheet-1',
+    });
+    expect(first.workbook.sheets['sheet-1'].cellData[0][5]).toMatchObject({ f: '=SUM(Q1Sales)', v: 150.5 });
+    // Edit one name as Univer would, then save: all three go back, with the edit.
+    byName['Rate'].formulaOrRefString = '=0.25';
+    writeResource(first.workbook, RESOURCE_DEFINED_NAMES, names);
+    const saved = await workbookToXlsx(first.workbook, first.preserved);
+    const workbookXml = (await (await OoxmlPackage.open(saved.bytes)).text('xl/workbook.xml'))!;
+    expect(workbookXml).toContain('<definedName name="Q1Sales">Sales!$B$2:$B$3</definedName>');
+    expect(workbookXml).toContain('<definedName name="Rate" comment="Tax">0.25</definedName>');
+    expect(workbookXml).toContain(
+      '<definedName name="Last" localSheetId="0" hidden="1">INDEX(Sales!$A:$A,COUNTA(Sales!$A:$A))</definedName>',
+    );
+    expect(workbookXml).toContain('fullCalcOnLoad="1"');
+    const second = await xlsxToWorkbook(saved.bytes, { id: 'wb', name: 'names.xlsx' });
+    expect(second.workbook.sheets['sheet-1'].cellData[0][5]).toMatchObject({ f: '=SUM(Q1Sales)', v: 150.5 });
+    expect(
+      Object.values(readResource<Record<string, UniverDefinedName>>(second.workbook, RESOURCE_DEFINED_NAMES)!)
+        .map(n => n.name)
+        .sort(),
+    ).toEqual(['Last', 'Q1Sales', 'Rate']);
+  });
+
+  it('translates shared formulas for their dependents and keeps array formulas as array formulas', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('F');
+    ws.getCell('A1').value = 1;
+    ws.getCell('A2').value = 2;
+    ws.getCell('B1').value = { formula: 'A1*2', result: 2, shareType: 'shared', ref: 'B1:B2' } as ExcelJS.CellFormulaValue;
+    ws.getCell('B2').value = { sharedFormula: 'B1', result: 4 } as ExcelJS.CellSharedFormulaValue;
+    ws.getCell('C1').value = { formula: 'A1:A2*10', result: 10, shareType: 'array', ref: 'C1:C2' } as ExcelJS.CellFormulaValue;
+    ws.getCell('C2').value = 20;
+    const first = await xlsxToWorkbook(await wb.xlsx.writeBuffer(), { id: 'wb', name: 'f.xlsx' });
+    const cells = first.workbook.sheets['sheet-1'].cellData;
+    expect(cells[0][1]).toMatchObject({ f: '=A1*2', v: 2 });
+    expect(cells[1][1]).toMatchObject({ f: '=A2*2', v: 4 });
+    expect(cells[0][2]).toMatchObject({ f: '=A1:A2*10', v: 10, ref: 'C1:C2', ft: 2 });
+    expect(first.report.warnings.map(w => w.feature)).not.toContain('Shared formulas kept as values');
+    const saved = await workbookToXlsx(first.workbook, first.preserved);
+    const sheetXml = (await (await OoxmlPackage.open(saved.bytes)).text('xl/worksheets/sheet1.xml'))!;
+    expect(sheetXml).toContain('<f t="array" ref="C1:C2">A1:A2*10</f>');
+    expect(sheetXml).toMatch(/<c r="B2"[^>]*><f>A2\*2<\/f>/);
+  });
+
+  it('carries column and row default styles', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('L');
+    ws.getColumn(2).style = { numFmt: '0.00%' };
+    ws.addRows([
+      [1, 0.5],
+      [2, 0.25],
+      [3, 0.125],
+    ]);
+    ws.getRow(3).font = { italic: true };
+    const first = await xlsxToWorkbook(await wb.xlsx.writeBuffer(), { id: 'wb', name: 'l.xlsx' });
+    const sheet = first.workbook.sheets['sheet-1'];
+    expect(first.workbook.styles[sheet.columnData[1].s!]).toMatchObject({ n: { pattern: '0.00%' } });
+    expect(first.workbook.styles[sheet.rowData[2].s!]).toMatchObject({ it: 1 });
+    const saved = await workbookToXlsx(first.workbook, first.preserved);
+    const second = await xlsxToWorkbook(saved.bytes, { id: 'wb', name: 'l.xlsx' });
+    const again = second.workbook.sheets['sheet-1'];
+    expect(second.workbook.styles[again.columnData[1].s!]).toMatchObject({ n: { pattern: '0.00%' } });
+    expect(second.workbook.styles[again.rowData[2].s!]).toMatchObject({ it: 1 });
   });
 });
 

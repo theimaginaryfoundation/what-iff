@@ -1,6 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { UNIVER_SHEETS_LOADER, UniverSheetsKit } from '../univer/univer-loader';
@@ -11,17 +12,23 @@ import { MUTATION, SheetsEditorComponent, XLSX_MIME } from './sheets-editor.comp
 /** A Univer double: records how it was created, keeps the workbook data, and lets tests fire commands. */
 function fakeUniverKit() {
   const state = {
-    created: [] as { container: HTMLElement; readOnly: boolean | undefined }[],
+    created: [] as { container: HTMLElement; readOnly: boolean | undefined; worker?: unknown }[],
     disposed: 0,
     editable: [] as boolean[],
     listeners: [] as ((event: { id: string; type: number }) => void)[],
     data: null as UniverWorkbook | null,
+    workers: 0,
+    terminated: 0,
   };
   const kit: UniverSheetsKit = {
-    options: (container, opts) => ({ presets: [], container, readOnly: opts?.readOnly }) as never,
+    options: (container, opts) => ({ presets: [], container, readOnly: opts?.readOnly, worker: opts?.formulaWorker }) as never,
+    createFormulaWorker: () => {
+      state.workers += 1;
+      return { terminate: () => (state.terminated += 1) } as unknown as Worker;
+    },
     createUniver: (options => {
       const o = options as unknown as { container: HTMLElement; readOnly?: boolean };
-      state.created.push({ container: o.container, readOnly: o.readOnly });
+      state.created.push({ container: o.container, readOnly: o.readOnly, worker: (o as { worker?: unknown }).worker });
       o.container.appendChild(document.createElement('canvas'));
       const univerAPI = {
         Event: { CommandExecuted: 'CommandExecuted' },
@@ -152,11 +159,19 @@ describe('SheetsEditorComponent', () => {
   it('shows what the converter dropped and reports it as losses', async () => {
     const wb = new ExcelJS.Workbook();
     wb.addWorksheet('S').getCell('A1').value = 1;
-    (wb as unknown as { definedNames: { model: unknown[] } }).definedNames.model = [{ name: 'Total', ranges: ['S!$A$1'] }];
-    const buffer = await wb.xlsx.writeBuffer();
-    const el = await open(attachment(), new Blob([buffer as ArrayBuffer]), false);
-    expect(fixture.componentInstance.losses()).toEqual(['Defined names']);
-    expect(el.querySelector('.fidelity-notice')?.textContent).toContain('Defined names');
+    // A slicer is the one thing on a sheet the converter cannot carry.
+    const zip = await JSZip.loadAsync(await wb.xlsx.writeBuffer());
+    zip.file(
+      'xl/worksheets/sheet1.xml',
+      (await zip.file('xl/worksheets/sheet1.xml')!.async('string')).replace(
+        '</worksheet>',
+        '<extLst><ext uri="{A8765BA9-456A-4dab-B4F3-ACF838C121DE}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><x14:slicerList/></ext></extLst></worksheet>',
+      ),
+    );
+    const buffer = await zip.generateAsync({ type: 'arraybuffer' });
+    const el = await open(attachment(), new Blob([buffer]), false);
+    expect(fixture.componentInstance.losses()).toEqual(['Slicers (S)']);
+    expect(el.querySelector('.fidelity-notice')?.textContent).toContain('Slicers');
     fixture.componentInstance.dismissNotice();
     fixture.detectChanges();
     expect(el.querySelector('.fidelity-notice')).toBeNull();
@@ -170,6 +185,19 @@ describe('SheetsEditorComponent', () => {
     expect(fake.state.disposed).toBe(1);
     fixture.destroy();
     expect(fake.state.disposed).toBe(2);
+  });
+
+  it('runs formulas in a worker per instance and terminates it with the instance', async () => {
+    await open(attachment(), await xlsxBlob());
+    expect(fake.state.workers).toBe(1);
+    expect((fake.state.created[0] as { worker?: unknown }).worker).toBeTruthy();
+    fixture.componentRef.setInput('blob', await xlsxBlob());
+    fixture.detectChanges();
+    await vi.waitFor(() => expect(fake.state.created).toHaveLength(2));
+    expect(fake.state.workers).toBe(2);
+    expect(fake.state.terminated).toBe(1);
+    fixture.destroy();
+    expect(fake.state.terminated).toBe(2);
   });
 
   it('keeps the instance when the host hands back the bytes it just saved', async () => {
