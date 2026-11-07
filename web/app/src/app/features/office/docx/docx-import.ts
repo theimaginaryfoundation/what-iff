@@ -348,7 +348,6 @@ const MODELLED_SECTPR = new Set([
   'pgNumType',
   'cols',
   'titlePg',
-  'sectPrChange',
 ]);
 
 /** After inserting one character at `at`, every recorded offset at or past it moves by one. */

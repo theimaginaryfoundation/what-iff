@@ -75,6 +75,8 @@ export interface DocParagraph {
   bullet?: DocBullet;
   /** Paragraph properties the model does not carry (tabs, frames, grid settings), as XML, written back as they were. */
   docxPPr?: string;
+  /** Revision marks on the paragraph mark: `w:ins` and the like first in its rPr, `w:rPrChange` last. */
+  docxMarkRPr?: { first?: string; last?: string };
 }
 
 export interface DocTextRun {
@@ -92,6 +94,8 @@ export interface DocCustomRange {
   /** CustomRangeType: 0 hyperlink, 1 field, 2 content control, 3 bookmark, 4 comment, 8 footnote, 9 endnote. */
   rangeType: number;
   wholeEntity?: boolean;
+  /** False keeps Univer from drawing a CUSTOM range underlined. */
+  active?: boolean;
   properties?: Record<string, unknown>;
 }
 

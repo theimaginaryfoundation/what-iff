@@ -37,6 +37,17 @@ import {
   TOKEN,
 } from './univer-doc-types';
 import {
+  BOUND_CONTROLS_NOTICE,
+  CONTROLS_NOTICE,
+  REVISIONS_NOTICE,
+  fragment,
+  isBound,
+  markExtras,
+  notePlaceholder,
+  openTagOf,
+  sdtProperties,
+} from './docx-revisions';
+import {
   ParagraphProps,
   listTypeForNum,
   paragraphPropsFromPPr,
@@ -94,10 +105,9 @@ const MODELLED_PPR = new Set([
   'numPr',
   'rPr',
   'sectPr',
-  'pPrChange',
 ]);
-const MODELLED_TCPR = new Set(['tcW', 'gridSpan', 'hMerge', 'vMerge', 'tcBorders', 'shd', 'tcMar', 'vAlign', 'tcPrChange']);
-const MODELLED_TRPR = new Set(['trHeight', 'cantSplit', 'tblHeader', 'gridBefore', 'gridAfter', 'trPrChange', 'ins', 'del']);
+const MODELLED_TCPR = new Set(['tcW', 'gridSpan', 'hMerge', 'vMerge', 'tcBorders', 'shd', 'tcMar', 'vAlign']);
+const MODELLED_TRPR = new Set(['trHeight', 'cantSplit', 'tblHeader', 'gridBefore', 'gridAfter']);
 
 /** The children of a properties element the model does not carry, serialised so they can go back verbatim. */
 export function extrasXml(el: Element | null | undefined, modelled: Set<string>): string | undefined {
@@ -154,12 +164,9 @@ export class BodyBuilder {
       case 'sectPr':
         this.ctx.onSection?.(el, this.length);
         return;
-      case 'sdt': {
-        const content = child(el, NS.w, 'sdtContent');
-        if (content) this.blocks(content);
-        this.ctx.fidelity.warn('Content controls kept as plain content', this.ctx.where);
+      case 'sdt':
+        this.blockSdt(el);
         return;
-      }
       case 'bookmarkStart':
       case 'bookmarkEnd':
       case 'commentRangeStart':
@@ -171,13 +178,20 @@ export class BodyBuilder {
       case 'permEnd':
         return;
       case 'ins':
-      case 'moveTo':
+      case 'moveTo': {
+        const start = this.length;
         this.blocks(el);
-        this.ctx.fidelity.drop('Tracked changes (accepted)', this.ctx.where);
+        this.revisionRange(el, start);
         return;
+      }
       case 'del':
       case 'moveFrom':
-        this.ctx.fidelity.warn('Tracked changes accepted', this.ctx.where);
+      case 'moveFromRangeStart':
+      case 'moveFromRangeEnd':
+      case 'moveToRangeStart':
+      case 'moveToRangeEnd':
+        this.ctx.fidelity.warn(REVISIONS_NOTICE, this.ctx.where);
+        this.body.docxRawBlocks!.push({ startIndex: this.length, xml: fragment(el) });
         return;
       case 'customXml':
         this.blocks(el);
@@ -201,7 +215,8 @@ export class BodyBuilder {
     const out: DocBody = { dataStream: b.dataStream, textRuns: b.textRuns, paragraphs: b.paragraphs, sectionBreaks: b.sectionBreaks };
     if (b.customBlocks?.length) out.customBlocks = b.customBlocks;
     if (b.docxRawCustomBlocks?.length) out.docxRawCustomBlocks = b.docxRawCustomBlocks;
-    if (b.customRanges?.length) out.customRanges = b.customRanges;
+    // Outermost first at each position, the order Univer writes them in.
+    if (b.customRanges?.length) out.customRanges = b.customRanges.slice().sort((x, y) => x.startIndex - y.startIndex || y.endIndex - x.endIndex);
     if (b.tables?.length) out.tables = b.tables;
     if (b.docxRawBlocks?.length) out.docxRawBlocks = b.docxRawBlocks;
     return out;
@@ -214,7 +229,7 @@ export class BodyBuilder {
     const props = paragraphPropsFromPPr(pPr);
     const baseTs = this.paragraphBaseTextStyle(props);
     this.inlineContent(p, baseTs);
-    this.endParagraph(props, extrasXml(pPr, MODELLED_PPR));
+    this.endParagraph(props, extrasXml(pPr, MODELLED_PPR), markExtras(pPr));
     if (props.sectPr) this.ctx.onSection?.(props.sectPr, this.length);
   }
 
@@ -224,10 +239,14 @@ export class BodyBuilder {
     return Object.keys(resolved).length ? resolved : undefined;
   }
 
-  private endParagraph(props: ParagraphProps, extras?: string): void {
+  private endParagraph(props: ParagraphProps, extras?: string, mark?: { first?: string; last?: string }): void {
     this.flushRun();
     const paragraph: DocParagraph = { startIndex: this.length, paragraphId: this.ctx.nextId('p') };
     if (extras) paragraph.docxPPr = extras;
+    if (mark?.first || mark?.last) {
+      paragraph.docxMarkRPr = mark;
+      this.ctx.fidelity.warn(REVISIONS_NOTICE, this.ctx.where);
+    }
     const style: DocParagraphStyle = { ...(props.style ?? {}) };
     if (props.styleId && this.ctx.styles[props.styleId]) {
       paragraph.styleId = props.styleId;
@@ -279,23 +298,30 @@ export class BodyBuilder {
       case 'fldSimple':
         this.simpleField(el, baseTs);
         return;
-      case 'sdt': {
-        const content = child(el, NS.w, 'sdtContent');
-        if (content) this.inlineContent(content, baseTs);
-        this.ctx.fidelity.warn('Content controls kept as plain content', this.ctx.where);
+      case 'sdt':
+        this.inlineSdt(el, baseTs);
         return;
-      }
       case 'smartTag':
       case 'customXml':
-      case 'ins':
-      case 'moveTo':
       case 'dir':
       case 'bdo':
         this.inlineContent(el, baseTs);
         return;
+      case 'ins':
+      case 'moveTo': {
+        const start = this.length;
+        this.inlineContent(el, baseTs);
+        this.revisionRange(el, start);
+        return;
+      }
       case 'del':
       case 'moveFrom':
-        this.ctx.fidelity.warn('Tracked changes accepted', this.ctx.where);
+      case 'moveFromRangeStart':
+      case 'moveFromRangeEnd':
+      case 'moveToRangeStart':
+      case 'moveToRangeEnd':
+        this.ctx.fidelity.warn(REVISIONS_NOTICE, this.ctx.where);
+        this.rawRun(fragment(el));
         return;
       default:
         return;
@@ -309,6 +335,7 @@ export class BodyBuilder {
     const direct = textStyleFromRPr(rPr);
     const ts = mergeTs(baseTs, charStyle, direct);
     // An opaque child (a shape, an object, an equation) is kept as a run of its own, with this run's formatting.
+    const runStart = this.length;
     const rawRun = (el: Element, what: string) => this.rawInline(`<w:r>${rPr ? serializeXml(rPr) : ''}${serializeXml(el)}</w:r>`, what);
     for (const el of elementChildren(r)) {
       if (el.namespaceURI === NS.mc && el.localName === 'AlternateContent') {
@@ -324,6 +351,21 @@ export class BodyBuilder {
       if (el.namespaceURI !== NS.w) continue;
       this.runChild(el, ts, sId, rawRun);
     }
+    const change = child(rPr, NS.w, 'rPrChange');
+    if (change) {
+      this.flushRun();
+      this.ctx.fidelity.warn(REVISIONS_NOTICE, this.ctx.where);
+      if (this.length > runStart) {
+        this.range({
+          startIndex: runStart,
+          endIndex: this.length - 1,
+          rangeId: this.ctx.nextId('rev'),
+          rangeType: CUSTOM_RANGE.CUSTOM,
+          active: false,
+          properties: { docxRPrChange: fragment(change), textColorMode: 'text' },
+        });
+      }
+    }
   }
 
   private runChild(el: Element, ts: DocTextStyle | undefined, sId: string | undefined, rawRun: (el: Element, what: string) => void): void {
@@ -336,15 +378,9 @@ export class BodyBuilder {
       case 'ptab':
         this.text(TOKEN.TAB, ts, sId);
         break;
-      case 'br': {
-        const type = attr(el, NS.w, 'type');
-        if (type === 'page') this.text(TOKEN.PAGE_BREAK, ts, sId);
-        else if (type === 'column') this.text(TOKEN.COLUMN_BREAK, ts, sId);
-        else this.lineBreak();
-        break;
-      }
+      case 'br':
       case 'cr':
-        this.lineBreak();
+        this.lineOrColumnBreak(el, ts, sId);
         break;
       case 'sym': {
         const code = attr(el, NS.w, 'char');
@@ -386,20 +422,29 @@ export class BodyBuilder {
     }
   }
 
-  /** A soft line break has no Univer token, so the paragraph is split and its style carried on. */
-  private lineBreak(): void {
-    this.ctx.fidelity.warn('Line breaks became paragraphs', this.ctx.where);
-    this.text(TOKEN.PARAGRAPH, undefined, undefined, true);
-  }
-
-  private text(text: string, ts: DocTextStyle | undefined, sId: string | undefined, paragraphToken = false): void {
-    if (!text) return;
-    if (paragraphToken) {
-      this.flushRun();
-      this.body.paragraphs!.push({ startIndex: this.length, paragraphId: this.ctx.nextId('p') });
-      this.body.dataStream += text;
+  /**
+   * In a traditional document Univer lays out a bare `\\v` as a soft line break, and only one marked
+   * `breakType: column` as a column break (engine-render createWhitespaceGlyph, _isMarkedColumnBreak).
+   */
+  private lineOrColumnBreak(el: Element, ts: DocTextStyle | undefined, sId: string | undefined): void {
+    const type = el.localName === 'br' ? attr(el, NS.w, 'type') : null;
+    if (type === 'page') {
+      this.text(TOKEN.PAGE_BREAK, ts, sId);
       return;
     }
+    this.text(TOKEN.COLUMN_BREAK, ts, sId);
+    const at = this.length - 1;
+    if (type === 'column') this.breakRange(at, { breakType: 'column' });
+    // w:cr and a clearing w:br draw the same line break, and go back as what they were.
+    else if (el.localName === 'cr' || attr(el, NS.w, 'clear')) this.breakRange(at, { docxBreakXml: fragment(el), textColorMode: 'text' });
+  }
+
+  private breakRange(at: number, properties: Record<string, unknown>): void {
+    this.range({ startIndex: at, endIndex: at, rangeId: this.ctx.nextId('br'), rangeType: CUSTOM_RANGE.CUSTOM, wholeEntity: true, active: false, properties });
+  }
+
+  private text(text: string, ts: DocTextStyle | undefined, sId: string | undefined): void {
+    if (!text) return;
     const style = ts && Object.keys(ts).length ? ts : undefined;
     if (!this.pendingRun || !sameTs(this.pendingRun.ts, style) || this.pendingRun.sId !== sId) {
       this.flushRun();
@@ -661,8 +706,13 @@ export class BodyBuilder {
 
   /** Run-level content with no Univer counterpart rides on a custom-block sentinel and is written back verbatim. */
   private rawInline(xml: string, what: string): void {
-    this.flushRun();
     this.ctx.fidelity.warn(`Kept but not shown: ${what}`, this.ctx.where);
+    this.rawRun(xml);
+  }
+
+  /** An opaque piece of run content on a sentinel; it moves with edits and Univer draws nothing for it. */
+  private rawRun(xml: string): void {
+    this.flushRun();
     this.body.docxRawCustomBlocks!.push({
       startIndex: this.length,
       blockId: this.ctx.nextId('raw'),
@@ -670,6 +720,71 @@ export class BodyBuilder {
       docxRawXml: stripRootNamespaces(xml),
     });
     this.body.dataStream += TOKEN.CUSTOM_BLOCK;
+  }
+
+  // --- content controls and tracked insertions ----------------------------------------------------
+
+  private inlineSdt(sdt: Element, baseTs: DocTextStyle | undefined): void {
+    const start = this.length;
+    const content = child(sdt, NS.w, 'sdtContent');
+    if (content) this.inlineContent(content, baseTs);
+    this.flushRun();
+    // A control with nothing in it has nothing for a range to hold on to.
+    if (this.length === start) this.rawRun(fragment(sdt));
+    else this.sdtRange(sdt, 'inline', start, this.length - 1);
+  }
+
+  private blockSdt(sdt: Element): void {
+    this.flushRun();
+    const start = this.length;
+    const content = child(sdt, NS.w, 'sdtContent');
+    if (content) this.blocks(content);
+    this.flushRun();
+    if (this.length === start) this.body.docxRawBlocks!.push({ startIndex: start, xml: fragment(sdt) });
+    else this.sdtRange(sdt, 'block', start, this.length - 1);
+  }
+
+  private sdtRange(sdt: Element, placement: 'inline' | 'block' | 'row' | 'cell', startIndex: number, endIndex: number): void {
+    this.ctx.fidelity.warn(CONTROLS_NOTICE, this.ctx.where);
+    if (isBound(sdt)) this.ctx.fidelity.warn(BOUND_CONTROLS_NOTICE, this.ctx.where);
+    const range: DocCustomRange = {
+      startIndex,
+      endIndex,
+      rangeId: this.ctx.nextId('sdt'),
+      rangeType: CUSTOM_RANGE.SDT,
+      properties: sdtProperties(sdt, placement),
+    };
+    notePlaceholder(this.body.dataStream, range);
+    this.range(range);
+  }
+
+  /** A tracked insertion: its text stays visible, and Univer marks a CUSTOM range coloured and underlined. */
+  private revisionRange(el: Element, start: number): void {
+    this.flushRun();
+    this.ctx.fidelity.warn(REVISIONS_NOTICE, this.ctx.where);
+    if (this.length === start) return;
+    this.range({
+      startIndex: start,
+      endIndex: this.length - 1,
+      rangeId: this.ctx.nextId('rev'),
+      rangeType: CUSTOM_RANGE.CUSTOM,
+      properties: { docxRevisionOpen: openTagOf(el), docxRevisionClose: `</w:${el.localName}>` },
+    });
+  }
+
+  /** Controls wrapping rows or cells, once every row or cell inside them has its place in the stream. */
+  private trackedSdts(): { note(el: Element, boundary: Element, start: number, end: number): void; finish(placement: 'row' | 'cell'): void } {
+    const spans = new Map<Element, { start: number; end: number }>();
+    return {
+      note: (el, boundary, start, end) => {
+        for (const sdt of enclosingSdts(el, boundary)) {
+          const span = spans.get(sdt);
+          if (span) span.end = end;
+          else spans.set(sdt, { start, end });
+        }
+      },
+      finish: placement => spans.forEach((span, sdt) => this.sdtRange(sdt, placement, span.start, span.end)),
+    };
   }
 
   // --- tables ------------------------------------------------------------------------------------
@@ -724,7 +839,10 @@ export class BodyBuilder {
     // Vertical merges: a cell with vMerge="restart" spans the following rows whose cell at the same
     // grid column says vMerge (continue); those are emitted as covered cells.
     const pendingVMerge = new Map<number, DocTableCell>();
+    const rowSdts = this.trackedSdts();
     rowsEl.forEach((tr, rowIndex) => {
+      const rowStart = this.length;
+      const cellSdts = this.trackedSdts();
       const trPr = child(tr, NS.w, 'trPr');
       const trHeight = child(trPr, NS.w, 'trHeight');
       const hRule = attr(trHeight, NS.w, 'hRule');
@@ -759,6 +877,7 @@ export class BodyBuilder {
         const isFirstRow = rowIndex === 0;
         const isFirstCol = col === 0;
         const isLastCol = col + span >= columnCount;
+        const cellStart = this.length;
         const cell = this.cell(
           tc,
           tcPr,
@@ -771,6 +890,7 @@ export class BodyBuilder {
           },
           table.cellMargin!,
         );
+        cellSdts.note(tc, tr, cellStart, this.length - 1);
         if (vMergeVal === 'restart') pendingVMerge.set(col, cell);
         else pendingVMerge.delete(col);
         row.tableCells.push(cell);
@@ -782,8 +902,11 @@ export class BodyBuilder {
         col++;
       }
       this.body.dataStream += TOKEN.TABLE_ROW_END;
+      cellSdts.finish('cell');
+      rowSdts.note(tr, tbl, rowStart, this.length - 1);
       table.tableRows.push(row);
     });
+    rowSdts.finish('row');
     this.body.dataStream += TOKEN.TABLE_END;
     this.tableSource[tableId] = table;
     this.body.tables!.push({ startIndex, endIndex: this.length, tableId });
@@ -900,6 +1023,15 @@ function unwrapped(parent: Element, localName: 'tr' | 'tc'): Element[] {
       const content = child(el, NS.w, 'sdtContent');
       if (content) out.push(...unwrapped(content, localName));
     } else if (el.localName === 'ins' || el.localName === 'customXml') out.push(...unwrapped(el, localName));
+  }
+  return out;
+}
+
+/** The content controls between an element and the row or table that holds it, outermost last. */
+function enclosingSdts(el: Element, boundary: Element): Element[] {
+  const out: Element[] = [];
+  for (let p = el.parentElement; p && p !== boundary; p = p.parentElement) {
+    if (p.namespaceURI === NS.w && p.localName === 'sdt') out.push(p);
   }
   return out;
 }
