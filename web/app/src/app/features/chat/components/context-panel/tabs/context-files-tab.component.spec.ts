@@ -71,6 +71,17 @@ describe('ContextFilesTabComponent', () => {
     expect(navigate).toHaveBeenCalledWith([], { queryParams: { file: 'f-agent' }, queryParamsHandling: 'merge', replaceUrl: false });
   });
 
+  it('closes the panel when a file is opened, leaving the remembered choice alone', async () => {
+    vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const el = await render();
+    panel.setDesktopVisible(true);
+    expect(panel.visible()).toBe(true);
+    (el.querySelector('button[aria-label="Open journal.md"]') as HTMLButtonElement).click();
+    expect(panel.visible()).toBe(false);
+    panel.restoreDesktopVisible();
+    expect(panel.visible()).toBe(true);
+  });
+
   it('reloads when the panel asks, and shows errors with a retry', async () => {
     await render();
     panel.refreshFiles();

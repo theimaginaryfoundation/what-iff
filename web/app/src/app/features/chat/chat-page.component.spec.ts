@@ -21,6 +21,7 @@ import { makeTestPersonality } from '../../core/models/personality.test-fixtures
 import { Chat } from '../../core/models/chat.model';
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { RightPanelService } from '../../core/services/right-panel.service';
+import { FileWorkspaceService } from '../file-workspace/file-workspace.service';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { ContextPanelService, DESKTOP_OPEN_STORAGE_KEY } from './services/context-panel.service';
 import { ChatSendGate, NoopChatSendGate } from './services/chat-send-gate';
@@ -30,7 +31,7 @@ describe('ChatPageComponent', () => {
     let params$: BehaviorSubject<ReturnType<typeof convertToParamMap>>;
     let queryParams$: BehaviorSubject<ReturnType<typeof convertToParamMap>>;
     type ChatServiceMock = Pick<MockedObject<ChatService>, 'createChat' | 'createWelcomeMessage' | 'getChat' | 'getChatContext' | 'getLastChatId' | 'listChats' | 'patchChat' | 'setLastChatId' | 'clearLastChatId' | 'exportChat' | 'markChatRead' | 'listAllChats'>;
-    type ImageGalleryServiceMock = Pick<MockedObject<ImageGalleryService>, 'referenceImage' | 'getImageUrl'>;
+    type ImageGalleryServiceMock = Pick<MockedObject<ImageGalleryService>, 'referenceImage' | 'getImageUrl' | 'getFileInfo'>;
     type FileAttachmentServiceMock = Pick<MockedObject<FileAttachmentService>, 'uploadChatFileAttachment'>;
     type MessageServiceMock = Pick<MockedObject<MessageService>, 'clearMessages' | 'listMessages' | 'listBookmarks' | 'sendMessage' | 'setCurrentChatId' | 'markAssistantMessagesRead' | 'messages$'>;
     type RouterMock = Pick<MockedObject<Router>, 'navigate' | 'events'>;
@@ -117,7 +118,8 @@ describe('ChatPageComponent', () => {
         } as unknown as FileAttachmentServiceMock;
         imageGallery = {
             referenceImage: vi.fn().mockName("ImageGalleryService.referenceImage"),
-            getImageUrl: vi.fn().mockName("ImageGalleryService.getImageUrl")
+            getImageUrl: vi.fn().mockName("ImageGalleryService.getImageUrl"),
+            getFileInfo: vi.fn().mockName("ImageGalleryService.getFileInfo").mockReturnValue(of({ id: 'f-1', user_id: 'u', name: 'a.txt', file_type: 'text/plain', created_at: '' })),
         } as unknown as ImageGalleryServiceMock;
         router = {
             navigate: vi.fn().mockName("Router.navigate"),
@@ -299,6 +301,25 @@ describe('ChatPageComponent', () => {
 
             expect(context.activeTab()).toBe('memories');
             expect(TestBed.inject(RightPanelService).visible()).toBe(true);
+        });
+
+        it('closes the context panel when a file opens, and lets the rail bring it back over the file', async () => {
+            const context = TestBed.inject(ContextPanelService);
+            const workspace = TestBed.inject(FileWorkspaceService);
+            fixture.detectChanges();
+            await fixture.whenStable();
+            context.setDesktopVisible(true);
+
+            workspace.show('chat', 'f-1', { chatId: chat.id });
+            fixture.detectChanges();
+            await fixture.whenStable();
+            expect(TestBed.inject(RightPanelService).visible()).toBe(false);
+
+            context.setDesktopVisible(true);
+            fixture.detectChanges();
+            await fixture.whenStable();
+            expect(TestBed.inject(RightPanelService).visible()).toBe(true);
+            workspace.hide();
         });
 
         it('adopts a sandbox change saved from the context panel so the chip appears without a reload', async () => {

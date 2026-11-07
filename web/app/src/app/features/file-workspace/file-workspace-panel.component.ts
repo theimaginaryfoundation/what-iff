@@ -80,6 +80,9 @@ import { DOCKED_WIDTH_MAX_FRACTION, DOCKED_WIDTH_MIN_FRACTION, FileWorkspaceServ
         display: flex;
         flex-direction: column;
         height: 100%;
+        // A stacking context of its own: what a viewer layers inside (Univer's canvases carry high
+        // z-indexes) stays under the context panel's flyout, whatever those numbers are.
+        isolation: isolate;
         min-width: 0;
         position: relative;
       }

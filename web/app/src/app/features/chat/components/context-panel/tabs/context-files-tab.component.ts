@@ -102,10 +102,12 @@ export class ContextFilesTabComponent {
   }
 
   open(row: ChatContextFile): void {
-    this.workspace.requestOpen(row.file.id);
+    this.openFile(row.file);
   }
 
+  /** The panel closes on every click, including one on the file already open behind it. */
   openFile(file: FileAttachment): void {
+    this.contextPanel.hideForOpenFile();
     this.workspace.requestOpen(file.id);
   }
 

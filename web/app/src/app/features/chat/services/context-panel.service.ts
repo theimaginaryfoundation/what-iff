@@ -223,6 +223,15 @@ export class ContextPanelService {
     this.rightPanel.setVisible(readStored(DESKTOP_OPEN_STORAGE_KEY) !== false);
   }
 
+  /**
+   * Gets out of the way of a file that is opening (ADR 0x043 §1): the panel would cover it. This
+   * is not the user's choice of open or closed, so the remembered value stays as it was.
+   */
+  hideForOpenFile(): void {
+    this.rightPanel.setVisible(false);
+    this._mobileOpen.set(false);
+  }
+
   /** Hides the docked panel when the chat page goes away, keeping the remembered choice. */
   hideOnPageExit(): void {
     this.rightPanel.setVisible(false);
