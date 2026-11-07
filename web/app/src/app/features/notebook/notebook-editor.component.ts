@@ -1,10 +1,12 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { FileEditor } from '../file-workspace/editors/file-editor';
 import { CellType, Notebook, NotebookCell, NotebookFormatError, notebookLanguage, parseNotebook, serializeNotebook } from './nbformat';
 import { clearOutputs, deleteCell, duplicateCell, insertCell, moveCell, setCellType, setSource } from './notebook-commands';
 import { NotebookCellComponent } from './notebook-cell.component';
+import { NotebookRunComponent } from './notebook-run.component';
+import { JUPYTERLITE_URL } from './notebook-run.config';
 
 export const IPYNB_MIME = 'application/x-ipynb+json';
 const DIRTY_CHECK_MS = 300;
@@ -18,13 +20,16 @@ const HISTORY_LIMIT = 100;
 @Component({
   selector: 'app-notebook-editor',
   standalone: true,
-  imports: [NotebookCellComponent],
+  imports: [NotebookCellComponent, NotebookRunComponent],
   templateUrl: './notebook-editor.component.html',
   styleUrl: './notebook-editor.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class NotebookEditorComponent implements FileEditor {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly runner = viewChild(NotebookRunComponent);
+  /** Null when this deployment has no runner: Run is not offered. */
+  readonly runUrl = inject(JUPYTERLITE_URL);
 
   readonly file = input.required<FileAttachment>();
   readonly blob = input.required<Blob>();
@@ -41,6 +46,9 @@ export class NotebookEditorComponent implements FileEditor {
   readonly editingUid = signal<string | null>(null);
   readonly canUndo = signal(false);
   readonly canRedo = signal(false);
+  /** Run mode: JupyterLite takes the cells' place, holding the notebook as it was when entered. */
+  readonly running = signal(false);
+  readonly runNotebook = signal<unknown>(null);
   readonly cellTypes: readonly { value: CellType; label: string }[] = [
     { value: 'code', label: 'Code' },
     { value: 'markdown', label: 'Markdown' },
@@ -78,7 +86,12 @@ export class NotebookEditorComponent implements FileEditor {
     });
     // Leaving edit mode leaves no cell being edited.
     effect(() => {
-      if (this.readOnly()) untracked(() => this.editingUid.set(null));
+      if (this.readOnly()) {
+        untracked(() => {
+          this.editingUid.set(null);
+          this.running.set(false);
+        });
+      }
     });
     // Focusable, so the notebook's keys work once a cell's editor has closed.
     this.host.nativeElement.tabIndex = -1;
@@ -221,6 +234,39 @@ export class NotebookEditorComponent implements FileEditor {
     this.travel(this.redoStack, this.undoStack);
   }
 
+  // --- run ---------------------------------------------------------------------------------------
+
+  startRun(): void {
+    const notebook = this.notebook();
+    if (!notebook || !this.runUrl || this.readOnly()) return;
+    this.editingUid.set(null);
+    this.runNotebook.set(JSON.parse(serializeNotebook(notebook)));
+    this.running.set(true);
+  }
+
+  /** Back to the cells; the runner saves what is unsaved first. */
+  stopRun(): void {
+    const runner = this.runner();
+    if (runner) runner.requestClose();
+    else this.running.set(false);
+  }
+
+  /** The runner saved: its notebook, with whatever outputs it produced, is now the file. */
+  onRunSaved(content: unknown): void {
+    let next: Notebook;
+    try {
+      next = parseNotebook(JSON.stringify(content));
+    } catch (error) {
+      console.error('The runner saved something that is not a notebook', error);
+      return;
+    }
+    this.typingIn = null;
+    this.remember();
+    this.apply(next);
+    this.activeUid.set(null);
+    this.saveRequested.emit();
+  }
+
   // --- internals ---------------------------------------------------------------------------------
 
   private travel(from: Notebook[], to: Notebook[]): void {
@@ -285,6 +331,7 @@ export class NotebookEditorComponent implements FileEditor {
     this.updateHistoryFlags();
     this.activeUid.set(null);
     this.editingUid.set(null);
+    this.running.set(false);
     try {
       const text = await blob.text();
       if (generation !== this.generation) return;
@@ -307,7 +354,7 @@ export class NotebookEditorComponent implements FileEditor {
       return;
     }
     // Keys in the cell editor are the editor's, apart from those it sends up itself.
-    if (this.readOnly() || this.editingUid()) return;
+    if (this.readOnly() || this.editingUid() || this.running()) return;
     const target = event.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') return;
     const key = event.key;

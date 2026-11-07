@@ -1,0 +1,7 @@
+.venv/
+dist/
+.jupyterlite.doit.db
+extension/node_modules/
+extension/lib/
+extension/whatiff_bridge/
+extension/tsconfig.tsbuildinfo

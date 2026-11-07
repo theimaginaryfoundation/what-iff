@@ -1,0 +1,7 @@
+{
+  "jupyter-lite-schema-version": 0,
+  "jupyter-config-data": {
+    "appName": "WhatIff Notebooks",
+    "whatiffHostOrigins": "http://localhost:4200,http://127.0.0.1:4200"
+  }
+}

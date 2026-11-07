@@ -1,0 +1,27 @@
+{
+  "name": "whatiff-bridge",
+  "version": "0.1.0",
+  "description": "Connects a JupyterLite embedded in WhatIff to the page hosting it.",
+  "private": true,
+  "license": "Apache-2.0",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": ["lib/**/*.js"],
+  "scripts": {
+    "build": "tsc && jupyter labextension build ."
+  },
+  "dependencies": {
+    "@jupyterlab/application": "^4.6.0",
+    "@jupyterlab/coreutils": "^6.6.0",
+    "@jupyterlab/docmanager": "^4.6.0",
+    "@jupyterlab/services": "^7.6.0"
+  },
+  "devDependencies": {
+    "@jupyterlab/builder": "^4.5.0",
+    "typescript": "~5.5.4"
+  },
+  "jupyterlab": {
+    "extension": true,
+    "outputDir": "whatiff_bridge/labextension"
+  }
+}

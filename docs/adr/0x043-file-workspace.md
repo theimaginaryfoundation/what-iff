@@ -305,6 +305,31 @@ Verification: the converters over the three real files and a fixture with a text
 - **Outputs are untrusted.** Picked by MIME type from the richest safe representation. Scripts never run. HTML goes through a dedicated DOMPurify instance that removes scripts, handlers, forms, frames and stylesheets, and only embedded pictures load, so opening a notebook cannot phone home. SVG shows through an `<img>`, where it cannot script. Output is `contain`ed, so a `position: fixed` element cannot cover the app. Scripted HTML steps aside for a picture or text fallback; widgets get a note.
 - **Not done:** formats before 4; widget state and script-driven plots render as their fallback.
 
+### Step 12 as built: Run with JupyterLite (2026-11-07)
+
+Two decisions differ from §8:
+
+- **JupyterLite gets its own origin, not `/jupyterlite/`.** A same-origin iframe shares `sessionStorage` with its parent, so a notebook's code or output could read the session token. `usableRunUrl` refuses a same-origin URL, so Run stays off rather than running unsafely. The site holds no credentials and receives only the notebook.
+- **A bridge, not a custom contents drive.** A small labextension (`web/jupyterlite/extension`) writes the host's notebook to JupyterLite's default drive and opens it, so a kernel reads it and its neighbours with plain `open()`. The extension reports saves back, and the host persists them through its usual `PUT …/content`.
+
+How it fits together:
+
+- **Entering Run.** Run is in the notebook toolbar in edit mode, so phones do not get it. JupyterLite takes the cells' place. Back to cells asks it to save first.
+- **Saving.** A save inside JupyterLite becomes the notebook's new state and goes through the host's normal save, and undo can step back over it.
+- **Trust at the boundary.** The host accepts messages only from its own frame on the configured origin. The extension accepts them only from its parent on an origin in `whatiffHostOrigins`.
+- **Build and configuration.** `make jupyterlite` builds the 65 MB site with versions pinned, and `make jupyterlite-serve` serves it on :4203 for development. `environment.jupyterliteUrl` (`JUPYTERLITE_URL` at image build) points at it; empty leaves Run off.
+
+Hosting requirements for production:
+
+- A static host on its own origin, such as a separate subdomain; it needs nothing from the API.
+- The app's origin in `JUPYTERLITE_HOST_ORIGINS` at build time.
+- `frame-ancestors` limited to the app.
+- A correct WASM MIME type.
+
+Python itself loads from the jsDelivr CDN at run time, which is the kernel's default. Self-hosting it would add hundreds of megabytes, and that remains an option if the outbound dependency is unwanted.
+
+Verified in Chromium against the composed stack: the frame could not read the app's token, Python ran, read its own notebook with `open()`, a save reached `PUT …/content`, and the output showed in our cells.
+
 ## Step 0 results (2026-11-06)
 
 The four spikes ran on `spike/file-workspace` (throwaway; scripts under `web/app/spike-scripts/`, the Monaco route at `/spike/monaco`), in headless Chromium.

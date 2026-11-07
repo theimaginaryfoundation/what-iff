@@ -12,5 +12,7 @@ export const environment = {
   // Gallery feature flag for expression assignment action. Substituted like
   // the other deployment values; defaults to false when the build arg is unset.
   enableGalleryExpressionAssignment: ['true'].includes('__ENABLE_GALLERY_EXPRESSION_ASSIGNMENT__'),
-  docsUrl: '__DOCS_URL__'
+  docsUrl: '__DOCS_URL__',
+  // The JupyterLite site that runs notebooks, on an origin of its own; empty leaves Run off.
+  jupyterliteUrl: '__JUPYTERLITE_URL__'
 };
