@@ -21,6 +21,8 @@ import { FUniver, Univer } from './univer-loader';
 
 /** CommandType.MUTATION in Univer: the commands that change a document. */
 export const MUTATION = 2;
+/** How long after a unit is created its own start-up mutations are still ignored. */
+const SETTLE_MS = 1000;
 /** Mutations that move the view or the caret, not the content. */
 const VIEW_ONLY_MUTATION = /scroll|selection|zoom|skeleton|active|viewport|freeze-render|render|cursor|focus/i;
 
@@ -145,8 +147,12 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
       this.univerAPI = univerAPI;
       this.unit = await this.createUnit(univerAPI, parsed.data, readOnly);
       if (generation !== this.generation) return;
+      // Univer runs mutations of its own while a unit settles (skeleton, selection, layout); only
+      // what happens after that is the user's.
+      let settled = false;
+      setTimeout(() => (settled = true), SETTLE_MS);
       univerAPI.addEvent(univerAPI.Event.CommandExecuted, (event: { id?: string; type?: number }) => {
-        if (readOnly || event.type !== MUTATION || VIEW_ONLY_MUTATION.test(event.id ?? '')) return;
+        if (readOnly || !settled || event.type !== MUTATION || VIEW_ONLY_MUTATION.test(event.id ?? '')) return;
         this.setDirty(true);
       });
       this.state.set('ready');

@@ -100,6 +100,8 @@ describe('DocsEditorComponent', () => {
     fixture.componentInstance.dirtyChange.subscribe(dirty);
     expect(fake.state.created[0].readOnly).toBe(false);
     expect(fake.state.editable).toEqual([]);
+    // Univer's own start-up mutations are ignored for a moment after the unit is created.
+    await new Promise(resolve => setTimeout(resolve, 1100));
     fake.state.listeners.forEach(fn => fn({ id: 'doc.mutation.set-text-selections', type: MUTATION }));
     expect(fixture.componentInstance.dirty()).toBe(false);
     fake.state.listeners.forEach(fn => fn({ id: 'doc.mutation.rich-text-editing', type: MUTATION }));
