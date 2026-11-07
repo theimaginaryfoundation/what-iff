@@ -13,7 +13,7 @@ export class TabComponent implements OnInit, OnDestroy {
   readonly id = input.required<string>();
   readonly controls = input.required<string>();
   readonly disabled = input(false);
-  private readonly tabs = inject(TabsComponent, { host: true });
+  protected readonly tabs = inject(TabsComponent, { host: true });
   private readonly elementRef = inject<ElementRef<HTMLElement>>(ElementRef);
 
   ngOnInit(): void {

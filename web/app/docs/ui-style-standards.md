@@ -44,6 +44,12 @@ Every public `<input type="checkbox">` now goes through `<ui-checkbox>`.
 The one exception is the gallery grid tile's check, a `<button role="checkbox">` with its own behaviour, which needs a pass of its own.
 Do not add a raw checkbox.
 
+## 1a. Radios: `ui-radio`
+
+`<ui-radio>` (`shared/ui/radio`) is the radio that goes with `ui-checkbox`: a native `<input type="radio">` with the same border, accent and focus ring.
+Like the checkbox it renders only the control, so wrap it in your own `<label>`, and give every radio of a group the same `name` (arrow keys then move within the group natively).
+Inputs: `name` (required), `checked`, `disabled`, `value`, `ariaLabel`, `inputId`, `testId`. Output: `(selected)` when it becomes the group's choice.
+
 ## 2. Tables with selection: `ui-data-table` + `ui-bulk-action-bar`
 
 When a screen lists rows that people select and act on together, use the shared table rather than building a new one.
@@ -76,12 +82,12 @@ Render it only while the count is above 0 (both adopters do).
 
 | Need | Use |
 | --- | --- |
-| Button / icon-only button | `ui-button` (`variant`: primary, secondary, ghost, danger; `size`; `loading`) / `ui-icon-button` (`ariaLabel` required) |
+| Button / icon-only button | `ui-button` (`variant`: primary, secondary, ghost, danger; `size`: md, sm, or xs for surfaces with many actions, such as cards and toolbars — it grows back to a 36px target on touch screens; `loading`) / `ui-icon-button` (`ariaLabel` required; `size`: md or xs) |
 | Toggle chip / filter pill | `ui-tag` (`selected`, `(toggle)`) |
 | Status pill | `ui-badge` (`intent`: neutral, info, success, warning, danger) |
 | Surface | `ui-card` (`variant`: flat, elevated) |
 | Dialog / bottom sheet | `ui-modal` (`open`, `labelledBy`, `size`, `(dismiss)` with a reason) / `ui-sheet` |
-| Tabs | `ui-tabs` + `ui-tab` + `ui-tab-panel` |
+| Tabs | `ui-tabs` + `ui-tab` + `ui-tab-panel` (`size="sm"` on `ui-tabs` inside a card) |
 | Empty list | `ui-empty-state` (`heading`, `body`) |
 | Hover/focus hint / click-to-open explainer | `uiTooltip` directive / `ui-help-hint` (works on touch, can link a guide) |
 | Loading | `ui-spinner` |
