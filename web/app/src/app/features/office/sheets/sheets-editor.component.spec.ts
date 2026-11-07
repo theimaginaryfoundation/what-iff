@@ -106,6 +106,8 @@ describe('SheetsEditorComponent', () => {
     fixture.componentInstance.saveRequested.subscribe(save);
     expect(fake.state.created[0].readOnly).toBe(false);
     expect(fake.state.editable).toEqual([true]);
+    // Univer's own start-up mutations are ignored for a moment after the unit is created.
+    await new Promise(resolve => setTimeout(resolve, 1100));
     fake.state.listeners.forEach(fn => fn({ id: 'sheet.operation.set-selections', type: 1 }));
     fake.state.listeners.forEach(fn => fn({ id: 'sheet.mutation.set-scroll', type: MUTATION }));
     expect(fixture.componentInstance.dirty()).toBe(false);
