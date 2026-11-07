@@ -368,6 +368,10 @@ export class SlidesEditorComponent implements FileEditor {
     this.updateHistoryFlags();
   }
 
+  onRotationChange(change: { id: string; rotate: number }): void {
+    this.commit(updateElement(this.deck(), this.slide().id, change.id, { rotate: change.rotate }), { history: false });
+  }
+
   onGeometryChange(change: { id: string; geometry: ElementGeometry }): void {
     this.commit(updateElement(this.deck(), this.slide().id, change.id, change.geometry), { history: false });
   }

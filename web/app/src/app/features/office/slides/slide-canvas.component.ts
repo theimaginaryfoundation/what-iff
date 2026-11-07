@@ -50,6 +50,7 @@ export class SlideCanvasComponent {
   /** The user started dragging or resizing: a point for the editor's undo history. */
   readonly gestureStart = output<string>();
   readonly geometryChange = output<{ id: string; geometry: ElementGeometry }>();
+  readonly rotationChange = output<{ id: string; rotate: number }>();
   readonly requestEdit = output<string>();
   readonly textCommit = output<{ id: string; paragraphs: Paragraph[]; cell?: { row: number; col: number } }>();
   readonly open = output<string>();
@@ -64,15 +65,19 @@ export class SlideCanvasComponent {
   });
   /** Geometry overrides while a drag or resize is in flight, so the deck is updated once at the end. */
   readonly liveGeometry = signal<{ id: string; geometry: ElementGeometry } | null>(null);
+  /** The angle while a rotation is in flight. */
+  readonly liveRotation = signal<{ id: string; rotate: number } | null>(null);
 
   private gesture: {
     id: string;
-    kind: 'move' | 'resize';
+    kind: 'move' | 'resize' | 'rotate';
     handle?: ResizeHandle;
     startX: number;
     startY: number;
     start: ElementGeometry;
     pointerId: number;
+    centre?: { x: number; y: number };
+    startRotate?: number;
   } | null = null;
 
   constructor() {
@@ -92,7 +97,9 @@ export class SlideCanvasComponent {
 
   transformOf(el: SlideElement): string {
     const parts: string[] = [];
-    if (el.rotate) parts.push(`rotate(${el.rotate}deg)`);
+    const live = this.liveRotation();
+    const rotate = live && live.id === el.id ? live.rotate : el.rotate;
+    if (rotate) parts.push(`rotate(${rotate}deg)`);
     if (el.flipH || el.flipV) parts.push(`scale(${el.flipH ? -1 : 1}, ${el.flipV ? -1 : 1})`);
     return parts.join(' ');
   }
@@ -211,6 +218,27 @@ export class SlideCanvasComponent {
     this.beginGesture(event, el, 'move');
   }
 
+  onRotatePointerDown(event: PointerEvent, el: SlideElement): void {
+    if (!this.interactive()) return;
+    event.stopPropagation();
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const target = event.currentTarget as HTMLElement;
+    target.setPointerCapture?.(event.pointerId);
+    const box = (target.parentElement as HTMLElement).getBoundingClientRect();
+    this.gesture = {
+      id: el.id,
+      kind: 'rotate',
+      startX: event.clientX,
+      startY: event.clientY,
+      start: { left: el.left, top: el.top, width: el.width, height: el.height },
+      pointerId: event.pointerId,
+      centre: { x: box.left + box.width / 2, y: box.top + box.height / 2 },
+      startRotate: el.rotate,
+    };
+    this.gestureStart.emit(el.id);
+  }
+
   onHandlePointerDown(event: PointerEvent, el: SlideElement, handle: ResizeHandle): void {
     if (!this.interactive()) return;
     event.stopPropagation();
@@ -237,6 +265,12 @@ export class SlideCanvasComponent {
   onPointerMove(event: PointerEvent): void {
     const g = this.gesture;
     if (!g || event.pointerId !== g.pointerId) return;
+    if (g.kind === 'rotate' && g.centre) {
+      const angle = (Math.atan2(event.clientY - g.centre.y, event.clientX - g.centre.x) * 180) / Math.PI + 90;
+      const snapped = event.shiftKey ? Math.round(angle / 15) * 15 : Math.round(angle);
+      this.liveRotation.set({ id: g.id, rotate: ((snapped % 360) + 360) % 360 });
+      return;
+    }
     const dx = (event.clientX - g.startX) / (PX_PER_PT * this.scale());
     const dy = (event.clientY - g.startY) / (PX_PER_PT * this.scale());
     this.liveGeometry.set({
@@ -252,6 +286,12 @@ export class SlideCanvasComponent {
     const g = this.gesture;
     if (!g || event.pointerId !== g.pointerId) return;
     this.gesture = null;
+    const rotation = this.liveRotation();
+    this.liveRotation.set(null);
+    if (g.kind === 'rotate') {
+      if (rotation && rotation.rotate !== g.startRotate) this.rotationChange.emit(rotation);
+      return;
+    }
     const live = this.liveGeometry();
     this.liveGeometry.set(null);
     if (

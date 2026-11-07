@@ -156,6 +156,7 @@
       }
     }
     @if (selected && interactive() && !editing) {
+      <div class="slide__rotate" (pointerdown)="onRotatePointerDown($event, el)" title="Drag to rotate; hold Shift for 15° steps"></div>
       @for (handle of handles; track handle) {
         <div
           class="slide__handle"
