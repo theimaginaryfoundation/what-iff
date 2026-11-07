@@ -32,7 +32,12 @@ export function addSlide(deck: Deck, afterIndex: number): { deck: Deck; slide: S
 export function duplicateSlide(deck: Deck, slideId: string): { deck: Deck; slide: Slide } {
   const index = deck.slides.findIndex(s => s.id === slideId);
   const source = deck.slides[index];
-  const copy: Slide = { ...structuredClone(source), id: newId('slide') };
+  // The save copies the source slide's part, so the copy's elements keep their shape ids.
+  const { sourcePath: _source, ...rest } = structuredClone(source);
+  void _source;
+  const copy: Slide = { ...rest, id: newId('slide') };
+  const clonedFrom = source.sourcePath ?? source.clonedFrom;
+  if (clonedFrom) copy.clonedFrom = clonedFrom;
   const reId = (els: SlideElement[]): SlideElement[] =>
     els.map(el => ({ ...el, id: newId('el'), ...(el.kind === 'group' ? { children: reId(el.children) } : {}) }) as SlideElement);
   copy.elements = reId(copy.elements);
@@ -81,7 +86,10 @@ export function duplicateElement(deck: Deck, slideId: string, elementId: string)
   const slide = deck.slides.find(s => s.id === slideId);
   const source = slide?.elements.find(el => el.id === elementId);
   if (!source) return { deck, element: null };
-  const element = { ...structuredClone(source), id: newId('el'), left: source.left + 12, top: source.top + 12 } as SlideElement;
+  // A copy is a new shape in the file: it has no source shape of its own.
+  const { sourceId: _sourceId, ...rest } = structuredClone(source);
+  void _sourceId;
+  const element = { ...rest, id: newId('el'), left: source.left + 12, top: source.top + 12 } as SlideElement;
   return { deck: addElement(deck, slideId, element), element };
 }
 

@@ -15,6 +15,10 @@ export interface Deck {
 
 export interface Slide {
   id: string;
+  /** The part this slide came from (such as "ppt/slides/slide3.xml"); absent for a slide made here. */
+  sourcePath?: string;
+  /** For a duplicate: the part of the slide it was copied from, so the save can copy that part. */
+  clonedFrom?: string;
   background: Fill | null;
   /** Speaker notes as plain text. */
   notes: string;
@@ -41,6 +45,8 @@ export interface LineEnd {
 
 export interface ElementBase {
   id: string;
+  /** The shape id (`p:cNvPr@id`) in the slide part this element came from; absent for an element made here. */
+  sourceId?: string;
   name: string;
   left: number;
   top: number;

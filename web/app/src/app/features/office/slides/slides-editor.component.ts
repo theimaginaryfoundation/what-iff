@@ -142,6 +142,9 @@ export class SlidesEditorComponent implements FileEditor {
   private readonly rendered = signal(false);
   private generation = 0;
   private lastContent: Blob | null = null;
+  /** The bytes the deck was read from and the deck as read: a save patches these rather than rebuilding the file. */
+  private original: Uint8Array | null = null;
+  private imported: Deck | null = null;
   private resizeObserver: ResizeObserver | null = null;
 
   constructor() {
@@ -169,9 +172,13 @@ export class SlidesEditorComponent implements FileEditor {
   // --- FileEditor --------------------------------------------------------------------------------
 
   async content(): Promise<Blob> {
-    const { bytes } = await deckToPptx(this.deck(), this.writer);
+    const deck = this.deck();
+    const { bytes } = await deckToPptx(deck, { original: this.original, imported: this.imported, factory: this.writer });
     const blob = new Blob([bytes as BlobPart], { type: PPTX_MIME });
     this.lastContent = blob;
+    // The next save patches what this one wrote.
+    this.original = bytes;
+    this.imported = deck;
     return blob;
   }
 
@@ -195,9 +202,12 @@ export class SlidesEditorComponent implements FileEditor {
     try {
       const file = this.file();
       const parse = await this.loadParser();
-      const result = await pptxToDeck(await blob.arrayBuffer(), { id: `deck-${file.id}`, name: file.name }, parse);
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const result = await pptxToDeck(bytes, { id: `deck-${file.id}`, name: file.name }, parse);
       if (generation !== this.generation) return;
       this.report.set(result.report);
+      this.original = bytes;
+      this.imported = result.deck;
       this.deck.set(result.deck);
       this.slideIndex.set(0);
       this.selectedId.set(null);

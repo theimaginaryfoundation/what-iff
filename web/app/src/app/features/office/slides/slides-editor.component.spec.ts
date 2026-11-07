@@ -5,6 +5,7 @@ import { parse } from 'pptxtojson';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { normalizePackage } from '../pptx/pptx-export';
+import { OoxmlPackage } from '../shared/ooxml';
 import { pptxToDeck } from '../pptx/pptx-import';
 import { PPTX_PARSER, PPTX_WRITER } from '../pptx/pptx-loader';
 import { PPTX_MIME, SlidesEditorComponent } from './slides-editor.component';
@@ -74,7 +75,8 @@ describe('SlidesEditorComponent', () => {
 
   it('edits: inserts, nudges, formats, undoes, and saves a deck that reads back with the changes', async () => {
     const dirty = vi.fn();
-    const el = await open(await samplePptx(), false);
+    const sample = await samplePptx();
+    const el = await open(sample, false);
     fixture.componentInstance.dirtyChange.subscribe(dirty);
     expect(el.querySelector('.slides__toolbar')).not.toBeNull();
     const c = fixture.componentInstance;
@@ -121,6 +123,11 @@ describe('SlidesEditorComponent', () => {
 
     const blob = await c.content();
     expect(blob.type).toBe(PPTX_MIME);
+    // The save patched the file it was read from: its master, layout and theme are untouched.
+    const original = await OoxmlPackage.open(await sample.arrayBuffer());
+    const saved = await OoxmlPackage.open(await blob.arrayBuffer());
+    for (const path of ['ppt/slideMasters/slideMaster1.xml', 'ppt/slideLayouts/slideLayout1.xml', 'ppt/theme/theme1.xml'])
+      expect(await saved.text(path), path).toBe(await original.text(path));
     const back = await pptxToDeck(await blob.arrayBuffer(), { id: 'x', name: 'x.pptx' }, parse);
     expect(back.deck.slides).toHaveLength(2);
     const texts = back.deck.slides[0].elements
@@ -132,6 +139,13 @@ describe('SlidesEditorComponent', () => {
     });
     c.markSaved();
     expect(c.dirty()).toBe(false);
+
+    // The next save patches what the first one wrote.
+    c.goTo(1);
+    c.setNotes('Second save notes');
+    const again = await pptxToDeck(await (await c.content()).arrayBuffer(), { id: 'x', name: 'x.pptx' }, parse);
+    expect(again.deck.slides[1].notes).toBe('Second save notes');
+    expect(again.deck.slides[0].elements.find(e => e.kind === 'shape' && e.shapeType === 'ellipse')).toBeDefined();
   });
 
   it('asks to save on Ctrl+S only while editable, and keeps shortcuts out of text being typed', async () => {

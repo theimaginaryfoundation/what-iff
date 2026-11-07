@@ -25,11 +25,30 @@ export interface PptxExportResult {
 
 export type PptxGenFactory = () => Promise<PptxGenJS>;
 
+export interface PptxExportOptions {
+  /** The bytes the deck was read from, and the deck as read: the save patches these (pptx-patch.ts). */
+  original?: ArrayBuffer | Uint8Array | null;
+  imported?: Deck | null;
+  /** The pptxgenjs factory for a deck with no original. */
+  factory?: PptxGenFactory;
+}
+
 const PT_PER_INCH = 72;
 
-/** Writes the deck as a .pptx with pptxgenjs; the mirror of pptxToDeck. */
-export async function deckToPptx(deck: Deck, factory?: PptxGenFactory): Promise<PptxExportResult> {
+/**
+ * Writes the deck as a .pptx: by patching the package it came from when the original bytes are
+ * given (everything the editor does not model stays as it was), else by building a new package
+ * with pptxgenjs; the mirror of pptxToDeck.
+ */
+export async function deckToPptx(deck: Deck, options?: PptxGenFactory | PptxExportOptions): Promise<PptxExportResult> {
+  const opts: PptxExportOptions = typeof options === 'function' ? { factory: options } : (options ?? {});
   const fidelity = new FidelityCollector();
+  if (opts.original && opts.imported) {
+    const { patchPptx } = await import('./pptx-patch');
+    const bytes = await patchPptx(deck, { original: opts.original, imported: opts.imported }, fidelity);
+    return { bytes, report: fidelity.report() };
+  }
+  const factory = opts.factory;
   const pptx = factory ? await factory() : new (await import('pptxgenjs')).default();
   writeDeck(pptx, deck, fidelity);
   const out = await pptx.write({ outputType: 'arraybuffer' });
@@ -41,10 +60,11 @@ export async function deckToPptx(deck: Deck, factory?: PptxGenFactory): Promise<
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
 /**
- * Two pptxgenjs habits are rewritten into the form PowerPoint itself writes: a paragraph-properties
- * element before every run of a paragraph (PresentationML allows one, first in a:p), and chart
+ * Three pptxgenjs habits are rewritten into the form PowerPoint itself writes: a paragraph-properties
+ * element before every run of a paragraph (PresentationML allows one, first in a:p), chart
  * categories as a multi-level string reference even when there is a single level (readers such
- * as pptxtojson only look for the plain string reference).
+ * as pptxtojson only look for the plain string reference), and shape ids that repeat within a
+ * slide (tables and pictures count separately from shapes; a slide's ids must be unique).
  */
 export async function normalizePackage(bytes: Uint8Array): Promise<Uint8Array> {
   const pkg = await OoxmlPackage.open(bytes);
@@ -55,7 +75,7 @@ export async function normalizePackage(bytes: Uint8Array): Promise<Uint8Array> {
     if (!isSlide && !isChart) continue;
     const xml = await pkg.text(path);
     if (!xml) continue;
-    const fixed = isChart ? singleLevelCategories(xml) : dedupeParagraphProperties(xml);
+    const fixed = isChart ? singleLevelCategories(xml) : uniqueShapeIds(dedupeParagraphProperties(xml));
     if (fixed !== xml) {
       pkg.put(path, fixed);
       changed = true;
@@ -74,6 +94,21 @@ function singleLevelCategories(xml: string): string {
       return `<c:strRef>${ref}<c:strCache>${inner}</c:strCache></c:strRef>`;
     },
   );
+}
+
+function uniqueShapeIds(xml: string): string {
+  const seen = new Set<string>();
+  let max = 0;
+  for (const m of xml.matchAll(/<p:cNvPr\b[^>]*\bid="(\d+)"/g)) max = Math.max(max, Number(m[1]));
+  return xml.replace(/(<p:cNvPr\b[^>]*\bid=")(\d+)(")/g, (whole, open: string, id: string, close: string) => {
+    if (!seen.has(id)) {
+      seen.add(id);
+      return whole;
+    }
+    const fresh = String(++max);
+    seen.add(fresh);
+    return `${open}${fresh}${close}`;
+  });
 }
 
 function dedupeParagraphProperties(xml: string): string {

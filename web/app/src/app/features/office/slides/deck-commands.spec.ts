@@ -38,6 +38,25 @@ describe('deck commands', () => {
     expect(deleted.slides[0].elements).toEqual([]);
   });
 
+  it('keeps the package identity straight when duplicating', () => {
+    let deck = blankDeck('d', 'Deck');
+    const slide = { ...deck.slides[0], sourcePath: 'ppt/slides/slide1.xml' };
+    deck = { ...deck, slides: [slide] };
+    const shape = { ...newTextBox(0, 0, 100, 20, 'Text'), sourceId: '7' };
+    deck = addElement(deck, slide.id, shape);
+    const dup = duplicateSlide(deck, slide.id);
+    // A copied slide is a copy of the part, so its shapes keep their ids; the slide itself is new.
+    expect(dup.slide.sourcePath).toBeUndefined();
+    expect(dup.slide.clonedFrom).toBe('ppt/slides/slide1.xml');
+    expect(dup.slide.elements[0].sourceId).toBe('7');
+    const dupAgain = duplicateSlide(dup.deck, dup.slide.id);
+    expect(dupAgain.slide.clonedFrom).toBe('ppt/slides/slide1.xml');
+    // A copied shape is a new shape in its slide.
+    const copied = duplicateElement(deck, slide.id, shape.id);
+    expect(copied.element?.sourceId).toBeUndefined();
+    expect(deck.slides[0].elements[0].sourceId).toBe('7');
+  });
+
   it('edits, duplicates, reorders and styles elements', () => {
     let deck = blankDeck('d', 'Deck');
     const slide = deck.slides[0].id;

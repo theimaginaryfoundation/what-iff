@@ -1,6 +1,7 @@
 import type * as PJ from 'pptxtojson';
 
 import { FidelityCollector, FidelityReport } from '../shared/fidelity';
+import { NS, OoxmlPackage, REL_TYPE, attr, children, resolveTarget } from '../shared/ooxml';
 import {
   Border,
   ChartElement,
@@ -36,7 +37,47 @@ export async function pptxToDeck(bytes: ArrayBuffer | Uint8Array, opts: PptxImpo
   const parse = parser ?? (await import('pptxtojson')).parse;
   const buffer = bytes instanceof Uint8Array ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) : bytes;
   const json = await parse(buffer as ArrayBuffer, { imageMode: 'base64' });
-  return jsonToDeck(json, opts);
+  let slideParts: SlideParts | undefined;
+  try {
+    slideParts = await listSlideParts(await OoxmlPackage.open(bytes));
+  } catch {
+    slideParts = undefined;
+  }
+  return jsonToDeck(json, opts, slideParts);
+}
+
+const REL_SLIDE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide';
+const CT_SLIDE = 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml';
+const P = 'http://schemas.openxmlformats.org/presentationml/2006/main';
+
+export interface SlideParts {
+  /** Slide parts by the number in their name, the order pptxtojson reads them in (it lists the content types). */
+  byNumber: string[];
+  /** Slide parts in presentation order (`p:sldIdLst`), the order PowerPoint shows them in. */
+  order: string[];
+}
+
+export async function listSlideParts(pkg: OoxmlPackage): Promise<SlideParts> {
+  const byNumber: string[] = [];
+  const types = await pkg.xml('[Content_Types].xml');
+  for (const el of Array.from(types?.getElementsByTagNameNS(NS.ct, 'Override') ?? [])) {
+    if (el.getAttribute('ContentType') === CT_SLIDE) byNumber.push((el.getAttribute('PartName') ?? '').replace(/^\//, ''));
+  }
+  const n = (path: string) => Number(/(\d+)\.xml$/.exec(path)?.[1] ?? 0);
+  byNumber.sort((a, b) => n(a) - n(b));
+  const root = await pkg.rels('');
+  const main = [...root.values()].find(r => r.type === REL_TYPE.officeDocument);
+  const presPath = main ? resolveTarget('', main.target) : 'ppt/presentation.xml';
+  const pres = await pkg.xml(presPath);
+  const order: string[] = [];
+  if (pres) {
+    const rels = await pkg.rels(presPath);
+    for (const sldId of children(children(pres.documentElement, P, 'sldIdLst')[0], P, 'sldId')) {
+      const rel = rels.get(attr(sldId, NS.r, 'id') ?? '');
+      if (rel && rel.type === REL_SLIDE) order.push(resolveTarget(presPath, rel.target));
+    }
+  }
+  return { byNumber, order };
 }
 
 /**
@@ -44,7 +85,8 @@ export async function pptxToDeck(bytes: ArrayBuffer | Uint8Array, opts: PptxImpo
  * rich text, lines, images, tables, charts and groups. SmartArt becomes its shapes, equations
  * their rendered picture; video and audio are reported as dropped.
  */
-export function jsonToDeck(json: PptxJson, opts: PptxImportOptions): PptxImportResult {
+export function jsonToDeck(json: PptxJson, opts: PptxImportOptions, slideParts?: SlideParts): PptxImportResult {
+  const slidePaths = slideParts?.byNumber ?? [];
   const fidelity = new FidelityCollector();
   const deck: Deck = {
     id: opts.id,
@@ -57,19 +99,41 @@ export function jsonToDeck(json: PptxJson, opts: PptxImportOptions): PptxImportR
     const where = `Slide ${index + 1}`;
     const out: Slide = {
       id: `slide-${index + 1}`,
+      ...(slidePaths[index] ? { sourcePath: slidePaths[index] } : {}),
       background: fillOf(slide.fill, fidelity, where),
       notes: htmlToPlainText(slide.note ?? ''),
       layoutElements: (slide.layoutElements ?? [])
         .map((el, i) => element(el, `layout-${index + 1}-${i}`, fidelity, where))
         .filter((e): e is SlideElement => e !== null),
-      elements: slide.elements
-        .map((el, i) => element(el, `el-${index + 1}-${i}`, fidelity, where))
-        .filter((e): e is SlideElement => e !== null),
+      elements: uniqueSourceIds(
+        slide.elements.map((el, i) => element(el, `el-${index + 1}-${i}`, fidelity, where)).filter((e): e is SlideElement => e !== null),
+      ),
     };
-    if (slide.transition?.type) fidelity.drop('Slide transitions', where);
+    if (slide.transition?.type) fidelity.warn('Transitions and animations are kept but not played', where);
     deck.slides.push(out);
   });
+  // pptxtojson reads slide parts by number; the presentation's own list says what order they show in.
+  if (slideParts?.order.length && deck.slides.every(s => s.sourcePath)) {
+    const byPath = new Map(deck.slides.map(s => [s.sourcePath!, s]));
+    const ordered = slideParts.order.map(path => byPath.get(path)).filter((s): s is Slide => !!s);
+    if (ordered.length < deck.slides.length) fidelity.warn('Slide parts the presentation does not list were left out');
+    if (ordered.length) deck.slides = ordered;
+  }
   return { deck, report: fidelity.report() };
+}
+
+/**
+ * A slide's shape ids should be unique, but some writers repeat them; the n-th repeat of an id
+ * becomes "id#n" so it still names one shape (pptx-patch numbers the tree's repeats the same way).
+ */
+export function uniqueSourceIds<T extends { sourceId?: string }>(elements: T[]): T[] {
+  const seen = new Map<string, number>();
+  return elements.map(el => {
+    if (!el.sourceId) return el;
+    const n = seen.get(el.sourceId) ?? 0;
+    seen.set(el.sourceId, n + 1);
+    return n === 0 ? el : { ...el, sourceId: `${el.sourceId}#${n}` };
+  });
 }
 
 function element(el: PJ.Element, id: string, fidelity: FidelityCollector, where: string): SlideElement | null {
@@ -87,7 +151,7 @@ function element(el: PJ.Element, id: string, fidelity: FidelityCollector, where:
     case 'group':
       return group(el, id, fidelity, where);
     case 'diagram': {
-      fidelity.warn('SmartArt converted to shapes', where);
+      fidelity.warn('SmartArt shown as its shapes', where);
       const g: GroupElement = {
         ...base(el, id, `Diagram`),
         kind: 'group',
@@ -96,22 +160,20 @@ function element(el: PJ.Element, id: string, fidelity: FidelityCollector, where:
       return g;
     }
     case 'math': {
-      fidelity.warn('Equations kept as pictures', where);
+      fidelity.warn('Equations shown as pictures', where);
       if (!el.picBase64) {
-        fidelity.drop('Equations', where);
+        fidelity.warn('Equations are kept but not shown', where);
         return null;
       }
       const img: ImageElement = { ...base(el, id, 'Equation'), kind: 'image', src: el.picBase64, border: null, geometry: 'rect' };
       return img;
     }
     case 'video':
-      fidelity.drop('Video', where);
-      return null;
     case 'audio':
-      fidelity.drop('Audio', where);
+      fidelity.warn('Video and audio are kept in the file but not shown', where);
       return null;
     default:
-      fidelity.drop('Unsupported slide content', where);
+      fidelity.warn('Unsupported slide content is kept in the file but not shown', where);
       return null;
   }
 }
@@ -127,12 +189,14 @@ function base(
     isFlipV?: boolean;
     name?: string;
     link?: string;
+    id?: string;
   },
   id: string,
   fallbackName: string,
 ) {
   return {
     id,
+    ...(el.id ? { sourceId: String(el.id) } : {}),
     name: el.name ?? fallbackName,
     left: round(el.left),
     top: round(el.top),
@@ -181,8 +245,7 @@ function shape(el: PJ.Shape, id: string, fidelity: FidelityCollector, where: str
   if (el.path) out.path = el.path;
   if (el.pathViewBox) out.viewBox = el.pathViewBox;
   if (el.keypoints && Object.keys(el.keypoints).length) out.adjustments = el.keypoints;
-  if (el.shadow) fidelity.warn('Shadows', where);
-  if (el.shapType === 'custom' || (!el.shapType && el.path)) fidelity.warn('Custom shapes exported as rectangles', where);
+  if (el.shadow) fidelity.warn('Shadows are kept but not drawn', where);
   return out;
 }
 
@@ -201,7 +264,7 @@ function textBox(el: PJ.Text, id: string): ShapeElement {
 function image(el: PJ.Image, id: string, fidelity: FidelityCollector, where: string): ImageElement | null {
   const src = el.base64 || el.blob;
   if (!src) {
-    fidelity.drop('Linked or unsupported images', where);
+    fidelity.warn('Linked or unsupported images are kept but not shown', where);
     return null;
   }
   const out: ImageElement = {
@@ -213,7 +276,7 @@ function image(el: PJ.Image, id: string, fidelity: FidelityCollector, where: str
   };
   if (el.rect && (el.rect.t || el.rect.b || el.rect.l || el.rect.r))
     out.crop = { top: (el.rect.t ?? 0) / 100, bottom: (el.rect.b ?? 0) / 100, left: (el.rect.l ?? 0) / 100, right: (el.rect.r ?? 0) / 100 };
-  if (el.filters && Object.keys(el.filters).length) fidelity.warn('Picture corrections', where);
+  if (el.filters && Object.keys(el.filters).length) fidelity.warn('Picture corrections are kept but not drawn', where);
   return out;
 }
 
@@ -272,7 +335,7 @@ function chart(el: PJ.Chart, id: string, fidelity: FidelityCollector, where: str
   };
   const chartType = typeMap[el.chartType];
   if (!chartType) {
-    fidelity.drop('Charts of an unsupported kind', where);
+    fidelity.warn('Charts of an unsupported kind are kept but not drawn', where);
     return null;
   }
   if (el.chartType.includes('3D')) fidelity.warn('3D charts drawn flat', where);
