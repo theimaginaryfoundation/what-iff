@@ -25,7 +25,11 @@ describe('file-preview.helpers', () => {
       ['page.html', 'text/html', 'text'],
       ['config.json', 'application/json', 'text'],
       ['readme', 'text/plain; charset=utf-8', 'text'],
-      ['letter.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'none'],
+      ['letter.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'document'],
+      ['book.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'spreadsheet'],
+      ['macros.xlsm', '', 'spreadsheet'],
+      ['deck.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'slides'],
+      ['old.xls', 'application/vnd.ms-excel', 'none'],
       ['bundle.zip', 'application/zip', 'none'],
       ['blob.bin', 'application/octet-stream', 'none'],
     ])('%s (%s) previews as %s', (name, type, kind) => {

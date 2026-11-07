@@ -12,4 +12,9 @@ export interface FileEditor {
   content(): Promise<Blob>;
   /** Called after a successful save (or a reload): the current content is the new baseline. */
   markSaved(): void;
+  /**
+   * What saving would drop, in words (the office suite's fidelity report, ADR 0x043): the host
+   * asks before overwriting the original when this is not empty.
+   */
+  readonly losses?: Signal<readonly string[]>;
 }
