@@ -518,6 +518,32 @@ describe('ChatComposerComponent', () => {
             expect(send).toHaveBeenCalledExactlyOnceWith('next question');
         });
 
+        it('sends a follow-up to the running turn when it can be steered', () => {
+            const send = vi.fn().mockName('send');
+            fixture.componentInstance.send.subscribe(send);
+            fixture.componentRef.setInput('canSteer', true);
+            type('also check the logs');
+
+            expect(fixture.nativeElement.querySelector('[data-testid=composer-steer-notice]')).not.toBeNull();
+            expect(fixture.nativeElement.querySelector('.composer__stop')).not.toBeNull();
+            const enter = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
+            textarea().dispatchEvent(enter);
+            expect(send).toHaveBeenCalledExactlyOnceWith('also check the logs');
+
+            send.mockClear();
+            type('/mode');
+            textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+            expect(send).not.toHaveBeenCalled();
+        });
+
+        it('holds a follow-up while files are attached', () => {
+            fixture.componentRef.setInput('canSteer', true);
+            fixture.componentRef.setInput('attachments', [{ id: 'f1', name: 'a.png', isUploading: false } as never]);
+            type('see attached');
+            expect(fixture.componentInstance.steering()).toBe(false);
+            expect(fixture.nativeElement.querySelector('[data-testid=composer-steer-send]')).toBeNull();
+        });
+
         it('keeps the send button disabled while busy even when the stop button is not shown', () => {
             fixture.componentRef.setInput('isGenerating', false);
             type('next question');

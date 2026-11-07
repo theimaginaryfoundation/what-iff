@@ -141,6 +141,21 @@ export class AssistantTurn {
     const activeJobId = this._activeChatJobId();
     return !!activeJobId && activeJobId === this._cancelRequestedJobId();
   });
+  /**
+   * True while a send would reach the running turn as a follow-up (ADR 0x042): the user's own turn
+   * is mid-inference with its job known (not a scheduled job's run, not a send still in flight,
+   * not being stopped).
+   */
+  readonly canSteer = computed(() => {
+    const jobId = this._activeChatJobId();
+    return (
+      this.inferenceGenerating() &&
+      !this.cancellationPending() &&
+      !this._jobRun() &&
+      !!jobId &&
+      jobId !== AssistantTurn.PENDING_SEND_JOB_ID
+    );
+  });
   /** True while the assistant is generating (core inference pending and/or UI streaming). */
   readonly isGenerating = computed(() => (this.inferenceGenerating() && !this.cancellationPending()) || this.isStreaming());
   /**

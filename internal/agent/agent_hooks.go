@@ -23,6 +23,8 @@ type agentTestHooks struct {
 	// their wait.
 	PromptStore   agentPromptStore
 	PromptTimeout time.Duration
+	// SteerStore replaces the datastore behind steering (ADR 0x042).
+	SteerStore steerStore
 }
 
 func (h agentTestHooks) anySet() bool {
@@ -31,7 +33,8 @@ func (h agentTestHooks) anySet() bool {
 		h.ChatTurnStore != nil ||
 		h.ImageGenerationPreference != nil ||
 		h.PromptStore != nil ||
-		h.PromptTimeout != 0
+		h.PromptTimeout != 0 ||
+		h.SteerStore != nil
 }
 
 // assertNoTestHooksInProduction panics if any test hook is set outside of `go test`.

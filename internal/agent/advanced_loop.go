@@ -322,6 +322,22 @@ func (r *advancedRun) loop(ctx context.Context) (*provider.GenerateResponse, err
 			// The inner round cap ended the step mid-work: that is progress, not a stall.
 			r.stalls = 0
 		} else {
+			// The person sent a follow-up while the model was answering (ADR 0x042): that answer
+			// becomes a working note and the run goes on with their message, whatever the plan
+			// says, rather than finishing without it. Not when a limit has been reached: the
+			// message then stays queued and runs as the next turn.
+			if r.limitReached(step) == "" && ctx.Err() == nil {
+				if note := r.a.takeSteering(ctx, r.chatCtx); note != "" {
+					r.last = res
+					if r.hooks.transcript != nil {
+						r.lastCall = r.hooks.transcript.currentCall()
+					}
+					r.stalls = 0
+					r.saveDraft()
+					r.adapter.(provider.Continuer).ContinueWith(note)
+					continue
+				}
+			}
 			r.last = res
 			if r.hooks.transcript != nil {
 				r.lastCall = r.hooks.transcript.currentCall()
@@ -647,6 +663,12 @@ func (r *advancedRun) workLog(step int) string {
 	fmt.Fprintf(&b, "You are partway through the user's latest message below, in extended mode (step %d). Earlier work was compacted to save space; here is what you have done so far. Continue from here without repeating finished work.\n", step)
 	if len(r.chatCtx.plan) > 0 {
 		fmt.Fprintf(&b, "\nYour plan:\n%s\n", formatPlan(r.chatCtx.plan))
+	}
+	if len(r.chatCtx.steerNotes) > 0 {
+		b.WriteString("\nMessages the user sent while you were working (from them, not from a tool):\n")
+		for _, t := range r.chatCtx.steerNotes {
+			fmt.Fprintf(&b, "- %s\n", agenttools.TruncateRunes(t, 1000))
+		}
 	}
 	if r.hooks.transcript != nil {
 		if notes := r.hooks.transcript.textSince(0); notes != "" {

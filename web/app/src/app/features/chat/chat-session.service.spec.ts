@@ -293,6 +293,29 @@ describe('ChatSessionService', () => {
         expect(service.pendingAssistantDraftReasoning()).toBe('Fresh start');
     });
 
+    it('sends a follow-up to the running turn and keeps following it (ADR 0x042)', async () => {
+        const activeJob$ = new Subject<any>();
+        jobService.pollJob.mockReturnValue(activeJob$ as any);
+        service.setActive('chat-1');
+        expect(isChatSendSucceeded(await service.sendMessage('research this'))).toBe(true);
+        activeJob$.next({ id: 'job-1', user_id: 'user-1', status: 'processing', job_type: 'chat_message', reference: 'user-msg', created_at: '', updated_at: '' });
+        expect(service.canSteer()).toBe(true);
+
+        messageService.sendMessage.mockClear();
+        jobService.pollJob.mockClear();
+        const result = await service.sendMessage('also check the 2025 numbers');
+
+        expect(isChatSendSucceeded(result)).toBe(true);
+        expect(messageService.sendMessage).toHaveBeenCalledWith('chat-1', expect.objectContaining({ message: 'also check the 2025 numbers', steer: true }));
+        expect(jobService.pollJob).not.toHaveBeenCalled();
+        expect(service.isGenerating()).toBe(true);
+        expect(service.draft()).toBe('');
+
+        // Files wait for the reply to finish.
+        expect((await service.sendMessage('see file', [{ id: 'f', name: 'a.png' } as never])).status).toBe('skipped');
+        activeJob$.complete();
+    });
+
     it('stops reporting generating once core inference completes, before post-inference phases', async () => {
         const activeJob$ = new Subject<any>();
         jobService.pollJob.mockReturnValue(activeJob$ as any);

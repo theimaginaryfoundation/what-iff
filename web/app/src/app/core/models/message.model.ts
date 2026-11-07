@@ -168,6 +168,11 @@ export interface CreateChatMessageRequest {
   rituals?: Ritual[];
   // IANA timezone name from the browser (e.g. "America/Los_Angeles")
   client_timezone?: string;
+  /**
+   * Sent while the user's turn in this chat is still running (ADR 0x042): that turn takes it in at
+   * its next step; if it finishes first, the message runs as its own turn.
+   */
+  steer?: boolean;
 }
 
 export interface ChatMessageResponse {

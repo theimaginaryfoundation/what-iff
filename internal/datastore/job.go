@@ -44,6 +44,7 @@ func toJobModel(e *ent.Job) *models.Job {
 		DraftReasoning: append([]string(nil), e.DraftReasoning...),
 		Progress:       e.Progress,
 		JobRun:         e.JobRun,
+		Steer:          e.Steer,
 		CreatedAt:      e.CreatedAt,
 		UpdatedAt:      e.UpdatedAt,
 	}
@@ -71,7 +72,8 @@ func (d *Datastore) CreateJob(ctx context.Context, userID uuid.UUID, jobModel mo
 		SetJobType(jobModel.JobType).
 		SetReference(jobModel.Reference).
 		SetStatus(job.Status(jobModel.Status)).
-		SetOwnerID(userID)
+		SetOwnerID(userID).
+		SetSteer(jobModel.Steer)
 
 	if jobModel.Error != "" {
 		jobCreate.SetError(jobModel.Error)

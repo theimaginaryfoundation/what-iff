@@ -115,6 +115,8 @@ export class ChatSessionService implements OnDestroy {
   readonly jobRun = this.turn.jobRun;
   /** True while that run is generating: the composer says so instead of just holding the send. */
   readonly jobRunActive = this.turn.jobRunActive;
+  /** True while a send would reach the user's running turn as a follow-up (ADR 0x042). */
+  readonly canSteer = this.turn.canSteer;
   readonly hasMoreOlderMessages = signal(false);
   readonly loadingOlderMessages = signal(false);
   private readonly _contextCheckpointToken = signal(0);
@@ -454,8 +456,13 @@ export class ChatSessionService implements OnDestroy {
     const message = text.trim();
     // `_thread` still holds the previous thread until the new one's getChat resolves; never
     // let a send in that window post to the thread the user just navigated away from.
-    if (!chat || !this.isActiveThread(chat.id) || !message || this.isGenerating()) {
+    if (!chat || !this.isActiveThread(chat.id) || !message) {
       return { status: 'skipped' };
+    }
+    if (this.isGenerating()) {
+      // Mid-turn, a text message goes to the running turn as a follow-up (ADR 0x042); files wait.
+      if (!this.canSteer() || attachments.length > 0) return { status: 'skipped' };
+      return this.sendFollowUp(chat.id, message, options);
     }
 
     this.turn.beginSend();
@@ -501,6 +508,33 @@ export class ChatSessionService implements OnDestroy {
     }
     this._error.set(null);
     this.turn.sendAccepted(chat.id, response.id, response.job_id);
+    return { status: 'sent' };
+  }
+
+  /**
+   * Sends a follow-up while the user's turn runs (ADR 0x042). It is saved and shown like any
+   * message; the running turn reads it at its next step, or, if that turn finishes first, it runs
+   * as the next turn (picked up by the active-turn watch). The running turn stays the one followed.
+   */
+  private async sendFollowUp(chatId: string, message: string, options: ChatSendMessageOptions): Promise<ChatSendMessageResult> {
+    this.draft.set('');
+    this.draftService.clearDraft(chatId);
+    try {
+      await firstValueFrom(this.messageService.sendMessage(chatId, {
+        message: `${options.contextPrefix ?? ''}${message}`,
+        origin: 'User',
+        steer: true,
+      }));
+    } catch (error) {
+      const typedAhead = this.isActiveThread(chatId) ? this.draft() : (this.draftService.getDraft(chatId)?.message ?? '');
+      const restored = restoreFailedSend(message, typedAhead);
+      this.draftService.saveDraft(chatId, restored);
+      if (!this.isActiveThread(chatId)) return { status: 'failed', error };
+      this.draft.set(restored);
+      this._error.set(apiErrorMessage(error, 'Failed to send message'));
+      return { status: 'failed', error };
+    }
+    if (this.isActiveThread(chatId)) this._error.set(null);
     return { status: 'sent' };
   }
 

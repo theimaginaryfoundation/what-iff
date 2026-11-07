@@ -44,7 +44,10 @@ type Job struct {
 	Progress string `json:"progress,omitempty"`
 	// JobRun is the agent job a scheduled run's queue ticket runs for, with its prompt (ADR 0x040);
 	// nil on every other job.
-	JobRun    *JobRun   `json:"job_run,omitempty"`
+	JobRun *JobRun `json:"job_run,omitempty"`
+	// Steer marks a chat_message sent while an earlier turn was running (ADR 0x042): the running
+	// turn takes it in at its next step, or it runs as its own turn once that one finishes.
+	Steer     bool      `json:"steer,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

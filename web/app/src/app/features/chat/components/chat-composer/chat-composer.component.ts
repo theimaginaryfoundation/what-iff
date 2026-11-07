@@ -152,6 +152,8 @@ let nextPreviewId = 0;
 
       @if (busyNotice(); as notice) {
         <div class="composer__thread-notice composer__busy-notice" role="status">{{ notice }}</div>
+      } @else if (steering() && draft().trim()) {
+        <div class="composer__thread-notice" role="status" data-testid="composer-steer-notice">Still working. Send this now and the agent reads it at its next step.</div>
       }
 
       <app-thread-ref-chips
@@ -505,6 +507,20 @@ let nextPreviewId = 0;
             <div style="flex: 1"></div>
 
             @if (isGenerating()) {
+              @if (steering() && draft().trim()) {
+                <button
+                  type="submit"
+                  class="composer__send"
+                  aria-label="Send to the agent while it works"
+                  uiTooltip="Send now: the agent reads it at its next step"
+                  data-testid="composer-steer-send"
+                  [disabled]="composerDisabled() || !draft().trim() || isOverLimit()"
+                >
+                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M 2.5 7 L 7 2 L 11.5 7 M 7 7 L 7 12"/>
+                  </svg>
+                </button>
+              }
               <button
                 type="button"
                 class="composer__stop"
@@ -1400,6 +1416,13 @@ export class ChatComposerComponent {
   readonly quotaMessage = input<string | null>(null);
   readonly generationRetryTarget = input<ChatMessage | null>(null);
   readonly isGenerating = input(false);
+  /**
+   * While a reply is generating, a message can still go to the running turn as a follow-up
+   * (ADR 0x042): Enter and Send work instead of being held. Text only; attachments wait.
+   */
+  readonly canSteer = input(false);
+  /** Whether a send right now would be a follow-up to the running turn. */
+  readonly steering = computed(() => this.isGenerating() && this.canSteer() && this.attachments().length === 0);
   readonly personalityId = input<string | null>(null);
   readonly activeMoodId = input<string | null>(null);
   readonly isAutoMood = input(true);
@@ -1729,7 +1752,7 @@ export class ChatComposerComponent {
     // On soft-keyboard devices Enter is a newline; submitting happens via the
     // Send button. This avoids needing a Shift key those devices don't have.
     const enterSends = event.key === 'Enter' && !event.shiftKey && !this.softKeyboard();
-    if (enterSends && this.busy()) {
+    if (enterSends && this.busy() && !this.steering()) {
       // Composing ahead: Enter neither sends nor inserts a newline until the reply finishes.
       event.preventDefault();
       return;
@@ -2323,7 +2346,10 @@ export class ChatComposerComponent {
 
   private submitDraft(): void {
     const text = this.draft().trim();
-    if (!text || this.busy() || this.isGenerating() || this.composerDisabled() || this.hasUploadingAttachments()) return;
+    const held = (this.busy() || this.isGenerating()) && !this.steering();
+    if (!text || held || this.composerDisabled() || this.hasUploadingAttachments()) return;
+    // Slash commands need the composer's controls, which stay locked mid-turn: a follow-up is text.
+    if (this.isGenerating() && text.startsWith('/')) return;
     if (this.isOverLimit()) {
       return;
     }

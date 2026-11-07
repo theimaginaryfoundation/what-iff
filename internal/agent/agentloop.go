@@ -105,6 +105,8 @@ func (a *Agent) runToolRounds(
 		}
 		allToolCalls = append(allToolCalls, modelToolCalls...)
 		allGeneratedAttachments = append(allGeneratedAttachments, generatedAttachments...)
+		// Follow-ups the person sent meanwhile ride on this round's results (ADR 0x042).
+		withSteerNote(toolResults, a.takeSteering(ctx, chatCtx))
 		adapter.AppendToolResults(toolResults)
 
 		// A question went unanswered (ADR 0x042): stop calling tools and have the model ask in its

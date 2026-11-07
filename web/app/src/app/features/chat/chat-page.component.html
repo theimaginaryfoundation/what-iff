@@ -234,6 +234,7 @@
             [busyNotice]="composerBusyNotice()"
             [modelPickerDisabled]="session.composerBusy() || session.thread()?.archived === true"
             [isGenerating]="session.isGenerating()"
+            [canSteer]="session.canSteer()"
             [generationRetryTarget]="retryableUserTurn()"
             (draftChange)="session.draft.set($event)"
             (send)="send($event)"

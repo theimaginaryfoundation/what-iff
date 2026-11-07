@@ -712,6 +712,7 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 		Reference:   chatMessage.ID.String(),
 		Status:      models.JobStatusPending,
 		DraftDeltas: []string{},
+		Steer:       request.Steer,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create job: %w", err)
@@ -968,6 +969,9 @@ type chatContext struct {
 	promptWaited time.Duration
 	// awaitingUser is set when a prompt went unanswered: the turn should end and ask in its reply.
 	awaitingUser bool
+	// steerNotes are the follow-ups the person sent while the turn ran and it took in (ADR 0x042),
+	// kept for an Advanced run's compacted work log.
+	steerNotes []string
 	// mcpSessions stores MCP session ids for this single conversation turn.
 	mcpSessions map[string]string
 }
