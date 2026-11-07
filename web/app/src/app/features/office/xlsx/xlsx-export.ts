@@ -4,15 +4,10 @@ import ExcelJS from 'exceljs';
 import { rangeA1 } from '../shared/a1';
 import { FidelityCollector, FidelityReport } from '../shared/fidelity';
 import {
-  RESOURCE_CONDITIONAL_FORMATTING,
-  RESOURCE_DATA_VALIDATION,
   RESOURCE_DRAWINGS,
   RESOURCE_FILTER,
   RESOURCE_NOTES,
   UniverCell,
-  UniverCfRule,
-  UniverCfValue,
-  UniverDataValidationRule,
   UniverDrawingsForSheet,
   UniverFilter,
   UniverNote,
@@ -22,11 +17,14 @@ import {
   pxToPoints,
   readResource,
 } from './univer-sheet-types';
+import { injectSlicerReferences } from './xlsx-slicers';
 import { serialToDate } from './xlsx-import';
 import { definedNamesFromWorkbook } from './xlsx-defined-names';
 import { applySheetExtras, applyWorkbookExtras } from './xlsx-extras';
-import { PreservedParts, hasPreservedParts, injectPreservedParts } from './xlsx-preserve';
+import { PreservedParts, XLSM_MIME, XLSX_MIME, hasMacros, hasPreservedParts, injectPreservedParts } from './xlsx-preserve';
+import { writeSheetRules } from './xlsx-sheet-rules';
 import { UniverStyle, colorToArgb, styleToExcel } from './xlsx-styles';
+import { RESOURCE_THREAD_COMMENTS, UniverComment, cellThreads, legacyNoteText } from './xlsx-threaded-comments';
 
 export interface XlsxExportResult {
   bytes: Uint8Array;
@@ -51,6 +49,8 @@ export async function workbookToXlsx(workbook: UniverWorkbook, preserved?: Prese
       { definedNames },
     );
   }
+  bytes = await writeSheetRules(bytes, workbook, preserved?.rules, fidelity, hasMacros(preserved) ? XLSM_MIME : XLSX_MIME);
+  if (preserved?.slicers) bytes = await injectSlicerReferences(bytes, preserved.slicers, hasMacros(preserved) ? XLSM_MIME : XLSX_MIME);
   return { bytes, report: fidelity.report() };
 }
 
@@ -60,8 +60,7 @@ export function workbookToExcel(
   preserved?: PreservedParts,
 ): ExcelJS.Workbook {
   const excel = new ExcelJS.Workbook();
-  const validation = readResource<Record<string, UniverDataValidationRule[]>>(workbook, RESOURCE_DATA_VALIDATION) ?? {};
-  const formatting = readResource<Record<string, UniverCfRule[]>>(workbook, RESOURCE_CONDITIONAL_FORMATTING) ?? {};
+  const threads = readResource<Record<string, UniverComment[]>>(workbook, RESOURCE_THREAD_COMMENTS) ?? {};
   const notes = readResource<Record<string, Record<number, Record<number, UniverNote>>>>(workbook, RESOURCE_NOTES) ?? {};
   const drawings = readResource<Record<string, UniverDrawingsForSheet>>(workbook, RESOURCE_DRAWINGS) ?? {};
   const filters = readResource<Record<string, UniverFilter>>(workbook, RESOURCE_FILTER) ?? {};
@@ -72,16 +71,10 @@ export function workbookToExcel(
     const ws = excel.addWorksheet(sheet.name || sheetId, sheetOptions(sheet));
     exportLayout(ws, sheet, workbook.styles);
     exportCells(ws, sheet, workbook.styles, fidelity);
-    exportDataValidations(ws, validation[sheetId] ?? []);
-    exportConditionalFormatting(ws, formatting[sheetId] ?? [], fidelity);
     exportNotes(ws, notes[sheetId] ?? {});
-    // A sheet whose original drawing holds charts or shapes gets that drawing back whole on save.
-    if (preserved?.bySheet[sheet.name]?.drawing) {
-      if ((drawings[sheetId]?.order ?? []).some(id => !id.startsWith('chart-')))
-        fidelity.warn('Pictures on a sheet with charts or shapes are saved as they were in the original', sheet.name);
-    } else {
-      exportImages(ws, excel, drawings[sheetId], sheet, fidelity);
-    }
+    for (const thread of cellThreads(threads[sheetId] ?? [])) ws.getCell(thread.ref).note = legacyNoteText(thread);
+    // A sheet with charts or shapes keeps its drawing part, which xlsx-chart-save.ts brings up to date.
+    if (!preserved?.bySheet[sheet.name]?.drawing) exportImages(ws, excel, drawings[sheetId], sheet, fidelity);
     const filter = filters[sheetId];
     if (filter?.ref) ws.autoFilter = rangeA1(filter.ref);
     applySheetExtras(ws, preserved?.extras?.sheets[sheet.name]);
@@ -200,120 +193,6 @@ function exportLayout(ws: ExcelJS.Worksheet, sheet: UniverSheet, styles: Record<
   }
 }
 
-function exportDataValidations(ws: ExcelJS.Worksheet, rules: UniverDataValidationRule[]): void {
-  for (const rule of rules) {
-    const dv: ExcelJS.DataValidation = { type: rule.type as ExcelJS.DataValidation['type'], formulae: [] };
-    if (rule.formula1 !== undefined)
-      dv.formulae.push(rule.type === 'list' && !rule.formula1.startsWith('=') ? `"${rule.formula1}"` : rule.formula1);
-    if (rule.formula2 !== undefined) dv.formulae.push(rule.formula2);
-    if (rule.operator) dv.operator = rule.operator as ExcelJS.DataValidation['operator'];
-    if (rule.allowBlank !== undefined) dv.allowBlank = rule.allowBlank;
-    if (rule.showErrorMessage !== undefined) dv.showErrorMessage = rule.showErrorMessage;
-    if (rule.error) dv.error = rule.error;
-    if (rule.errorTitle) dv.errorTitle = rule.errorTitle;
-    if (rule.showInputMessage !== undefined) dv.showInputMessage = rule.showInputMessage;
-    if (rule.prompt) dv.prompt = rule.prompt;
-    if (rule.promptTitle) dv.promptTitle = rule.promptTitle;
-    for (const range of rule.ranges) {
-      for (let r = range.startRow; r <= range.endRow; r++) {
-        for (let c = range.startColumn; c <= range.endColumn; c++) ws.getCell(r + 1, c + 1).dataValidation = dv;
-      }
-    }
-  }
-}
-
-function cfvo(value: UniverCfValue | undefined): ExcelJS.Cvfo {
-  if (!value) return { type: 'min' as never };
-  return { type: value.type as never, value: value.value as number };
-}
-
-function exportConditionalFormatting(ws: ExcelJS.Worksheet, rules: UniverCfRule[], fidelity: FidelityCollector): void {
-  for (const cf of rules) {
-    const ref = cf.ranges.map(rangeA1).join(' ');
-    const rule = cfRule(cf, fidelity, ws.name);
-    if (!rule) continue;
-    ws.addConditionalFormatting({ ref, rules: [rule] });
-  }
-}
-
-function cfRule(cf: UniverCfRule, fidelity: FidelityCollector, where: string): ExcelJS.ConditionalFormattingRule | null {
-  const r = cf.rule;
-  const priority = 1;
-  const base = { priority, stopIfTrue: cf.stopIfTrue } as { priority: number; stopIfTrue?: boolean };
-  switch (r.type) {
-    case 'highlightCell': {
-      const style = styleToExcel(r.style);
-      switch (r.subType) {
-        case 'number': {
-          const formulae = Array.isArray(r.value) ? r.value : r.value === undefined ? [] : [r.value];
-          return { ...base, type: 'cellIs', operator: r.operator as never, formulae, style } as ExcelJS.ConditionalFormattingRule;
-        }
-        case 'text':
-          return {
-            ...base,
-            type: 'containsText',
-            operator: r.operator as never,
-            text: r.value ?? '',
-            style,
-          } as ExcelJS.ConditionalFormattingRule;
-        case 'formula':
-          return { ...base, type: 'expression', formulae: [r.value.replace(/^=/, '')], style } as ExcelJS.ConditionalFormattingRule;
-        case 'timePeriod':
-          return { ...base, type: 'timePeriod', timePeriod: r.operator as never, style } as ExcelJS.ConditionalFormattingRule;
-        case 'rank':
-          return {
-            ...base,
-            type: 'top10',
-            rank: r.value,
-            bottom: r.isBottom,
-            percent: r.isPercent,
-            style,
-          } as ExcelJS.ConditionalFormattingRule;
-        case 'average':
-          return {
-            ...base,
-            type: 'aboveAverage',
-            aboveAverage: r.operator !== 'lessThan' && r.operator !== 'lessThanOrEqual',
-            style,
-          } as ExcelJS.ConditionalFormattingRule;
-        case 'uniqueValues':
-        case 'duplicateValues':
-          return { ...base, type: r.subType, style } as unknown as ExcelJS.ConditionalFormattingRule;
-        default:
-          fidelity.drop('Conditional formatting of an unsupported kind', where);
-          return null;
-      }
-    }
-    case 'colorScale':
-      return {
-        ...base,
-        type: 'colorScale',
-        cfvo: r.config.map(c => cfvo(c.value)),
-        color: r.config.map(c => colorToArgb({ rgb: c.color }) ?? { argb: 'FFFFFFFF' }),
-      } as ExcelJS.ConditionalFormattingRule;
-    case 'dataBar':
-      return {
-        ...base,
-        type: 'dataBar',
-        cfvo: [cfvo(r.config.min), cfvo(r.config.max)],
-        color: colorToArgb({ rgb: r.config.positiveColor }) ?? { argb: 'FF638EC6' },
-        gradient: r.config.isGradient,
-        showValue: r.isShowValue,
-      } as ExcelJS.ConditionalFormattingRule;
-    case 'iconSet':
-      return {
-        ...base,
-        type: 'iconSet',
-        iconSet: (r.config[0]?.iconType ?? '3TrafficLights1') as never,
-        cfvo: r.config.map(c => cfvo(c.value)),
-        showValue: r.isShowValue,
-      } as ExcelJS.ConditionalFormattingRule;
-    default:
-      fidelity.drop('Conditional formatting of an unsupported kind', where);
-      return null;
-  }
-}
-
 function exportNotes(ws: ExcelJS.Worksheet, notes: Record<number, Record<number, UniverNote>>): void {
   for (const row of Object.values(notes)) {
     for (const note of Object.values(row ?? {})) {
@@ -339,7 +218,7 @@ function exportImages(
     const image = drawings.data[id];
     if (!image) continue;
     // Charts drawn from their data (xlsx-import) are pictures of the real chart, which goes back as itself.
-    if (id.startsWith('chart-')) continue;
+    if (id.startsWith('chart-') || id.startsWith('slicer-')) continue;
     if (image.drawingType !== 0 || image.imageSourceType !== 'BASE64' || !image.source.startsWith('data:')) {
       fidelity.drop('Shapes and linked images', sheet.name);
       continue;

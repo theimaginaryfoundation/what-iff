@@ -28,13 +28,19 @@
       <aside class="sheets-editor__panel" [attr.aria-label]="panelLabel()">
         @switch (panel()) {
           @case ("charts") {
-            <p class="sheets-editor__placeholder">Charts panel</p>
+            @if (charts(); as session) {
+              <app-sheet-charts-panel [session]="session" [grid]="grid()!" />
+            }
           }
           @case ("pivots") {
-            <p class="sheets-editor__placeholder">Pivot tables panel</p>
+            @if (pivots(); as workspace) {
+              <app-sheet-pivots-panel [workspace]="workspace" [grid]="grid()!" (changed)="markObjectsChanged()" />
+            }
           }
           @case ("slicers") {
-            <p class="sheets-editor__placeholder">Slicers panel</p>
+            @if (slicers(); as workspace) {
+              <app-sheet-slicers-panel [workspace]="workspace" (changed)="markObjectsChanged()" />
+            }
           }
         }
       </aside>

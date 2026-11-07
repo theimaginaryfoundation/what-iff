@@ -1,3 +1,4 @@
+import type { SheetRuleExtras } from './xlsx-sheet-rules';
 import {
   NS,
   OoxmlPackage,
@@ -12,6 +13,19 @@ import {
 } from '../shared/ooxml';
 import { XlsxDefinedName, mergeDefinedNamesXml } from './xlsx-defined-names';
 import { XlsxExtras } from './xlsx-extras';
+import {
+  CT_SLICER,
+  CT_SLICER_CACHE,
+  CT_TIMELINE,
+  CT_TIMELINE_CACHE,
+  REL_SLICER,
+  REL_SLICER_CACHE,
+  REL_TIMELINE,
+  REL_TIMELINE_CACHE,
+  SlicerPreserved,
+  emptySlicerPreserved,
+  hasSlicerParts,
+} from './xlsx-slicers';
 
 /**
  * What ExcelJS cannot carry and the editor cannot edit, kept from the original package and
@@ -86,6 +100,8 @@ export interface PreservedSheet {
 }
 
 export interface PreservedParts {
+  /** What rides beside conditional formatting, validation and threaded comments (xlsx-sheet-rules.ts). */
+  rules?: SheetRuleExtras;
   /** Every part that goes back verbatim, keyed by original path. */
   parts: Record<string, PreservedPart>;
   /** Relationship parts for the above, keyed by the part they belong to. */
@@ -102,6 +118,8 @@ export interface PreservedParts {
   customProperties?: string;
   /** What ExcelJS carries that Univer has no model for (xlsx-extras.ts). */
   extras?: XlsxExtras;
+  /** Slicer and timeline parts, whose references are written after the rest (xlsx-slicers.ts). */
+  slicers?: SlicerPreserved;
 }
 
 /** Whether the original package held anything that goes back by surgery. */
@@ -113,7 +131,8 @@ export function hasPreservedParts(p: PreservedParts | null | undefined): boolean
     p.externalLinks.length > 0 ||
     !!p.vbaProject ||
     p.customXml.length > 0 ||
-    !!p.customProperties
+    !!p.customProperties ||
+    hasSlicerParts(p.slicers)
   );
 }
 
@@ -128,7 +147,8 @@ export function emptyPreservedSheet(): PreservedSheet {
 
 /** Collects everything to carry from the original package, per sheet name and for the workbook. */
 export async function collectPreservedParts(pkg: OoxmlPackage): Promise<PreservedParts> {
-  const out: PreservedParts = { parts: {}, rels: {}, bySheet: {}, pivotCaches: [], externalLinks: [], customXml: [] };
+  const slicers = emptySlicerPreserved();
+  const out: PreservedParts = { parts: {}, rels: {}, bySheet: {}, pivotCaches: [], externalLinks: [], customXml: [], slicers };
   const contentTypes = await readContentTypes(pkg);
   const wbPath = 'xl/workbook.xml';
   const wb = await pkg.xml(wbPath);
@@ -149,6 +169,7 @@ export async function collectPreservedParts(pkg: OoxmlPackage): Promise<Preserve
   const sheets = children(wb.documentElement, wbNs, 'sheets')[0];
   for (const sheet of children(sheets, wbNs, 'sheet')) {
     const name = sheet.getAttribute('name') ?? '';
+    slicers.sheetIds[name] = sheet.getAttribute('sheetId') ?? '';
     const relId = attr(sheet, NS.r, 'id');
     const rel = relId ? wbRels.get(relId) : undefined;
     if (!rel) continue;
@@ -160,8 +181,8 @@ export async function collectPreservedParts(pkg: OoxmlPackage): Promise<Preserve
       if (r.type === REL_DRAWING) {
         const drawing = await pkg.xml(target);
         if (!drawing) continue;
-        const { charts, shapes } = drawingContents(drawing, await pkg.rels(target), target);
-        if (!charts.length && !shapes) continue;
+        const { charts, shapes, slicers: slicerFrames } = drawingContents(drawing, await pkg.rels(target), target);
+        if (!charts.length && !shapes && !slicerFrames) continue;
         await keepTree(target);
         entry.drawing = { path: target, charts, shapes };
       } else if (r.type === REL_PIVOT_TABLE) {
@@ -170,6 +191,10 @@ export async function collectPreservedParts(pkg: OoxmlPackage): Promise<Preserve
         if (await keepTree(target)) entry.tables.push(target);
       } else if (r.type === REL_PRINTER_SETTINGS) {
         if (await keepTree(target)) entry.printerSettings = target;
+      } else if (r.type === REL_SLICER) {
+        if (await keepTree(target)) (slicers.sheetSlicers[name] ??= []).push(target);
+      } else if (r.type === REL_TIMELINE) {
+        if (await keepTree(target)) (slicers.sheetTimelines[name] ??= []).push(target);
       } else if (r.type === REL_THREADED_COMMENTS) {
         entry.threadedComments = true;
       }
@@ -218,6 +243,10 @@ export async function collectPreservedParts(pkg: OoxmlPackage): Promise<Preserve
       if (await keepTree(path)) out.vbaProject = path;
     } else if (r.type === REL_CUSTOM_XML) {
       if (await keepTree(path)) out.customXml.push(path);
+    } else if (r.type === REL_SLICER_CACHE) {
+      if (await keepTree(path)) slicers.slicerCaches.push(path);
+    } else if (r.type === REL_TIMELINE_CACHE) {
+      if (await keepTree(path)) slicers.timelineCaches.push(path);
     }
   }
   const rootRels = await pkg.rels('');
@@ -235,9 +264,10 @@ function drawingContents(
   drawing: Document,
   rels: Map<string, Relationship>,
   drawingPath: string,
-): { charts: PreservedChart[]; shapes: number } {
+): { charts: PreservedChart[]; shapes: number; slicers: number } {
   const charts: PreservedChart[] = [];
   let shapes = 0;
+  let slicers = 0;
   for (const anchor of Array.from(drawing.documentElement.childNodes).filter((n): n is Element => n.nodeType === 1)) {
     const content = Array.from(anchor.childNodes).filter(
       (n): n is Element => n.nodeType === 1 && !['from', 'to', 'ext', 'pos', 'clientData'].includes((n as Element).localName),
@@ -259,9 +289,10 @@ function drawingContents(
       charts.push({ from, to, chartPath: resolveTarget(drawingPath, rel.target), name });
       continue;
     }
-    if (content.some(el => el.localName !== 'pic')) shapes++;
+    if (anchor.getElementsByTagNameNS('http://schemas.microsoft.com/office/drawing/2010/slicer', 'slicer').length || anchor.getElementsByTagNameNS('http://schemas.microsoft.com/office/drawing/2012/slicer', 'slicer').length) slicers++;
+    else if (content.some(el => el.localName !== 'pic')) shapes++;
   }
-  return { charts, shapes };
+  return { charts, shapes, slicers };
 }
 
 interface ContentTypes {
@@ -296,7 +327,11 @@ async function readContentTypes(pkg: OoxmlPackage): Promise<ContentTypes> {
   };
 }
 
-function contentTypeFor(path: string): string | null {
+export function contentTypeFor(path: string): string | null {
+  if (/^xl\/slicers\//.test(path)) return CT_SLICER;
+  if (/^xl\/slicerCaches\//.test(path)) return CT_SLICER_CACHE;
+  if (/^xl\/timelines\//.test(path)) return CT_TIMELINE;
+  if (/^xl\/timelineCaches\//.test(path)) return CT_TIMELINE_CACHE;
   if (/^xl\/charts\/chart/.test(path)) return CT_CHART;
   if (/^xl\/charts\/style/.test(path)) return CT_CHART_STYLE;
   if (/^xl\/charts\/colors/.test(path)) return CT_CHART_COLORS;
@@ -484,7 +519,7 @@ const AFTER_EXTERNAL_REFERENCES = ['definedNames', 'calcPr', 'oleSize', 'customW
 
 /** Parts ExcelJS never writes keep their names; Excel and other tools look some of them up by name. */
 const KEEP_NAME =
-  /^(xl\/vbaProject\.bin|xl\/vbaProjectSignature\.bin|customXml\/|docProps\/custom\.xml|xl\/externalLinks\/|xl\/printerSettings\/|xl\/tables\/|xl\/pivotTables\/|xl\/pivotCache\/|xl\/charts\/|xl\/embeddings\/)/;
+  /^(xl\/vbaProject\.bin|xl\/vbaProjectSignature\.bin|customXml\/|docProps\/custom\.xml|xl\/externalLinks\/|xl\/printerSettings\/|xl\/tables\/|xl\/pivotTables\/|xl\/pivotCache\/|xl\/charts\/|xl\/embeddings\/|xl\/slicers\/|xl\/slicerCaches\/|xl\/timelines\/|xl\/timelineCaches\/)/;
 
 /** "xl/drawings/drawing1.xml" becomes "xl/drawings/drawingP1.xml": the same folder, a name ExcelJS never uses; a name already of that form stays. */
 function renamed(path: string): string {

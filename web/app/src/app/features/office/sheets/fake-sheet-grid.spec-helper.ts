@@ -16,6 +16,10 @@ export class FakeSheetGrid implements SheetGrid {
     return Object.keys(this.sheets);
   }
 
+  addSheet(name: string): void {
+    this.sheets[name] ??= [];
+  }
+
   activeSheetName(): string | null {
     return this.active;
   }

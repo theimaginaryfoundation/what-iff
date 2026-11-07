@@ -1,0 +1,44 @@
+<div class="objects-panel">
+  @for (entry of workspace().entries(); track entry.name) {
+    <div class="objects-panel__section" [attr.aria-label]="'Slicer ' + entry.caption">
+      <h3 class="objects-panel__title">{{ entry.caption }}</h3>
+      <div class="objects-panel__row" role="group" [attr.aria-label]="entry.caption + ' items'">
+        @for (item of itemsOf(entry); track item.label) {
+          <button type="button" class="objects-panel__tool" [attr.aria-pressed]="item.selected" (click)="click(entry, item.label, $event)">{{ item.label }}</button>
+        }
+      </div>
+      <div class="objects-panel__row">
+        <button type="button" class="objects-panel__tool" [disabled]="!entry.excluded.length" (click)="clear(entry)">Clear filter</button>
+        <button type="button" class="objects-panel__tool" (click)="remove(entry)">Delete</button>
+      </div>
+    </div>
+  } @empty {
+    <p class="objects-panel__empty">No slicers yet.</p>
+  }
+
+  <div class="objects-panel__section" aria-label="Add a slicer">
+    @if (targets().length) {
+      <label class="objects-panel__label">
+        Filter
+        <select class="objects-panel__select" (change)="targetId.set($any($event.target).value); field.set('')">
+          @for (t of targets(); track t.id) {
+            <option [value]="t.id" [selected]="t.id === target()?.id">{{ t.label }}</option>
+          }
+        </select>
+      </label>
+      <label class="objects-panel__label">
+        By field
+        <select class="objects-panel__select" (change)="field.set($any($event.target).value)">
+          @for (f of target()?.fields ?? []; track f) {
+            <option [value]="f" [selected]="f === field()">{{ f }}</option>
+          }
+        </select>
+      </label>
+      <div class="objects-panel__row">
+        <button type="button" class="objects-panel__tool objects-panel__tool--primary" (click)="add()">Add slicer</button>
+      </div>
+    } @else {
+      <p class="objects-panel__empty">A slicer filters a pivot table or a table. This workbook has neither yet.</p>
+    }
+  </div>
+</div>

@@ -19,6 +19,11 @@ export interface UniverSheetsKit {
   options(container: HTMLElement, opts?: { readOnly?: boolean; formulaWorker?: Worker | null }): Parameters<UniverPresets['createUniver']>[0];
   /** A formula worker for one instance (null where workers are unavailable); the caller terminates it. */
   createFormulaWorker(): Worker | null;
+  /**
+   * Paints a picture's new source now. Univer stores a changed source but its image shape only reads
+   * it when the sheet is next rendered from scratch, so a redrawn chart would look stale until then.
+   */
+  repaintDrawing(univer: Univer, drawing: { unitId: string; subUnitId: string; drawingId: string }, source: string): void;
 }
 
 export interface UniverDocsKit {
@@ -121,6 +126,11 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
     return {
       createUniver: presets.createUniver,
       createFormulaWorker,
+      repaintDrawing: (univer, { unitId, subUnitId, drawingId }, source) => {
+        const scene = univer.__getInjector().get(core.IRenderManagerService).getRenderUnitById(unitId)?.scene;
+        const shape = scene?.getObjectIncludeInGroup(`${unitId}#-#${subUnitId}#-#${drawingId}`) as { changeSource?(url: string): void } | undefined;
+        shape?.changeSource?.(source);
+      },
       options: (container, opts) => ({
         locale: presets.LocaleType.EN_US,
         locales: { [presets.LocaleType.EN_US]: strings },

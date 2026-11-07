@@ -1,28 +1,25 @@
 import { linkProperties } from '../shared/safe-link';
 import ExcelJS from 'exceljs';
 
-import { cellA1, parseRangeA1, parseSqref } from '../shared/a1';
+import { cellA1, parseRangeA1 } from '../shared/a1';
 import { chartSvgDataUrl } from '../shared/chart-svg';
 import { FidelityCollector, FidelityReport } from '../shared/fidelity';
 import { OoxmlPackage, emuToPx, parseXml } from '../shared/ooxml';
+import { addSlicerPictures, notePivotLimits } from '../sheets/slicers/slicer-pictures';
 import { parseChartXml } from './xlsx-chart-xml';
+import { ChartSpec, DRAWN_NOTICE, KEPT_FEATURES_NOTICE, NOT_EDITABLE_NOTICE, cachedSeries, chartDataFor } from '../sheets/charts/chart-spec';
+import { chartSpecsFromPreserved } from './xlsx-chart-save';
 import { XlsxDefinedName, definedNamesToWorkbook, parseDefinedNames } from './xlsx-defined-names';
 import { collectExtras } from './xlsx-extras';
 import { PreservedParts, collectPreservedParts } from './xlsx-preserve';
 import {
   DEFAULT_COLUMN_WIDTH_PX,
   DEFAULT_ROW_HEIGHT_PX,
-  RESOURCE_CONDITIONAL_FORMATTING,
-  RESOURCE_DATA_VALIDATION,
   RESOURCE_DRAWINGS,
   RESOURCE_FILTER,
   RESOURCE_NOTES,
   UniverCell,
   UniverCellDoc,
-  UniverCfRule,
-  UniverCfRuleConfig,
-  UniverCfValue,
-  UniverDataValidationRule,
   UniverDrawingsForSheet,
   UniverNote,
   UniverRange,
@@ -34,6 +31,7 @@ import {
   pointsToPx,
   writeResource,
 } from './univer-sheet-types';
+import { readSheetRules } from './xlsx-sheet-rules';
 import { UniverStyle, colorFromArgb, styleFromExcel, styleKey } from './xlsx-styles';
 import { ExcelThemeColors, parseThemeColors } from './xlsx-theme';
 
@@ -84,32 +82,44 @@ export async function xlsxToWorkbook(bytes: ArrayBuffer | Uint8Array, opts: Xlsx
   const fidelity = new FidelityCollector();
   for (const item of result.report.dropped) for (let i = 0; i < (item.count ?? 1); i++) fidelity.drop(item.feature, item.where);
   for (const item of result.report.warnings) for (let i = 0; i < (item.count ?? 1); i++) fidelity.warn(item.feature, item.where);
+  // Conditional formatting, validation and threaded comments come from the package as well: ExcelJS
+  // reads them only in part (xlsx-sheet-rules.ts).
+  preserved.rules = await readSheetRules(
+    await OoxmlPackage.open(bytes),
+    result.workbook,
+    parseThemeColors((excel.model as unknown as { themes?: Record<string, string> }).themes?.['theme1']),
+    fidelity,
+  );
   definedNamesToWorkbook(definedNames, result.workbook);
-  addPreservedCharts(result.workbook, preserved, excel);
+  const chartTheme = parseThemeColors((excel.model as unknown as { themes?: Record<string, string> }).themes?.['theme1']);
+  const chartSpecs = chartSpecsFromPreserved(preserved, result.workbook, chartTheme);
+  addPreservedCharts(result.workbook, preserved, excel, chartSpecs);
+  addSlicerPictures(result.workbook, preserved);
   notePreserved(preserved, fidelity);
+  for (const spec of chartSpecs) {
+    if (!spec.editable) fidelity.warn(NOT_EDITABLE_NOTICE, spec.sheet);
+    if (spec.limits.includes('Trendlines and error bars')) fidelity.warn(KEPT_FEATURES_NOTICE, spec.sheet);
+  }
   return { ...result, report: fidelity.report(), preserved };
 }
 
 /** What is carried but not shown or editable, and what is not carried. */
 function notePreserved(preserved: PreservedParts, fidelity: FidelityCollector): void {
   for (const [name, entry] of Object.entries(preserved.bySheet)) {
-    if (entry.pivotTables.length) fidelity.warn('Pivot tables are kept in the file but not editable here; Excel refreshes them', name);
-    if (entry.drawing?.charts.length) fidelity.warn('Charts are shown as pictures and kept in the file; edit them in Excel', name);
+    if (entry.drawing?.charts.length) fidelity.warn(DRAWN_NOTICE, name);
     if (entry.drawing?.shapes) fidelity.warn('Shapes and text boxes are kept in the file but not shown here', name);
-    if (entry.drawing && entry.drawing.shapes + entry.drawing.charts.length)
-      fidelity.warn('Pictures on a sheet with charts or shapes are saved as they were in the original', name);
     if (entry.tables.length)
       fidelity.warn('Tables are kept in the file but not editable here; edits to their headers do not update them', name);
     if (entry.exts.length) fidelity.warn('Sparklines are kept in the file but not shown here', name);
-    if (entry.threadedComments) fidelity.warn('Threaded comments are saved as notes', name);
-    if (entry.slicers) fidelity.drop('Slicers', name);
   }
+  notePivotLimits(preserved, fidelity);
+  if (Object.keys(preserved.slicers?.sheetTimelines ?? {}).length) fidelity.warn('Timelines are kept in the file but not shown here; edit them in Excel');
   if (preserved.externalLinks.length) fidelity.warn('Links to other workbooks are kept in the file');
   if (preserved.vbaProject) fidelity.warn('Macros are kept in the file but cannot run here');
 }
 
 /** Draws each kept chart from its cached data as a picture at its anchor. */
-function addPreservedCharts(workbook: UniverWorkbook, preserved: PreservedParts, excel: ExcelJS.Workbook): void {
+function addPreservedCharts(workbook: UniverWorkbook, preserved: PreservedParts, excel: ExcelJS.Workbook, specs: readonly ChartSpec[]): void {
   if (!Object.values(preserved.bySheet).some(s => s.drawing?.charts.length)) return;
   const theme = parseThemeColors((excel.model as unknown as { themes?: Record<string, string> }).themes?.['theme1']);
   const drawings = readResourceMap<UniverDrawingsForSheet>(workbook, RESOURCE_DRAWINGS);
@@ -137,6 +147,8 @@ function addPreservedCharts(workbook: UniverWorkbook, preserved: PreservedParts,
       } catch {
         data = null;
       }
+      const spec = specs.find(c => c.id === `chart-${sheetId}-${index}`);
+      if (spec?.editable) data = chartDataFor(spec, cachedSeries(spec), theme);
       const left = colLeft(chart.from.col) + emuToPx(chart.from.colOff);
       const top = rowTop(chart.from.row) + emuToPx(chart.from.rowOff);
       const width = Math.max(40, colLeft(chart.to.col) + emuToPx(chart.to.colOff) - left);
@@ -198,8 +210,6 @@ export function excelToWorkbook(excel: ExcelJS.Workbook, opts: XlsxImportOptions
     styles: {},
     resources: [],
   };
-  const validation: Record<string, UniverDataValidationRule[]> = {};
-  const formatting: Record<string, UniverCfRule[]> = {};
   const notes: Record<string, Record<number, Record<number, UniverNote>>> = {};
   const drawings: Record<string, UniverDrawingsForSheet> = {};
   const filters: Record<string, { ref: UniverRange }> = {};
@@ -209,10 +219,6 @@ export function excelToWorkbook(excel: ExcelJS.Workbook, opts: XlsxImportOptions
     workbook.sheetOrder.push(id);
     const sheet = importSheet(ws, id, styles, fidelity);
     workbook.sheets[id] = sheet;
-    const dv = importDataValidations(ws, fidelity);
-    if (dv.length) validation[id] = dv;
-    const cf = importConditionalFormatting(ws, fidelity, styles.theme);
-    if (cf.length) formatting[id] = cf;
     const sheetNotes = importNotes(ws);
     if (Object.keys(sheetNotes).length) notes[id] = sheetNotes;
     const images = importImages(ws, excel, opts.id, id, sheet, fidelity);
@@ -221,8 +227,6 @@ export function excelToWorkbook(excel: ExcelJS.Workbook, opts: XlsxImportOptions
     if (filter) filters[id] = filter;
   });
   workbook.styles = styles.table;
-  if (Object.keys(validation).length) writeResource(workbook, RESOURCE_DATA_VALIDATION, validation);
-  if (Object.keys(formatting).length) writeResource(workbook, RESOURCE_CONDITIONAL_FORMATTING, formatting);
   if (Object.keys(notes).length) writeResource(workbook, RESOURCE_NOTES, notes);
   if (Object.keys(drawings).length) writeResource(workbook, RESOURCE_DRAWINGS, drawings);
   if (Object.keys(filters).length) writeResource(workbook, RESOURCE_FILTER, filters);
@@ -435,190 +439,6 @@ export function cellDoc(row: number, col: number, text: string, textRuns: Univer
     },
     documentStyle: {},
   };
-}
-
-// --- data validation --------------------------------------------------------------------------
-
-const DV_TYPES: Record<string, string> = {
-  list: 'list',
-  whole: 'whole',
-  decimal: 'decimal',
-  date: 'date',
-  textLength: 'textLength',
-  custom: 'custom',
-  time: 'time',
-};
-
-function importDataValidations(ws: ExcelJS.Worksheet, fidelity: FidelityCollector): UniverDataValidationRule[] {
-  const model = (ws as unknown as { dataValidations?: { model?: Record<string, ExcelJS.DataValidation> } }).dataValidations?.model ?? {};
-  const rules: UniverDataValidationRule[] = [];
-  let n = 0;
-  for (const [sqref, dv] of Object.entries(model)) {
-    const type = DV_TYPES[dv.type];
-    if (!type) {
-      fidelity.drop('Data validation of an unsupported kind', ws.name);
-      continue;
-    }
-    const ranges = parseSqref(sqref);
-    if (!ranges.length) continue;
-    const [f1, f2] = (dv.formulae ?? []).map(formulaText);
-    const rule: UniverDataValidationRule = { uid: `dv-${ws.id}-${n++}`, type, ranges };
-    if (f1 !== undefined) rule.formula1 = type === 'list' ? unquoteList(f1) : f1;
-    if (f2 !== undefined) rule.formula2 = f2;
-    if (dv.operator) rule.operator = dv.operator;
-    if (dv.allowBlank !== undefined) rule.allowBlank = dv.allowBlank;
-    if (dv.showErrorMessage !== undefined) rule.showErrorMessage = dv.showErrorMessage;
-    if (dv.error) rule.error = dv.error;
-    if (dv.errorTitle) rule.errorTitle = dv.errorTitle;
-    if (dv.showInputMessage !== undefined) rule.showInputMessage = dv.showInputMessage;
-    if (dv.prompt) rule.prompt = dv.prompt;
-    if (dv.promptTitle) rule.promptTitle = dv.promptTitle;
-    rules.push(rule);
-  }
-  return rules;
-}
-
-function formulaText(value: unknown): string {
-  if (value instanceof Date) return String(dateToSerial(value));
-  return String(value);
-}
-
-/** Excel stores a literal list as "a,b,c" with quotes; Univer wants the bare list. */
-function unquoteList(formula: string): string {
-  const m = /^"(.*)"$/.exec(formula.trim());
-  return m ? m[1] : formula;
-}
-
-// --- conditional formatting -------------------------------------------------------------------
-
-const CF_NUMBER_OPERATORS: Record<string, string> = {
-  equal: 'equal',
-  notEqual: 'notEqual',
-  greaterThan: 'greaterThan',
-  greaterThanOrEqual: 'greaterThanOrEqual',
-  lessThan: 'lessThan',
-  lessThanOrEqual: 'lessThanOrEqual',
-  between: 'between',
-  notBetween: 'notBetween',
-};
-
-function importConditionalFormatting(ws: ExcelJS.Worksheet, fidelity: FidelityCollector, theme: ExcelThemeColors): UniverCfRule[] {
-  const list = ((ws as unknown as { conditionalFormattings?: ExcelJS.ConditionalFormattingOptions[] }).conditionalFormattings ??
-    []) as ExcelJS.ConditionalFormattingOptions[];
-  const rules: UniverCfRule[] = [];
-  let n = 0;
-  for (const cf of list) {
-    const ranges = parseSqref(cf.ref);
-    if (!ranges.length) continue;
-    for (const rule of cf.rules) {
-      const config = cfRuleConfig(rule, fidelity, ws.name, theme);
-      if (!config) continue;
-      rules.push({ cfId: `cf-${ws.id}-${n++}`, ranges, stopIfTrue: !!(rule as { stopIfTrue?: boolean }).stopIfTrue, rule: config });
-    }
-  }
-  return rules;
-}
-
-function cfStyle(rule: ExcelJS.ConditionalFormattingRule, theme: ExcelThemeColors): UniverStyle {
-  return styleFromExcel(rule.style, theme) ?? {};
-}
-
-function cfValue(cvfo: ExcelJS.Cvfo | undefined): UniverCfValue {
-  if (!cvfo) return { type: 'min' };
-  const type = String(cvfo.type);
-  if (type === 'num' || type === 'min' || type === 'max' || type === 'percent' || type === 'percentile' || type === 'formula') {
-    return { type, value: cvfo.value };
-  }
-  return { type: 'num', value: cvfo.value };
-}
-
-function cfRuleConfig(
-  rule: ExcelJS.ConditionalFormattingRule,
-  fidelity: FidelityCollector,
-  where: string,
-  theme: ExcelThemeColors,
-): UniverCfRuleConfig | null {
-  switch (rule.type) {
-    case 'cellIs': {
-      const operator = CF_NUMBER_OPERATORS[rule.operator ?? 'equal'] ?? 'equal';
-      const values = (rule.formulae ?? []).map(Number);
-      if (values.some(v => Number.isNaN(v))) {
-        fidelity.warn('Conditional formatting compared with a formula was kept as a formula rule', where);
-        return { type: 'highlightCell', subType: 'formula', value: `=${String(rule.formulae?.[0] ?? '')}`, style: cfStyle(rule, theme) };
-      }
-      if (operator === 'between' || operator === 'notBetween') {
-        return { type: 'highlightCell', subType: 'number', operator, value: [values[0] ?? 0, values[1] ?? 0], style: cfStyle(rule, theme) };
-      }
-      return { type: 'highlightCell', subType: 'number', operator, value: values[0], style: cfStyle(rule, theme) };
-    }
-    case 'expression':
-      return { type: 'highlightCell', subType: 'formula', value: `=${String(rule.formulae?.[0] ?? '')}`, style: cfStyle(rule, theme) };
-    case 'containsText':
-      return {
-        type: 'highlightCell',
-        subType: 'text',
-        operator: rule.operator ?? 'containsText',
-        value: rule.text,
-        style: cfStyle(rule, theme),
-      };
-    case 'timePeriod':
-      return { type: 'highlightCell', subType: 'timePeriod', operator: rule.timePeriod ?? 'today', style: cfStyle(rule, theme) };
-    case 'top10':
-      return {
-        type: 'highlightCell',
-        subType: 'rank',
-        isBottom: !!rule.bottom,
-        isPercent: !!rule.percent,
-        value: rule.rank ?? 10,
-        style: cfStyle(rule, theme),
-      };
-    case 'aboveAverage':
-      return {
-        type: 'highlightCell',
-        subType: 'average',
-        operator: (rule as { aboveAverage?: boolean }).aboveAverage === false ? 'lessThan' : 'greaterThan',
-        style: cfStyle(rule, theme),
-      };
-    case 'colorScale': {
-      const colors = rule.color ?? [];
-      const cfvo = rule.cfvo ?? [];
-      return {
-        type: 'colorScale',
-        config: colors.map((color, index) => ({
-          index,
-          color: colorFromArgb(color, theme)?.rgb ?? '#ffffff',
-          value: cfValue(cfvo[index]),
-        })),
-      };
-    }
-    case 'dataBar': {
-      const cfvo = rule.cfvo ?? [];
-      const color = colorFromArgb((rule as { color?: Partial<ExcelJS.Color> }).color, theme)?.rgb ?? '#638ec6';
-      return {
-        type: 'dataBar',
-        isShowValue: rule.showValue !== false,
-        config: {
-          min: cfValue(cfvo[0]),
-          max: cfValue(cfvo[1] ?? { type: 'max' as never }),
-          isGradient: rule.gradient !== false,
-          positiveColor: color,
-          nativeColor: '#ff0000',
-        },
-      };
-    }
-    case 'iconSet': {
-      const cfvo = rule.cfvo ?? [];
-      const iconType = rule.iconSet ?? '3TrafficLights1';
-      return {
-        type: 'iconSet',
-        isShowValue: rule.showValue !== false,
-        config: cfvo.map((v, i) => ({ operator: 'greaterThanOrEqual', value: cfValue(v), iconType, iconId: String(i) })),
-      };
-    }
-    default:
-      fidelity.drop('Conditional formatting of an unsupported kind', where);
-      return null;
-  }
 }
 
 // --- notes, images, filter ------------------------------------------------------------------

@@ -115,7 +115,7 @@ describe('xlsx charts and pivot tables', () => {
     const { workbook, report, preserved } = await xlsxToWorkbook(await chartAndPivotWorkbook(), { id: 'wb', name: 'cp.xlsx' });
     expect(preserved && hasPreservedParts(preserved)).toBe(true);
     expect(report.warnings.map(w => w.feature)).toEqual(
-      expect.arrayContaining([expect.stringContaining('Charts are shown as pictures'), expect.stringContaining('Pivot tables are kept')]),
+      expect.arrayContaining([expect.stringContaining('Charts are drawn here'), expect.stringContaining('Changing a pivot table here')]),
     );
     const drawings = readResource<Record<string, UniverDrawingsForSheet>>(workbook, RESOURCE_DRAWINGS)!;
     const data = drawings[workbook.sheetOrder[0]];

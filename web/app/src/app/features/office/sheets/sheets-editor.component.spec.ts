@@ -22,6 +22,7 @@ function fakeUniverKit() {
   };
   const kit: UniverSheetsKit = {
     options: (container, opts) => ({ presets: [], container, readOnly: opts?.readOnly, worker: opts?.formulaWorker }) as never,
+    repaintDrawing: () => undefined,
     createFormulaWorker: () => {
       state.workers += 1;
       return { terminate: () => (state.terminated += 1) } as unknown as Worker;
@@ -159,19 +160,11 @@ describe('SheetsEditorComponent', () => {
   it('shows what the converter dropped and reports it as losses', async () => {
     const wb = new ExcelJS.Workbook();
     wb.addWorksheet('S').getCell('A1').value = 1;
-    // A slicer is the one thing on a sheet the converter cannot carry.
-    const zip = await JSZip.loadAsync(await wb.xlsx.writeBuffer());
-    zip.file(
-      'xl/worksheets/sheet1.xml',
-      (await zip.file('xl/worksheets/sheet1.xml')!.async('string')).replace(
-        '</worksheet>',
-        '<extLst><ext uri="{A8765BA9-456A-4dab-B4F3-ACF838C121DE}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><x14:slicerList/></ext></extLst></worksheet>',
-      ),
-    );
-    const buffer = await zip.generateAsync({ type: 'arraybuffer' });
-    const el = await open(attachment(), new Blob([buffer]), false);
-    expect(fixture.componentInstance.losses()).toEqual(['Slicers (S)']);
-    expect(el.querySelector('.fidelity-notice')?.textContent).toContain('Slicers');
+    const el = await open(attachment(), new Blob([(await wb.xlsx.writeBuffer()) as ArrayBuffer]), false);
+    fixture.componentInstance.report.set({ dropped: [{ feature: 'Something', where: 'S', count: 1 }], warnings: [] });
+    fixture.detectChanges();
+    expect(fixture.componentInstance.losses()).toEqual(['Something (S)']);
+    expect(el.querySelector('.fidelity-notice')?.textContent).toContain('Something');
     fixture.componentInstance.dismissNotice();
     fixture.detectChanges();
     expect(el.querySelector('.fidelity-notice')).toBeNull();

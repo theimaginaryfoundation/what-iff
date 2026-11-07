@@ -156,7 +156,6 @@ describe('xlsx preservation of tables, shapes, links, macros and document parts'
       [
         'Links to other workbooks are kept in the file|',
         'Macros are kept in the file but cannot run here|',
-        'Pictures on a sheet with charts or shapes are saved as they were in the original|Shapes',
         'Shapes and text boxes are kept in the file but not shown here|Shapes',
         'Sparklines are kept in the file but not shown here|Data',
         'Tables are kept in the file but not editable here; edits to their headers do not update them|Data',
@@ -244,7 +243,7 @@ describe('xlsx preservation of tables, shapes, links, macros and document parts'
     expect(again.paths().filter(p => /drawingP/.test(p))).toEqual(['xl/drawings/drawingP1.xml']);
   });
 
-  it('warns about threaded comments and drops slicers', async () => {
+  it('keeps slicers rather than dropping them', async () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('S');
     ws.getCell('A1').value = 'x';
@@ -270,7 +269,6 @@ describe('xlsx preservation of tables, shapes, links, macros and document parts'
       ),
     );
     const { report } = await xlsxToWorkbook(await zip.generateAsync({ type: 'arraybuffer' }), { id: 'wb', name: 's.xlsx' });
-    expect(report.warnings.map(w => w.feature)).toContain('Threaded comments are saved as notes');
-    expect(report.dropped).toEqual([{ feature: 'Slicers', where: 'S', count: 1 }]);
+    expect(report.dropped).toEqual([]);
   });
 });

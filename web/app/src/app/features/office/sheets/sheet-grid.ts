@@ -9,6 +9,8 @@ export type GridValue = string | number | boolean | null;
  */
 export interface SheetGrid {
   sheetNames(): string[];
+  /** Adds an empty sheet at the end. */
+  addSheet(name: string): void;
   activeSheetName(): string | null;
   /** The current selection, when there is one. */
   selection(): { sheet: string; range: UniverRange } | null;
@@ -35,14 +37,14 @@ interface FacadeSheet {
   getRange(row: number, column: number, rows: number, columns: number): FacadeRange;
   hideRows(row: number, count?: number): unknown;
   showRows(row: number, count?: number): unknown;
-  getRowHidden?(row: number): boolean;
-  isRowHiddenByUser?(row: number): boolean;
+  getSheet(): { getRowRawVisible(row: number): boolean };
 }
 
 interface FacadeWorkbook {
   getSheets(): FacadeSheet[];
   getActiveSheet(): FacadeSheet | null;
   getSheetByName(name: string): FacadeSheet | null;
+  insertSheet?(name?: string): unknown;
   getActiveRange(): FacadeRange | null;
 }
 
@@ -62,6 +64,10 @@ export class FacadeSheetGrid implements SheetGrid {
 
   sheetNames(): string[] {
     return this.workbook.getSheets().map(s => s.getSheetName());
+  }
+
+  addSheet(name: string): void {
+    this.workbook.insertSheet?.(name);
   }
 
   activeSheetName(): string | null {
@@ -95,8 +101,9 @@ export class FacadeSheetGrid implements SheetGrid {
   }
 
   isRowHidden(sheet: string, row: number): boolean {
+    // Raw: hidden by the reader or a slicer, whatever a filter is doing.
     const target = this.sheet(sheet);
-    return target?.isRowHiddenByUser?.(row) ?? target?.getRowHidden?.(row) ?? false;
+    return target ? !target.getSheet().getRowRawVisible(row) : false;
   }
 
   onChange(listener: () => void): () => void {

@@ -1,0 +1,138 @@
+:host {
+  display: block;
+}
+
+.charts-panel {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.8125rem;
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+
+.charts-panel__button {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  padding: 0.3rem 0.55rem;
+  white-space: nowrap;
+
+  &:hover {
+    border-color: var(--border-hover, var(--accent));
+  }
+
+  &--primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  &--danger {
+    color: var(--color-danger, #dc2626);
+  }
+}
+
+.charts-panel__message {
+  color: var(--color-danger, #dc2626);
+  margin: 0;
+}
+
+.charts-panel__empty,
+.charts-panel__note {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.charts-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.charts-panel__item {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  text-align: left;
+  width: 100%;
+
+  &[aria-pressed='true'] {
+    border-color: var(--accent);
+  }
+}
+
+.charts-panel__item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.charts-panel__item-meta {
+  color: var(--text-secondary);
+  flex: none;
+}
+
+.charts-panel__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.charts-panel__field {
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+
+  input[type='text'],
+  select {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 0.4rem;
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    min-width: 0;
+    padding: 0.25rem 0.4rem;
+    width: 100%;
+  }
+
+  &--inline {
+    align-items: center;
+    flex-direction: row;
+    justify-content: space-between;
+  }
+}
+
+.charts-panel__ref {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.charts-panel__series {
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  min-width: 0;
+  padding: 0.4rem 0.55rem 0.55rem;
+
+  legend {
+    color: var(--text-primary);
+    padding: 0 0.25rem;
+  }
+}
