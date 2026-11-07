@@ -68,6 +68,13 @@ export class SlideCanvasComponent {
   /** The angle while a rotation is in flight. */
   readonly liveRotation = signal<{ id: string; rotate: number } | null>(null);
 
+  /**
+   * One value per text body, which is replaced rather than mutated on an edit. A new value on each
+   * check would make Angular set innerHTML again, wiping what is being typed and the caret with it.
+   */
+  private readonly htmlByBody = new WeakMap<TextBody, SafeHtml>();
+  private readonly emptyHtml = this.sanitizer.bypassSecurityTrustHtml('');
+
   private gesture: {
     id: string;
     kind: 'move' | 'resize' | 'rotate';
@@ -143,7 +150,13 @@ export class SlideCanvasComponent {
    * and sizes.
    */
   textHtml(body: TextBody | null): SafeHtml {
-    return this.sanitizer.bypassSecurityTrustHtml(body ? paragraphsToHtml(body.paragraphs) : '');
+    if (!body) return this.emptyHtml;
+    let html = this.htmlByBody.get(body);
+    if (!html) {
+      html = this.sanitizer.bypassSecurityTrustHtml(paragraphsToHtml(body.paragraphs));
+      this.htmlByBody.set(body, html);
+    }
+    return html;
   }
 
   imageFillOf(el: SlideElement): { src: string; opacity: number } | null {

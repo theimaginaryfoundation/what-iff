@@ -207,6 +207,26 @@ describe('SlideCanvasComponent', () => {
     expect(commit).toHaveBeenCalledWith({ id: text.id, paragraphs: [{ align: 'left', runs: [{ text: 'Changed', bold: true }] }] });
   });
 
+  it('leaves the text being typed alone when the canvas is checked again', () => {
+    const text = newTextBox(0, 0, 200, 40, 'Hello');
+    const el = render(slideWith(text), { interactive: true, selectedId: text.id, editingId: text.id });
+    const box = el.querySelector('.slide__text') as HTMLElement;
+    const node = box.querySelector('p, div') ?? box;
+    node.append(' typed');
+    fixture.componentRef.setInput('scale', 2);
+    fixture.detectChanges();
+    expect(box.textContent).toContain('Hello typed');
+  });
+
+  it('shows a text body again once the model replaces it', () => {
+    const text = newTextBox(0, 0, 200, 40, 'Hello');
+    const el = render(slideWith(text));
+    const replaced = { ...text, text: emptyTextBody([{ align: 'left', runs: [{ text: 'Changed' }] }]) };
+    fixture.componentRef.setInput('slide', slideWith(replaced));
+    fixture.detectChanges();
+    expect(el.querySelector('.slide__text')?.textContent).toContain('Changed');
+  });
+
   it('does nothing with pointers when not interactive', () => {
     const shape = newShape('rect', 0, 0, 10, 10, '#000000');
     const el = render(slideWith(shape));
