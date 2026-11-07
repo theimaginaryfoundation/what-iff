@@ -15,4 +15,9 @@ export interface FileEditor {
    * have changed since `content()` was called, in which case it stays dirty.
    */
   markSaved(saved?: Blob): void;
+  /**
+   * What saving would drop, in words (the office suite's fidelity report, ADR 0x043): the host
+   * asks before overwriting the original when this is not empty.
+   */
+  readonly losses?: Signal<readonly string[]>;
 }

@@ -39,7 +39,7 @@ import { FilePreviewKind, fileTypeLabel, previewKindFor } from '../gallery/helpe
 import { folderLabel, folderPathError, normalizeFolderPath } from '../gallery/helpers/gallery-folder.helpers';
 import { formatSource, sourceForImage } from '../gallery/helpers/image-source.helpers';
 import { FileWorkspaceService } from './file-workspace.service';
-import { EDITOR_LOADER, VIEWER_LOADER, hasEditor } from './viewers/registry';
+import { EDITOR_LOADER, VIEWER_LOADER, hasEditor, viewerFor } from './viewers/registry';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -241,6 +241,7 @@ export class FileWorkspaceComponent {
     const ref = outlet.createComponent(type);
     ref.setInput('file', this.file());
     ref.setInput('blob', blob);
+    if (viewerFor(this.kind())?.editInPlace) ref.setInput('readOnly', false);
     const instance = ref.instance as FileEditor & {
       dirtyChange?: { subscribe(fn: (dirty: boolean) => void): unknown };
       saveRequested?: { subscribe(fn: () => void): unknown };
@@ -281,6 +282,8 @@ export class FileWorkspaceComponent {
     const editor = this.editorRef?.instance;
     const file = this.file();
     if (!editor || this.saving()) return;
+    const losses = editor.losses?.() ?? [];
+    if (losses.length && !opts.overwrite && !(await this.confirmLossySave(losses))) return;
     this.saving.set(true);
     this.saveError.set(null);
     let content: Blob;
@@ -314,6 +317,17 @@ export class FileWorkspaceComponent {
     } finally {
       this.saving.set(false);
     }
+  }
+
+  /** The editor cannot keep everything the original had: saving over it loses that for good. */
+  private confirmLossySave(losses: readonly string[]): Promise<boolean> {
+    return this.confirmationService.confirm({
+      title: 'Save over the original?',
+      message: `This editor cannot keep: ${losses.join('; ')}. Saving replaces the original without them. Use Save as to keep the original file.`,
+      confirmText: 'Save anyway',
+      cancelText: 'Cancel',
+      type: 'warning',
+    });
   }
 
   /** Conflict: drop the edits and show what is on the server now. */
