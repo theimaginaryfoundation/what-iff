@@ -1378,7 +1378,20 @@ func (a *Agent) generateAssistantForMessageMock(ctx context.Context, userID uuid
 	// paths do (no MCP discovery: mock mode is hermetic), so a scripted tool call is gated exactly
 	// like a real model's.
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	chatCtx.setOfferedTools(policy.offeredAgentToolNames())
+	offered := policy.offeredAgentToolNames()
+	// Turn-only tools (update_plan, ask_user) and the chat's MCP connectors are offered too, so
+	// the mock's echo directives can drive them (provider/mock_directives.go). A chat with no
+	// connectors attached discovers nothing, which keeps mock e2e hermetic.
+	for _, spec := range turnOnlyToolSpecs(chatCtx) {
+		offered[spec.Name] = struct{}{}
+	}
+	if policy.toolsEnabled {
+		for _, spec := range a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs) {
+			offered[spec.Name] = struct{}{}
+		}
+	}
+	chatCtx.setOfferedTools(offered)
+	a.prepareTurnLoadableTools(ctx, chatCtx, offered)
 
 	build := func(*provider.ModelContext) (provider.AgentAdapter, error) {
 		return provider.NewMockAdapter(provider.MockAdapterConfig{

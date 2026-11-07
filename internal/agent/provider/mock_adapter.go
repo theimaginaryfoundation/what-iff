@@ -54,10 +54,12 @@ type MockAdapterConfig struct {
 // exercised. Build one per request — it holds per-turn state and must not be
 // shared.
 type MockAdapter struct {
-	cfg          MockAdapterConfig
-	callCount    int
-	fixedIndex   int
-	deltaHandler func(delta string)
+	cfg        MockAdapterConfig
+	callCount  int
+	fixedIndex int
+	// directiveIndex is the next echo-mode directive to play (mock_directives.go).
+	directiveIndex int
+	deltaHandler   func(delta string)
 
 	// appendedBatches records AppendToolResults input for test inspection.
 	appendedBatches [][]ToolResult
@@ -119,7 +121,38 @@ func (m *MockAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse, e
 		return resp, nil, err
 	}
 
+	if m.cfg.Mode == MockModeEcho {
+		directives, rest := parseMockDirectives(m.cfg.EchoText)
+		if len(directives) > 0 {
+			return m.callDirectives(ctx, directives, rest)
+		}
+	}
+
 	resp, err := m.streamText(ctx, m.pickText())
+	return resp, nil, err
+}
+
+// callDirectives plays echo-mode directives (mock_directives.go): every call takes the next tool
+// directive (after any waits before it); once none is left, the mock answers.
+func (m *MockAdapter) callDirectives(ctx context.Context, directives []mockDirective, rest string) (*GenerateResponse, []ToolUse, error) {
+	for m.directiveIndex < len(directives) {
+		d := directives[m.directiveIndex]
+		m.directiveIndex++
+		if d.wait > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			case <-time.After(d.wait):
+			}
+			continue
+		}
+		m.addUsage(genAIUsage{Input: m.inputTokens()})
+		return nil, []ToolUse{*d.tool}, nil
+	}
+	if rest == "" {
+		rest = "Done."
+	}
+	resp, err := m.streamText(ctx, rest+mockToolSummary(m.appendedBatches))
 	return resp, nil, err
 }
 

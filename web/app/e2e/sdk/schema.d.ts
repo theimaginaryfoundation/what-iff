@@ -10593,6 +10593,8 @@ export interface paths {
                         message: string;
                         /** @description IANA timezone name from the client (e.g. "America/Los_Angeles") used for timestamping prompts */
                         client_timezone?: string;
+                        /** @description The message is a follow-up sent while the user's turn in this chat is still running (ADR 0x042). That turn takes it in at its next step and its job ends cancelled with error_code delivered_to_running_turn; if the turn finishes first, the message runs as its own turn. */
+                        steer?: boolean;
                         /** @description File attachments associated with this message */
                         attachments?: components["schemas"]["FileAttachment"][];
                         /** @description Rituals associated with this message */
@@ -10986,6 +10988,228 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{chatId}/prompts/{promptId}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer a question the running turn asked
+         * @description Records the user's answer to an agent prompt (ADR 0x042): the agent's ask_user questions or approval, or an MCP server's elicitation. The pending prompt is shown on the turn's job progress (prompt); the turn resumes as soon as it reads the answer. Only a pending prompt of this chat takes an answer, once.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                    promptId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AgentPromptResponse"];
+                };
+            };
+            responses: {
+                /** @description Answer recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentPrompt"];
+                    };
+                };
+                /** @description Invalid body, or an answer that does not fit the prompt */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such prompt in this chat */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The prompt no longer waits for an answer (answered, expired, or its turn ended) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{chatId}/tool-calls/{toolCallId}/app": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * MCP App view of a tool call
+         * @description Returns the MCP App (SEP-1865) view of a saved tool call whose MCP tool has one (ADR 0x042): the view's HTML, read from its connector with its Content-Security-Policy already inserted at the top, plus the tool's input and raw result. Render it in a sandboxed frame without allow-same-origin.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                    toolCallId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The view */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MCPAppView"];
+                    };
+                };
+                /** @description No such tool call in this chat, or it has no app */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The app's connector could not be reached or returned an error */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{chatId}/tool-calls/{toolCallId}/app/tools/call": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a tool for an MCP App view
+         * @description Runs a tools/call an MCP App view makes on its own connector (ADR 0x042) and returns the CallToolResult as the server sent it. Only tools the connector lists as visible to apps may be called.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                    toolCallId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        arguments?: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description The tool's CallToolResult */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+                /** @description Invalid body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The connector does not let views call this tool */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such tool call in this chat, or it has no app */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The app's connector could not be reached or returned an error */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -15214,6 +15438,89 @@ export interface components {
             id: string;
             name: string;
         };
+        /** @description The MCP App (ui:// view) of a tool call whose MCP tool has one (ADR 0x042). */
+        ToolCallApp: {
+            /** Format: uuid */
+            server_id?: string;
+            resource_uri?: string;
+            /** @description The tool's own name on its connector. */
+            tool_name?: string;
+            /** @description The tool's raw CallToolResult (absent when it was too large to keep). */
+            result?: {
+                [key: string]: unknown;
+            };
+        };
+        MCPAppView: {
+            /** Format: uuid */
+            tool_call_id: string;
+            server_name: string;
+            tool_name: string;
+            resource_uri: string;
+            /** @description The view's document, with its Content-Security-Policy meta at the top. */
+            html: string;
+            csp: string;
+            prefers_border?: boolean;
+            tool_input: unknown;
+            tool_result?: unknown;
+        };
+        AgentPromptPayload: {
+            /** @enum {string} */
+            kind: "questions" | "approval" | "form" | "url";
+            title?: string;
+            message?: string;
+            questions?: {
+                id?: string;
+                header?: string;
+                question?: string;
+                options?: {
+                    label?: string;
+                    description?: string;
+                }[];
+                multi_select?: boolean;
+            }[];
+            /** @description An MCP elicitation form's requestedSchema. */
+            schema?: {
+                [key: string]: unknown;
+            };
+            url?: string;
+            server_name?: string;
+            tool_name?: string;
+        };
+        AgentPromptResponse: {
+            /** @enum {string} */
+            action: "accept" | "decline" | "cancel";
+            answers?: {
+                [key: string]: {
+                    selected?: string[];
+                    text?: string;
+                };
+            };
+            content?: {
+                [key: string]: unknown;
+            };
+            note?: string;
+        };
+        AgentPrompt: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            chat_id: string;
+            /** Format: uuid */
+            job_id: string;
+            /** @enum {string} */
+            source: "agent" | "mcp_elicitation";
+            tool_call_id?: string;
+            payload: components["schemas"]["AgentPromptPayload"];
+            /** @enum {string} */
+            status: "pending" | "answered" | "expired" | "cancelled";
+            response?: components["schemas"]["AgentPromptResponse"];
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            answered_at?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
         /**
          * @example {
          *       "id": "123e4567-e89b-12d3-a456-426614174000",
@@ -15228,6 +15535,7 @@ export interface components {
         ToolCall: {
             /** @description Advanced-loop step (1-based) the call ran in; absent on Standard turns. */
             step?: number;
+            app?: components["schemas"]["ToolCallApp"];
             /** Format: uuid */
             id: string;
             tool_name: string;

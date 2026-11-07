@@ -6910,6 +6910,13 @@ paths:
                 client_timezone:
                   type: string
                   description: IANA timezone name from the client (e.g. "America/Los_Angeles") used for timestamping prompts
+                steer:
+                  type: boolean
+                  description: >-
+                    The message is a follow-up sent while the user's turn in this chat is still
+                    running (ADR 0x042). That turn takes it in at its next step and its job ends
+                    cancelled with error_code delivered_to_running_turn; if the turn finishes
+                    first, the message runs as its own turn.
                 attachments:
                   type: array
                   items:
@@ -7171,6 +7178,166 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /chat/{chatId}/prompts/{promptId}/answer:
+    post:
+      summary: Answer a question the running turn asked
+      description: >-
+        Records the user's answer to an agent prompt (ADR 0x042): the agent's ask_user questions or
+        approval, or an MCP server's elicitation. The pending prompt is shown on the turn's job
+        progress (prompt); the turn resumes as soon as it reads the answer. Only a pending prompt
+        of this chat takes an answer, once.
+      tags: [Chat Messages]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: promptId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentPromptResponse'
+      responses:
+        '200':
+          description: Answer recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentPrompt'
+        '400':
+          description: Invalid body, or an answer that does not fit the prompt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such prompt in this chat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The prompt no longer waits for an answer (answered, expired, or its turn ended)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /chat/{chatId}/tool-calls/{toolCallId}/app:
+    get:
+      summary: MCP App view of a tool call
+      description: >-
+        Returns the MCP App (SEP-1865) view of a saved tool call whose MCP tool has one (ADR 0x042):
+        the view's HTML, read from its connector with its Content-Security-Policy already inserted
+        at the top, plus the tool's input and raw result. Render it in a sandboxed frame without
+        allow-same-origin.
+      tags: [Chat Messages]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: toolCallId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The view
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPAppView'
+        '404':
+          description: No such tool call in this chat, or it has no app
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: The app's connector could not be reached or returned an error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /chat/{chatId}/tool-calls/{toolCallId}/app/tools/call:
+    post:
+      summary: Run a tool for an MCP App view
+      description: >-
+        Runs a tools/call an MCP App view makes on its own connector (ADR 0x042) and returns the
+        CallToolResult as the server sent it. Only tools the connector lists as visible to apps
+        may be called.
+      tags: [Chat Messages]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: toolCallId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                arguments:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: The tool's CallToolResult
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Invalid body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: The connector does not let views call this tool
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such tool call in this chat, or it has no app
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: The app's connector could not be reached or returned an error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /webhooks/chat/{chatId}/messages:
     post:
       summary: Send webhook message to chat
@@ -11699,12 +11866,152 @@ components:
         - name
 
     # Tool Call Schemas
+    ToolCallApp:
+      type: object
+      description: The MCP App (ui:// view) of a tool call whose MCP tool has one (ADR 0x042).
+      properties:
+        server_id:
+          type: string
+          format: uuid
+        resource_uri:
+          type: string
+        tool_name:
+          type: string
+          description: The tool's own name on its connector.
+        result:
+          type: object
+          additionalProperties: true
+          description: The tool's raw CallToolResult (absent when it was too large to keep).
+    MCPAppView:
+      type: object
+      properties:
+        tool_call_id:
+          type: string
+          format: uuid
+        server_name:
+          type: string
+        tool_name:
+          type: string
+        resource_uri:
+          type: string
+        html:
+          type: string
+          description: The view's document, with its Content-Security-Policy meta at the top.
+        csp:
+          type: string
+        prefers_border:
+          type: boolean
+        tool_input: {}
+        tool_result: {}
+      required: [tool_call_id, server_name, tool_name, resource_uri, html, csp, tool_input]
+    AgentPromptPayload:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [questions, approval, form, url]
+        title:
+          type: string
+        message:
+          type: string
+        questions:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              header:
+                type: string
+              question:
+                type: string
+              options:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    label:
+                      type: string
+                    description:
+                      type: string
+              multi_select:
+                type: boolean
+        schema:
+          type: object
+          additionalProperties: true
+          description: An MCP elicitation form's requestedSchema.
+        url:
+          type: string
+        server_name:
+          type: string
+        tool_name:
+          type: string
+      required: [kind]
+    AgentPromptResponse:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [accept, decline, cancel]
+        answers:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              selected:
+                type: array
+                items:
+                  type: string
+              text:
+                type: string
+        content:
+          type: object
+          additionalProperties: true
+        note:
+          type: string
+      required: [action]
+    AgentPrompt:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        chat_id:
+          type: string
+          format: uuid
+        job_id:
+          type: string
+          format: uuid
+        source:
+          type: string
+          enum: [agent, mcp_elicitation]
+        tool_call_id:
+          type: string
+        payload:
+          $ref: '#/components/schemas/AgentPromptPayload'
+        status:
+          type: string
+          enum: [pending, answered, expired, cancelled]
+        response:
+          $ref: '#/components/schemas/AgentPromptResponse'
+        expires_at:
+          type: string
+          format: date-time
+        answered_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+      required: [id, chat_id, job_id, source, payload, status, expires_at, created_at]
     ToolCall:
       type: object
       properties:
         step:
           type: integer
           description: Advanced-loop step (1-based) the call ran in; absent on Standard turns.
+        app:
+          $ref: '#/components/schemas/ToolCallApp'
         id:
           type: string
           format: uuid

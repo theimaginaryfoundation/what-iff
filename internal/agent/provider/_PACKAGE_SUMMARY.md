@@ -118,6 +118,11 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 - **Inbound:** `internal/agent` (message handling, loops), `internal/agentjobs/schedule` (schedule parsing via `CallWithRetry`).
 - **Outbound:** `internal/datastore` (OpenAI provider for some ops), OpenAI and Anthropic SDKs, `go.uber.org/zap`.
 
+## Mock directives
+
+- In echo mode the mock reads `/mock-tool <name> <json>` and `/mock-wait <duration>` lines from the user message (`mock_directives.go`): one tool call per round, then it answers with the rest of the message and a summary of the results.
+  Used to drive tools (ask_user, MCP tools) locally and in e2e without a real model (ADR 0x042).
+
 ## Non-obvious decisions
 
 - **User images are always inline.**
