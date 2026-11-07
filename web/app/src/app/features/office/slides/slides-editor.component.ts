@@ -140,6 +140,7 @@ export class SlidesEditorComponent implements FileEditor {
   private readonly history = new DeckHistory();
   private readonly rendered = signal(false);
   private generation = 0;
+  private lastContent: Blob | null = null;
   private resizeObserver: ResizeObserver | null = null;
 
   constructor() {
@@ -151,6 +152,8 @@ export class SlidesEditorComponent implements FileEditor {
       if (!this.rendered()) return;
       const blob = this.blob();
       this.file();
+      // After a save the host hands back the bytes this editor produced; the deck already is them.
+      if (blob === this.lastContent) return;
       untracked(() => void this.open(blob));
     });
     this.host.nativeElement.addEventListener('keydown', event => this.onKeydown(event));
@@ -164,7 +167,9 @@ export class SlidesEditorComponent implements FileEditor {
 
   async content(): Promise<Blob> {
     const { bytes } = await deckToPptx(this.deck(), this.writer);
-    return new Blob([bytes as BlobPart], { type: PPTX_MIME });
+    const blob = new Blob([bytes as BlobPart], { type: PPTX_MIME });
+    this.lastContent = blob;
+    return blob;
   }
 
   markSaved(): void {
@@ -196,6 +201,8 @@ export class SlidesEditorComponent implements FileEditor {
       this.editingId.set(null);
       this.state.set('ready');
       this.fit();
+      // Keyboard navigation and shortcuts listen on the host, so give it focus once it is shown.
+      setTimeout(() => this.stage()?.nativeElement.focus({ preventScroll: true }));
     } catch (error) {
       if (generation !== this.generation) return;
       console.error('The presentation could not be opened', error);

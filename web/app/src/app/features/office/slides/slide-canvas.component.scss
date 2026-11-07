@@ -11,6 +11,9 @@
 .slide__surface {
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  // Slide content has its own colours; the app theme must not leak in.
+  color: #000000;
+  font-family: Calibri, Carlito, Arial, sans-serif;
   left: 0;
   overflow: hidden;
   position: absolute;
