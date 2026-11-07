@@ -136,7 +136,11 @@ class DocxWriter {
     const n = kind === 'header' ? ++this.headerCount : ++this.footerCount;
     const name = `${kind}${n}.xml`;
     const partRels: PartRels = { entries: [], next: 1 };
-    const scope: DocDocument = { ...this.doc, tableSource: source.tableSource ?? {}, drawings: source.drawings ?? {} };
+    const scope: DocDocument = {
+      ...this.doc,
+      tableSource: source.tableSource ?? {},
+      drawings: { ...(this.doc.drawings ?? {}), ...(source.drawings ?? {}) },
+    };
     const xml = this.bodyXml(source.body, scope, pkg, partRels, addRel, `word/${name}`);
     const tag = kind === 'header' ? 'w:hdr' : 'w:ftr';
     pkg.put(`word/${name}`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><${tag} ${NAMESPACES}>${xml}</${tag}>`);
