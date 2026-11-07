@@ -332,6 +332,11 @@ Nothing here changes the decisions; the recipes and numbers below are what steps
 - Collaborative cursors or presence in an open file are out of scope.
 - Letting the agent propose edits to user files for approval (ADR 0x034 "Not done yet"), now with a diff viewer to show them in.
 - Shape and media editing in slides; headers, footers and comments in documents.
+- Office limitations parked after v1 (2026-11-07; see "Preservation pass"), each a candidate for a later pass:
+  - Sheets: slicers are dropped, with a notice; threaded comments become notes; x14 conditional formatting and validation in `extLst` are not read; pictures moved on a sheet whose drawing is kept whole are saved where they were; charts and pivots are view-only; editing defined names in Univer's UI has not been exercised.
+  - Docs: tracked changes are accepted on import; content-control properties are lost, though their content stays; soft line breaks become paragraphs; text boxes, shapes, charts and equations are kept but not shown; a heading applied in the editor does not export as a paragraph style.
+  - Slides: gradient and picture fills, group contents, table geometry and video or audio are kept but not editable.
+  - All formats: saved files have not yet been opened in Microsoft Office. LibreOffice and independent parsers read them.
 - JupyterLite *Run* in the Capacitor app once service workers are confirmed there.
 - A storage quota per account, now that users can create files.
 
