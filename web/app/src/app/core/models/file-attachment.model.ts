@@ -111,3 +111,33 @@ export function isPendingImageAttachment(item: PendingFileAttachment): boolean {
   }
   return item.file?.type.toLowerCase().startsWith('image/') ?? false;
 }
+
+/** Why a file is in a thread's context (`GET /chat/{id}/context-files`). Unknown values are shown as is. */
+export type ChatContextReason =
+  | 'attached_recent'
+  | 'attached_since_checkpoint'
+  | 'recalled'
+  | 'produced_this_turn'
+  | 'agent_written'
+  | 'skill_bundle'
+  | (string & {});
+
+/** One file in a thread's context (ADR 0x043 §4). */
+export interface ChatContextFile {
+  file: FileAttachment;
+  /** Where a container mounts it, relative to /workspace. */
+  workspace_path: string;
+  reasons: ChatContextReason[];
+  /** The newer file that takes the same workspace path, so this one is not mounted. */
+  shadowed_by?: string;
+}
+
+export interface ChatContainerStatus {
+  state: string;
+  files?: Record<string, string>;
+}
+
+export interface ChatContextFilesResponse {
+  files: ChatContextFile[];
+  container?: ChatContainerStatus;
+}

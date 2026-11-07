@@ -202,7 +202,7 @@ func TestAgentFiles_CreateReadAppendPatch(t *testing.T) {
 	row := fx.store.rows[uuid.MustParse(id)]
 	require.True(t, row.AgentAuthored())
 	require.Equal(t, &persona, row.CreatedByPersonalityID)
-	require.Nil(t, row.CreatedByChatID)
+	require.Equal(t, &chat.ID, row.CreatedByChatID, "the conversation is always recorded (ADR 0x043 §4); the personality still owns the file")
 	require.True(t, strings.HasPrefix(row.S3Key, "users/"+fx.userID.String()+"/agent/"))
 
 	firstKey := row.S3Key

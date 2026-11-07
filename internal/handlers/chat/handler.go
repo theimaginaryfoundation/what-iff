@@ -91,6 +91,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	chatRouter.HandleFunc("/{chatId}/loaded-skills", h.ListChatLoadedSkills).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/loaded-skills/{ritualId}", h.UnloadChatSkill).Methods("DELETE")
 	chatRouter.HandleFunc("/{chatId}/file-attachment", h.CreateFileAttachment).Methods("POST")
+	chatRouter.HandleFunc("/{chatId}/context-files", h.ListChatContextFiles).Methods("GET")
 	chatRouter.HandleFunc("/chat-message/{id}", h.GetChatMessage).Methods("GET")
 	chatRouter.HandleFunc("/{id}/context", h.GetChatContext).Methods("GET")
 	chatRouter.HandleFunc("/{id}/context", h.PatchChatContext).Methods("PATCH")

@@ -682,7 +682,7 @@ describe('ChatComposerComponent', () => {
         galleryBtn!.click();
         fixture.detectChanges();
 
-        expect(imageGallery.listImages).toHaveBeenCalledWith(1, 30);
+        expect(imageGallery.listImages).toHaveBeenCalledWith(1, 30, { kind: 'all' });
         expect(fixture.componentInstance.galleryOpen()).toBe(true);
     });
 
