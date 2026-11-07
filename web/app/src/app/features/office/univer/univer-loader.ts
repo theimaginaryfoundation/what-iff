@@ -12,8 +12,13 @@ export type Univer = import('@univerjs/presets').Univer;
 
 export interface UniverSheetsKit {
   createUniver: UniverPresets['createUniver'];
-  /** createUniver options ready for a container element: locale, strings, theme and presets. */
-  options(container: HTMLElement, opts?: { readOnly?: boolean }): Parameters<UniverPresets['createUniver']>[0];
+  /**
+   * createUniver options ready for a container element: locale, strings, theme and presets. With
+   * a `formulaWorker`, formulas are calculated there instead of on the main thread.
+   */
+  options(container: HTMLElement, opts?: { readOnly?: boolean; formulaWorker?: Worker | null }): Parameters<UniverPresets['createUniver']>[0];
+  /** A formula worker for one instance (null where workers are unavailable); the caller terminates it. */
+  createFormulaWorker(): Worker | null;
 }
 
 export interface UniverDocsKit {
@@ -36,6 +41,17 @@ function linkStylesheet(document: Document, href: string, marker: string): Promi
     link.onerror = () => resolve(); // the editor still works, unstyled, and the console says why
     document.head.appendChild(link);
   });
+}
+
+/** The formula engine runs in a worker (univer-formula.worker.ts), one per sheets instance. */
+export function createFormulaWorker(): Worker | null {
+  if (typeof Worker === 'undefined') return null;
+  try {
+    return new Worker(new URL('./univer-formula.worker', import.meta.url), { type: 'module' });
+  } catch (error) {
+    console.warn('Univer formula worker unavailable; formulas run on the main thread', error);
+    return null;
+  }
 }
 
 let sheetsKit: Promise<UniverSheetsKit> | null = null;
@@ -99,6 +115,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
     );
     return {
       createUniver: presets.createUniver,
+      createFormulaWorker,
       options: (container, opts) => ({
         locale: presets.LocaleType.EN_US,
         locales: { [presets.LocaleType.EN_US]: strings },
@@ -114,6 +131,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
             formulaBar: !opts?.readOnly,
             toolbar: !opts?.readOnly,
             contextMenu: !opts?.readOnly,
+            ...(opts?.formulaWorker ? { workerURL: opts.formulaWorker } : {}),
           }),
           dv.UniverSheetsDataValidationPreset(),
           cf.UniverSheetsConditionalFormattingPreset(),

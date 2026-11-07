@@ -37,7 +37,10 @@ export function changesContent(event: KeyboardEvent): boolean {
 
 export interface UniverKit {
   createUniver: (typeof import('@univerjs/presets'))['createUniver'];
-  options(container: HTMLElement, opts?: { readOnly?: boolean }): Parameters<(typeof import('@univerjs/presets'))['createUniver']>[0];
+  options(
+    container: HTMLElement,
+    opts?: { readOnly?: boolean; formulaWorker?: Worker | null },
+  ): Parameters<(typeof import('@univerjs/presets'))['createUniver']>[0];
 }
 
 /** What a unit (a workbook, a document) gives back: its snapshot. */
@@ -92,6 +95,12 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
   protected abstract parse(blob: Blob, file: FileAttachment): Promise<{ data: TData; report: FidelityReport }>;
   protected abstract createUnit(univerAPI: FUniver, data: TData, readOnly: boolean): Promise<TUnit> | TUnit;
   protected abstract serialize(data: TData, file: FileAttachment): Promise<Blob>;
+  /** The createUniver options for this instance; a subclass can add to them (a worker, say). */
+  protected univerOptions(kit: UniverKit, container: HTMLElement, readOnly: boolean): ReturnType<UniverKit['options']> {
+    return kit.options(container, { readOnly });
+  }
+  /** Called whenever the instance is torn down, before a reopen and on destroy. */
+  protected onDispose(): void {}
 
   constructor() {
     afterNextRender(() => this.rendered.set(true));
@@ -164,7 +173,7 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
       this.report.set(parsed.report);
       const readOnly = this.readOnly();
       this.openedReadOnly = readOnly;
-      const { univer, univerAPI } = kit.createUniver(kit.options(this.container().nativeElement, { readOnly }));
+      const { univer, univerAPI } = kit.createUniver(this.univerOptions(kit, this.container().nativeElement, readOnly));
       this.univer = univer;
       this.univerAPI = univerAPI;
       this.unit = await this.createUnit(univerAPI, parsed.data, readOnly);
@@ -201,6 +210,7 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
       // A half-created instance can throw on dispose; nothing to keep.
     }
     this.univer = null;
+    this.onDispose();
     const el = this.rendered() ? this.container().nativeElement : null;
     if (el) el.replaceChildren();
   }
