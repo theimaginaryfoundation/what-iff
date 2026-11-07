@@ -333,7 +333,8 @@ func TestUploadExpressionCellAttachment_StoresImageAndThumbnail(t *testing.T) {
 	// The cell is filed in the personality's expressions folder, not left at the top of the gallery.
 	any := sqlmock.AnyArg()
 	expectCreatePersonalityAttachmentWithInsert(mock, uid, pid, attID,
-		[]driver.Value{"expression-smug.png", "image/png", "expressions/aster", false, any, "user", any, any, any})
+		// name, type, folder, context_only, created_at, origin, content_version, owner, personality, id
+		[]driver.Value{"expression-smug.png", "image/png", "expressions/aster", false, any, "user", any, any, any, any})
 	mock.ExpectExec("UPDATE `file_attachments`").WillReturnResult(sqlmock.NewResult(0, 1))
 
 	store := newRecordingFileStore()
