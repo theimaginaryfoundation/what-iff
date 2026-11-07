@@ -1,0 +1,36 @@
+<div class="pdf-editor">
+  <div class="pdf-editor__toolbar" role="toolbar" aria-label="Annotation tools">
+    <div class="pdf-editor__tools" role="group" aria-label="Tool">
+      <button type="button" [attr.aria-pressed]="tool() === 'select'" (click)="setTool('select')">Select</button>
+      <button type="button" [attr.aria-pressed]="tool() === 'text'" (click)="setTool('text')">Text</button>
+      <button type="button" [attr.aria-pressed]="tool() === 'draw'" (click)="setTool('draw')">Draw</button>
+      <button type="button" [attr.aria-pressed]="tool() === 'highlight'" (click)="setTool('highlight')">Highlight</button>
+    </div>
+    <div class="pdf-editor__colors" role="group" aria-label="Colour">
+      @for (c of colors; track c) {
+        <button
+          type="button"
+          class="pdf-editor__swatch"
+          [class.pdf-editor__swatch--active]="color() === c"
+          [style.background]="c"
+          [attr.aria-label]="'Use colour ' + c"
+          [attr.aria-pressed]="color() === c"
+          (click)="setColor(c)"
+        ></button>
+      }
+    </div>
+    <span class="pdf-editor__pages" aria-live="polite">
+      @if (state() === 'ready') {
+        {{ pageCount() }} {{ pageCount() === 1 ? 'page' : 'pages' }}
+      }
+    </span>
+  </div>
+  @if (state() === 'loading') {
+    <p class="pdf-editor__placeholder" role="status">Opening {{ file().name }}…</p>
+  } @else if (state() === 'error') {
+    <p class="pdf-editor__placeholder" role="alert">Could not open this PDF for editing.</p>
+  }
+  <div #container class="pdf-editor__container" [class.pdf-editor__container--hidden]="state() !== 'ready'">
+    <div #viewerHost class="pdfViewer"></div>
+  </div>
+</div>
