@@ -3,6 +3,7 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { csvDelimiterFor, previewKindFor } from '../../gallery/helpers/file-preview.helpers';
 import { FidelityReport } from '../shared/fidelity';
+import { FidelityNoticeComponent } from '../shared/fidelity-notice.component';
 import { UniverEditorBase, UniverKit, UniverUnit } from '../univer/univer-editor-base';
 import { FUniver, UNIVER_SHEETS_LOADER } from '../univer/univer-loader';
 import { UniverWorkbook } from '../xlsx/univer-sheet-types';
@@ -24,6 +25,7 @@ interface Workbook extends UniverUnit<UniverWorkbook> {
 @Component({
   selector: 'app-sheets-editor',
   standalone: true,
+  imports: [FidelityNoticeComponent],
   templateUrl: '../univer/univer-editor.component.html',
   styleUrl: '../univer/univer-editor.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

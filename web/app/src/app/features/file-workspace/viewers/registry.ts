@@ -35,6 +35,7 @@ const loadTextViewer = () => import('./text-viewer.component').then(m => m.TextV
 const loadCodeEditor = () => import('../editors/code-editor.component').then(m => m.CodeEditorComponent);
 const loadSheetsEditor = () => import('../../office/sheets/sheets-editor.component').then(m => m.SheetsEditorComponent);
 const loadDocsEditor = () => import('../../office/docs/docs-editor.component').then(m => m.DocsEditorComponent);
+const loadSlidesEditor = () => import('../../office/slides/slides-editor.component').then(m => m.SlidesEditorComponent);
 
 const VIEWERS: Partial<Record<FilePreviewKind, ViewerEntry>> = {
   text: { load: loadTextViewer, phoneView: true, edit: loadCodeEditor },
@@ -42,6 +43,7 @@ const VIEWERS: Partial<Record<FilePreviewKind, ViewerEntry>> = {
   csv: { load: loadSheetsEditor, phoneView: true, edit: loadSheetsEditor, editInPlace: true },
   spreadsheet: { load: loadSheetsEditor, phoneView: true, edit: loadSheetsEditor, editInPlace: true },
   document: { load: loadDocsEditor, phoneView: true, edit: loadDocsEditor, editInPlace: true },
+  slides: { load: loadSlidesEditor, phoneView: true, edit: loadSlidesEditor, editInPlace: true },
   image: {
     load: () => import('./image-viewer.component').then(m => m.ImageViewerComponent),
     phoneView: true,
