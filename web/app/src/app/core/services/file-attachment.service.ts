@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { FileAttachment, FileAttachmentFilters } from '../models/file-attachment.model';
+import { FileAttachment, FileAttachmentFilters, ChatContextFilesResponse } from '../models/file-attachment.model';
 import { PaginatedResponse } from '../models/common.model';
 
 @Injectable({
@@ -85,6 +85,11 @@ export class FileAttachmentService {
   /** The attachment's bytes, for viewing or saving in the browser. */
   downloadFileAttachment(attachmentId: string): Observable<Blob> {
     return this.http.get(`${this.apiUrl}/file-attachment/${attachmentId}`, { responseType: 'blob' });
+  }
+
+  /** The files in a thread's context (ADR 0x043 §4), newest first, with why each is there. */
+  listChatContextFiles(chatId: string): Observable<ChatContextFilesResponse> {
+    return this.http.get<ChatContextFilesResponse>(`${this.apiUrl}/chat/${chatId}/context-files`);
   }
 }
 

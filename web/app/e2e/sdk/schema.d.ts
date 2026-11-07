@@ -12959,6 +12959,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/{chatId}/context-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The files in a thread's context
+         * @description Lists the files an agent working in the thread is expected to see (ADR 0x043 §4), newest first: the attachments on every message since the last checkpoint and the files `find_context` pulled in for them, the attachments on the last ten user messages, the agent's own files written in this thread, and the active skills' bundle files. The same rule hydrates the thread's container in builds that have one. Files that share a workspace path are all listed; the newest takes the path and the others say which one shadows them.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The thread's files */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChatContextFilesResponse"];
+                    };
+                };
+                /** @description Invalid chat ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/{chatId}/file-attachment": {
         parameters: {
             query?: never;
@@ -15712,6 +15789,32 @@ export interface components {
         GalleryMoveResult: {
             /** @description Number of files whose folder changed */
             moved: number;
+        };
+        /** @description One file in a thread's context and why it is there. */
+        ChatContextFile: {
+            file: components["schemas"]["FileAttachment"];
+            /** @description Where a container mounts it, relative to `/workspace`: a message attachment or agent file by its name alone (gallery folders are labels), a bundle file under `skills/<slug>/`. */
+            workspace_path: string;
+            /** @description Why the file is in context. More values may be added; show an unknown one as is. */
+            reasons: ("attached_recent" | "attached_since_checkpoint" | "recalled" | "produced_this_turn" | "agent_written" | "skill_bundle")[];
+            /**
+             * Format: uuid
+             * @description The newer file that takes the same workspace path, so this one is not mounted. Absent for a file that holds its path.
+             */
+            shadowed_by?: string;
+        };
+        /** @description What the build knows about the thread's container, when it has one. */
+        ChatContainerStatus: {
+            /** @description `none`, `running` or `stopped`. */
+            state: string;
+            /** @description Per workspace path, whether the container's copy is `current` or `stale`. */
+            files?: {
+                [key: string]: string;
+            };
+        };
+        ChatContextFilesResponse: {
+            files: components["schemas"]["ChatContextFile"][];
+            container?: components["schemas"]["ChatContainerStatus"];
         };
         /**
          * @example {
