@@ -38,3 +38,30 @@
   inset: 0;
   position: absolute;
 }
+
+.univer-editor__bar {
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.3rem 0.75rem;
+}
+
+.univer-editor__tool {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  padding: 0.3rem 0.55rem;
+
+  &:hover {
+    border-color: var(--border-hover, var(--accent));
+  }
+
+  &[aria-pressed='true'] {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+}

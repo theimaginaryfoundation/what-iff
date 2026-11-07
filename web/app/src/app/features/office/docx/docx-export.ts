@@ -46,6 +46,7 @@ import {
   DocTextStyle,
   LAYOUT,
   TOKEN,
+  isNoBorder,
 } from './univer-doc-types';
 
 export interface DocxExportResult {
@@ -1066,7 +1067,10 @@ export function rootNamespaces(originalXml: string | null | undefined): string {
 }
 
 function cellBorderXml(name: string, b: DocTableCellBorder | undefined): string {
-  if (!b) return '';
+  // Unset is a table made in the editor, which Univer draws with its default line: say so, so the
+  // saved file looks the same in Word, where an unset side has none.
+  if (!b) return `<w:${name} w:val="single" w:sz="4" w:space="0" w:color="C7C9CC"/>`;
+  if (isNoBorder(b)) return `<w:${name} w:val="nil"/>`;
   const val = b.dashStyle === 2 ? 'dotted' : b.dashStyle === 3 ? 'dashed' : 'single';
   return `<w:${name} w:val="${val}" w:sz="${pxToEighths(b.width?.v ?? 0.5)}" w:space="0" w:color="${colorHex(b.color.rgb) ?? 'auto'}"/>`;
 }

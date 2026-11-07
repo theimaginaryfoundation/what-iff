@@ -30,6 +30,11 @@ export interface UniverDocsKit {
   createUniver: UniverPresets['createUniver'];
   options(container: HTMLElement, opts?: { readOnly?: boolean }): Parameters<UniverPresets['createUniver']>[0];
   UniverInstanceType: UniverPresets['UniverInstanceType'];
+  /**
+   * Shows or hides the editing guides: margin corners and lines for table sides that have no border.
+   * Paint only, so the document and its layout do not change. False when the page is not rendered yet.
+   */
+  setDocGuides(univer: Univer, unitId: string, show: boolean): boolean;
 }
 
 export const UNIVER_SHEETS_STYLESHEET = 'univer-sheets.css';
@@ -57,6 +62,19 @@ export function createFormulaWorker(): Worker | null {
     console.warn('Univer formula worker unavailable; formulas run on the main thread', error);
     return null;
   }
+}
+
+const DOC_MAIN_COMPONENT = '__Document_Render_Main__';
+const DOC_BACKGROUND_COMPONENT = '__Document_Render_Background__';
+/** A table side with no border, while guides are showing: dashed and light, as Word's gridlines are. */
+const DOC_GUIDE_LINE = { color: { rgb: '#B8C0CC' }, width: { v: 0.75 }, dashStyle: 3 };
+
+interface DocRenderComponent {
+  makeDirty(dirty: boolean): void;
+  _marginStrokeColor?: string;
+  _resolveTableCellBorder?(primary: unknown, secondary: unknown): unknown;
+  /** Univer's own method, kept while it is wrapped. */
+  __resolveTableCellBorder?(primary: unknown, secondary: unknown): unknown;
 }
 
 let sheetsKit: Promise<UniverSheetsKit> | null = null;
@@ -180,6 +198,21 @@ export function loadUniverDocs(document: Document): Promise<UniverDocsKit> {
     return {
       createUniver: presets.createUniver,
       UniverInstanceType: presets.UniverInstanceType,
+      setDocGuides: (univer, unitId, show) => {
+        const injector = univer.__getInjector();
+        const components = injector.get(core.IRenderManagerService).getRenderUnitById(unitId)?.components as Map<string, DocRenderComponent> | undefined;
+        const main = components?.get(DOC_MAIN_COMPONENT);
+        const background = components?.get(DOC_BACKGROUND_COMPONENT);
+        if (!main || !background) return false;
+        // Univer has no option for either, so this reaches two fields of the pinned version.
+        const resolve = main.__resolveTableCellBorder ?? main._resolveTableCellBorder!;
+        main.__resolveTableCellBorder = resolve;
+        main._resolveTableCellBorder = show ? (primary, secondary) => resolve.call(main, primary, secondary) ?? DOC_GUIDE_LINE : resolve;
+        background._marginStrokeColor = show ? undefined : 'transparent';
+        main.makeDirty(true);
+        background.makeDirty(true);
+        return true;
+      },
       options: (container, opts) => ({
         locale: presets.LocaleType.EN_US,
         locales: { [presets.LocaleType.EN_US]: strings },

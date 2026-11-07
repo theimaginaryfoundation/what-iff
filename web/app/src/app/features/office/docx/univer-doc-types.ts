@@ -380,3 +380,13 @@ export const GLYPH = {
   lowerRoman: 7,
 } as const;
 export const LAYOUT = { inline: 0, none: 1, polygon: 2, square: 3, through: 4, tight: 5, topAndBottom: 6 } as const;
+
+/**
+ * A side with no line. Univer draws a default gray line where a cell has no border data at all, and
+ * draws nothing for a side that is explicitly invisible; in Word an unset side has no line.
+ */
+export const NO_BORDER: DocTableCellBorder = { color: { rgb: 'transparent' }, width: { v: 0 } };
+
+export function isNoBorder(border: DocTableCellBorder | undefined): boolean {
+  return !!border && (border.color?.rgb === 'transparent' || (border.width?.v ?? 1) <= 0);
+}

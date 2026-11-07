@@ -18,8 +18,13 @@ function fakeUniverKit() {
     editable: [] as boolean[],
     listeners: [] as ((event: { id: string; type: number }) => void)[],
     data: null as DocDocument | null,
+    guides: [] as boolean[],
   };
-  const kit: UniverKit = {
+  const kit: UniverKit & { setDocGuides(univer: unknown, unitId: string, show: boolean): boolean } = {
+    setDocGuides: (_univer, _unitId, show) => {
+      state.guides.push(show);
+      return true;
+    },
     options: (container, opts) => ({ presets: [], container, readOnly: opts?.readOnly }) as never,
     createUniver: (options => {
       const o = options as unknown as { container: HTMLElement; readOnly?: boolean };
@@ -127,6 +132,24 @@ describe('DocsEditorComponent', () => {
     expect(await saved.text('customXml/item1.xml')).toBe('<root xmlns="urn:test">kept</root>');
     expect(await saved.text('word/document.xml')).toContain('> again</w:t>');
     expect(await saved.text('word/styles.xml')).toBe(await pkg.text('word/styles.xml'));
+  });
+
+  it('hides the guides by default, and shows them only when asked while editing', async () => {
+    const view = await open(attachment(), await docxBlob());
+    expect(fake.state.guides.at(-1)).toBe(false);
+    expect(view.querySelector('.univer-editor__tool')).toBeNull();
+    fixture.destroy();
+
+    const el = await open(attachment(), await docxBlob(), false);
+    expect(fake.state.guides.at(-1)).toBe(false);
+    const toggle = el.querySelector('.univer-editor__tool') as HTMLButtonElement;
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    toggle.click();
+    fixture.detectChanges();
+    expect(fake.state.guides.at(-1)).toBe(true);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    toggle.click();
+    expect(fake.state.guides.at(-1)).toBe(false);
   });
 
   it('reports bytes it cannot read', async () => {

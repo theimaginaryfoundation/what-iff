@@ -120,6 +120,7 @@ Read-only is enforced twice, because Univer's workbook lock does not hold on a f
 A unit runs mutations of its own as it settles, so the editor marks dirty only after that.
 
 Office font names (Aptos, Calibri, Cambria, Segoe UI and others) alias to local lookalikes through `@font-face` `local()` rules, and nothing is fetched.
+Each alias declares regular, bold and italic faces by full font name, because with a single face bold text was left to the browser's synthesis and showed as regular.
 
 ### 7. The Univer editors
 
@@ -169,11 +170,13 @@ Saving regenerates `document.xml`, the headers and footers, numbering additions 
 
 Univer's renderer composes a run's style from the document default, the paragraph's `textStyle` and the run, and does not look at `styles[styleId].textStyle`.
 The importer therefore bakes each named style's text formatting into the paragraph and the exporter subtracts it, so Heading 1 renders as Heading 1 and exports as a style reference.
+The page shows what prints. **Show guides**, in edit mode, draws the margin corners and dashed lines for table sides with no border. It only changes painting, so layout and the file are untouched, and it reaches two fields of the pinned Univer version because there is no option for either.
 Pictures are in both `drawings`, which layout reads, and the `DOC_DRAWING_PLUGIN` resource, which the painter loads.
 A read-only document is a disabled snapshot rather than a permission lock, which keeps the "content is protected" toast out of the viewer.
 
 | Feature | Behaviour |
 |---|---|
+| Table borders | Resolved as Word does: the table style and its `basedOn`, the table's `tblBorders`, first and last row and column formatting where `tblLook` turns it on, then the cell's `tcBorders`. A side with no line is stated as invisible, because Univer draws a default gray line where a cell has no border data, and saves as `nil`. |
 | Soft line breaks | Stay inside their paragraph as an unmarked `\v`, which Univer draws as a line break in a paginated document; column breaks are marked as such. |
 | Content controls | `CustomRangeType.SDT` ranges at run, block, row and cell level, with `w:sdtPr` kept. Typing over a placeholder clears `w:showingPlcHdr`. Univer enforces `w:lock`. |
 | Tracked changes | Insertions stay wrapped and show coloured on screen, with nothing added to the saved formatting. Deletions, moves and property changes ride through as they were. |
@@ -262,6 +265,8 @@ Python loads from jsDelivr at run time, the kernel's default, rather than self-h
   - Comments anchored to drawings are not written, and new comments are authored "WhatIff user", because Univer's current user is not wired to the signed-in user.
   - Renaming a sheet orphans its kept drawing and chart references.
 - **Documents.**
+  - Table borders cannot be edited here, because Univer has no command for them.
+  - Shading and text formatting from table styles are not applied, including banded rows and header-row colours; only their borders are.
   - Tracked changes cannot be accepted or rejected here, new typing is not tracked, and deleted text does not show.
   - Content-control pickers open only in Word, and data-bound controls refresh from the document's data there.
   - Backspace directly after an opaque run or a deletion appears to do nothing; ArrowLeft steps past it.

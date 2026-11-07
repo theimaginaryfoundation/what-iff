@@ -35,7 +35,9 @@ import {
   LAYOUT,
   NOTE_REFERENCE,
   TOKEN,
+  NO_BORDER,
 } from './univer-doc-types';
+import { TableStyles, tableBordersFor } from './docx-table-styles';
 import {
   BOUND_CONTROLS_NOTICE,
   CONTROLS_NOTICE,
@@ -73,6 +75,8 @@ export interface BodyContext {
   styles: Record<string, DocNamedStyle>;
   /** Styles whose paragraph chain has numbering: style id to list binding. */
   styleNumbering: Map<string, { numId: string; level: number }>;
+  /** Table styles' borders by style id, for tables that take theirs from a style. */
+  tableStyles?: TableStyles;
   knownLists: Set<string>;
   fidelity: FidelityCollector;
   where: string;
@@ -797,15 +801,7 @@ export class BodyBuilder {
     const columnCount = Math.max(grid.length, ...rowsEl.map(tr => gridWidthOfRow(tr)), 1);
     while (grid.length < columnCount) grid.push(96);
     const tableId = this.ctx.nextId('tbl');
-    const tableBorders = child(tblPr, NS.w, 'tblBorders');
-    const defaults = {
-      top: cellBorder(child(tableBorders, NS.w, 'top')),
-      bottom: cellBorder(child(tableBorders, NS.w, 'bottom')),
-      left: cellBorder(child(tableBorders, NS.w, 'left')),
-      right: cellBorder(child(tableBorders, NS.w, 'right')),
-      insideH: cellBorder(child(tableBorders, NS.w, 'insideH')),
-      insideV: cellBorder(child(tableBorders, NS.w, 'insideV')),
-    };
+    const borders = tableBordersFor(tblPr, this.ctx.tableStyles);
     const tblW = child(tblPr, NS.w, 'tblW');
     const widthType = attr(tblW, NS.w, 'type');
     const widthValue = num(attr(tblW, NS.w, 'w'));
@@ -882,12 +878,7 @@ export class BodyBuilder {
           tc,
           tcPr,
           span,
-          {
-            top: isFirstRow ? defaults.top : defaults.insideH,
-            bottom: isLastRow ? defaults.bottom : defaults.insideH,
-            left: isFirstCol ? defaults.left : defaults.insideV,
-            right: isLastCol ? defaults.right : defaults.insideV,
-          },
+          borders.forCell({ isFirstRow, isLastRow, isFirstCol, isLastCol }),
           table.cellMargin!,
         );
         cellSdts.note(tc, tr, cellStart, this.length - 1);
@@ -946,10 +937,11 @@ export class BodyBuilder {
       bb = own('bottom'),
       bl = own('left'),
       br = own('right');
-    if (bt) cell.borderTop = bt;
-    if (bb) cell.borderBottom = bb;
-    if (bl) cell.borderLeft = bl;
-    if (br) cell.borderRight = br;
+    // Every side is stated: a side with no border data would draw Univer's default gray line.
+    cell.borderTop = bt ?? NO_BORDER;
+    cell.borderBottom = bb ?? NO_BORDER;
+    cell.borderLeft = bl ?? NO_BORDER;
+    cell.borderRight = br ?? NO_BORDER;
     const tcMar = child(tcPr, NS.w, 'tcMar');
     if (tcMar) {
       const m = (name: string, fallback: { v: number }) => {
@@ -1053,7 +1045,7 @@ const BORDER_DASH: Record<string, number> = { dotted: 2, dashed: 3, dashSmallGap
 export function cellBorder(el: Element | null): DocTableCellBorder | undefined {
   if (!el) return undefined;
   const val = wval(el);
-  if (!val || val === 'nil' || val === 'none') return undefined;
+  if (!val || val === 'nil' || val === 'none') return NO_BORDER;
   return {
     color: { rgb: hexColor(attr(el, NS.w, 'color')) ?? '#000000' },
     width: { v: eighthsToPx(num(attr(el, NS.w, 'sz')) ?? 4) },
