@@ -1,4 +1,5 @@
-import { Component, input, provideZonelessChangeDetection } from '@angular/core';
+import { Component, input, output, provideZonelessChangeDetection, signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { NEVER, of, Subject, throwError } from 'rxjs';
@@ -7,12 +8,37 @@ import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
 import { FileWorkspaceComponent } from './file-workspace.component';
-import { VIEWER_LOADER } from './viewers/registry';
+import { FileEditor } from './editors/file-editor';
+import { EDITOR_LOADER, VIEWER_LOADER } from './viewers/registry';
 
 @Component({ standalone: true, template: `<p class="fake-viewer">{{ file().name }}:{{ blob().size }}</p>` })
 class FakeViewerComponent {
   readonly file = input.required<FileAttachment>();
   readonly blob = input.required<Blob>();
+}
+
+@Component({ standalone: true, template: `<p class="fake-editor">{{ file().name }}</p>` })
+class FakeEditorComponent implements FileEditor {
+  readonly file = input.required<FileAttachment>();
+  readonly blob = input.required<Blob>();
+  readonly dirtyChange = output<boolean>();
+  readonly saveRequested = output<void>();
+  readonly dirty = signal(false);
+  text = 'edited';
+  marked = 0;
+  content(): Promise<Blob> {
+    return Promise.resolve(new Blob([this.text], { type: 'text/plain' }));
+  }
+  markSaved(): void {
+    this.marked += 1;
+    this.dirty.set(false);
+    this.dirtyChange.emit(false);
+  }
+  edit(text: string): void {
+    this.text = text;
+    this.dirty.set(true);
+    this.dirtyChange.emit(true);
+  }
 }
 
 function file(overrides: Partial<FileAttachment> = {}): FileAttachment {
@@ -25,20 +51,25 @@ describe('FileWorkspaceComponent', () => {
   let fixture: ComponentFixture<FileWorkspaceComponent>;
   let download: ReturnType<typeof vi.fn>;
   let alert: ReturnType<typeof vi.fn>;
+  let replaceContent: ReturnType<typeof vi.fn>;
+  let confirmDiscard: ReturnType<typeof vi.fn>;
   let loadViewer: ReturnType<typeof vi.fn<(kind: string) => Promise<unknown> | null>>;
 
   beforeEach(async () => {
     download = vi.fn().mockReturnValue(of(textBlob('hello')));
     alert = vi.fn().mockResolvedValue(undefined);
+    replaceContent = vi.fn().mockImplementation((id: string) => of(file({ id, content_version: 2 })));
+    confirmDiscard = vi.fn().mockResolvedValue(true);
     loadViewer = vi.fn((kind: string) => (kind === 'none' ? null : Promise.resolve(FakeViewerComponent)));
     await TestBed.configureTestingModule({
       imports: [FileWorkspaceComponent],
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
-        { provide: FileAttachmentService, useValue: { downloadFileAttachment: download } },
-        { provide: ConfirmationService, useValue: { alert } },
+        { provide: FileAttachmentService, useValue: { downloadFileAttachment: download, replaceContent } },
+        { provide: ConfirmationService, useValue: { alert, confirmDiscardChanges: confirmDiscard } },
         { provide: VIEWER_LOADER, useValue: (kind: string) => loadViewer(kind) },
+        { provide: EDITOR_LOADER, useValue: (kind: string) => (kind === 'none' ? null : Promise.resolve(FakeEditorComponent)) },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(FileWorkspaceComponent);
@@ -185,5 +216,112 @@ describe('FileWorkspaceComponent', () => {
     expect(el.querySelector('button[aria-label="Expand file"]')).not.toBeNull();
     expect(button(el, 'Prev')).toBeUndefined();
     expect(el.querySelector('a.file-workspace__link')?.textContent).toContain('Open in gallery');
+  });
+
+  async function startEditing(): Promise<{ el: HTMLElement; editor: FakeEditorComponent }> {
+    const el = await show(file({ content_version: 3 }));
+    button(el, 'Edit')!.click();
+    await fixture.whenStable();
+    await new Promise(resolve => setTimeout(resolve));
+    fixture.detectChanges();
+    const editor = fixture.componentInstance['editorRef']!.instance as FakeEditorComponent;
+    return { el, editor };
+  }
+
+  it('offers Edit for kinds with an editor, not on a phone, and never for kinds without one', async () => {
+    let el = await show(file());
+    expect(button(el, 'Edit')).toBeDefined();
+    fixture.componentRef.setInput('canEdit', false);
+    fixture.detectChanges();
+    expect(button(el, 'Edit')).toBeUndefined();
+    fixture.componentRef.setInput('canEdit', true);
+    download.mockReturnValue(of(new Blob(['PK'])));
+    el = await show(file({ name: 'a.zip', file_type: 'application/zip' }));
+    expect(button(el, 'Edit')).toBeUndefined();
+  });
+
+  it('creates the editor, saves with the loaded version as If-Match, and adopts the new version', async () => {
+    const changed = vi.fn();
+    fixture.componentInstance.fileChanged.subscribe(changed);
+    const { el, editor } = await startEditing();
+    expect(el.querySelector('.fake-editor')?.textContent).toBe('notes.txt');
+    expect(el.querySelector('.fake-viewer')).toBeNull();
+    expect((button(el, 'Save') as HTMLButtonElement).disabled).toBe(true);
+
+    editor.edit('new text');
+    fixture.detectChanges();
+    expect((button(el, 'Save') as HTMLButtonElement).disabled).toBe(false);
+    await fixture.componentInstance.save();
+    expect(replaceContent).toHaveBeenCalledWith('f-1', expect.any(Blob), 'text/plain', 3, null);
+    expect(await (replaceContent.mock.calls[0][1] as Blob).text()).toBe('new text');
+    expect(editor.marked).toBe(1);
+    expect(changed).toHaveBeenCalledWith(expect.objectContaining({ id: 'f-1', content_version: 2 }));
+    expect(await fixture.componentInstance.blob()!.text()).toBe('new text');
+  });
+
+  it('turns a stale version into the conflict dialog, with reload, overwrite and save-as', async () => {
+    const { el, editor } = await startEditing();
+    editor.edit('mine');
+    replaceContent.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 412, error: { details: { content_version: 7 } } })));
+    await fixture.componentInstance.save();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.conflictVersion()).toBe(7);
+    expect(el.textContent).toContain('now version 7');
+
+    fixture.componentInstance.overwriteAfterConflict();
+    await vi.waitFor(() => expect(replaceContent).toHaveBeenCalledTimes(2));
+    expect(replaceContent.mock.calls[1][3]).toBeNull();
+    await vi.waitFor(() => expect(fixture.componentInstance.conflictVersion()).toBeNull());
+
+    editor.edit('again');
+    replaceContent.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 412, error: { details: { content_version: 8 } } })));
+    await fixture.componentInstance.save();
+    download.mockReturnValue(of(textBlob('theirs')));
+    fixture.componentInstance.reloadAfterConflict();
+    await fixture.whenStable();
+    expect(fixture.componentInstance.mode()).toBe('view');
+    await vi.waitFor(async () => expect(await fixture.componentInstance.blob()!.text()).toBe('theirs'));
+
+    replaceContent.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 500 })));
+    await startEditing();
+    (fixture.componentInstance['editorRef']!.instance as FakeEditorComponent).edit('x');
+    await fixture.componentInstance.save();
+    expect(fixture.componentInstance.saveError()).toContain('Could not save');
+  });
+
+  it('asks before leaving edit mode or closing with unsaved changes', async () => {
+    const closed = vi.fn();
+    fixture.componentInstance.close.subscribe(closed);
+    const { editor } = await startEditing();
+    editor.edit('dirty');
+    confirmDiscard.mockResolvedValueOnce(false);
+    await fixture.componentInstance.requestClose();
+    expect(closed).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.mode()).toBe('edit');
+    confirmDiscard.mockResolvedValueOnce(true);
+    await fixture.componentInstance.requestClose();
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(fixture.componentInstance.mode()).toBe('view');
+  });
+
+  it('validates Save As and hands the content, name and folder to the host', async () => {
+    const saveAs = vi.fn();
+    fixture.componentInstance.saveAs.subscribe(saveAs);
+    const { editor } = await startEditing();
+    editor.edit('copy me');
+    fixture.componentInstance.openSaveAs();
+    expect(fixture.componentInstance.saveAsName()).toBe('notes.txt');
+    fixture.componentInstance.saveAsName.set('bad/name.txt');
+    await fixture.componentInstance.submitSaveAs();
+    expect(fixture.componentInstance.saveAsError()).toContain('without slashes');
+    fixture.componentInstance.saveAsName.set('copy.txt');
+    fixture.componentInstance.saveAsFolder.set(' Docs/Drafts ');
+    await fixture.componentInstance.submitSaveAs();
+    expect(saveAs).toHaveBeenCalledTimes(1);
+    const payload = saveAs.mock.calls[0][0] as { name: string; folder: string; blob: Blob };
+    expect(payload.name).toBe('copy.txt');
+    expect(payload.folder).toBe('docs/drafts');
+    expect(await payload.blob.text()).toBe('copy me');
+    expect(fixture.componentInstance.saveAsOpen()).toBe(false);
   });
 });

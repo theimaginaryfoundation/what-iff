@@ -1,7 +1,7 @@
 <section class="file-workspace" aria-labelledby="file-workspace-title">
   <header class="file-workspace__bar">
     @if (backLabel(); as label) {
-      <button type="button" class="file-workspace__back" (click)="close.emit()" [attr.aria-label]="'Back to the ' + label.toLowerCase()">
+      <button type="button" class="file-workspace__back" (click)="requestClose()" [attr.aria-label]="'Back to the ' + label.toLowerCase()">
         <ui-arrow-left-icon [size]="16" />
         <span>{{ label }}</span>
       </button>
@@ -56,7 +56,16 @@
     </div>
 
     <div class="file-workspace__actions">
-      @if (!isRenaming()) {
+      @if (mode() === 'edit') {
+        <button type="button" class="file-workspace__button file-workspace__button--primary" [disabled]="!editorDirty() || saving()" (click)="save()">
+          {{ saving() ? 'Saving…' : 'Save' }}
+        </button>
+        <button type="button" class="file-workspace__button" [disabled]="saving()" (click)="openSaveAs()">Save as…</button>
+        <button type="button" class="file-workspace__button" [disabled]="saving()" (click)="stopEdit()">Done</button>
+      } @else if (editable()) {
+        <button type="button" class="file-workspace__button file-workspace__button--primary" (click)="startEdit()">Edit</button>
+      }
+      @if (!isRenaming() && mode() === 'view') {
         <button type="button" class="file-workspace__icon-btn" uiTooltip="Rename this file" placement="bottom" aria-label="Rename file" (click)="startRename()">
           <ui-edit-icon [size]="14" />
         </button>
@@ -94,14 +103,19 @@
         </button>
       }
       @if (!backLabel()) {
-        <button type="button" class="file-workspace__icon-btn" uiTooltip="Close" placement="bottom" aria-label="Close file" (click)="close.emit()">
+        <button type="button" class="file-workspace__icon-btn" uiTooltip="Close" placement="bottom" aria-label="Close file" (click)="requestClose()">
           <ui-x-icon [size]="14" />
         </button>
       }
     </div>
   </header>
 
+  @if (saveError(); as message) {
+    <p class="file-workspace__save-error" role="alert">{{ message }}</p>
+  }
+
   <div class="file-workspace__body">
+    <ng-container #editorOutlet />
     @switch (state()) {
       @case ('loading') {
         <p class="file-workspace__placeholder" role="status">Loading {{ title() }}…</p>
@@ -113,7 +127,9 @@
         </div>
       }
       @case ('ready') {
-        @if (viewer(); as type) {
+        @if (mode() === 'edit') {
+          <!-- The editor is created in the outlet above. -->
+        } @else if (viewer(); as type) {
           <ng-container *ngComponentOutlet="type; inputs: viewerInputs() ?? undefined" />
         } @else {
           <p class="file-workspace__placeholder" role="status">Loading the viewer…</p>
@@ -131,3 +147,47 @@
     }
   </div>
 </section>
+
+@if (conflictVersion() !== null) {
+  <ui-modal [open]="true" labelledBy="file-workspace-conflict-title" size="sm" (dismiss)="dismissConflict()">
+    <h2 modal-header id="file-workspace-conflict-title" class="file-workspace__dialog-title">The file changed</h2>
+    <p class="file-workspace__dialog-text">
+      Someone, or the agent, saved {{ title() }} since you opened it (now version {{ conflictVersion() }}). Reload to see their
+      version and lose your edits, overwrite it with yours, or save yours as a new file.
+    </p>
+    <div modal-footer class="file-workspace__dialog-actions">
+      <button type="button" class="file-workspace__button" (click)="reloadAfterConflict()">Reload</button>
+      <button type="button" class="file-workspace__button" (click)="openSaveAs()">Save as…</button>
+      <button type="button" class="file-workspace__button file-workspace__button--danger" (click)="overwriteAfterConflict()">Overwrite</button>
+    </div>
+  </ui-modal>
+}
+
+@if (saveAsOpen()) {
+  <ui-modal [open]="true" labelledBy="file-workspace-save-as-title" size="sm" (dismiss)="cancelSaveAs()">
+    <h2 modal-header id="file-workspace-save-as-title" class="file-workspace__dialog-title">Save as a new file</h2>
+    <form class="file-workspace__dialog-form" (submit)="$event.preventDefault(); submitSaveAs()">
+      <label class="file-workspace__dialog-label">
+        Name
+        <input type="text" class="file-workspace__rename-input" [value]="saveAsName()" (input)="saveAsName.set($any($event.target).value)" autofocus />
+      </label>
+      <label class="file-workspace__dialog-label">
+        Folder
+        <input
+          type="text"
+          class="file-workspace__rename-input"
+          placeholder="Top level"
+          [value]="saveAsFolder()"
+          (input)="saveAsFolder.set($any($event.target).value)"
+        />
+      </label>
+      @if (saveAsError(); as message) {
+        <p class="file-workspace__save-error" role="alert">{{ message }}</p>
+      }
+    </form>
+    <div modal-footer class="file-workspace__dialog-actions">
+      <button type="button" class="file-workspace__button" (click)="cancelSaveAs()">Cancel</button>
+      <button type="button" class="file-workspace__button file-workspace__button--primary" (click)="submitSaveAs()">Save</button>
+    </div>
+  </ui-modal>
+}

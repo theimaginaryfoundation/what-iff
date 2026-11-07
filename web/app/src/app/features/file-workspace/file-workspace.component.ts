@@ -2,8 +2,10 @@ import { DatePipe, NgComponentOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
+  ComponentRef,
   DestroyRef,
   Type,
+  ViewContainerRef,
   computed,
   effect,
   inject,
@@ -11,12 +13,14 @@ import {
   output,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Observable, of, take } from 'rxjs';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../core/services/confirmation.service';
+import { conflictVersionOf } from '../../core/utils/api-error.helpers';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
 import { saveBlobAsFile } from '../../core/utils/download.helpers';
 import {
@@ -27,12 +31,14 @@ import {
   ExpandIconComponent,
   XIconComponent,
 } from '../../shared/ui/icons/icons';
+import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
+import { FileEditor } from './editors/file-editor';
 import { galleryDisplayBaseName, galleryFilenameFromBaseName } from '../gallery/helpers/gallery-filename.helpers';
 import { FilePreviewKind, fileTypeLabel, previewKindFor } from '../gallery/helpers/file-preview.helpers';
-import { folderLabel } from '../gallery/helpers/gallery-folder.helpers';
+import { folderLabel, folderPathError, normalizeFolderPath } from '../gallery/helpers/gallery-folder.helpers';
 import { formatSource, sourceForImage } from '../gallery/helpers/image-source.helpers';
-import { VIEWER_LOADER } from './viewers/registry';
+import { EDITOR_LOADER, VIEWER_LOADER, hasEditor } from './viewers/registry';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -57,6 +63,7 @@ type LoadState = 'idle' | 'loading' | 'ready' | 'error';
     EditIconComponent,
     ExpandIconComponent,
     XIconComponent,
+    ModalComponent,
   ],
   templateUrl: './file-workspace.component.html',
   styleUrl: './file-workspace.component.scss',
@@ -66,6 +73,8 @@ export class FileWorkspaceComponent {
   private readonly files = inject(FileAttachmentService);
   private readonly confirmationService = inject(ConfirmationService);
   private readonly loadViewer = inject(VIEWER_LOADER);
+  private readonly loadEditor = inject(EDITOR_LOADER);
+  private readonly editorOutlet = viewChild('editorOutlet', { read: ViewContainerRef });
 
   readonly file = input.required<FileAttachment>();
   /** The personality this file is a document of, by its current name, if any. */
@@ -83,6 +92,10 @@ export class FileWorkspaceComponent {
   readonly expanded = input(false);
   /** A link to the gallery, where the file can be filed and found again (the chat). */
   readonly showGalleryLink = input(false);
+  /** Whether editing is offered: not on a phone (ADR 0x043 §1). */
+  readonly canEdit = input(true);
+  /** The conversation a save is made from, carried on the save so its container is updated. */
+  readonly chatId = input<string | null>(null);
 
   readonly close = output<void>();
   readonly previous = output<void>();
@@ -91,6 +104,10 @@ export class FileWorkspaceComponent {
   readonly rename = output<{ id: string; name: string }>();
   readonly moveToFolder = output<string>();
   readonly toggleExpand = output<void>();
+  /** The file's metadata after a save (a new content_version), for the host to adopt. */
+  readonly fileChanged = output<FileAttachment>();
+  /** Save As: the host creates the file where the user chose and opens it. */
+  readonly saveAs = output<{ name: string; folder: string; blob: Blob }>();
 
   readonly kind = computed<FilePreviewKind>(() => previewKindFor(this.file()));
   readonly typeLabel = computed(() => fileTypeLabel(this.file()));
@@ -118,6 +135,20 @@ export class FileWorkspaceComponent {
   readonly downloading = signal(false);
   readonly isRenaming = signal(false);
   readonly renameDraft = signal('');
+
+  // Editing (ADR 0x043 §3).
+  readonly mode = signal<'view' | 'edit'>('view');
+  readonly editable = computed(() => this.canEdit() && hasEditor(this.kind()) && this.state() === 'ready');
+  readonly editorDirty = signal(false);
+  readonly saving = signal(false);
+  readonly saveError = signal<string | null>(null);
+  /** The current version the server reported on a 412; the conflict dialog is open while set. */
+  readonly conflictVersion = signal<number | null>(null);
+  readonly saveAsOpen = signal(false);
+  readonly saveAsName = signal('');
+  readonly saveAsFolder = signal('');
+  readonly saveAsError = signal<string | null>(null);
+  private editorRef: ComponentRef<FileEditor> | null = null;
 
   /** Bumped on every reset, so bytes for a file that is no longer shown are dropped when they arrive. */
   private generation = 0;
@@ -158,7 +189,164 @@ export class FileWorkspaceComponent {
       );
       onCleanup(() => subscription.unsubscribe());
     });
-    inject(DestroyRef).onDestroy(() => (this.generation += 1));
+    // A new blob (after a save or a reload) or new metadata reaches the open editor.
+    effect(() => {
+      const blob = this.blob();
+      const file = this.file();
+      untracked(() => {
+        if (this.editorRef && blob) {
+          this.editorRef.setInput('file', file);
+          this.editorRef.setInput('blob', blob);
+        }
+      });
+    });
+    inject(DestroyRef).onDestroy(() => {
+      this.generation += 1;
+      this.destroyEditor();
+    });
+  }
+
+  // --- editing -----------------------------------------------------------------------------------
+
+  async startEdit(): Promise<void> {
+    if (!this.editable() || this.mode() === 'edit') return;
+    const load = this.loadEditor(this.kind());
+    const outlet = this.editorOutlet();
+    const blob = this.blob();
+    if (!load || !outlet || !blob) return;
+    this.mode.set('edit');
+    this.saveError.set(null);
+    const type = (await load) as Type<FileEditor>;
+    if (this.mode() !== 'edit' || this.editorRef) return;
+    const ref = outlet.createComponent(type);
+    ref.setInput('file', this.file());
+    ref.setInput('blob', blob);
+    const instance = ref.instance as FileEditor & {
+      dirtyChange?: { subscribe(fn: (dirty: boolean) => void): unknown };
+      saveRequested?: { subscribe(fn: () => void): unknown };
+    };
+    instance.dirtyChange?.subscribe(dirty => this.editorDirty.set(dirty));
+    instance.saveRequested?.subscribe(() => void this.save());
+    this.editorRef = ref;
+  }
+
+  /** Leaves edit mode, asking first when there are unsaved changes. */
+  async stopEdit(): Promise<boolean> {
+    if (this.mode() !== 'edit') return true;
+    if (this.editorDirty() && !(await this.confirmationService.confirmDiscardChanges())) return false;
+    this.destroyEditor();
+    this.mode.set('view');
+    return true;
+  }
+
+  async requestClose(): Promise<void> {
+    if (await this.stopEdit()) this.close.emit();
+  }
+
+  /** Saves the editor's content as the file's new version; a stale version opens the conflict dialog. */
+  async save(opts: { overwrite?: boolean } = {}): Promise<void> {
+    const editor = this.editorRef?.instance;
+    const file = this.file();
+    if (!editor || this.saving()) return;
+    this.saving.set(true);
+    this.saveError.set(null);
+    try {
+      const content = await editor.content();
+      const ifMatch = opts.overwrite ? null : file.content_version ?? 1;
+      const updated = await new Promise<FileAttachment>((resolve, reject) =>
+        this.files.replaceContent(file.id, content, file.file_type, ifMatch, this.chatId()).pipe(take(1)).subscribe({ next: resolve, error: reject }),
+      );
+      this.conflictVersion.set(null);
+      this.blob.set(content);
+      editor.markSaved();
+      this.editorDirty.set(false);
+      this.fileChanged.emit({ ...file, ...updated, chat_id: updated.chat_id ?? file.chat_id });
+    } catch (error) {
+      const current = conflictVersionOf(error);
+      if (current !== null) {
+        this.conflictVersion.set(current);
+      } else {
+        this.saveError.set('Could not save the file. Please try again.');
+      }
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  /** Conflict: drop the edits and show what is on the server now. */
+  reloadAfterConflict(): void {
+    this.conflictVersion.set(null);
+    this.destroyEditor();
+    this.mode.set('view');
+    this.generation += 1;
+    this.refetch();
+  }
+
+  overwriteAfterConflict(): void {
+    this.conflictVersion.set(null);
+    void this.save({ overwrite: true });
+  }
+
+  dismissConflict(): void {
+    this.conflictVersion.set(null);
+  }
+
+  openSaveAs(): void {
+    const file = this.file();
+    this.saveAsName.set(file.name);
+    this.saveAsFolder.set(file.folder ?? '');
+    this.saveAsError.set(null);
+    this.conflictVersion.set(null);
+    this.saveAsOpen.set(true);
+  }
+
+  cancelSaveAs(): void {
+    this.saveAsOpen.set(false);
+  }
+
+  async submitSaveAs(): Promise<void> {
+    const name = this.saveAsName().trim();
+    if (!name || /[\\/]/.test(name)) {
+      this.saveAsError.set('Enter a file name without slashes.');
+      return;
+    }
+    const rawFolder = this.saveAsFolder().trim();
+    let folder = '';
+    if (rawFolder) {
+      const problem = folderPathError(rawFolder);
+      if (problem) {
+        this.saveAsError.set(problem);
+        return;
+      }
+      folder = normalizeFolderPath(rawFolder) ?? '';
+    }
+    const content = this.editorRef ? await this.editorRef.instance.content() : this.blob();
+    if (!content) return;
+    this.saveAsOpen.set(false);
+    this.saveAs.emit({ name, folder, blob: content });
+  }
+
+  /** Re-reads the current file's bytes (after a conflict reload). */
+  private refetch(): void {
+    const file = this.file();
+    this.state.set('loading');
+    const generation = this.generation;
+    this.files.downloadFileAttachment(file.id).pipe(take(1)).subscribe({
+      next: blob => {
+        if (generation !== this.generation) return;
+        this.blob.set(blob);
+        this.state.set('ready');
+      },
+      error: () => {
+        if (generation === this.generation) this.state.set('error');
+      },
+    });
+  }
+
+  private destroyEditor(): void {
+    this.editorRef?.destroy();
+    this.editorRef = null;
+    this.editorDirty.set(false);
   }
 
   download(): void {
@@ -197,6 +385,11 @@ export class FileWorkspaceComponent {
 
   private reset(): void {
     this.generation += 1;
+    this.destroyEditor();
+    this.mode.set('view');
+    this.conflictVersion.set(null);
+    this.saveAsOpen.set(false);
+    this.saveError.set(null);
     this.blob.set(null);
     this.viewer.set(null);
     this.state.set('idle');
