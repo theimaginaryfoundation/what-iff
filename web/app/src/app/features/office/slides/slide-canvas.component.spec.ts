@@ -127,8 +127,9 @@ describe('SlideCanvasComponent', () => {
     expect(elements[3].querySelector<HTMLImageElement>('img')?.style.height).toBe('125%');
     expect(elements[4].querySelectorAll('td')).toHaveLength(3);
     expect(elements[4].querySelector('td')?.getAttribute('colspan')).toBe('2');
-    expect(elements[5].querySelectorAll('rect')).toHaveLength(2);
-    expect(elements[5].querySelectorAll('rect')[1].getAttribute('height')).toBe('84');
+    const chartImg = elements[5].querySelector<HTMLImageElement>('img.slide__chart')!;
+    expect(chartImg.src.startsWith('data:image/svg+xml')).toBe(true);
+    expect(decodeURIComponent(chartImg.src)).toContain('<rect');
   });
 
   it('selects, drags and resizes elements when interactive, in slide points', () => {

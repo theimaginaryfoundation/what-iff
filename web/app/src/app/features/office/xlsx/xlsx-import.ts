@@ -1,7 +1,11 @@
 import ExcelJS from 'exceljs';
 
 import { cellA1, parseRangeA1, parseSqref } from '../shared/a1';
+import { chartSvgDataUrl } from '../shared/chart-svg';
 import { FidelityCollector, FidelityReport } from '../shared/fidelity';
+import { OoxmlPackage, emuToPx, parseXml } from '../shared/ooxml';
+import { parseChartXml } from './xlsx-chart-xml';
+import { PreservedParts, collectPreservedParts, hasPreservedParts } from './xlsx-preserve';
 import {
   DEFAULT_COLUMN_WIDTH_PX,
   DEFAULT_ROW_HEIGHT_PX,
@@ -28,6 +32,7 @@ import {
   writeResource,
 } from './univer-sheet-types';
 import { UniverStyle, colorFromArgb, styleFromExcel, styleKey } from './xlsx-styles';
+import { ExcelThemeColors, parseThemeColors } from './xlsx-theme';
 
 export interface XlsxImportOptions {
   /** The workbook unit id Univer will use. */
@@ -38,6 +43,8 @@ export interface XlsxImportOptions {
 export interface XlsxImportResult {
   workbook: UniverWorkbook;
   report: FidelityReport;
+  /** Charts and pivot tables from the original, to write back on save (see xlsx-preserve.ts). */
+  preserved?: PreservedParts;
 }
 
 export const UNIVER_APP_VERSION = '1.3.1';
@@ -55,12 +62,112 @@ const MS_PER_DAY = 86_400_000;
 export async function xlsxToWorkbook(bytes: ArrayBuffer | Uint8Array, opts: XlsxImportOptions): Promise<XlsxImportResult> {
   const excel = new ExcelJS.Workbook();
   await excel.xlsx.load(bytes as never);
-  return excelToWorkbook(excel, opts);
+  const result = excelToWorkbook(excel, opts);
+  // Charts and pivot tables: ExcelJS reads neither, so they come from the package itself.
+  let preserved: PreservedParts | null = null;
+  try {
+    preserved = await collectPreservedParts(await OoxmlPackage.open(bytes));
+  } catch {
+    preserved = null;
+  }
+  if (preserved && hasPreservedParts(preserved)) {
+    const fidelity = new FidelityCollector();
+    for (const item of result.report.dropped) for (let i = 0; i < (item.count ?? 1); i++) fidelity.drop(item.feature, item.where);
+    for (const item of result.report.warnings) for (let i = 0; i < (item.count ?? 1); i++) fidelity.warn(item.feature, item.where);
+    addPreservedCharts(result.workbook, preserved, fidelity, excel);
+    return { ...result, report: fidelity.report(), preserved };
+  }
+  return result;
+}
+
+/** Draws each kept chart from its cached data as a picture at its anchor, and notes what is kept but not editable. */
+function addPreservedCharts(
+  workbook: UniverWorkbook,
+  preserved: PreservedParts,
+  fidelity: FidelityCollector,
+  excel: ExcelJS.Workbook,
+): void {
+  const theme = parseThemeColors((excel.model as unknown as { themes?: Record<string, string> }).themes?.['theme1']);
+  const drawings = readResourceMap<UniverDrawingsForSheet>(workbook, RESOURCE_DRAWINGS);
+  for (const sheetId of workbook.sheetOrder) {
+    const sheet = workbook.sheets[sheetId];
+    const entry = preserved.bySheet[sheet.name];
+    if (!entry) continue;
+    if (entry.pivotTables.length)
+      fidelity.warn('Pivot tables are kept in the file but not editable here; Excel refreshes them', sheet.name);
+    if (!entry.drawing) continue;
+    fidelity.warn('Charts are shown as pictures and kept in the file; edit them in Excel', sheet.name);
+    const colLeft = (col: number) => {
+      let x = 0;
+      for (let i = 0; i < col; i++) x += sheet.columnData[i]?.w ?? sheet.defaultColumnWidth;
+      return x;
+    };
+    const rowTop = (row: number) => {
+      let y = 0;
+      for (let i = 0; i < row; i++) y += sheet.rowData[i]?.h ?? sheet.defaultRowHeight;
+      return y;
+    };
+    const forSheet = (drawings[sheetId] ??= { data: {}, order: [] });
+    entry.drawing.charts.forEach((chart, index) => {
+      const part = preserved.parts[chart.chartPath];
+      if (!part) return;
+      let data: ReturnType<typeof parseChartXml> = null;
+      try {
+        data = parseChartXml(parseXml(new TextDecoder().decode(part.bytes)), theme);
+      } catch {
+        data = null;
+      }
+      const left = colLeft(chart.from.col) + emuToPx(chart.from.colOff);
+      const top = rowTop(chart.from.row) + emuToPx(chart.from.rowOff);
+      const width = Math.max(40, colLeft(chart.to.col) + emuToPx(chart.to.colOff) - left);
+      const height = Math.max(30, rowTop(chart.to.row) + emuToPx(chart.to.rowOff) - top);
+      const source = data ? chartSvgDataUrl(data, { width, height, background: '#FFFFFF' }) : placeholderSvg(width, height, chart.name);
+      const drawingId = `chart-${sheetId}-${index}`;
+      forSheet.data[drawingId] = {
+        unitId: workbook.id,
+        subUnitId: sheetId,
+        drawingId,
+        drawingType: 0,
+        imageSourceType: 'BASE64',
+        source,
+        transform: { left, top, width, height, angle: 0 },
+        sheetTransform: {
+          from: {
+            column: chart.from.col,
+            columnOffset: emuToPx(chart.from.colOff),
+            row: chart.from.row,
+            rowOffset: emuToPx(chart.from.rowOff),
+          },
+          to: { column: chart.to.col, columnOffset: emuToPx(chart.to.colOff), row: chart.to.row, rowOffset: emuToPx(chart.to.rowOff) },
+          angle: 0,
+        },
+        anchorType: '1',
+      };
+      forSheet.order.push(drawingId);
+    });
+  }
+  if (Object.keys(drawings).length) writeResource(workbook, RESOURCE_DRAWINGS, drawings);
+}
+
+function placeholderSvg(width: number, height: number, name: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="#FFFFFF" stroke="#BFBFBF"/><text x="50%" y="50%" text-anchor="middle" font-family="Arial" font-size="12" fill="#808080">${name.replace(/[<>&]/g, '')}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function readResourceMap<T>(workbook: UniverWorkbook, name: string): Record<string, T> {
+  const raw = workbook.resources.find(r => r.name === name)?.data;
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, T>;
+  } catch {
+    return {};
+  }
 }
 
 export function excelToWorkbook(excel: ExcelJS.Workbook, opts: XlsxImportOptions): XlsxImportResult {
   const fidelity = new FidelityCollector();
-  const styles = new StyleTable();
+  const theme = parseThemeColors((excel.model as unknown as { themes?: Record<string, string> }).themes?.['theme1']);
+  const styles = new StyleTable(theme);
   const workbook: UniverWorkbook = {
     id: opts.id,
     name: opts.name,
@@ -87,7 +194,7 @@ export function excelToWorkbook(excel: ExcelJS.Workbook, opts: XlsxImportOptions
     workbook.sheets[id] = sheet;
     const dv = importDataValidations(ws, fidelity);
     if (dv.length) validation[id] = dv;
-    const cf = importConditionalFormatting(ws, fidelity);
+    const cf = importConditionalFormatting(ws, fidelity, styles.theme);
     if (cf.length) formatting[id] = cf;
     const sheetNotes = importNotes(ws);
     if (Object.keys(sheetNotes).length) notes[id] = sheetNotes;
@@ -111,6 +218,13 @@ class StyleTable {
   private readonly ids = new Map<string, string>();
   private next = 0;
 
+  constructor(readonly theme: ExcelThemeColors) {}
+
+  /** The Univer style for an ExcelJS style, with theme and indexed colours resolved. */
+  fromExcel(style: Partial<ExcelJS.Style> | undefined): UniverStyle | null {
+    return styleFromExcel(style, this.theme);
+  }
+
   idFor(style: UniverStyle | null): string | undefined {
     if (!style) return undefined;
     const key = styleKey(style);
@@ -128,7 +242,7 @@ function importSheet(ws: ExcelJS.Worksheet, id: string, styles: StyleTable, fide
   const sheet: UniverSheet = {
     id,
     name: ws.name,
-    tabColor: colorFromArgb(ws.properties?.tabColor)?.rgb ?? '',
+    tabColor: colorFromArgb(ws.properties?.tabColor, styles.theme)?.rgb ?? '',
     hidden: ws.state === 'veryHidden' ? 2 : ws.state === 'hidden' ? 1 : 0,
     freeze: { xSplit: 0, ySplit: 0, startRow: -1, startColumn: -1 },
     rowCount: Math.max(ws.rowCount + 100, 1000),
@@ -187,7 +301,7 @@ function importCell(
   where: string,
 ): UniverCell | null {
   const out: UniverCell = {};
-  const styleId = styles.idFor(styleFromExcel(cell.style));
+  const styleId = styles.idFor(styles.fromExcel(cell.style));
   if (styleId) out.s = styleId;
   const raw = cell.value;
   if (raw === null || raw === undefined) {
@@ -206,7 +320,7 @@ function importCell(
     out.p = richTextDoc(
       row,
       col,
-      runs.map(r => ({ text: r.text, style: styleFromExcel({ font: r.font as ExcelJS.Font }) })),
+      runs.map(r => ({ text: r.text, style: styles.fromExcel({ font: r.font as ExcelJS.Font }) })),
     );
     out.v = runs.map(r => r.text).join('');
     out.t = 1;
@@ -236,7 +350,7 @@ function assignValue(out: UniverCell, value: ExcelJS.CellValue | undefined, cell
     out.t = 2;
     if (!cell.numFmt) {
       // Keep it a date on screen: Univer shows serials as numbers without a format.
-      out.s = styles.idFor({ ...(cell.style ? styleFromExcel(cell.style) : {}), n: { pattern: 'yyyy-mm-dd' } });
+      out.s = styles.idFor({ ...(cell.style ? styles.fromExcel(cell.style) : {}), n: { pattern: 'yyyy-mm-dd' } });
     }
     return;
   }
@@ -360,7 +474,7 @@ const CF_NUMBER_OPERATORS: Record<string, string> = {
   notBetween: 'notBetween',
 };
 
-function importConditionalFormatting(ws: ExcelJS.Worksheet, fidelity: FidelityCollector): UniverCfRule[] {
+function importConditionalFormatting(ws: ExcelJS.Worksheet, fidelity: FidelityCollector, theme: ExcelThemeColors): UniverCfRule[] {
   const list = ((ws as unknown as { conditionalFormattings?: ExcelJS.ConditionalFormattingOptions[] }).conditionalFormattings ??
     []) as ExcelJS.ConditionalFormattingOptions[];
   const rules: UniverCfRule[] = [];
@@ -369,7 +483,7 @@ function importConditionalFormatting(ws: ExcelJS.Worksheet, fidelity: FidelityCo
     const ranges = parseSqref(cf.ref);
     if (!ranges.length) continue;
     for (const rule of cf.rules) {
-      const config = cfRuleConfig(rule, fidelity, ws.name);
+      const config = cfRuleConfig(rule, fidelity, ws.name, theme);
       if (!config) continue;
       rules.push({ cfId: `cf-${ws.id}-${n++}`, ranges, stopIfTrue: !!(rule as { stopIfTrue?: boolean }).stopIfTrue, rule: config });
     }
@@ -377,8 +491,8 @@ function importConditionalFormatting(ws: ExcelJS.Worksheet, fidelity: FidelityCo
   return rules;
 }
 
-function cfStyle(rule: ExcelJS.ConditionalFormattingRule): UniverStyle {
-  return styleFromExcel(rule.style) ?? {};
+function cfStyle(rule: ExcelJS.ConditionalFormattingRule, theme: ExcelThemeColors): UniverStyle {
+  return styleFromExcel(rule.style, theme) ?? {};
 }
 
 function cfValue(cvfo: ExcelJS.Cvfo | undefined): UniverCfValue {
@@ -390,26 +504,37 @@ function cfValue(cvfo: ExcelJS.Cvfo | undefined): UniverCfValue {
   return { type: 'num', value: cvfo.value };
 }
 
-function cfRuleConfig(rule: ExcelJS.ConditionalFormattingRule, fidelity: FidelityCollector, where: string): UniverCfRuleConfig | null {
+function cfRuleConfig(
+  rule: ExcelJS.ConditionalFormattingRule,
+  fidelity: FidelityCollector,
+  where: string,
+  theme: ExcelThemeColors,
+): UniverCfRuleConfig | null {
   switch (rule.type) {
     case 'cellIs': {
       const operator = CF_NUMBER_OPERATORS[rule.operator ?? 'equal'] ?? 'equal';
       const values = (rule.formulae ?? []).map(Number);
       if (values.some(v => Number.isNaN(v))) {
         fidelity.warn('Conditional formatting compared with a formula was kept as a formula rule', where);
-        return { type: 'highlightCell', subType: 'formula', value: `=${String(rule.formulae?.[0] ?? '')}`, style: cfStyle(rule) };
+        return { type: 'highlightCell', subType: 'formula', value: `=${String(rule.formulae?.[0] ?? '')}`, style: cfStyle(rule, theme) };
       }
       if (operator === 'between' || operator === 'notBetween') {
-        return { type: 'highlightCell', subType: 'number', operator, value: [values[0] ?? 0, values[1] ?? 0], style: cfStyle(rule) };
+        return { type: 'highlightCell', subType: 'number', operator, value: [values[0] ?? 0, values[1] ?? 0], style: cfStyle(rule, theme) };
       }
-      return { type: 'highlightCell', subType: 'number', operator, value: values[0], style: cfStyle(rule) };
+      return { type: 'highlightCell', subType: 'number', operator, value: values[0], style: cfStyle(rule, theme) };
     }
     case 'expression':
-      return { type: 'highlightCell', subType: 'formula', value: `=${String(rule.formulae?.[0] ?? '')}`, style: cfStyle(rule) };
+      return { type: 'highlightCell', subType: 'formula', value: `=${String(rule.formulae?.[0] ?? '')}`, style: cfStyle(rule, theme) };
     case 'containsText':
-      return { type: 'highlightCell', subType: 'text', operator: rule.operator ?? 'containsText', value: rule.text, style: cfStyle(rule) };
+      return {
+        type: 'highlightCell',
+        subType: 'text',
+        operator: rule.operator ?? 'containsText',
+        value: rule.text,
+        style: cfStyle(rule, theme),
+      };
     case 'timePeriod':
-      return { type: 'highlightCell', subType: 'timePeriod', operator: rule.timePeriod ?? 'today', style: cfStyle(rule) };
+      return { type: 'highlightCell', subType: 'timePeriod', operator: rule.timePeriod ?? 'today', style: cfStyle(rule, theme) };
     case 'top10':
       return {
         type: 'highlightCell',
@@ -417,26 +542,30 @@ function cfRuleConfig(rule: ExcelJS.ConditionalFormattingRule, fidelity: Fidelit
         isBottom: !!rule.bottom,
         isPercent: !!rule.percent,
         value: rule.rank ?? 10,
-        style: cfStyle(rule),
+        style: cfStyle(rule, theme),
       };
     case 'aboveAverage':
       return {
         type: 'highlightCell',
         subType: 'average',
         operator: (rule as { aboveAverage?: boolean }).aboveAverage === false ? 'lessThan' : 'greaterThan',
-        style: cfStyle(rule),
+        style: cfStyle(rule, theme),
       };
     case 'colorScale': {
       const colors = rule.color ?? [];
       const cfvo = rule.cfvo ?? [];
       return {
         type: 'colorScale',
-        config: colors.map((color, index) => ({ index, color: colorFromArgb(color)?.rgb ?? '#ffffff', value: cfValue(cfvo[index]) })),
+        config: colors.map((color, index) => ({
+          index,
+          color: colorFromArgb(color, theme)?.rgb ?? '#ffffff',
+          value: cfValue(cfvo[index]),
+        })),
       };
     }
     case 'dataBar': {
       const cfvo = rule.cfvo ?? [];
-      const color = colorFromArgb((rule as { color?: Partial<ExcelJS.Color> }).color)?.rgb ?? '#638ec6';
+      const color = colorFromArgb((rule as { color?: Partial<ExcelJS.Color> }).color, theme)?.rgb ?? '#638ec6';
       return {
         type: 'dataBar',
         isShowValue: rule.showValue !== false,

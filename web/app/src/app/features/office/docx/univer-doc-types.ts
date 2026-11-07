@@ -288,6 +288,9 @@ export interface DocDrawing {
   distB?: number;
   distL?: number;
   distR?: number;
+  /** Header and footer drawings: one transform per page the drawing appears on. */
+  isMultiTransform?: 0 | 1;
+  transforms?: { left: number; top: number; width: number; height: number; angle: number }[];
 }
 
 export interface DocDocument {

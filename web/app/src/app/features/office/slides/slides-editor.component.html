@@ -177,9 +177,6 @@
         }
         <div class="slides__group slides__group--end">
           <button type="button" class="slides__tool" (click)="notesOpen.set(!notesOpen())" [attr.aria-pressed]="notesOpen()">Notes</button>
-          <button type="button" class="slides__tool slides__tool--icon" (click)="zoomBy(1 / 1.25)" aria-label="Zoom out">−</button>
-          <button type="button" class="slides__tool" (click)="zoomToFit()" title="Fit to window">{{ (scale() * 100).toFixed(0) }}%</button>
-          <button type="button" class="slides__tool slides__tool--icon" (click)="zoomBy(1.25)" aria-label="Zoom in">+</button>
         </div>
       </div>
     }
@@ -216,29 +213,46 @@
           (textCommit)="onTextCommit($event)"
           (open)="openLink($event)"
         />
-        @if (readOnly()) {
-          <div class="slides__pager">
-            <button
-              type="button"
-              class="slides__tool"
-              (click)="goTo(slideIndex() - 1)"
-              [disabled]="slideIndex() === 0"
-              aria-label="Previous slide"
-            >
-              ‹
-            </button>
-            <span>{{ slideIndex() + 1 }} / {{ deck().slides.length }}</span>
-            <button
-              type="button"
-              class="slides__tool"
-              (click)="goTo(slideIndex() + 1)"
-              [disabled]="slideIndex() >= deck().slides.length - 1"
-              aria-label="Next slide"
-            >
-              ›
-            </button>
-          </div>
-        }
+      </div>
+    </div>
+    <div class="slides__status" role="toolbar" aria-label="Slide navigation and zoom">
+      <div class="slides__status-group">
+        <button
+          type="button"
+          class="slides__tool slides__tool--icon"
+          (click)="goTo(slideIndex() - 1)"
+          [disabled]="slideIndex() === 0"
+          aria-label="Previous slide"
+        >
+          ‹
+        </button>
+        <span class="slides__status-text">Slide {{ slideIndex() + 1 }} of {{ deck().slides.length }}</span>
+        <button
+          type="button"
+          class="slides__tool slides__tool--icon"
+          (click)="goTo(slideIndex() + 1)"
+          [disabled]="slideIndex() >= deck().slides.length - 1"
+          aria-label="Next slide"
+        >
+          ›
+        </button>
+      </div>
+      <div class="slides__status-group">
+        <button type="button" class="slides__tool slides__tool--icon" (click)="zoomBy(1 / 1.25)" aria-label="Zoom out">−</button>
+        <input
+          type="range"
+          class="slides__zoom"
+          min="10"
+          max="400"
+          step="5"
+          [value]="(scale() * 100).toFixed(0)"
+          (input)="setZoomPercent(+$any($event.target).value)"
+          aria-label="Zoom"
+        />
+        <button type="button" class="slides__tool slides__tool--icon" (click)="zoomBy(1.25)" aria-label="Zoom in">+</button>
+        <button type="button" class="slides__tool" (click)="zoomToFit()" [class.slides__tool--on]="zoom() === null" title="Fit to window">
+          {{ (scale() * 100).toFixed(0) }}%
+        </button>
       </div>
     </div>
     @if (notesOpen() || (readOnly() && slide().notes)) {
