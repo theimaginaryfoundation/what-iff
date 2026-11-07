@@ -306,7 +306,12 @@ export interface DocDocument {
   drawings?: Record<string, DocDrawing>;
   drawingsOrder?: string[];
   settings?: { zoomRatio?: number };
+  /** Plugin data, as Univer's resource manager loads it; the drawing plugin reads its pictures from here. */
+  resources?: { name: string; data: string }[];
 }
+
+/** The docs-drawing plugin's resource: {data: drawings, order: drawingsOrder} as JSON. */
+export const RESOURCE_DOC_DRAWINGS = 'DOC_DRAWING_PLUGIN';
 
 // Data stream tokens (DataStreamTreeTokenType).
 export const TOKEN = {

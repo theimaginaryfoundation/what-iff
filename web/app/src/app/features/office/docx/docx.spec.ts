@@ -23,7 +23,7 @@ import { describe, expect, it } from 'vitest';
 import { OoxmlPackage, base64ToBytes } from '../shared/ooxml';
 import { documentToDocx } from './docx-export';
 import { docxToDocument } from './docx-import';
-import { CUSTOM_RANGE, DocDocument, TOKEN } from './univer-doc-types';
+import { CUSTOM_RANGE, DocDocument, RESOURCE_DOC_DRAWINGS, TOKEN } from './univer-doc-types';
 
 // A 64x32 PNG.
 const PNG_BASE64 =
@@ -192,6 +192,8 @@ describe('docx import', () => {
     expect(drawing.source).toBe(`data:image/png;base64,${PNG_BASE64}`);
     expect(drawing.docTransform.size).toEqual({ width: 128, height: 64 });
     expect(drawing.layoutType).toBe(0);
+    const resource = document.resources!.find(r => r.name === RESOURCE_DOC_DRAWINGS)!;
+    expect(JSON.parse(resource.data)).toEqual({ data: document.drawings, order: document.drawingsOrder });
     const header = document.headers![document.documentStyle.defaultHeaderId!];
     expect(header.body.dataStream).toBe('Spike header\r\n');
     expect(header.body.paragraphs![0].paragraphStyle?.horizontalAlign).toBe(3);

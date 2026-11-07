@@ -23,6 +23,7 @@ import {
   DocSectionBreak,
   DocTable,
   DocDrawing,
+  RESOURCE_DOC_DRAWINGS,
 } from './univer-doc-types';
 
 export interface DocxImportOptions {
@@ -209,6 +210,8 @@ export async function packageToDocument(pkg: OoxmlPackage, opts: DocxImportOptio
   if (drawingsOrder.length) {
     document.drawings = drawings;
     document.drawingsOrder = drawingsOrder;
+    // Layout reads `drawings`; the drawing plugin that paints them loads from its resource.
+    document.resources = [{ name: RESOURCE_DOC_DRAWINGS, data: JSON.stringify({ data: drawings, order: drawingsOrder }) }];
   }
   return { document, report: fidelity.report() };
 }
