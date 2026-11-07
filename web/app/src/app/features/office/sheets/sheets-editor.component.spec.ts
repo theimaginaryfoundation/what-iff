@@ -95,7 +95,7 @@ describe('SheetsEditorComponent', () => {
     expect(fake.state.editable).toEqual([false]);
     expect(fake.state.data?.sheets[fake.state.data.sheetOrder[0]].cellData[0][1]).toMatchObject({ v: 42 });
     expect(el.querySelector('.univer-editor__univer canvas')).not.toBeNull();
-    expect(el.querySelector('.univer-editor__notice')).toBeNull();
+    expect(el.querySelector('.fidelity-notice')).toBeNull();
   });
 
   it('as the editor: a data mutation marks it dirty, Ctrl+S asks to save, and content is a fresh xlsx', async () => {
@@ -154,10 +154,10 @@ describe('SheetsEditorComponent', () => {
     const buffer = await wb.xlsx.writeBuffer();
     const el = await open(attachment(), new Blob([buffer as ArrayBuffer]), false);
     expect(fixture.componentInstance.losses()).toEqual(['Defined names']);
-    expect(el.querySelector('.univer-editor__notice')?.textContent).toContain('Defined names');
+    expect(el.querySelector('.fidelity-notice')?.textContent).toContain('Defined names');
     fixture.componentInstance.dismissNotice();
     fixture.detectChanges();
-    expect(el.querySelector('.univer-editor__notice')).toBeNull();
+    expect(el.querySelector('.fidelity-notice')).toBeNull();
   });
 
   it('recreates the instance for new bytes and disposes it when destroyed', async () => {

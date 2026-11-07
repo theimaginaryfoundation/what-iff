@@ -5,6 +5,7 @@ import { DocDocument } from '../docx/univer-doc-types';
 import { DOCX_MIME, documentToDocx } from '../docx/docx-export';
 import { docxToDocument } from '../docx/docx-import';
 import { FidelityReport } from '../shared/fidelity';
+import { FidelityNoticeComponent } from '../shared/fidelity-notice.component';
 import { UniverEditorBase, UniverKit, UniverUnit } from '../univer/univer-editor-base';
 import { FUniver, UNIVER_DOCS_LOADER } from '../univer/univer-loader';
 
@@ -19,6 +20,7 @@ interface Document extends UniverUnit<DocDocument> {
 @Component({
   selector: 'app-docs-editor',
   standalone: true,
+  imports: [FidelityNoticeComponent],
   templateUrl: '../univer/univer-editor.component.html',
   styleUrl: '../univer/univer-editor.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

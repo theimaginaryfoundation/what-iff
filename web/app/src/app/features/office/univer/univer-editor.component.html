@@ -1,29 +1,16 @@
 <div class="univer-editor" [class.univer-editor--read-only]="readOnly()">
-  @if (!noticeDismissed() && (losses().length || warnings().length)) {
-    <aside class="univer-editor__notice" role="status">
-      <div class="univer-editor__notice-text">
-        @if (losses().length) {
-          <p>
-            <strong>Some of the original cannot be edited here:</strong> {{ losses().join("; ") }}. Saving over the original drops it; use
-            Save as to keep the original file.
-          </p>
-        }
-        @if (warnings().length) {
-          <p class="univer-editor__notice-minor">Approximated: {{ warnings().join("; ") }}.</p>
-        }
-      </div>
-      <button type="button" class="univer-editor__notice-close" aria-label="Dismiss" (click)="dismissNotice()">×</button>
-    </aside>
+  @if (!noticeDismissed()) {
+    <app-fidelity-notice [losses]="losses()" [warnings]="warnings()" (dismiss)="dismissNotice()" />
   }
   @if (state() === "error") {
     <p class="univer-editor__placeholder" role="alert">{{ error() }}</p>
   } @else if (state() === "loading") {
-    <p class="univer-editor__placeholder" role="status">Loading the spreadsheet…</p>
+    <p class="univer-editor__placeholder" role="status">Loading the {{ noun }}…</p>
   }
   <div
     #container
     class="univer-editor__univer"
-    [attr.aria-label]="(readOnly() ? 'Spreadsheet ' : 'Spreadsheet editor for ') + file().name"
+    [attr.aria-label]="(readOnly() ? '' : 'Editor for ') + file().name"
     [hidden]="state() !== 'ready'"
   ></div>
 </div>

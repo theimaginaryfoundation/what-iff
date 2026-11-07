@@ -1,0 +1,233 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.slides {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.slides__placeholder {
+  color: var(--text-secondary);
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+.slides__toolbar {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  padding: 0.35rem 0.75rem;
+}
+
+.slides__group {
+  align-items: center;
+  display: flex;
+  gap: 0.2rem;
+
+  &--end {
+    margin-left: auto;
+  }
+}
+
+.slides__tool {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  padding: 0.3rem 0.55rem;
+
+  &:hover:not(:disabled) {
+    border-color: var(--border-hover, var(--accent));
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+
+  &--icon {
+    min-width: 2rem;
+    text-align: center;
+  }
+
+  &--on {
+    background: var(--accent-bg, rgba(37, 99, 235, 0.12));
+    border-color: var(--accent);
+  }
+
+  &--danger {
+    color: var(--danger, #b91c1c);
+  }
+}
+
+.slides__select {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  padding: 0.25rem 0.3rem;
+}
+
+.slides__color {
+  align-items: center;
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-size: 0.75rem;
+  gap: 0.25rem;
+
+  input {
+    border: 1px solid var(--border);
+    border-radius: 0.3rem;
+    height: 1.6rem;
+    padding: 0;
+    width: 1.8rem;
+  }
+}
+
+.slides__file {
+  display: none;
+}
+
+.slides__menu-host {
+  position: relative;
+}
+
+.slides__menu {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  display: grid;
+  gap: 0.1rem;
+  grid-template-columns: repeat(2, minmax(8rem, 1fr));
+  left: 0;
+  padding: 0.35rem;
+  position: absolute;
+  top: calc(100% + 0.2rem);
+  z-index: 20;
+}
+
+.slides__menu-item {
+  background: none;
+  border: none;
+  border-radius: 0.3rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+
+  &:hover {
+    background: var(--accent-bg, rgba(37, 99, 235, 0.12));
+  }
+}
+
+.slides__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.slides__rail {
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow: auto;
+  padding: 0.75rem 0.5rem;
+  width: 11.5rem;
+}
+
+.slides__thumb {
+  align-items: flex-start;
+  background: none;
+  border: 2px solid transparent;
+  border-radius: 0.4rem;
+  cursor: pointer;
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.25rem;
+
+  &--current {
+    border-color: var(--accent);
+  }
+}
+
+.slides__thumb-number {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  min-width: 1rem;
+}
+
+.slides__stage {
+  align-items: center;
+  background: var(--bg-base);
+  display: flex;
+  flex: 1 1 auto;
+  justify-content: center;
+  min-height: 0;
+  min-width: 0;
+  outline: none;
+  overflow: auto;
+  padding: 1rem;
+  position: relative;
+}
+
+.slides__pager {
+  align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  bottom: 0.75rem;
+  color: var(--text-secondary);
+  display: flex;
+  font-size: 0.8125rem;
+  gap: 0.5rem;
+  left: 50%;
+  padding: 0.2rem 0.4rem;
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.slides__notes {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.slides__notes-label {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  margin: 0;
+}
+
+.slides__notes-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.slides__notes-input {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  color: var(--text-primary);
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  resize: vertical;
+}

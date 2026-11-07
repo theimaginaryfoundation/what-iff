@@ -1,0 +1,181 @@
+<div
+  class="slide"
+  [class.slide--interactive]="interactive()"
+  [style.width.px]="cssWidth()"
+  [style.height.px]="cssHeight()"
+  [attr.role]="label() ? 'img' : null"
+  [attr.aria-label]="label() || null"
+  (pointerdown)="onBackgroundPointerDown($event)"
+  (pointermove)="onPointerMove($event)"
+  (pointerup)="onPointerUp($event)"
+  (pointercancel)="onPointerUp($event)"
+>
+  <div
+    class="slide__surface"
+    [style.width.pt]="size().width"
+    [style.height.pt]="size().height"
+    [style.transform]="'scale(' + scale() + ')'"
+    [style.background]="background()"
+  >
+    @for (el of slide().layoutElements; track el.id) {
+      <ng-container *ngTemplateOutlet="element; context: { $implicit: el, layout: true }" />
+    }
+    @for (el of slide().elements; track el.id) {
+      <ng-container *ngTemplateOutlet="element; context: { $implicit: el, layout: false }" />
+    }
+  </div>
+</div>
+
+<ng-template #element let-el let-layout="layout">
+  @let g = geometryOf(el);
+  @let selected = !layout && selectedId() === el.id;
+  @let editing = !layout && editingId() === el.id;
+  <div
+    class="slide__element"
+    [class.slide__element--layout]="layout"
+    [class.slide__element--selected]="selected"
+    [class.slide__element--editing]="editing"
+    [class.slide__element--link]="!!el.link && !interactive()"
+    [style.left.pt]="g.left"
+    [style.top.pt]="g.top"
+    [style.width.pt]="g.width"
+    [style.height.pt]="g.height"
+    [style.transform]="transformOf(el)"
+    [attr.data-element-id]="el.id"
+    (pointerdown)="layout ? null : onElementPointerDown($event, el)"
+    (dblclick)="layout ? null : onElementDoubleClick($event, el)"
+    (click)="onLinkClick($event, el)"
+  >
+    @switch (el.kind) {
+      @case ("shape") {
+        @let stroke = strokeOf(el.border);
+        <svg class="slide__svg" [attr.viewBox]="viewBoxOf(el, g)" preserveAspectRatio="none" aria-hidden="true">
+          <path
+            [attr.d]="pathOf(el, g)"
+            [attr.fill]="svgFill(el)"
+            [attr.stroke]="stroke.color"
+            [attr.stroke-width]="stroke.width"
+            [attr.stroke-dasharray]="stroke.dash"
+            vector-effect="non-scaling-stroke"
+          />
+        </svg>
+        @if (el.text) {
+          <div
+            class="slide__text"
+            [ngStyle]="textStyle(el.text)"
+            [attr.contenteditable]="editing ? 'true' : null"
+            [innerHTML]="textHtml(el.text)"
+            (blur)="onTextBlur($event, el)"
+            (keydown)="editing ? onTextKeydown($event) : null"
+          ></div>
+        }
+      }
+      @case ("line") {
+        @let stroke = strokeOf(el.border);
+        <svg class="slide__svg slide__svg--line" [attr.viewBox]="viewBoxOf(el, g)" preserveAspectRatio="none" aria-hidden="true">
+          <path
+            [attr.d]="pathOf(el, g)"
+            fill="none"
+            [attr.stroke]="stroke.color"
+            [attr.stroke-width]="stroke.width"
+            [attr.stroke-dasharray]="stroke.dash"
+            vector-effect="non-scaling-stroke"
+            [attr.marker-start]="el.headEnd.type !== 'none' ? 'url(#arrow-start)' : null"
+            [attr.marker-end]="el.tailEnd.type !== 'none' ? 'url(#arrow-end)' : null"
+          />
+        </svg>
+      }
+      @case ("image") {
+        <div
+          class="slide__image-frame"
+          [class.slide__image-frame--ellipse]="el.geometry === 'ellipse'"
+          [style.border]="el.border ? el.border.width + 'pt ' + el.border.style + ' ' + el.border.color : 'none'"
+        >
+          <img class="slide__image" [src]="el.src" [ngStyle]="imageStyle(el)" [alt]="el.name" draggable="false" />
+        </div>
+      }
+      @case ("table") {
+        <table class="slide__table">
+          <colgroup>
+            @for (w of el.colWidths; track $index) {
+              <col [style.width.pt]="w" />
+            }
+          </colgroup>
+          <tbody>
+            @for (row of el.rows; track $index; let r = $index) {
+              <tr [style.height.pt]="el.rowHeights[r] || null">
+                @for (cell of row; track $index; let c = $index) {
+                  @if (!cell.covered) {
+                    <td
+                      [attr.rowspan]="cell.rowSpan > 1 ? cell.rowSpan : null"
+                      [attr.colspan]="cell.colSpan > 1 ? cell.colSpan : null"
+                      [ngStyle]="cellStyle(cell)"
+                      [attr.contenteditable]="editing ? 'true' : null"
+                      [innerHTML]="textHtml(cell.text)"
+                      (blur)="onTextBlur($event, el, { row: r, col: c })"
+                      (keydown)="editing ? onTextKeydown($event) : null"
+                    ></td>
+                  }
+                }
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+      @case ("chart") {
+        <svg
+          class="slide__svg"
+          [attr.viewBox]="'0 0 ' + g.width + ' ' + g.height"
+          preserveAspectRatio="none"
+          role="img"
+          [attr.aria-label]="el.chartType + ' chart'"
+        >
+          @if (isPie(el)) {
+            @for (slice of chartSlices(el, g); track $index) {
+              <path [attr.d]="slice.d" [attr.fill]="slice.color" />
+            }
+          } @else if (isLineChart(el)) {
+            @for (line of chartLines(el, g); track $index) {
+              <polyline
+                [attr.points]="line.points"
+                fill="none"
+                [attr.stroke]="line.color"
+                stroke-width="2"
+                vector-effect="non-scaling-stroke"
+              />
+            }
+          } @else {
+            @for (bar of chartBars(el, g); track $index) {
+              <rect [attr.x]="bar.x" [attr.y]="bar.y" [attr.width]="bar.w" [attr.height]="bar.h" [attr.fill]="bar.color" />
+            }
+          }
+        </svg>
+      }
+      @case ("group") {
+        @for (child of el.children; track child.id) {
+          <ng-container *ngTemplateOutlet="element; context: { $implicit: child, layout: true }" />
+        }
+      }
+    }
+    @if (selected && interactive() && !editing) {
+      @for (handle of handles; track handle) {
+        <div
+          class="slide__handle"
+          [class]="'slide__handle slide__handle--' + handle"
+          (pointerdown)="onHandlePointerDown($event, el, handle)"
+        ></div>
+      }
+    }
+  </div>
+</ng-template>
+
+<svg class="slide__defs" width="0" height="0" aria-hidden="true">
+  <defs>
+    <marker id="arrow-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0L10,5L0,10Z" fill="context-stroke" />
+    </marker>
+    <marker id="arrow-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M10,0L0,5L10,10Z" fill="context-stroke" />
+    </marker>
+  </defs>
+</svg>

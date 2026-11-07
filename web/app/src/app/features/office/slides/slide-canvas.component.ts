@@ -1,0 +1,374 @@
+import { NgStyle, NgTemplateOutlet } from '@angular/common';
+import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, computed, inject, input, output, signal } from '@angular/core';
+
+import { Border, ChartElement, Fill, Paragraph, Slide, SlideElement, TableCell, TextBody } from '../pptx/deck-model';
+import { isLinePreset, shapePath } from './shape-paths';
+import { domToParagraphs, paragraphsToHtml } from './text-dom';
+
+/** Points to CSS pixels: the slide is laid out in points and scaled to fit. */
+export const PX_PER_PT = 96 / 72;
+
+export type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+const HANDLES: readonly ResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+
+export interface ElementGeometry {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * One slide drawn at a scale (ADR 0x043, office suite): shapes as SVG, text as HTML in points,
+ * images, tables, charts and groups. Interactive, it selects, drags and resizes elements and
+ * edits text in place; the deck itself belongs to the editor, which applies the changes.
+ */
+@Component({
+  selector: 'app-slide-canvas',
+  standalone: true,
+  imports: [NgStyle, NgTemplateOutlet],
+  templateUrl: './slide-canvas.component.html',
+  styleUrl: './slide-canvas.component.scss',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class SlideCanvasComponent {
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+
+  readonly slide = input.required<Slide>();
+  readonly size = input.required<{ width: number; height: number }>();
+  readonly scale = input(1);
+  readonly interactive = input(false);
+  readonly selectedId = input<string | null>(null);
+  readonly editingId = input<string | null>(null);
+  /** Drawn for the rail: no handles, no pointer handling, a label for assistive tech. */
+  readonly label = input<string>('');
+
+  readonly select = output<string | null>();
+  /** The user started dragging or resizing: a point for the editor's undo history. */
+  readonly gestureStart = output<string>();
+  readonly geometryChange = output<{ id: string; geometry: ElementGeometry }>();
+  readonly requestEdit = output<string>();
+  readonly textCommit = output<{ id: string; paragraphs: Paragraph[]; cell?: { row: number; col: number } }>();
+  readonly open = output<string>();
+
+  readonly handles = HANDLES;
+  readonly cssWidth = computed(() => this.size().width * PX_PER_PT * this.scale());
+  readonly cssHeight = computed(() => this.size().height * PX_PER_PT * this.scale());
+  readonly background = computed(() => fillCss(this.slide().background));
+  /** Geometry overrides while a drag or resize is in flight, so the deck is updated once at the end. */
+  readonly liveGeometry = signal<{ id: string; geometry: ElementGeometry } | null>(null);
+
+  private gesture: {
+    id: string;
+    kind: 'move' | 'resize';
+    handle?: ResizeHandle;
+    startX: number;
+    startY: number;
+    start: ElementGeometry;
+    pointerId: number;
+  } | null = null;
+
+  constructor() {
+    // Once the element being edited is rendered editable, put the caret at its end.
+    afterRenderEffect(() => {
+      const id = this.editingId();
+      if (!id) return;
+      const target = this.host.nativeElement.querySelector<HTMLElement>(`[data-element-id="${CSS.escape(id)}"] [contenteditable="true"]`);
+      if (target && this.host.nativeElement.ownerDocument.activeElement !== target) this.focusText(target);
+    });
+  }
+
+  geometryOf(el: SlideElement): ElementGeometry {
+    const live = this.liveGeometry();
+    return live && live.id === el.id ? live.geometry : { left: el.left, top: el.top, width: el.width, height: el.height };
+  }
+
+  transformOf(el: SlideElement): string {
+    const parts: string[] = [];
+    if (el.rotate) parts.push(`rotate(${el.rotate}deg)`);
+    if (el.flipH || el.flipV) parts.push(`scale(${el.flipH ? -1 : 1}, ${el.flipV ? -1 : 1})`);
+    return parts.join(' ');
+  }
+
+  pathOf(el: SlideElement, g: ElementGeometry): string {
+    if (el.kind === 'line') return `M0,0L${g.width},${g.height}`;
+    if (el.kind !== 'shape') return '';
+    if (el.path && el.viewBox && g.width === el.width && g.height === el.height) return el.path;
+    return shapePath(el.shapeType, Math.max(1, g.width), Math.max(1, g.height), el.adjustments);
+  }
+
+  viewBoxOf(el: SlideElement, g: ElementGeometry): string {
+    if (el.kind === 'shape' && el.path && el.viewBox && g.width === el.width && g.height === el.height)
+      return `${el.viewBox.x} ${el.viewBox.y} ${Math.max(1, el.viewBox.width)} ${Math.max(1, el.viewBox.height)}`;
+    return `0 0 ${Math.max(1, g.width)} ${Math.max(1, g.height)}`;
+  }
+
+  isLine(el: SlideElement): boolean {
+    return el.kind === 'line' || (el.kind === 'shape' && isLinePreset(el.shapeType));
+  }
+
+  fillCss(fill: Fill | null): string {
+    return fillCss(fill);
+  }
+
+  svgFill(el: SlideElement): string {
+    if (el.kind !== 'shape' || !el.fill) return 'none';
+    if (el.fill.type === 'color') return el.fill.color;
+    if (el.fill.type === 'gradient') return el.fill.stops[0]?.color ?? 'none';
+    return '#CCCCCC';
+  }
+
+  strokeOf(border: Border | null): { color: string; width: number; dash: string | null } {
+    if (!border) return { color: 'none', width: 0, dash: null };
+    return { color: border.color, width: border.width, dash: border.style === 'dashed' ? '6 4' : border.style === 'dotted' ? '2 3' : null };
+  }
+
+  textHtml(body: TextBody | null): string {
+    return body ? paragraphsToHtml(body.paragraphs) : '';
+  }
+
+  textStyle(body: TextBody): Record<string, string> {
+    return {
+      padding: `${body.inset[1]}pt ${body.inset[2]}pt ${body.inset[3]}pt ${body.inset[0]}pt`,
+      'justify-content': body.vAlign === 'middle' ? 'center' : body.vAlign === 'bottom' ? 'flex-end' : 'flex-start',
+      'white-space': body.wrap ? 'pre-wrap' : 'pre',
+    };
+  }
+
+  imageStyle(el: SlideElement): Record<string, string> {
+    if (el.kind !== 'image' || !el.crop) return {};
+    const { top, bottom, left, right } = el.crop;
+    const w = 100 / Math.max(0.01, 1 - left - right);
+    const h = 100 / Math.max(0.01, 1 - top - bottom);
+    return { width: `${w}%`, height: `${h}%`, left: `-${left * w}%`, top: `-${top * h}%`, position: 'absolute', 'max-width': 'none' };
+  }
+
+  cellStyle(cell: TableCell): Record<string, string> {
+    const b = (border: Border | undefined) => (border ? `${border.width}pt ${border.style} ${border.color}` : 'none');
+    return {
+      background: cell.fill?.type === 'color' ? cell.fill.color : 'transparent',
+      'border-top': b(cell.borders.top),
+      'border-bottom': b(cell.borders.bottom),
+      'border-left': b(cell.borders.left),
+      'border-right': b(cell.borders.right),
+      'vertical-align': cell.text.vAlign === 'middle' ? 'middle' : cell.text.vAlign === 'bottom' ? 'bottom' : 'top',
+      padding: `${cell.text.inset[1]}pt ${cell.text.inset[2]}pt ${cell.text.inset[3]}pt ${cell.text.inset[0]}pt`,
+    };
+  }
+
+  // --- charts (a plain rendering; the data is what gets saved) ------------------------------------
+
+  chartBars(el: ChartElement, g: ElementGeometry): { x: number; y: number; w: number; h: number; color: string }[] {
+    const series = el.series;
+    const n = Math.max(1, ...series.map(s => s.values.length));
+    const max = Math.max(1, ...series.flatMap(s => s.values));
+    const out: { x: number; y: number; w: number; h: number; color: string }[] = [];
+    const pad = 8;
+    const plotW = g.width - pad * 2;
+    const plotH = g.height - pad * 2;
+    const groupW = plotW / n;
+    const barW = (groupW * 0.8) / Math.max(1, series.length);
+    series.forEach((s, si) => {
+      s.values.forEach((v, i) => {
+        const h = (Math.max(0, v) / max) * plotH;
+        out.push({
+          x: pad + i * groupW + groupW * 0.1 + si * barW,
+          y: pad + plotH - h,
+          w: barW,
+          h,
+          color: el.colors[si % el.colors.length] ?? '#4472C4',
+        });
+      });
+    });
+    return out;
+  }
+
+  chartLines(el: ChartElement, g: ElementGeometry): { points: string; color: string }[] {
+    const pad = 8;
+    const plotW = g.width - pad * 2;
+    const plotH = g.height - pad * 2;
+    const max = Math.max(1, ...el.series.flatMap(s => s.values));
+    return el.series.map((s, si) => ({
+      color: el.colors[si % el.colors.length] ?? '#4472C4',
+      points: s.values
+        .map(
+          (v, i) =>
+            `${pad + (s.values.length > 1 ? (i / (s.values.length - 1)) * plotW : plotW / 2)},${pad + plotH - (Math.max(0, v) / max) * plotH}`,
+        )
+        .join(' '),
+    }));
+  }
+
+  chartSlices(el: ChartElement, g: ElementGeometry): { d: string; color: string }[] {
+    const values = el.series[0]?.values ?? [];
+    const total = values.reduce((a, b) => a + Math.max(0, b), 0) || 1;
+    const cx = g.width / 2;
+    const cy = g.height / 2;
+    const radius = Math.max(1, Math.min(g.width, g.height) / 2 - 4);
+    const inner = el.chartType === 'doughnut' ? radius * ((el.holeSize ?? 50) / 100) : 0;
+    let angle = -Math.PI / 2;
+    return values.map((v, i) => {
+      const sweep = (Math.max(0, v) / total) * Math.PI * 2;
+      const a0 = angle;
+      const a1 = angle + sweep;
+      angle = a1;
+      const large = sweep > Math.PI ? 1 : 0;
+      const p = (a: number, rr: number) => `${(cx + rr * Math.cos(a)).toFixed(2)},${(cy + rr * Math.sin(a)).toFixed(2)}`;
+      const d = inner
+        ? `M${p(a0, radius)}A${radius},${radius} 0 ${large},1 ${p(a1, radius)}L${p(a1, inner)}A${inner},${inner} 0 ${large},0 ${p(a0, inner)}Z`
+        : `M${cx},${cy}L${p(a0, radius)}A${radius},${radius} 0 ${large},1 ${p(a1, radius)}Z`;
+      return { d, color: el.colors[i % el.colors.length] ?? '#4472C4' };
+    });
+  }
+
+  isPie(el: ChartElement): boolean {
+    return el.chartType === 'pie' || el.chartType === 'doughnut';
+  }
+
+  isLineChart(el: ChartElement): boolean {
+    return el.chartType === 'line' || el.chartType === 'area' || el.chartType === 'scatter' || el.chartType === 'radar';
+  }
+
+  // --- interaction -------------------------------------------------------------------------------
+
+  onBackgroundPointerDown(event: PointerEvent): void {
+    if (!this.interactive()) return;
+    if ((event.target as HTMLElement).closest('.slide__element')) return;
+    this.select.emit(null);
+  }
+
+  onElementPointerDown(event: PointerEvent, el: SlideElement): void {
+    if (!this.interactive()) return;
+    if (this.editingId() === el.id) return;
+    event.stopPropagation();
+    if (this.selectedId() !== el.id) this.select.emit(el.id);
+    if (event.button !== 0) return;
+    this.beginGesture(event, el, 'move');
+  }
+
+  onHandlePointerDown(event: PointerEvent, el: SlideElement, handle: ResizeHandle): void {
+    if (!this.interactive()) return;
+    event.stopPropagation();
+    if (event.button !== 0) return;
+    this.beginGesture(event, el, 'resize', handle);
+  }
+
+  private beginGesture(event: PointerEvent, el: SlideElement, kind: 'move' | 'resize', handle?: ResizeHandle): void {
+    event.preventDefault();
+    const target = event.currentTarget as HTMLElement;
+    target.setPointerCapture?.(event.pointerId);
+    this.gesture = {
+      id: el.id,
+      kind,
+      handle,
+      startX: event.clientX,
+      startY: event.clientY,
+      start: { left: el.left, top: el.top, width: el.width, height: el.height },
+      pointerId: event.pointerId,
+    };
+    this.gestureStart.emit(el.id);
+  }
+
+  onPointerMove(event: PointerEvent): void {
+    const g = this.gesture;
+    if (!g || event.pointerId !== g.pointerId) return;
+    const dx = (event.clientX - g.startX) / (PX_PER_PT * this.scale());
+    const dy = (event.clientY - g.startY) / (PX_PER_PT * this.scale());
+    this.liveGeometry.set({
+      id: g.id,
+      geometry:
+        g.kind === 'move'
+          ? { ...g.start, left: round(g.start.left + dx), top: round(g.start.top + dy) }
+          : resized(g.start, g.handle!, dx, dy),
+    });
+  }
+
+  onPointerUp(event: PointerEvent): void {
+    const g = this.gesture;
+    if (!g || event.pointerId !== g.pointerId) return;
+    this.gesture = null;
+    const live = this.liveGeometry();
+    this.liveGeometry.set(null);
+    if (
+      live &&
+      (live.geometry.left !== g.start.left ||
+        live.geometry.top !== g.start.top ||
+        live.geometry.width !== g.start.width ||
+        live.geometry.height !== g.start.height)
+    ) {
+      this.geometryChange.emit(live);
+    }
+  }
+
+  onElementDoubleClick(event: MouseEvent, el: SlideElement): void {
+    if (!this.interactive()) return;
+    event.stopPropagation();
+    if (el.kind === 'shape' || el.kind === 'table') this.requestEdit.emit(el.id);
+  }
+
+  /** Text editing ends on blur or Escape; the edited DOM becomes paragraphs. */
+  onTextBlur(event: FocusEvent, el: SlideElement, cell?: { row: number; col: number }): void {
+    const target = event.target as HTMLElement;
+    if (this.editingId() !== el.id) return;
+    this.textCommit.emit({ id: el.id, paragraphs: domToParagraphs(target), ...(cell ? { cell } : {}) });
+  }
+
+  onTextKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      (event.target as HTMLElement).blur();
+    }
+    // Editing keys stay in the text; the editor's shortcuts must not see them.
+    event.stopPropagation();
+  }
+
+  private focusText(element: HTMLElement): void {
+    element.focus();
+    const range = this.host.nativeElement.ownerDocument.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    const selection = this.host.nativeElement.ownerDocument.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  onLinkClick(event: MouseEvent, el: SlideElement): void {
+    if (this.interactive() || !el.link) return;
+    event.preventDefault();
+    this.open.emit(el.link);
+  }
+}
+
+function round(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function resized(start: ElementGeometry, handle: ResizeHandle, dx: number, dy: number): ElementGeometry {
+  let { left, top, width, height } = start;
+  if (handle.includes('e')) width = start.width + dx;
+  if (handle.includes('s')) height = start.height + dy;
+  if (handle.includes('w')) {
+    width = start.width - dx;
+    left = start.left + dx;
+  }
+  if (handle.includes('n')) {
+    height = start.height - dy;
+    top = start.top + dy;
+  }
+  if (width < 4) {
+    if (handle.includes('w')) left = start.left + start.width - 4;
+    width = 4;
+  }
+  if (height < 0) {
+    if (handle.includes('n')) top = start.top + start.height;
+    height = 0;
+  }
+  return { left: round(left), top: round(top), width: round(width), height: round(height) };
+}
+
+export function fillCss(fill: Fill | null): string {
+  if (!fill) return 'transparent';
+  if (fill.type === 'color') return fill.color;
+  if (fill.type === 'gradient') return `linear-gradient(${90 + fill.angle}deg, ${fill.stops.map(s => `${s.color} ${s.pos}%`).join(', ')})`;
+  return `url("${fill.src}") center / cover`;
+}
