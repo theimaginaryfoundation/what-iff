@@ -34,12 +34,20 @@
                 "input": "node_modules/pdfjs-dist/web/pdf_viewer.css",
                 "bundleName": "pdfjs",
                 "inject": false
+              },
+              {
+                "input": "node_modules/monaco-editor/min/vs/editor/editor.main.css",
+                "bundleName": "monaco",
+                "inject": false
               }
             ],
             "scripts": [
               "node_modules/clipboard/dist/clipboard.min.js"
             ],
-            "webWorkerTsConfig": "tsconfig.worker.json"
+            "webWorkerTsConfig": "tsconfig.worker.json",
+            "loader": {
+              ".ttf": "file"
+            }
           },
           "configurations": {
             "production": {

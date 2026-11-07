@@ -84,3 +84,14 @@ function firstNonBlank(...values: unknown[]): string | null {
   }
   return null;
 }
+
+/**
+ * The current `content_version` a 412 from `PUT /file-attachment/{id}/content` reports, or null
+ * for any other error. The editor offers Reload, Overwrite or Save As with it.
+ */
+export function conflictVersionOf(error: unknown): number | null {
+  if (!(error instanceof HttpErrorResponse) || error.status !== 412) return null;
+  const details = (error.error as { details?: { content_version?: unknown } } | null)?.details;
+  const version = details?.content_version;
+  return typeof version === 'number' && Number.isFinite(version) ? version : null;
+}
