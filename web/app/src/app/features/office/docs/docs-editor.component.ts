@@ -40,8 +40,9 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
 
   protected async createUnit(univerAPI: FUniver, data: DocDocument, readOnly: boolean): Promise<Document> {
     const api = univerAPI as FUniver & { createDocument(data: unknown): Document };
-    const document = api.createDocument(data);
-    if (readOnly) await document.getPermission?.().setEditable(false);
+    // A disabled snapshot is read-only without the permission layer's "content is protected"
+    // toasts on every click; the viewer stays quiet.
+    const document = api.createDocument(readOnly ? { ...data, disabled: true } : data);
     return document;
   }
 

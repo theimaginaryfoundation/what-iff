@@ -125,21 +125,12 @@ export async function packageToDocument(pkg: OoxmlPackage, opts: DocxImportOptio
     builder.blocks(doc.documentElement);
     const body = builder.finish();
     const id = nextId(kind === 'header' ? 'h' : 'f');
-    const extra = { tableSource: builder.tableSource, drawings: builder.drawings, drawingsOrder: builder.drawingsOrder };
-    if (kind === 'header')
-      headers[id] = {
-        headerId: id,
-        body,
-        ...(Object.keys(builder.tableSource).length ? { tableSource: extra.tableSource } : {}),
-        ...(builder.drawingsOrder.length ? { drawings: extra.drawings, drawingsOrder: extra.drawingsOrder } : {}),
-      };
-    else
-      footers[id] = {
-        footerId: id,
-        body,
-        ...(Object.keys(builder.tableSource).length ? { tableSource: extra.tableSource } : {}),
-        ...(builder.drawingsOrder.length ? { drawings: extra.drawings, drawingsOrder: extra.drawingsOrder } : {}),
-      };
+    // Univer lays every drawing out from the document's own map, headers and footers included.
+    Object.assign(drawings, builder.drawings);
+    drawingsOrder.push(...builder.drawingsOrder);
+    const tables = Object.keys(builder.tableSource).length ? { tableSource: builder.tableSource } : {};
+    if (kind === 'header') headers[id] = { headerId: id, body, ...tables };
+    else footers[id] = { footerId: id, body, ...tables };
     return id;
   };
 

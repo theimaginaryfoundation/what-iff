@@ -87,7 +87,8 @@ describe('DocsEditorComponent', () => {
     const el = await open(attachment(), await docxBlob());
     expect(fixture.componentInstance.state()).toBe('ready');
     expect(fake.state.created[0].readOnly).toBe(true);
-    expect(fake.state.editable).toEqual([false]);
+    expect(fake.state.editable).toEqual([]);
+    expect((fake.state.data as { disabled?: boolean }).disabled).toBe(true);
     expect(fake.state.data?.body.dataStream).toBe('Hello world\r\n');
     expect(fake.state.data?.documentStyle.documentFlavor).toBe(1);
     expect(el.querySelector('.univer-editor__univer canvas')).not.toBeNull();
