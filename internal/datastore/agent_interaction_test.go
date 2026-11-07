@@ -34,11 +34,7 @@ func TestAgentPrompt_AnswerOnceAndOnlyWhilePending(t *testing.T) {
 	require.Equal(t, models.AgentPromptPending, p.Status)
 	require.Equal(t, "Send it", p.Payload.Title)
 
-	pending, err := ds.ListPendingAgentPrompts(ctx, userID, chatID)
-	require.NoError(t, err)
-	require.Len(t, pending, 1)
-
-	_, err = ds.AnswerAgentPrompt(ctx, other, chatID, p.ID, accept)
+	_, err := ds.AnswerAgentPrompt(ctx, other, chatID, p.ID, accept)
 	require.ErrorIs(t, err, ErrAgentPromptNotFound, "another account cannot answer")
 	_, err = ds.AnswerAgentPrompt(ctx, userID, otherChat, p.ID, accept)
 	require.ErrorIs(t, err, ErrAgentPromptNotFound, "nor from another chat")
@@ -60,13 +56,14 @@ func TestAgentPrompt_AnswerOnceAndOnlyWhilePending(t *testing.T) {
 	require.ErrorIs(t, err, ErrAgentPromptClosed, "past its expiry it takes no answer")
 
 	live := newPrompt(time.Now().Add(time.Minute))
-	require.NoError(t, ds.CancelPendingAgentPromptsForJob(ctx, userID, jobID))
+	closed, err = ds.CloseAgentPrompt(ctx, userID, live.ID, models.AgentPromptCancelled)
+	require.NoError(t, err)
+	require.True(t, closed)
 	got, err := ds.GetAgentPrompt(ctx, userID, live.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.AgentPromptCancelled, got.Status)
-	pending, err = ds.ListPendingAgentPrompts(ctx, userID, chatID)
-	require.NoError(t, err)
-	require.Empty(t, pending)
+	_, err = ds.AnswerAgentPrompt(ctx, userID, chatID, live.ID, accept)
+	require.ErrorIs(t, err, ErrAgentPromptClosed, "a cancelled prompt takes no answer")
 }
 
 func TestClaimSteerMessages(t *testing.T) {

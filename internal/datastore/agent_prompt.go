@@ -110,40 +110,6 @@ func (d *Datastore) CloseAgentPrompt(ctx context.Context, userID, id uuid.UUID, 
 	return n > 0, nil
 }
 
-// ListPendingAgentPrompts returns the chat's prompts still waiting for an answer, oldest first.
-func (d *Datastore) ListPendingAgentPrompts(ctx context.Context, userID, chatID uuid.UUID) ([]*models.AgentPrompt, error) {
-	rows, err := d.dbClient.AgentPrompt.Query().
-		Where(
-			entagentprompt.UserID(userID),
-			entagentprompt.ChatID(chatID),
-			entagentprompt.StatusEQ(entagentprompt.StatusPending),
-			entagentprompt.ExpiresAtGT(time.Now()),
-		).
-		Order(ent.Asc(entagentprompt.FieldCreatedAt)).
-		All(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*models.AgentPrompt, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, agentPromptFromEnt(row))
-	}
-	return out, nil
-}
-
-// CancelPendingAgentPromptsForJob cancels every prompt of a job still pending (the turn ended).
-func (d *Datastore) CancelPendingAgentPromptsForJob(ctx context.Context, userID, jobID uuid.UUID) error {
-	_, err := d.dbClient.AgentPrompt.Update().
-		Where(
-			entagentprompt.UserID(userID),
-			entagentprompt.JobID(jobID),
-			entagentprompt.StatusEQ(entagentprompt.StatusPending),
-		).
-		SetStatus(entagentprompt.StatusCancelled).
-		Save(ctx)
-	return err
-}
-
 func agentPromptFromEnt(row *ent.AgentPrompt) *models.AgentPrompt {
 	if row == nil {
 		return nil
