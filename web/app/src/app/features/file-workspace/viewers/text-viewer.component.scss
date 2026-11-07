@@ -1,0 +1,116 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.text-viewer__toolbar {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+}
+
+.text-viewer__segmented {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  display: inline-flex;
+  overflow: hidden;
+
+  button {
+    background: transparent;
+    border: 0;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8125rem;
+    padding: 0.3rem 0.75rem;
+
+    &[aria-pressed='true'] {
+      background: var(--accent);
+      color: var(--text-on-accent, #fff);
+    }
+
+    + button {
+      border-left: 1px solid var(--border);
+    }
+  }
+}
+
+.text-viewer__toggle {
+  align-items: center;
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-size: 0.8125rem;
+  gap: 0.4rem;
+}
+
+.text-viewer__notice {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.text-viewer__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.text-viewer__placeholder {
+  color: var(--text-secondary);
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+.text-viewer__text {
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre;
+
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+.text-viewer__text--wrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.text-viewer__table-wrap {
+  overflow: auto;
+}
+
+.text-viewer__table {
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+  min-width: 100%;
+
+  th,
+  td {
+    border: 1px solid var(--border);
+    padding: 0.3rem 0.6rem;
+    text-align: left;
+    vertical-align: top;
+    white-space: nowrap;
+  }
+
+  th {
+    background: var(--bg-muted, var(--bg-card));
+    color: var(--text-primary);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+  }
+
+  td {
+    color: var(--text-primary);
+  }
+}

@@ -38,7 +38,7 @@ import { GalleryGridComponent } from './components/gallery-grid.component';
 import { GalleryListComponent } from './components/gallery-list.component';
 import { GalleryLayout } from './helpers/gallery-list.helpers';
 import { ImageDetailModalComponent } from './components/image-detail-modal.component';
-import { FileViewerComponent } from './components/file-viewer.component';
+import { FileWorkspaceComponent } from '../file-workspace/file-workspace.component';
 import { PersonalityExpressionsManagerComponent } from '../personality/detail/personality-expressions-manager.component';
 import { PersonalityMediaJobBannerComponent } from '../personality/components/personality-media-job-banner.component';
 import { mediaJobFinished$ } from './helpers/gallery-job-refresh.helpers';
@@ -63,7 +63,7 @@ type GallerySort = 'created';
     GalleryListComponent,
     GalleryFolderToolsComponent,
     ImageDetailModalComponent,
-    FileViewerComponent,
+    FileWorkspaceComponent,
     GalleryImportModalComponent,
     AssignAsExpressionFlowComponent,
     PersonalityExpressionsManagerComponent,
