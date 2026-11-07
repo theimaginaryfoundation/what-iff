@@ -307,6 +307,16 @@ func (r *advancedRun) loop(ctx context.Context) (*provider.GenerateResponse, err
 		}
 		r.overflowCompacted = false
 		r.pendingToolResults = capped
+		if r.chatCtx.awaitingUser {
+			// Nobody answered ask_user (ADR 0x042): the run ends asking in its reply rather than
+			// carrying on without the answer.
+			r.end(models.AgentRunEndNeedsInput)
+			if !capped {
+				r.last = res
+				return res, nil
+			}
+			return r.finish(ctx)
+		}
 
 		if capped {
 			// The inner round cap ended the step mid-work: that is progress, not a stall.
@@ -353,10 +363,11 @@ func (r *advancedRun) judgeAnswer(madeToolCalls bool, planBefore int) models.Age
 }
 
 // limitReached checks the limits between steps: the time limit and the step limit. The quota is
-// checked before every model call instead (beforeCall).
+// checked before every model call instead (beforeCall). Time spent waiting on the person to answer
+// a prompt (ADR 0x042) does not count toward the time limit.
 func (r *advancedRun) limitReached(step int) models.AgentRunEnd {
 	switch {
-	case time.Since(r.start) > r.hooks.config.maxDuration:
+	case time.Since(r.start)-r.chatCtx.promptWaited > r.hooks.config.maxDuration:
 		return models.AgentRunEndDuration
 	case step >= r.hooks.config.maxSteps:
 		return models.AgentRunEndStepLimit

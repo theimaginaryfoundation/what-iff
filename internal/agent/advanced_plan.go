@@ -16,12 +16,20 @@ import (
 )
 
 // turnOnlyToolSpecs are tools a turn offers outside the catalog: update_plan on Advanced turns
-// (ADR 0x026), where the plan is what tells the loop whether work remains.
+// (ADR 0x026), where the plan is what tells the loop whether work remains, and ask_user on a turn
+// someone can answer (ADR 0x042).
 func turnOnlyToolSpecs(chatCtx *chatContext) []agenttools.FunctionToolSpec {
-	if chatCtx == nil || !chatCtx.turnSettings.Advanced() {
+	if chatCtx == nil {
 		return nil
 	}
-	return []agenttools.FunctionToolSpec{agenttools.UpdatePlanToolSpec}
+	var specs []agenttools.FunctionToolSpec
+	if chatCtx.turnSettings.Advanced() {
+		specs = append(specs, agenttools.UpdatePlanToolSpec)
+	}
+	if chatCtx.promptJob != nil {
+		specs = append(specs, agenttools.AskUserToolSpec)
+	}
+	return specs
 }
 
 // updatePlanTool replaces the run's plan and publishes it to the live timeline.

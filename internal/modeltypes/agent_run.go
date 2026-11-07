@@ -55,6 +55,9 @@ const (
 	AgentRunEndStepLimit AgentRunEnd = "step_limit"     // AGENT_ADVANCED_MAX_STEPS
 	AgentRunEndCancelled AgentRunEnd = "cancelled"      // the user stopped it
 	AgentRunEndFailed    AgentRunEnd = "failed"         // an error, or the server shut down mid-run
+	// AgentRunEndNeedsInput: the agent asked the person something (ask_user, ADR 0x042) and
+	// nobody answered in time, so the run ended asking in its reply.
+	AgentRunEndNeedsInput AgentRunEnd = "needs_input"
 )
 
 // Unfinished reports whether the run stopped before its work was done, so its open plan items are

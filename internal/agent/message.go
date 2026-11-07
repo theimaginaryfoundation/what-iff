@@ -182,6 +182,8 @@ type Agent struct {
 
 	// turns tracks this process's live chat turns for the per-chat turn gate (chat_turn_gate.go).
 	turns chatTurnTracker
+	// prompts wakes turns waiting on an agent prompt this instance answered (ADR 0x042).
+	prompts promptWaiters
 }
 
 // nonVendorLLM reports whether assistant generation is served by anything
@@ -957,6 +959,15 @@ type chatContext struct {
 	loadedTools map[string]struct{}
 	// skills are the turn's skills: scope, loaded set, active set (ADR 0x035; see prepareTurnSkills).
 	skills *turnSkills
+	// promptJob is the job a person can answer prompts on (ask_user, MCP elicitation; ADR 0x042):
+	// set only on an interactive web turn, nil wherever nobody is there to answer (relays,
+	// scheduled runs, webhooks, sub-agents).
+	promptJob *models.Job
+	// promptWaited is the time the turn spent waiting on the person, which the Advanced run's
+	// duration limit leaves out.
+	promptWaited time.Duration
+	// awaitingUser is set when a prompt went unanswered: the turn should end and ask in its reply.
+	awaitingUser bool
 	// mcpSessions stores MCP session ids for this single conversation turn.
 	mcpSessions map[string]string
 }
@@ -1028,6 +1039,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 		a.setJobStatusFailed(ctx, chatJob, err)
 		return nil, err
 	}
+	chatCtx.promptJob = interactivePromptJob(chatJob, chatCtx)
 	// Resolve active mood and load mood-driven rituals before determining action type
 	// (a mood may inject image-generation rituals). Mode skills are injected into the
 	// mode context segment, not the user message.

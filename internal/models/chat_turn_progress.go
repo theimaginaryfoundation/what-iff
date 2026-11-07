@@ -27,6 +27,9 @@ type ChatTurnProgress struct {
 	Step int `json:"step,omitempty"`
 	// Plan is the Advanced run's current checklist (update_plan). Empty on Standard turns.
 	Plan []PlanItem `json:"plan,omitempty"`
+	// Prompt is the question the turn is waiting on the person to answer (ADR 0x042), nil when it
+	// is not waiting.
+	Prompt *AgentPromptView `json:"prompt,omitempty"`
 }
 
 // PlanItemStatus, PlanItem and the statuses live in modeltypes (shared with the Ent schema).

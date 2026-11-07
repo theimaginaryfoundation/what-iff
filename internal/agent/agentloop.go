@@ -107,7 +107,10 @@ func (a *Agent) runToolRounds(
 		allGeneratedAttachments = append(allGeneratedAttachments, generatedAttachments...)
 		adapter.AppendToolResults(toolResults)
 
-		if round == maxToolCallRounds-1 {
+		// A question went unanswered (ADR 0x042): stop calling tools and have the model ask in its
+		// reply, as at the round cap. An Advanced step ends here with the results pending, and the
+		// run wraps up (advancedRun.loop).
+		if round == maxToolCallRounds-1 || (chatCtx != nil && chatCtx.awaitingUser) {
 			if opts.endStepAtCap {
 				return nil, allToolCalls, allGeneratedAttachments, true, nil
 			}
@@ -268,7 +271,7 @@ func (a *Agent) executeToolUseWithRecovery(ctx context.Context, chatCtx *chatCon
 			}
 		}()
 
-		output, generatedAttachments, err := a.dispatchToolUse(ctx, chatCtx, use)
+		output, generatedAttachments, err := a.dispatchToolUse(withToolUseID(ctx, use.ID), chatCtx, use)
 		toolErr = err
 		if err != nil {
 			result.IsErr = true

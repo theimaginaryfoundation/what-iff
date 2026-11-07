@@ -50,6 +50,8 @@ type jobToolProgress struct {
 	// step and plan are the Advanced run's current step and checklist (zero on Standard turns).
 	step int
 	plan []models.PlanItem
+	// prompt is the question the turn is waiting on (ADR 0x042), nil when it is not waiting.
+	prompt *models.AgentPromptView
 	// pending is the newest snapshot not yet written; the writer goroutine always takes the
 	// latest, so writes can't land out of order and a burst of updates coalesces into one.
 	pending string
@@ -208,6 +210,17 @@ func (p *jobToolProgress) SetPlan(plan []models.PlanItem) {
 	p.mu.Unlock()
 }
 
+// SetPrompt publishes the question the turn waits on, or clears it (nil).
+func (p *jobToolProgress) SetPrompt(prompt *models.AgentPromptView) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.prompt = prompt
+	p.scheduleLocked()
+	p.mu.Unlock()
+}
+
 // Finished marks the running entry for result.ID complete (or error) with an output preview.
 func (p *jobToolProgress) Finished(result provider.ToolResult) {
 	if p == nil {
@@ -238,7 +251,7 @@ func (p *jobToolProgress) Finished(result provider.ToolResult) {
 }
 
 func (p *jobToolProgress) snapshotLocked() string {
-	raw, err := json.Marshal(models.ChatTurnProgress{ToolCalls: p.entries, Step: p.step, Plan: p.plan})
+	raw, err := json.Marshal(models.ChatTurnProgress{ToolCalls: p.entries, Step: p.step, Plan: p.plan, Prompt: p.prompt})
 	if err != nil {
 		p.logger.Warn("failed to encode chat turn progress", zap.String("job_id", p.jobID.String()), zap.Error(err))
 		return ""
