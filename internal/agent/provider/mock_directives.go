@@ -64,9 +64,11 @@ func mockToolSummary(batches [][]ToolResult) string {
 	var b strings.Builder
 	for _, batch := range batches {
 		for _, r := range batch {
+			// Long outputs keep their head and tail: a follow-up the turn took in (steering) is
+			// appended to the end of a result.
 			out := r.Output
-			if len([]rune(out)) > 400 {
-				out = string([]rune(out)[:400]) + "…"
+			if rs := []rune(out); len(rs) > 700 {
+				out = string(rs[:200]) + " … " + string(rs[len(rs)-450:])
 			}
 			status := "ok"
 			if r.IsErr {
