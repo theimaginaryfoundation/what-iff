@@ -1,4 +1,5 @@
 
+import { McpAppFrameComponent } from '../mcp-app-frame/mcp-app-frame.component';
 import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, computed, inject, input, output, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 
@@ -36,7 +37,7 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
 @Component({
   selector: 'app-message-bubble',
   standalone: true,
-  imports: [AgentRunNotesComponent, MessageContentComponent, TooltipDirective, StarIconComponent, BrainIconComponent, ChevRightIconComponent, ClockIconComponent],
+  imports: [AgentRunNotesComponent, McpAppFrameComponent, MessageContentComponent, TooltipDirective, StarIconComponent, BrainIconComponent, ChevRightIconComponent, ClockIconComponent],
   template: `
     <article
       class="bubble"
@@ -123,6 +124,9 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
           />
         }
       </div>
+      @for (call of appCalls(); track call.id) {
+        <app-mcp-app-frame [chatId]="message().chat_id" [toolCall]="call" />
+      }
       @if (userSkillNames().length) {
         <div class="bubble__skills" aria-label="Skills sent with this message">
           @for (name of userSkillNames(); track name) {
@@ -624,6 +628,13 @@ export class MessageBubbleComponent {
   readonly showContext = output<ChatMessage>();
   /** A tool call opened from the working notes. */
   readonly openToolCall = output<ToolCall>();
+
+  /** The reply's tool calls whose MCP tool has an MCP App, rendered under it (ADR 0x042). */
+  readonly appCalls = computed(() => {
+    const m = this.message();
+    if (m.origin !== 'Assistant') return [];
+    return (m.tool_calls ?? []).filter(call => !!call.app?.resource_uri && !call.tool_error);
+  });
 
   /** True for assistant replies that captured a Context X-ray snapshot. */
   readonly hasContextBreakdown = computed(() => {
