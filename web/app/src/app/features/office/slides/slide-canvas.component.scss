@@ -185,6 +185,29 @@
   }
 }
 
+.slide__rotate {
+  background: #ffffff;
+  border: 1pt solid var(--accent, #2563eb);
+  border-radius: 50%;
+  cursor: grab;
+  height: 7pt;
+  left: calc(50% - 3.5pt);
+  position: absolute;
+  top: -16pt;
+  width: 7pt;
+  z-index: 2;
+
+  &::after {
+    background: var(--accent, #2563eb);
+    content: "";
+    height: 8pt;
+    left: 3pt;
+    position: absolute;
+    top: 7pt;
+    width: 1pt;
+  }
+}
+
 .slide__defs {
   position: absolute;
 }

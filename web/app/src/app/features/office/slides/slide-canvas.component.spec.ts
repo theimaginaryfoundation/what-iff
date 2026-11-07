@@ -171,6 +171,24 @@ describe('SlideCanvasComponent', () => {
     expect(select).toHaveBeenLastCalledWith(null);
   });
 
+  it('rotates with the handle above the element', () => {
+    const shape = newShape('rect', 100, 100, 200, 100, '#FF0000');
+    const el = render(slideWith(shape), { interactive: true, selectedId: shape.id });
+    const rotated = vi.fn();
+    fixture.componentInstance.rotationChange.subscribe(rotated);
+    const handle = el.querySelector<HTMLElement>('.slide__rotate')!;
+    const box = handle.parentElement!.getBoundingClientRect();
+    const cx = box.left + box.width / 2;
+    const cy = box.top + box.height / 2;
+    handle.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: cx, clientY: cy - 50, button: 0, pointerId: 9 }));
+    const slide = el.querySelector<HTMLElement>('.slide')!;
+    slide.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: cx + 50, clientY: cy, pointerId: 9 }));
+    fixture.detectChanges();
+    expect(el.querySelector<HTMLElement>('.slide__element')!.style.transform).toContain('rotate(90deg)');
+    slide.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: cx + 50, clientY: cy, pointerId: 9 }));
+    expect(rotated).toHaveBeenCalledWith({ id: shape.id, rotate: 90 });
+  });
+
   it('asks to edit on double-click and commits the edited text on blur', () => {
     const text = newTextBox(0, 0, 200, 40, 'Hello');
     const el = render(slideWith(text), { interactive: true, selectedId: text.id });
