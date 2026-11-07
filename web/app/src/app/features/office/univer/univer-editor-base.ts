@@ -26,6 +26,15 @@ const SETTLE_MS = 1000;
 /** Mutations that move the view or the caret, not the content. */
 const VIEW_ONLY_MUTATION = /scroll|selection|zoom|skeleton|active|viewport|freeze-render|render|cursor|focus/i;
 
+/** Whether a key press would type, delete or paste content (navigation, copy and find are fine). */
+export function changesContent(event: KeyboardEvent): boolean {
+  const key = event.key;
+  const mod = event.ctrlKey || event.metaKey;
+  if (mod) return ['v', 'x', 'z', 'y', 'b', 'i', 'u'].includes(key.toLowerCase());
+  if (key.length === 1) return true;
+  return ['Enter', 'Backspace', 'Delete', 'Tab', 'F2'].includes(key);
+}
+
 export interface UniverKit {
   createUniver: (typeof import('@univerjs/presets'))['createUniver'];
   options(container: HTMLElement, opts?: { readOnly?: boolean }): Parameters<(typeof import('@univerjs/presets'))['createUniver']>[0];
@@ -102,7 +111,20 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
           event.preventDefault();
           event.stopPropagation();
           if (!this.readOnly()) this.saveRequested.emit();
+          return;
         }
+        // Read-only is enforced here as well as in Univer: keys that would change content never reach it.
+        if (this.readOnly() && changesContent(event)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      },
+      { capture: true },
+    );
+    this.hostEl.nativeElement.addEventListener(
+      'dblclick',
+      event => {
+        if (this.readOnly()) event.stopPropagation();
       },
       { capture: true },
     );

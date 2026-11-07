@@ -58,6 +58,8 @@ export class SheetsEditorComponent extends UniverEditorBase<UniverWorkbook, Work
     const api = univerAPI as FUniver & { createWorkbook(data: unknown): Workbook };
     const workbook = api.createWorkbook(data);
     workbook.setEditable(!readOnly);
+    // The unit's permission points register as it comes up, so the lock is set again once it has.
+    if (readOnly) setTimeout(() => workbook.setEditable(false), 1200);
     return workbook;
   }
 
