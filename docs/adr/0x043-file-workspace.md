@@ -255,7 +255,8 @@ Shared decisions:
 - The registry marks these kinds `editInPlace`: the same component is the viewer and the editor, and the host flips its `readOnly` input rather than swapping components.
 - `FileEditor` gained an optional `losses` signal. The host asks before saving over an original the editor cannot keep whole, naming what would be dropped and pointing at Save As.
 - New preview kinds `spreadsheet`, `document` and `slides`; `.csv` and `.tsv` now open in the Sheets editor and save back as CSV.
-- Specs fake the Univer kits through injection tokens; the slides specs run the real pptxgenjs and pptxtojson, which both work under the jsdom runner. None of the three editors has been driven in a real browser yet; a manual pass is the next check.
+- Specs fake the Univer kits through injection tokens; the slides specs run the real pptxgenjs and pptxtojson, which both work under the jsdom runner.
+- A Playwright pass in Chromium against the branch's own API (mock LLM, throwaway Postgres) drove all three: open from the gallery, read-only view, Edit, a typed change, Save (`PUT …/content` 200), and the saved bytes read back with the change (ExcelJS for the sheet, `document.xml` for the document, pptxtojson for the deck, plus a reopen of the deck). It found three things the unit specs could not: Univer measured its container while the loading placeholder still hid it and drew a zero-height sheet; a host that does not constrain the height (the gallery page) gave it nothing to measure; slides inherited the app's dark theme as their text colour. All three are fixed on the branch.
 
 ## Step 0 results (2026-11-06)
 
