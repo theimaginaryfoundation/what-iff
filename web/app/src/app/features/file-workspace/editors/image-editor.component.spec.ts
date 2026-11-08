@@ -108,4 +108,18 @@ describe('ImageEditorComponent', () => {
     expect(fake.instances[0].terminated).toBe(true);
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:image');
   });
+
+  it('stays dirty for a change made during a save and does not reopen its own bytes', async () => {
+    await open(file());
+    const modify = fake.instances[0].config['onModify'] as () => void;
+    modify();
+    const saved = await fixture.componentInstance.content();
+    modify();
+    fixture.componentRef.setInput('blob', saved);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.componentInstance.markSaved(saved);
+    expect(fake.instances.length).toBe(1);
+    expect(fixture.componentInstance.dirty()).toBe(true);
+  });
 });

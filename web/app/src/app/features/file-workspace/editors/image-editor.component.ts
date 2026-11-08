@@ -99,6 +99,11 @@ export class ImageEditorComponent implements FileEditor {
   private objectUrl: string | null = null;
   private rendered = false;
 
+  private lastContent: Blob | null = null;
+  /** Counts changes, so a save can tell whether any landed after it started. */
+  private edits = 0;
+  private readonly savedEdits = new WeakMap<Blob, number>();
+
   constructor() {
     afterNextRender(() => {
       this.rendered = true;
@@ -107,12 +112,24 @@ export class ImageEditorComponent implements FileEditor {
     effect(() => {
       const blob = this.blob();
       if (!this.rendered) return;
+      // After a save the host hands back this editor's own bytes; reopening them would discard
+      // the undo history and anything changed since.
+      if (blob === this.lastContent) return;
       untracked(() => void this.mount(blob));
     });
     inject(DestroyRef).onDestroy(() => this.teardown());
   }
 
-  async content(): Promise<Blob> {
+  content(): Promise<Blob> {
+    const edits = this.edits;
+    return this.render().then(blob => {
+      this.lastContent = blob;
+      this.savedEdits.set(blob, edits);
+      return blob;
+    });
+  }
+
+  private async render(): Promise<Blob> {
     const type = (this.file().file_type || '').toLowerCase();
     const extension = SAVE_EXTENSIONS[type];
     if (!extension) throw new Error(`cannot write ${type}`);
@@ -129,8 +146,10 @@ export class ImageEditorComponent implements FileEditor {
     return new Blob([bytes], { type });
   }
 
-  markSaved(): void {
-    this.setDirty(false);
+  markSaved(saved?: Blob): void {
+    // A change made while the save was running is still unsaved.
+    const at = saved && this.savedEdits.get(saved);
+    this.setDirty(at !== undefined && at !== this.edits);
   }
 
   private async mount(blob: Blob): Promise<void> {
@@ -148,7 +167,10 @@ export class ImageEditorComponent implements FileEditor {
     const view = this.document.defaultView;
     const editor = new ctor(this.host().nativeElement, {
       source: this.objectUrl,
-      onModify: () => this.setDirty(true),
+      onModify: () => {
+        this.edits += 1;
+        this.setDirty(true);
+      },
       onSave: () => this.saveRequested.emit(),
       avoidChangesNotSavedAlertOnLeave: true,
       showBackButton: false,

@@ -77,6 +77,8 @@ export class PdfEditorComponent implements FileEditor {
   private rendered = false;
   private generation = 0;
 
+  private lastContent: Blob | null = null;
+
   constructor() {
     afterNextRender(() => {
       this.rendered = true;
@@ -85,6 +87,9 @@ export class PdfEditorComponent implements FileEditor {
     effect(() => {
       const blob = this.blob();
       if (!this.rendered) return;
+      // After a save the host hands back this editor's own bytes; reopening them would discard
+      // the undo history and anything changed since.
+      if (blob === this.lastContent) return;
       untracked(() => void this.open(blob));
     });
     inject(DestroyRef).onDestroy(() => this.teardown());
@@ -93,7 +98,8 @@ export class PdfEditorComponent implements FileEditor {
   async content(): Promise<Blob> {
     if (!this.doc) return this.blob();
     const bytes = await this.doc.saveDocument();
-    return new Blob([bytes as BlobPart], { type: 'application/pdf' });
+    this.lastContent = new Blob([bytes as BlobPart], { type: 'application/pdf' });
+    return this.lastContent;
   }
 
   markSaved(): void {
