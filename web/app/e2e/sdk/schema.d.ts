@@ -13139,11 +13139,16 @@ export interface paths {
         /**
          * Download file attachment
          * @description Downloads the binary content for a single file attachment owned by the authenticated user.
+         *     The response carries the file's `content_version` as its ETag and must be revalidated before
+         *     reuse, because a save replaces the bytes under the same URL.
          */
         get: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description The ETag of a cached copy; a match returns 304 with no body. */
+                    "If-None-Match"?: string;
+                };
                 path: {
                     /** @description File attachment ID */
                     id: string;
@@ -13155,11 +13160,20 @@ export interface paths {
                 /** @description File attachment content */
                 200: {
                     headers: {
+                        /** @description The file's content_version, quoted. */
+                        ETag?: string;
                         [name: string]: unknown;
                     };
                     content: {
                         "application/octet-stream": string;
                     };
+                };
+                /** @description The cached copy is current */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
                 /** @description Invalid attachment ID */
                 400: {
@@ -13602,6 +13616,13 @@ export interface paths {
                     content: {
                         "image/*": string;
                     };
+                };
+                /** @description The cached copy is current (the ETag is the file's content_version; responses must be revalidated). */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
                 /** @description Invalid image ID, or the file is not an image */
                 400: {

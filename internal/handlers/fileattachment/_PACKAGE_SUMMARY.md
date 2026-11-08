@@ -25,6 +25,8 @@ HTTP API for **file attachments** metadata and download flows at `/api/file-atta
   `DELETE /file-attachment/{id}` deletes the row, then releases the stored object and thumbnail via `storage.ReleaseAttachmentObjects` (skipped while another row references the key).
   The object step is best effort and never fails the request; an object it cannot remove is left orphaned.
   The steps live in `filedelete.Service.DeleteFile`, which the gallery's bulk delete shares; the handler only maps its errors (not found or unreadable is 404, anything else 500).
+- **Downloads revalidate.**
+  A save replaces a file's bytes under the same URL, so `GET` sends `Cache-Control: private, no-cache` with `content_version` as the ETag and answers a matching `If-None-Match` with 304, without reading the store.
 - **Download fallback uses the chat id.**
   For rows without `s3_key` the derived key comes from `FileKeyForAttachment(..., ChatID, PersonalityID)`; `ChatID` is resolved by the datastore through the chat message (issue #253).
 

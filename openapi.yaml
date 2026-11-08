@@ -8777,7 +8777,10 @@ paths:
   /file-attachment/{id}:
     get:
       summary: Download file attachment
-      description: Downloads the binary content for a single file attachment owned by the authenticated user.
+      description: |
+        Downloads the binary content for a single file attachment owned by the authenticated user.
+        The response carries the file's `content_version` as its ETag and must be revalidated before
+        reuse, because a save replaces the bytes under the same URL.
       tags: [File Attachments]
       parameters:
         - name: id
@@ -8787,14 +8790,27 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: If-None-Match
+          in: header
+          required: false
+          description: The ETag of a cached copy; a match returns 304 with no body.
+          schema:
+            type: string
       responses:
         '200':
           description: File attachment content
+          headers:
+            ETag:
+              description: The file's content_version, quoted.
+              schema:
+                type: string
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
+        '304':
+          description: The cached copy is current
         '400':
           description: Invalid attachment ID
           content:
@@ -9134,6 +9150,8 @@ paths:
             type: string
             enum: [full, thumbnail]
       responses:
+        '304':
+          description: The cached copy is current (the ETag is the file's content_version; responses must be revalidated).
         '200':
           description: The image bytes
           content:

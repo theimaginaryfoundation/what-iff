@@ -295,6 +295,48 @@ func TestGetFileAttachmentContent_DownloadsFallbackKey(t *testing.T) {
 	require.Equal(t, "hello world", rec.Body.String())
 }
 
+func TestGetFileAttachmentContent_RevalidatesByContentVersion(t *testing.T) {
+	attachmentID := uuid.New()
+	userID := uuid.New()
+	attachment := &models.FileAttachment{ID: attachmentID, Name: "notes.txt", FileType: "text/plain", S3Key: "k", ContentVersion: 3}
+	fs := &stubFileStore{contentByKey: map[string][]byte{"k": []byte("v3")}, errByKey: map[string]error{}}
+	h := &Handler{
+		logger: zap.NewNop(),
+		ds: stubStore{
+			getFn: func(context.Context, uuid.UUID, uuid.UUID) (*models.FileAttachment, error) {
+				return attachment, nil
+			},
+		},
+		agent: &stubAgent{store: fs},
+	}
+	get := func(ifNoneMatch string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/file-attachment/"+attachmentID.String(), nil)
+		if ifNoneMatch != "" {
+			req.Header.Set("If-None-Match", ifNoneMatch)
+		}
+		req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, userID))
+		req = mux.SetURLVars(req, map[string]string{"id": attachmentID.String()})
+		rec := httptest.NewRecorder()
+		h.GetFileAttachmentContent(rec, req)
+		return rec
+	}
+
+	first := get("")
+	require.Equal(t, http.StatusOK, first.Code)
+	require.Equal(t, `"3"`, first.Header().Get("ETag"))
+	require.Equal(t, "private, no-cache", first.Header().Get("Cache-Control"))
+
+	current := get(`"3"`)
+	require.Equal(t, http.StatusNotModified, current.Code)
+	require.Empty(t, current.Body.String())
+	require.Len(t, fs.seenKeys, 1, "a current copy needs no read from the store")
+
+	// A save moved the version on: the old copy gets the new bytes.
+	stale := get(`"2"`)
+	require.Equal(t, http.StatusOK, stale.Code)
+	require.Equal(t, "v3", stale.Body.String())
+}
+
 func TestGetFileAttachmentContent_DownloadError(t *testing.T) {
 	id := uuid.New()
 	fs := &stubFileStore{
