@@ -218,6 +218,7 @@ export function personsXml(persons: Iterable<ThreadPerson>): string {
 }
 
 /** Threads on a cell; comments anchored to a drawing or a range have no place in the Excel format. */
+/** Threads on a real cell. Anything else in `ref` comes from the file and never reaches the XML. */
 export function cellThreads(threads: readonly UniverComment[]): UniverComment[] {
   return threads.filter(t => parseCellA1(t.ref) !== null);
 }

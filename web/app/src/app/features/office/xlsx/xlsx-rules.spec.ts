@@ -4,7 +4,7 @@ import JSZip from 'jszip';
 import { RESOURCE_CONDITIONAL_FORMATTING, RESOURCE_DATA_VALIDATION, RESOURCE_NOTES, UniverCfRule, UniverDataValidationRule, UniverWorkbook, readResource, writeResource } from './univer-sheet-types';
 import { workbookToXlsx } from './xlsx-export';
 import { xlsxToWorkbook } from './xlsx-import';
-import { RESOURCE_THREAD_COMMENTS, UniverComment } from './xlsx-threaded-comments';
+import { RESOURCE_THREAD_COMMENTS, UniverComment, linkLegacyComments } from './xlsx-threaded-comments';
 
 const MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const X14 = 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main';
@@ -315,6 +315,12 @@ describe('data validation', () => {
 });
 
 describe('threaded comments', () => {
+  it('ignores a thread whose ref is not a cell, so it cannot reach the legacy notes', () => {
+    const xml = '<comments><authors></authors><commentList><comment ref="A1" authorId="0"></comment></commentList></comments>';
+    const thread = { id: 't', ref: 'A1"/><x y="' } as UniverComment;
+    expect(linkLegacyComments(xml, [thread], { guid: () => 'g' } as unknown as Parameters<typeof linkLegacyComments>[2])).toBe(xml);
+  });
+
   const persons = `<?xml version="1.0" encoding="UTF-8"?><personList xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments" xmlns:x="${MAIN}"><person displayName="Ada Lovelace" id="${PERSON}" userId="ada@example.test" providerId="Windows Live"/></personList>`;
   const comments = `<?xml version="1.0" encoding="UTF-8"?><ThreadedComments xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments" xmlns:x="${MAIN}"><threadedComment ref="A1" dT="2026-01-02T03:04:05.00" personId="${PERSON}" id="${GUID_A}" done="1"><text>First @Ada</text><mentions><mention mentionpersonId="${PERSON}" mentionId="${GUID_B}" startIndex="6" length="4"/></mentions></threadedComment><threadedComment ref="A1" dT="2026-01-02T04:00:00.00" personId="${PERSON}" id="${GUID_B}" parentId="${GUID_A}"><text>A reply</text></threadedComment></ThreadedComments>`;
 
