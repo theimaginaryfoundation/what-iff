@@ -340,6 +340,8 @@ describe('NotebookEditorComponent', () => {
       expect(error).toHaveBeenCalled();
       expect(usableRunUrl('__JUPYTERLITE_URL__', app)).toBeNull();
       expect(usableRunUrl('javascript:alert(1)', app)).toBeNull();
+      expect(usableRunUrl('http://notebooks.example.test/lab/index.html', app)).toBeNull();
+      expect(usableRunUrl('http://localhost:4203/lab/index.html', app)).toBe('http://localhost:4203/lab/index.html');
       expect(usableRunUrl('', app)).toBeNull();
       expect(usableRunUrl(undefined, app)).toBeNull();
       error.mockRestore();

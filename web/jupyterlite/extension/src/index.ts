@@ -10,6 +10,9 @@ import { IDocumentManager } from '@jupyterlab/docmanager';
  *   host -> here   whatiff:open { name, content }, whatiff:close
  *   here -> host   whatiff:ready, whatiff:save { content }, whatiff:closed
  *
+ * The drive is in memory (see jupyter-lite.json), so one notebook's files are not there for the next
+ * notebook or the next account on this browser.
+ *
  * This site holds nothing of the user's beyond the notebook it was handed, and it has no credentials:
  * it lives on an origin of its own, and only origins in `whatiffHostOrigins` may talk to it.
  */

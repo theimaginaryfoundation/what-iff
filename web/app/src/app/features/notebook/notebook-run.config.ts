@@ -6,7 +6,9 @@ import { environment } from '../../../environments/environment';
 /**
  * Where the JupyterLite that runs notebooks lives (ADR 0x043 §8), or null when Run is not offered.
  * It must be another origin: a same-origin iframe shares `sessionStorage` with this page, so a
- * notebook's code or output could read the session token. A URL on this origin is refused outright.
+ * notebook's code or output could read the session token. A URL on this origin is refused outright,
+ * and this check is what makes `allow-same-origin` on the Run iframe safe: the two change together.
+ * It must also be https outside local development, since the frame runs what it is served.
  */
 export function usableRunUrl(url: string | null | undefined, appOrigin: string): string | null {
   if (!url) return null;
@@ -16,7 +18,8 @@ export function usableRunUrl(url: string | null | undefined, appOrigin: string):
   } catch {
     return null; // Includes a deployment's unsubstituted placeholder.
   }
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+  const local = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && local)) return null;
   if (parsed.origin === appOrigin) {
     console.error('JupyterLite must be served from its own origin; Run stays off.');
     return null;

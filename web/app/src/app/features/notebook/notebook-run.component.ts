@@ -20,6 +20,10 @@ const CLOSE_TIMEOUT_MS = 5_000;
       @if (state() === 'starting') {
         <p class="notebook-run__message" role="status">Starting Python in your browser. The first time takes a while…</p>
       }
+      <!--
+        allow-same-origin gives JupyterLite its own origin's storage, which it needs to start. It
+        is safe only because usableRunUrl refuses this app's origin; change the two together.
+      -->
       <iframe
         #frame
         class="notebook-run__frame"

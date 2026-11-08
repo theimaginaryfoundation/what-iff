@@ -310,7 +310,7 @@ Verification: the converters over the three real files and a fixture with a text
 Two decisions differ from §8:
 
 - **JupyterLite gets its own origin, not `/jupyterlite/`.** A same-origin iframe shares `sessionStorage` with its parent, so a notebook's code or output could read the session token. `usableRunUrl` refuses a same-origin URL, so Run stays off rather than running unsafely. The site holds no credentials and receives only the notebook.
-- **A bridge, not a custom contents drive.** A small labextension (`web/jupyterlite/extension`) writes the host's notebook to JupyterLite's default drive and opens it, so a kernel reads it and its neighbours with plain `open()`. The extension reports saves back, and the host persists them through its usual `PUT …/content`.
+- **A bridge, not a custom contents drive.** A small labextension (`web/jupyterlite/extension`) writes the host's notebook to JupyterLite's in-memory default drive and opens it, so a kernel reads it and its neighbours with plain `open()`. The extension reports saves back, and the host persists them through its usual `PUT …/content`.
 
 How it fits together:
 
