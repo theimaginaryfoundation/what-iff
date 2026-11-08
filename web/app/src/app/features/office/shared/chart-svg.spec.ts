@@ -34,6 +34,12 @@ describe('chartSvg', () => {
     expect(svg).toContain('&lt;script&gt;a&amp;b');
   });
 
+  it('shows axis titles and a legend, and hides the legend when told to', () => {
+    const svg = chartSvg(chart('bar', { categoryAxisTitle: 'Quarter', valueAxisTitle: 'Units' }), opts);
+    for (const text of ['Quarter', 'Units', 'North', 'South']) expect(svg).toContain(text);
+    expect(chartSvg(chart('bar', { legend: false }), opts)).not.toContain('>South<');
+  });
+
   it('survives a chart with no data', () => {
     const svg = chartSvg({ type: 'bar', series: [], colors: [] }, opts);
     expect(new DOMParser().parseFromString(svg, 'image/svg+xml').querySelector('parsererror')).toBeNull();
