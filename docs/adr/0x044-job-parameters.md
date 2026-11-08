@@ -60,6 +60,7 @@ A value is **set** when:
 
 Values for names that have no definition are dropped on save.
 A select value that is no longer one of the options (the options changed) is dropped on save too, so a stale selection can never render.
+For `multi_select` the whole selection is dropped if any of its options is gone, rather than quietly keeping what is left: the parameter then needs a value again, and the owner sees it.
 
 ### 3. Rendering
 
@@ -174,6 +175,8 @@ The jobs list, job cards and the sidebar's recent jobs show the `needs_values` s
 ### 9. Agent tools
 
 `create_agent_job` and `update_agent_job` gain `parameters` and `parameter_values`, with the same validation and the same `needs_values` rule.
+The tools take values as a list of `{name, value}` or `{name, items}` rather than a name-keyed object, because strict tool schemas can't describe an object with free-form keys.
+On update, the values passed are merged over the stored ones (an empty value clears one), so the agent can set one parameter without restating the rest.
 The tool result lists any missing parameters, so the agent can ask the user for them.
 This keeps "set my news job's topics to AI and climate" working in chat, and stops an agent edit of a parameterised prompt from silently dropping a definition.
 
