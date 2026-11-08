@@ -36,6 +36,9 @@ var (
 	ErrAgentJobNotFound     = errors.New("agent job not found")
 	ErrInvalidAgentJob      = errors.New("invalid agent job")
 	ErrInvalidAgentSchedule = errors.New("invalid agent job schedule")
+	// ErrAgentJobNeedsValues wraps a *params.MissingError: the job can't be active or run until
+	// every parameter has a value (ADR 0x044).
+	ErrAgentJobNeedsValues = errors.New("agent job needs parameter values")
 
 	// Chat-related errors
 	ErrChatNotFound                            = errors.New("chat not found")

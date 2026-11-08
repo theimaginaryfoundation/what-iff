@@ -5021,7 +5021,61 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /**
+         * Create agent job
+         * @description Creates an AgentJob. The schedule input is read in natural language. Every `{{name}}` placeholder in the prompt needs a parameter definition (ADR 0x044); a job created with a parameter that has no value gets status `needs_values`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateAgentJobRequest"];
+                };
+            };
+            responses: {
+                /** @description AgentJob created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentJob"];
+                    };
+                };
+                /** @description Invalid request data, schedule or timezone. Parameter problems use code job_parameters_invalid with details (AgentJobParametersError). */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -5143,7 +5197,7 @@ export interface paths {
         };
         /**
          * Update agent job
-         * @description Updates an AgentJob title, prompt, and/or schedule input
+         * @description Updates an AgentJob. The prompt, parameter definitions and parameter values are saved together and checked against each other (ADR 0x044); the status becomes `needs_values` when an active job is saved with a parameter that has no value, and `active` again once a `needs_values` job's values are all set. Parameter problems answer 400 with code job_parameters_invalid and details (AgentJobParametersError).
          */
         put: {
             parameters: {
@@ -5258,7 +5312,7 @@ export interface paths {
         get?: never;
         /**
          * Update agent job status
-         * @description Pauses or resumes an AgentJob
+         * @description Pauses or resumes an AgentJob. A job with a parameter that has no value can't be resumed (409).
          */
         put: {
             parameters: {
@@ -5305,6 +5359,15 @@ export interface paths {
                 };
                 /** @description AgentJob not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The job has a parameter with no value (code job_needs_values; details.missing_parameters lists them) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -5378,6 +5441,15 @@ export interface paths {
                 };
                 /** @description AgentJob not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The job has a parameter with no value (code job_needs_values; details.missing_parameters lists them) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -14927,10 +14999,11 @@ export interface components {
          */
         AgentJobScheduleType: "cron" | "at";
         /**
+         * @description `needs_values`: the job has a parameter with no value and can't run until it gets one (ADR 0x044). `paused` is always the user's choice.
          * @example active
          * @enum {string}
          */
-        AgentJobStatus: "active" | "paused" | "complete" | "failed";
+        AgentJobStatus: "active" | "paused" | "complete" | "failed" | "needs_values";
         /**
          * @example {
          *       "id": "123e4567-e89b-12d3-a456-426614174000",
@@ -14978,10 +15051,58 @@ export interface components {
             last_run_at?: string | null;
             last_error?: string | null;
             run_count?: number;
+            /** @description Definitions of the prompt's `{{name}}` placeholders, in form order (ADR 0x044). */
+            parameters?: components["schemas"]["AgentJobParameter"][];
+            parameter_values?: components["schemas"]["AgentJobParameterValues"];
+            /** @description Names of the parameters without a usable value, in definition order. Derived. */
+            missing_parameters?: string[];
             /** Format: date-time */
             created_at?: string;
             /** Format: date-time */
             updated_at?: string;
+        };
+        /** @description One `{{name}}` placeholder of a job prompt (ADR 0x044). All parameters are required. */
+        AgentJobParameter: {
+            name: string;
+            /** @description What the form shows; defaults to the name. */
+            label?: string;
+            description?: string;
+            /** @enum {string} */
+            type: "single_select" | "multi_select" | "text" | "list";
+            /** @description The choices, for single_select and multi_select (at least one, unique). */
+            options?: string[];
+            /**
+             * @description multi_select and list only. comma joins the values on one line (default for multi_select); bullets renders a Markdown bullet list (default for list).
+             * @enum {string}
+             */
+            format?: "comma" | "bullets";
+        };
+        /** @description The owner's parameter values by name: a string for text and single_select, an array of strings for multi_select and list. Never published with a shared job. */
+        AgentJobParameterValues: {
+            [key: string]: string | string[];
+        };
+        /** @description The details of a job_parameters_invalid error. */
+        AgentJobParametersError: {
+            undefined_placeholders?: string[];
+            problems?: string[];
+        };
+        CreateAgentJobRequest: {
+            title?: string;
+            prompt: string;
+            /** @description Natural-language schedule input */
+            schedule_input: string;
+            /** @description Optional IANA timezone */
+            timezone?: string;
+            /** Format: uuid */
+            chat_id?: string;
+            /** Format: uuid */
+            personality_id?: string;
+            /** Format: uuid */
+            model_id?: string;
+            reasoning_effort?: components["schemas"]["ReasoningEffort"];
+            agent_loop?: components["schemas"]["AgentLoop"];
+            parameters?: components["schemas"]["AgentJobParameter"][];
+            parameter_values?: components["schemas"]["AgentJobParameterValues"];
         };
         AgentJobScheduleParseRequest: {
             schedule_input: string;
@@ -15023,6 +15144,10 @@ export interface components {
             schedule_input?: string | null;
             /** @description Optional IANA timezone (used when schedule_input is provided) */
             timezone?: string | null;
+            /** @description Replaces the job's parameter definitions. Preserved when absent. */
+            parameters?: components["schemas"]["AgentJobParameter"][];
+            /** @description Replaces the job's parameter values. Preserved when absent. */
+            parameter_values?: components["schemas"]["AgentJobParameterValues"];
         };
         UpdateAgentJobStatusRequest: {
             /** @enum {string} */

@@ -15,6 +15,7 @@ const (
 	runOutcomeSkippedOverlap    = "skipped_overlap"
 	runOutcomeSkippedInactive   = "skipped_inactive"
 	runOutcomeSkippedCongestion = "skipped_congestion"
+	runOutcomeSkippedNeedsValue = "skipped_needs_values" // a parameter has no value (ADR 0x044)
 	runOutcomeDeferred          = "deferred"
 	runOutcomeLoadFailed        = "load_failed"
 	runOutcomeChatResolveFailed = "chat_resolve_failed"

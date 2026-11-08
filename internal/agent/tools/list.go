@@ -11,6 +11,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 	"go.uber.org/zap"
 )
 
@@ -59,7 +60,7 @@ const ListDescription = `List your available resources. Pick a kind:
 - skills — skills you can attach to a subagent or scheduled job (id, name, description).
 - files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf"), scope ("personality" docs, "conversation" attachments, or "all"), folder, and origin ("agent" for files agents wrote, "user" for the rest). view="tree" draws one page of them (up to 200 by default) as a folder tree; with folder set, that is the folder's tree. Images dominate most libraries, so pass file_type to cut through them. Files, images and documents alike, can be filed in gallery folders (e.g. "charts/oura"); folder lists that folder and everything beneath it, and each row shows its folder.
 - conversations — your past conversations, including archived imports, that have messages, most-recent first (id, name). Pass an id to find_context (mode="conversation"/"origin") to read one.
-- jobs — your scheduled jobs (id, name, status, schedule, thread_id, next_runtime for still-active ones, and the start of each prompt as description). Active by default; set include_completed=true to also see paused jobs and finished/failed one-offs. Pass a job's id as filter to read that job in full: its whole prompt, model_id and skill_ids.
+- jobs — your scheduled jobs (id, name, status, schedule, thread_id, next_runtime for still-active ones, and the start of each prompt as description). Active by default; set include_completed=true to also see paused jobs, jobs waiting for parameter values (needs_values) and finished/failed one-offs. Pass a job's id as filter to read that job in full: its whole prompt, model_id, skill_ids and parameters.
 - mcp_servers — MCP servers available to the current conversation (attached to it, or linked to a skill that is active now), with discoverable MCP tools and currently loaded tools for this chat.
 
 Use filter for a free-text name/content match (files, conversations, jobs). Use limit to cap page size and page (1-based) to walk further results when has_more is true.`
@@ -200,9 +201,13 @@ type listItem struct {
 	ThreadID     string   `json:"thread_id,omitempty"`     // jobs that run in a set conversation
 	ModelID      string   `json:"model_id,omitempty"`      // a job read in full, when it overrides the model
 	SkillIDs     []string `json:"skill_ids,omitempty"`     // a job read in full
-	UpdatedAt    string   `json:"updated_at,omitempty"`    // personalities, conversations
-	URL          string   `json:"url,omitempty"`           // mcp_servers
-	Archived     *bool    `json:"archived,omitempty"`      // conversations
+	// Jobs (ADR 0x044): definitions and values when read in full; missing names on every row.
+	Parameters        []modeltypes.JobParameter     `json:"parameters,omitempty"`
+	ParameterValues   modeltypes.JobParameterValues `json:"parameter_values,omitempty"`
+	MissingParameters []string                      `json:"missing_parameters,omitempty"`
+	UpdatedAt         string                        `json:"updated_at,omitempty"` // personalities, conversations
+	URL               string                        `json:"url,omitempty"`        // mcp_servers
+	Archived          *bool                         `json:"archived,omitempty"`   // conversations
 }
 
 type listResult struct {

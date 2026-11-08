@@ -130,6 +130,11 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Chat list search/favorites/tags:** `chat.go` persists chat `tags` and `is_favorite`; tags are normalized/validated via shared model helpers.
   `ListChats` search matches chat **name**, **checkpoint_summary**, and individual **tags** (JSON array) with case-insensitive substring predicates.
   Favorite-count checks are a **best-effort UI guard** (non-locking count check, not a strict datastore invariant under races).
+- **Job parameters (ADR 0x044):** `agent_jobs.parameters` and `parameter_values` are JSON columns (`modeltypes.JobParameter`, `modeltypes.JobParameterValues`).
+  `CreateAgentJob` and `UpdateAgentJobParameters` (prompt, definitions and values together, in one transaction) run `params.Prepare` and return its `*params.ValidationError` unwrapped, then set the status with `params.StatusAfterSave`: active becomes `needs_values` when a value is missing, and `needs_values` becomes active when none is.
+  `UpdateAgentJobStatus` refuses `active` while a value is missing (`ErrAgentJobNeedsValues` wrapping a `*params.MissingError`).
+  `toAgentJobModel` derives `missing_parameters`.
+  A backup import keeps parameters that still check out and applies the same status rule.
 - **Agent jobs:** `UpdateAgentJobSchedule` (`agentjob.go`) sets status back to **active** and clears **last_error** when the job was **complete** or **failed** and the new schedule still has a **next_run_at**, so the in-process scheduler (which only schedules **active** jobs) picks it up again.
 - **Live reasoning draft:** `Job.draft_reasoning` mirrors `draft_deltas` for model reasoning (`AppendJobDraftReasoning`).
   Unlike the text draft it can be emptied mid-turn (`ResetJobDraftReasoning`) when a truncated attempt is retried, so clients render it wholesale per poll.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/reugn/go-quartz/quartz"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
+	"github.com/theimaginaryfoundation/what-iff/internal/agentjobs/params"
 	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
@@ -240,6 +241,16 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 		recordRun(ctx, runOutcomeSkippedInactive)
 		return
 	}
+	// The run sends the prompt with its parameter values filled in (ADR 0x044). Saves keep an
+	// active job's values complete, so this only guards a paused job run by hand, which the API
+	// already refuses, and a race with an edit.
+	prompt, err := params.Render(job.Prompt, job.Parameters, job.ParameterValues)
+	if err != nil {
+		m.logger.Info("skipping agent job run with missing parameter values",
+			zap.String("agent_job_id", agentJobID.String()), zap.Error(err))
+		recordRun(ctx, runOutcomeSkippedNeedsValue)
+		return
+	}
 
 	runAt := time.Now().UTC()
 	recordLateness(ctx, job.NextRunAt, runAt, opts)
@@ -328,9 +339,9 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 	if job.Title != nil {
 		title = strings.TrimSpace(*job.Title)
 	}
-	execCtx = models.WithJobRun(execCtx, models.JobRun{AgentJobID: agentJobID, Title: title, Prompt: job.Prompt})
+	execCtx = models.WithJobRun(execCtx, models.JobRun{AgentJobID: agentJobID, Title: title, Prompt: prompt})
 	runStart := time.Now()
-	_, runErr := m.agent.HandleAgentJobPrompt(execCtx, *chatID, job.Prompt, job.ModelID, job.PersonalityID, ritualIDs, nil)
+	_, runErr := m.agent.HandleAgentJobPrompt(execCtx, *chatID, prompt, job.ModelID, job.PersonalityID, ritualIDs, nil)
 	runOutcome := runOutcomeRan
 	switch {
 	case runStopped(runErr):

@@ -18,7 +18,7 @@
 ## Non-obvious decisions
 
 - Only one instance should execute the scheduler loop in production clusters — server config documents lock key and retry tuning.
-- **Metrics** (`metrics.go`): every firing counts once on `whatiff.scheduler.runs` by outcome (`ran`, `failed`, `stopped`, `skipped_overlap`, `skipped_inactive`, `load_failed`, `chat_resolve_failed`, `skipped_congestion`, `deferred`, `misfire`).
+- **Metrics** (`metrics.go`): every firing counts once on `whatiff.scheduler.runs` by outcome (`ran`, `failed`, `stopped`, `skipped_overlap`, `skipped_inactive`, `load_failed`, `chat_resolve_failed`, `skipped_congestion`, `skipped_needs_values`, `deferred`, `misfire`).
   Runs that reach the agent also record `whatiff.scheduler.run.duration` (outcome `ran`, `failed` or `stopped`).
   `whatiff.scheduler.lateness` is start time minus the job's stored `next_run_at`, for regular firings only (manual runs and deferred retries have no planned time).
   The manager isn't handed a `*telemetry.Metrics`, so it records through `telemetry.Global()`.
@@ -31,6 +31,9 @@
   The run returns an error wrapping `agent.ErrTurnStopped`, which `runStopped` tells apart: `last_error` reads `StoppedRunText`, no failure message is posted to the thread, a one-off job ends `complete` rather than `failed`, and the run counts as `stopped`.
   A run cancelled for any other reason (a worker shutting down) carries plain `context.Canceled` and is recorded as a failure.
   A stopped one-off job still ends `failed`, and the run counts as `failed` in the metrics.
+- **Job parameters (ADR 0x044):** the run sends the prompt rendered with the job's parameter values (`params.Render`), and the reply's `job_run` records that rendered prompt.
+  A job whose values are missing is skipped with outcome `skipped_needs_values`; saves keep an active job's values complete, so this only guards races and hand-run paused jobs, which the API already refuses.
+  `needs_values` jobs are never scheduled, like every non-active status.
 - **Which job a reply came from:** the run's context carries the job's id, title and prompt (`models.WithJobRun`), which the agent records on the run's ticket and its reply as `job_run` (ADR 0x040).
 - **MVP note:** `Config.EnableAgentJobsScheduler` gates whether the scheduler runs at all.
 

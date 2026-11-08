@@ -11,6 +11,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -26,6 +27,9 @@ type createAgentJobRequest struct {
 	ChatID        *string `json:"chat_id,omitempty"`
 	PersonalityID *string `json:"personality_id,omitempty"`
 	ModelID       *string `json:"model_id,omitempty"`
+	// Parameters and ParameterValues are the job's parameters (ADR 0x044).
+	Parameters      []modeltypes.JobParameter     `json:"parameters,omitempty"`
+	ParameterValues modeltypes.JobParameterValues `json:"parameter_values,omitempty"`
 	// TurnSettingValues override everything else for this job's runs (ADR 0x026).
 	models.TurnSettingValues
 }
@@ -107,6 +111,9 @@ func (h *Handler) CreateAgentJob(w http.ResponseWriter, r *http.Request) {
 		Status:        models.AgentJobStatusActive,
 		NextRunAt:     nextRunAt,
 		RunCount:      0,
+
+		Parameters:      req.Parameters,
+		ParameterValues: req.ParameterValues,
 	}
 	if err := req.TurnSettingValues.Validate(); err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
@@ -149,6 +156,9 @@ func (h *Handler) CreateAgentJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	created, err := h.provider.CreateAgentJob(r.Context(), userID, newJob)
+	if h.respondIfParamsError(w, err) {
+		return
+	}
 	if errors.Is(err, datastore.ErrChatNotFound) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Chat not found", nil)
 		return

@@ -41,7 +41,7 @@ func (f *fakeAgentJobProvider) GetAgentJob(ctx context.Context, userID, id uuid.
 func (f *fakeAgentJobProvider) UpdateAgentJobTitle(ctx context.Context, userID, id uuid.UUID, title *string) (*models.AgentJob, error) {
 	return nil, errors.New("not implemented")
 }
-func (f *fakeAgentJobProvider) UpdateAgentJobPrompt(ctx context.Context, userID, id uuid.UUID, prompt string) (*models.AgentJob, error) {
+func (f *fakeAgentJobProvider) UpdateAgentJobParameters(ctx context.Context, userID, id uuid.UUID, patch models.AgentJobParametersPatch) (*models.AgentJob, error) {
 	f.updatePromptCalled = true
 	return nil, errors.New("unexpected call")
 }

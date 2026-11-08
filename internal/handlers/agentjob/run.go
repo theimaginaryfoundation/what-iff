@@ -59,6 +59,11 @@ func (h *Handler) RunAgentJobNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(job.MissingParameters) > 0 {
+		respondNeedsValues(w, h, job.MissingParameters)
+		return
+	}
+
 	if h.runner == nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusServiceUnavailable, handlerutils.CodeNotSet, "AgentJob scheduler is not enabled", nil)
 		return

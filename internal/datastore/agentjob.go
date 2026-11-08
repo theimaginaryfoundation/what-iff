@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -12,8 +13,10 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/personality"
 	entritual "github.com/theimaginaryfoundation/what-iff/ent/ritual"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
+	"github.com/theimaginaryfoundation/what-iff/internal/agentjobs/params"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -66,6 +69,19 @@ func toAgentJobModel(e *ent.AgentJob) *models.AgentJob {
 		}
 	}
 
+	parameters := e.Parameters
+	if parameters == nil {
+		parameters = []modeltypes.JobParameter{}
+	}
+	values := e.ParameterValues
+	if values == nil {
+		values = modeltypes.JobParameterValues{}
+	}
+	missing := params.Missing(parameters, values)
+	if missing == nil {
+		missing = []string{}
+	}
+
 	return &models.AgentJob{
 		ID:                e.ID,
 		UserID:            userID,
@@ -84,6 +100,9 @@ func toAgentJobModel(e *ent.AgentJob) *models.AgentJob {
 		LastRunAt:         lastRunAt,
 		LastError:         lastError,
 		RunCount:          e.RunCount,
+		Parameters:        parameters,
+		ParameterValues:   values,
+		MissingParameters: missing,
 		Rituals:           rituals,
 		TurnSettingValues: turnSettingsFromEnt(e.ReasoningEffort, e.AgentLoop),
 		CreatedAt:         e.CreatedAt,
@@ -116,9 +135,18 @@ func (d *Datastore) CreateAgentJob(ctx context.Context, userID uuid.UUID, jobMod
 		return nil, ErrUnauthorized
 	}
 
+	defs, values, err := params.Prepare(jobModel.Prompt, jobModel.Parameters, jobModel.ParameterValues)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	jobModel.Status = params.StatusAfterSave(jobModel.Status, len(params.Missing(defs, values)) > 0)
+
 	create := tx.AgentJob.Create().
 		SetOwnerID(userID).
 		SetPrompt(jobModel.Prompt).
+		SetParameters(defs).
+		SetParameterValues(values).
 		SetScheduleInput(jobModel.ScheduleInput).
 		SetScheduleType(agentjob.ScheduleType(jobModel.ScheduleType)).
 		SetTimezone(jobModel.Timezone).
@@ -442,6 +470,24 @@ func (d *Datastore) UpdateAgentJobStatus(ctx context.Context, userID, id uuid.UU
 		}
 	}()
 
+	if status == models.AgentJobStatusActive {
+		existing, err := tx.AgentJob.Query().
+			Where(agentjob.ID(id), agentjob.HasOwnerWith(user.ID(userID))).
+			Only(ctx)
+		if err != nil {
+			tx.Rollback()
+			if ent.IsNotFound(err) {
+				return nil, ErrAgentJobNotFound
+			}
+			d.logger.Error(i18n.T1("query.failed", "Entity", "agent job"), zap.Error(err))
+			return nil, normalizeAgentJobDatastoreUnexpectedError(err)
+		}
+		if missing := params.Missing(existing.Parameters, existing.ParameterValues); len(missing) > 0 {
+			tx.Rollback()
+			return nil, fmt.Errorf("%w: %w", ErrAgentJobNeedsValues, &params.MissingError{Names: missing})
+		}
+	}
+
 	update := tx.AgentJob.Update().
 		Where(agentjob.ID(id), agentjob.HasOwnerWith(user.ID(userID))).
 		SetStatus(agentjob.Status(status))
@@ -535,11 +581,14 @@ func (d *Datastore) UpdateAgentJobTitle(ctx context.Context, userID, id uuid.UUI
 	return toAgentJobModel(entJob), nil
 }
 
-// UpdateAgentJobPrompt updates the prompt of an AgentJob.
-func (d *Datastore) UpdateAgentJobPrompt(ctx context.Context, userID, id uuid.UUID, prompt string) (*models.AgentJob, error) {
+// UpdateAgentJobParameters updates a job's prompt, parameter definitions and parameter values
+// together (ADR 0x044), since each is only valid against the others. Nil fields keep their stored
+// value. The result is checked with params.Prepare (a *params.ValidationError is returned as is)
+// and the job's status follows params.StatusAfterSave.
+func (d *Datastore) UpdateAgentJobParameters(ctx context.Context, userID, id uuid.UUID, patch models.AgentJobParametersPatch) (*models.AgentJob, error) {
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
-		d.logger.Error("failed to start transaction", zap.Error(err))
+		d.logger.Error(i18n.T("tx.start_failed"), zap.Error(err))
 		return nil, normalizeAgentJobDatastoreUnexpectedError(err)
 	}
 	defer func() {
@@ -549,34 +598,60 @@ func (d *Datastore) UpdateAgentJobPrompt(ctx context.Context, userID, id uuid.UU
 		}
 	}()
 
-	update := tx.AgentJob.Update().
+	existing, err := tx.AgentJob.Query().
 		Where(agentjob.ID(id), agentjob.HasOwnerWith(user.ID(userID))).
-		SetPrompt(prompt)
-
-	affected, err := update.Save(ctx)
+		Only(ctx)
 	if err != nil {
-		d.logger.Error("failed to update agent job prompt", zap.Error(err))
 		tx.Rollback()
+		if ent.IsNotFound(err) {
+			return nil, ErrAgentJobNotFound
+		}
+		d.logger.Error(i18n.T1("query.failed", "Entity", "agent job"), zap.Error(err))
 		return nil, normalizeAgentJobDatastoreUnexpectedError(err)
 	}
-	if affected == 0 {
+
+	prompt, defs, values := existing.Prompt, existing.Parameters, existing.ParameterValues
+	if patch.Prompt != nil {
+		prompt = *patch.Prompt
+	}
+	if patch.Parameters != nil {
+		defs = *patch.Parameters
+	}
+	if patch.ParameterValues != nil {
+		values = *patch.ParameterValues
+	}
+	defs, values, err = params.Prepare(prompt, defs, values)
+	if err != nil {
 		tx.Rollback()
-		return nil, ErrAgentJobNotFound
+		return nil, err
+	}
+	status := params.StatusAfterSave(models.AgentJobStatus(existing.Status), len(params.Missing(defs, values)) > 0)
+
+	update := tx.AgentJob.UpdateOneID(id).
+		SetPrompt(prompt).
+		SetParameters(defs).
+		SetParameterValues(values).
+		SetStatus(agentjob.Status(status))
+	if _, err := update.Save(ctx); err != nil {
+		d.logger.Error(i18n.T1("update.failed", "Entity", "agent job parameters"), zap.Error(err))
+		tx.Rollback()
+		return nil, normalizeAgentJobDatastoreUnexpectedError(err)
 	}
 
 	entJob, err := tx.AgentJob.Query().
 		Where(agentjob.ID(id)).
 		WithOwner().
 		WithChat().
+		WithRituals().
 		Only(ctx)
 	if err != nil {
-		d.logger.Error("failed to load agent job relationships", zap.Error(err))
+		d.logger.Error(i18n.T("agentjob.relationships_load_failed"), zap.Error(err))
 		tx.Rollback()
 		return nil, normalizeAgentJobDatastoreUnexpectedError(err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		d.logger.Error("failed to commit transaction", zap.Error(err))
+		d.logger.Error(i18n.T("tx.commit_failed"), zap.Error(err))
 		return nil, normalizeAgentJobDatastoreUnexpectedError(err)
 	}
 

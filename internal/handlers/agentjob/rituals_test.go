@@ -38,7 +38,7 @@ func (f *fakeRitualOpsProvider) GetAgentJob(ctx context.Context, userID, id uuid
 func (f *fakeRitualOpsProvider) UpdateAgentJobTitle(ctx context.Context, userID, id uuid.UUID, title *string) (*models.AgentJob, error) {
 	return nil, errors.New("not implemented")
 }
-func (f *fakeRitualOpsProvider) UpdateAgentJobPrompt(ctx context.Context, userID, id uuid.UUID, prompt string) (*models.AgentJob, error) {
+func (f *fakeRitualOpsProvider) UpdateAgentJobParameters(ctx context.Context, userID, id uuid.UUID, patch models.AgentJobParametersPatch) (*models.AgentJob, error) {
 	return nil, errors.New("not implemented")
 }
 func (f *fakeRitualOpsProvider) UpdateAgentJobSchedule(ctx context.Context, userID, id uuid.UUID, scheduleInput string, scheduleType models.AgentJobScheduleType, schedule *string, runAt *time.Time, timezone string, nextRunAt *time.Time) (*models.AgentJob, error) {
