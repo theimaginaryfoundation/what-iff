@@ -57,9 +57,10 @@ describe('FileWorkspacePanelComponent', () => {
     expect(el.querySelector('ui-overlay [role="dialog"]')).toBeNull();
 
     (el.querySelector('button[aria-label="Expand file"]') as HTMLButtonElement).click();
-    fixture.detectChanges();
-    await fixture.whenStable();
-    expect(el.querySelector('.workspace-panel--docked')).toBeNull();
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(el.querySelector('.workspace-panel--docked')).toBeNull();
+    });
     expect(el.querySelector('ui-overlay [role="dialog"]')).not.toBeNull();
     expect(el.querySelector('.ui-overlay--inset')).not.toBeNull();
   });

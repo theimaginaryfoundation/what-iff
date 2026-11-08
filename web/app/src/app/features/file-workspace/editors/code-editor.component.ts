@@ -61,6 +61,9 @@ export class CodeEditorComponent implements FileEditor {
   private editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null;
   private model: import('monaco-editor').editor.ITextModel | null = null;
   private baseline = '';
+  /** The text behind each blob handed to the host, and the latest one. */
+  private readonly handedOut = new WeakMap<Blob, string>();
+  private lastContent: Blob | null = null;
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
   private rendered = false;
   private generation = 0;
@@ -74,6 +77,9 @@ export class CodeEditorComponent implements FileEditor {
       const blob = this.blob();
       this.file();
       if (!this.rendered) return;
+      // After a save the host hands back this editor's own bytes; reloading them would discard
+      // what was typed since, and the undo history and cursor with it.
+      if (blob === this.lastContent) return;
       untracked(() => void this.loadText(blob));
     });
     effect(() => {
@@ -85,12 +91,17 @@ export class CodeEditorComponent implements FileEditor {
 
   async content(): Promise<Blob> {
     const text = this.model?.getValue() ?? this.baseline;
-    return new Blob([text], { type: this.file().file_type || 'text/plain' });
+    const blob = new Blob([text], { type: this.file().file_type || 'text/plain' });
+    this.handedOut.set(blob, text);
+    this.lastContent = blob;
+    return blob;
   }
 
-  markSaved(): void {
-    this.baseline = this.model?.getValue() ?? this.baseline;
-    this.setDirty(false);
+  markSaved(saved?: Blob): void {
+    const current = this.model?.getValue() ?? this.baseline;
+    // What was saved, which is not the current text if the user kept typing during the save.
+    this.baseline = (saved && this.handedOut.get(saved)) ?? current;
+    this.setDirty(current !== this.baseline);
   }
 
   togglePreview(): void {

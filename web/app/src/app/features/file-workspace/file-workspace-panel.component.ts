@@ -1,5 +1,5 @@
 import { DOCUMENT, NgTemplateOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, viewChild } from '@angular/core';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../core/services/confirmation.service';
@@ -39,7 +39,7 @@ import { DOCKED_WIDTH_MAX_FRACTION, DOCKED_WIDTH_MIN_FRACTION, FileWorkspaceServ
         [open]="workspace.open()"
         labelledBy="file-workspace-title"
         [variant]="workspace.layout() === 'full' ? 'inset' : 'fill'"
-        (dismiss)="close()"
+        (dismiss)="dismiss()"
       >
         <ng-container *ngTemplateOutlet="body" />
       </ui-overlay>
@@ -118,6 +118,7 @@ import { DOCKED_WIDTH_MAX_FRACTION, DOCKED_WIDTH_MIN_FRACTION, FileWorkspaceServ
 })
 export class FileWorkspacePanelComponent {
   readonly workspace = inject(FileWorkspaceService);
+  private readonly opened = viewChild(FileWorkspaceComponent);
   private readonly gallery = inject(ImageGalleryService);
   private readonly files = inject(FileAttachmentService);
   private readonly confirmationService = inject(ConfirmationService);
@@ -129,6 +130,13 @@ export class FileWorkspacePanelComponent {
 
   close(): void {
     this.workspace.requestClose();
+  }
+
+  /** Escape or a click on the backdrop: the workspace asks first if there are unsaved changes. */
+  dismiss(): void {
+    const open = this.opened();
+    if (open) void open.requestClose();
+    else this.close();
   }
 
   /** A save: adopt the new version and let the Files tab show the change. */

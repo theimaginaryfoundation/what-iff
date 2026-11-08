@@ -37,6 +37,24 @@ describe('CodeEditorComponent', () => {
     fixture.detectChanges();
   }
 
+  it('keeps typing that lands during a save, and does not reload its own saved bytes', async () => {
+    await open(file(), 'a');
+    const model = fake.models.get('vfs:///notes.py?id=f-1')!;
+    model.type('ab');
+    const saved = await fixture.componentInstance.content();
+    model.type('abc');
+
+    fixture.componentRef.setInput('blob', saved);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.componentInstance.markSaved(saved);
+
+    expect(model.getValue()).toBe('abc');
+    expect(fixture.componentInstance.dirty()).toBe(true);
+    model.type('ab');
+    expect(fixture.componentInstance.dirty()).toBe(false);
+  });
+
   it('loads the text into a model with the file language and a VFS URI, and tracks dirtiness', async () => {
     const dirty: boolean[] = [];
     fixture.componentInstance.dirtyChange.subscribe(d => dirty.push(d));

@@ -1,4 +1,4 @@
-import { DatePipe, NgComponentOutlet } from '@angular/common';
+import { DOCUMENT, DatePipe, NgComponentOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -38,6 +38,7 @@ import { galleryDisplayBaseName, galleryFilenameFromBaseName } from '../gallery/
 import { FilePreviewKind, fileTypeLabel, previewKindFor } from '../gallery/helpers/file-preview.helpers';
 import { folderLabel, folderPathError, normalizeFolderPath } from '../gallery/helpers/gallery-folder.helpers';
 import { formatSource, sourceForImage } from '../gallery/helpers/image-source.helpers';
+import { FileWorkspaceService } from './file-workspace.service';
 import { EDITOR_LOADER, VIEWER_LOADER, hasEditor } from './viewers/registry';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
@@ -72,6 +73,8 @@ type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 export class FileWorkspaceComponent {
   private readonly files = inject(FileAttachmentService);
   private readonly confirmationService = inject(ConfirmationService);
+  private readonly workspace = inject(FileWorkspaceService);
+  private readonly document = inject(DOCUMENT);
   private readonly loadViewer = inject(VIEWER_LOADER);
   private readonly loadEditor = inject(EDITOR_LOADER);
   private readonly editorOutlet = viewChild('editorOutlet', { read: ViewContainerRef });
@@ -149,6 +152,8 @@ export class FileWorkspaceComponent {
   readonly saveAsFolder = signal('');
   readonly saveAsError = signal<string | null>(null);
   private editorRef: ComponentRef<FileEditor> | null = null;
+  /** The version of the bytes the editor holds. The file's metadata can move on during an edit. */
+  private loadedVersion = 1;
 
   /** Bumped on every reset, so bytes for a file that is no longer shown are dropped when they arrive. */
   private generation = 0;
@@ -163,6 +168,7 @@ export class FileWorkspaceComponent {
       untracked(() => this.reset());
       const load = this.loadViewer(kind);
       if (!load) return;
+      this.loadedVersion = file.content_version ?? 1;
       this.state.set('loading');
       const generation = this.generation;
       load.then(
@@ -200,7 +206,19 @@ export class FileWorkspaceComponent {
         }
       });
     });
+    // Route changes, resizes across a breakpoint and closing the tab all ask this.
+    effect(() => {
+      const unsaved = this.mode() === 'edit' && this.editorDirty();
+      untracked(() => this.workspace.setUnsaved(unsaved));
+    });
+    const view = this.document.defaultView;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (this.mode() === 'edit' && this.editorDirty()) event.preventDefault();
+    };
+    view?.addEventListener('beforeunload', warnBeforeUnload);
     inject(DestroyRef).onDestroy(() => {
+      view?.removeEventListener('beforeunload', warnBeforeUnload);
+      this.workspace.setUnsaved(false);
       this.generation += 1;
       this.destroyEditor();
     });
@@ -243,6 +261,19 @@ export class FileWorkspaceComponent {
     if (await this.stopEdit()) this.close.emit();
   }
 
+  async goPrevious(): Promise<void> {
+    if (await this.stopEdit()) this.previous.emit();
+  }
+
+  async goNext(): Promise<void> {
+    if (await this.stopEdit()) this.next.emit();
+  }
+
+  /** Expanding moves the workspace to another layout, which rebuilds the editor. */
+  async requestToggleExpand(): Promise<void> {
+    if (await this.stopEdit()) this.toggleExpand.emit();
+  }
+
   /** Saves the editor's content as the file's new version; a stale version opens the conflict dialog. */
   async save(opts: { overwrite?: boolean } = {}): Promise<void> {
     const editor = this.editorRef?.instance;
@@ -252,14 +283,15 @@ export class FileWorkspaceComponent {
     this.saveError.set(null);
     try {
       const content = await editor.content();
-      const ifMatch = opts.overwrite ? null : file.content_version ?? 1;
+      const ifMatch = opts.overwrite ? null : this.loadedVersion;
       const updated = await new Promise<FileAttachment>((resolve, reject) =>
         this.files.replaceContent(file.id, content, file.file_type, ifMatch, this.chatId()).pipe(take(1)).subscribe({ next: resolve, error: reject }),
       );
       this.conflictVersion.set(null);
+      this.loadedVersion = updated.content_version ?? this.loadedVersion + 1;
       this.blob.set(content);
-      editor.markSaved();
-      this.editorDirty.set(false);
+      editor.markSaved(content);
+      this.editorDirty.set(editor.dirty());
       this.fileChanged.emit({ ...file, ...updated, chat_id: updated.chat_id ?? file.chat_id });
     } catch (error) {
       const current = conflictVersionOf(error);
@@ -275,6 +307,7 @@ export class FileWorkspaceComponent {
 
   /** Conflict: drop the edits and show what is on the server now. */
   reloadAfterConflict(): void {
+    this.loadedVersion = this.conflictVersion() ?? this.loadedVersion;
     this.conflictVersion.set(null);
     this.destroyEditor();
     this.mode.set('view');

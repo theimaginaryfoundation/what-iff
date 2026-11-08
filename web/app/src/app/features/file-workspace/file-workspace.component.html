@@ -83,8 +83,8 @@
       </button>
       <button type="button" class="file-workspace__button file-workspace__button--danger" (click)="delete.emit(file())">Delete</button>
       @if (showNavigation()) {
-        <button type="button" class="file-workspace__button" [disabled]="!hasPrev()" (click)="previous.emit()">Prev</button>
-        <button type="button" class="file-workspace__button" [disabled]="!hasNext()" (click)="next.emit()">Next</button>
+        <button type="button" class="file-workspace__button" [disabled]="!hasPrev()" (click)="goPrevious()">Prev</button>
+        <button type="button" class="file-workspace__button" [disabled]="!hasNext()" (click)="goNext()">Next</button>
       }
       @if (expandable()) {
         <button
@@ -93,7 +93,7 @@
           [uiTooltip]="expanded() ? 'Back to the side panel' : 'Expand to full screen'"
           placement="bottom"
           [attr.aria-label]="expanded() ? 'Collapse file' : 'Expand file'"
-          (click)="toggleExpand.emit()"
+          (click)="requestToggleExpand()"
         >
           @if (expanded()) {
             <ui-contract-icon [size]="14" />

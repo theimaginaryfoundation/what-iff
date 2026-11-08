@@ -10,6 +10,9 @@ export interface FileEditor {
   readonly dirty: Signal<boolean>;
   /** The content as it should be stored. */
   content(): Promise<Blob>;
-  /** Called after a successful save (or a reload): the current content is the new baseline. */
-  markSaved(): void;
+  /**
+   * Called after a successful save with what was saved, which is the new baseline. The editor may
+   * have changed since `content()` was called, in which case it stays dirty.
+   */
+  markSaved(saved?: Blob): void;
 }

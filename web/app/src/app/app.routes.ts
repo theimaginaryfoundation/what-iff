@@ -5,6 +5,7 @@ import { personalitySetupGuard } from './core/guards/personality-setup.guard';
 import { AppLayoutComponent } from './layout/app-layout.component';
 import { privateChildRoutes } from './extensions/private-routes';
 import { authChildRoutes } from './extensions/auth-routes';
+import { unsavedWorkspaceGuard } from './features/file-workspace/unsaved-workspace.guard';
 
 export const routes: Routes = [
   {
@@ -35,12 +36,16 @@ export const routes: Routes = [
           {
             path: '',
             loadComponent: () => import('./features/chat/chat-page.component')
-              .then(m => m.ChatPageComponent)
+              .then(m => m.ChatPageComponent),
+            runGuardsAndResolvers: 'pathParamsOrQueryParamsChange',
+            canDeactivate: [unsavedWorkspaceGuard]
           },
           {
             path: ':id',
             loadComponent: () => import('./features/chat/chat-page.component')
-              .then(m => m.ChatPageComponent)
+              .then(m => m.ChatPageComponent),
+            runGuardsAndResolvers: 'pathParamsOrQueryParamsChange',
+            canDeactivate: [unsavedWorkspaceGuard]
           }
         ]
       },
@@ -191,7 +196,9 @@ export const routes: Routes = [
       {
         path: 'gallery',
         loadComponent: () => import('./features/gallery/gallery-page.component')
-          .then(m => m.GalleryPageComponent)
+          .then(m => m.GalleryPageComponent),
+        runGuardsAndResolvers: 'pathParamsOrQueryParamsChange',
+        canDeactivate: [unsavedWorkspaceGuard]
       },
       {
         // Unified Import & Export ("your data") screen: account export + restore,
