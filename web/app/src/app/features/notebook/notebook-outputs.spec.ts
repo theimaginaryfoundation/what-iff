@@ -82,9 +82,10 @@ describe('notebook outputs', () => {
     const bokeh = { output_type: 'display_data', metadata: {}, data: { 'application/javascript': 'window.Bokeh=1', 'application/vnd.bokehjs_load.v0+json': '', 'text/html': '<div>Loading</div>' } };
     const js = { output_type: 'display_data', metadata: {}, data: { 'application/javascript': 'window.J=1', 'text/plain': '<Js>' } };
     const plain = { output_type: 'stream', name: 'stdout', text: 'x' };
-    expect(outputViews([load, bokeh, js])).toEqual([]);
+    expect(outputViews([load, bokeh])).toEqual([]);
     const loaders = notebookLoaders([{ outputs: [load, plain] }, { outputs: [bokeh, js] }]);
-    expect(loaders).toBe('<script>window.Lib=1</script><script>window.Bokeh=1</script><script>window.J=1</script>');
+    expect(loaders).toBe('<script>window.Lib=1</script><script>window.Bokeh=1</script>');
+    expect(outputViews([js])[0].kind).toBe('interactive');
     const [plot] = outputViews([{ output_type: 'display_data', metadata: {}, data: { 'text/html': '<div></div>', 'application/javascript': 'draw()' } }], loaders);
     expect((plot as { document: string }).document).toContain('window.Bokeh=1');
     expect((plot as { document: string }).document).toContain('draw()');

@@ -133,7 +133,8 @@ function loaderHtml(data: Record<string, unknown>): string | null {
   const js = data[JAVASCRIPT] !== undefined ? `<script>${inScript(joinSource(data[JAVASCRIPT]))}</script>` : '';
   if (data[BOKEH_LOAD] !== undefined) return js;
   const rest = Object.keys(data).filter(m => m !== 'text/plain' && m !== JAVASCRIPT);
-  if (js && !rest.length) return js;
+  // A bare application/javascript output is not treated as a loader: nothing says it is one, and
+  // it would run in every other frame. It gets a frame of its own, like any other script output.
   if (rest.length === 1 && rest[0] === 'text/html') {
     const html = joinSource(data['text/html']);
     if (onlyScripts(html)) return html + js;
@@ -181,6 +182,11 @@ function interactiveBody(data: Record<string, unknown>): string | null {
  * The whole document for one sandboxed frame. The sandbox gives it an opaque origin, so it reaches
  * neither this page nor its storage; the policy keeps it to https and stops forms and <base>. It
  * tells the host its height, the only thing the host listens for.
+ *
+ * The script sources are deliberately broad. Inline script is how every output library starts, and
+ * Plotly and Vega compile functions at run time, so they need 'unsafe-inline' and 'unsafe-eval'.
+ * Notebooks load libraries from whichever CDN their author used, so a host list would break output
+ * without protecting anything: the boundary is the opaque origin, and this only runs on request.
  */
 function frameDocument(body: string, loaders: string): string {
   const policy = [
