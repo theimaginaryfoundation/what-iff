@@ -13,6 +13,7 @@ Job parameters (ADR 0x044): the `{{name}}` placeholders of a job prompt, their t
   Values for unknown names and select values with an option no longer offered are dropped, not rejected.
 - **`Missing` / `IsSet`:** which parameters have no usable value.
 - **`Render`:** the prompt with each defined placeholder replaced; a `*MissingError` if any value is missing.
+- **`CarryOverValues`:** the values still valid when a job's definitions are replaced by a newer version (a shared job's upgrade): same name, same type, still usable.
 - **`StatusAfterSave`:** the status a job gets when it is saved with or without missing values.
 
 ## Dependencies
@@ -30,7 +31,7 @@ Job parameters (ADR 0x044): the `{{name}}` placeholders of a job prompt, their t
 
 ## Testing
 
-- `params_test.go` — placeholders, validation problems, normalisation, value dropping, rendering in both formats, JSON shape of values, status rule.
+- `params_test.go` — placeholders, validation problems, normalisation, value dropping, rendering in both formats, JSON shape of values, carry-over on upgrade, status rule.
 
 ## Related documentation
 

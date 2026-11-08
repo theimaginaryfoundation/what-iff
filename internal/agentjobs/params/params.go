@@ -389,3 +389,23 @@ func atLineEnd(s string, pos int) bool {
 	}
 	return strings.TrimRight(rest, " \t\r") == ""
 }
+
+// CarryOverValues keeps the values that are still valid when a job's definitions are replaced by
+// a newer version of them, as when a shared job is upgraded (ADR 0x044, decision 10): the
+// parameter still exists with the same type, and its value is still usable (for the select types,
+// every selected option is still offered). Everything else is dropped, so the job waits for it.
+func CarryOverValues(oldDefs, newDefs []modeltypes.JobParameter, values modeltypes.JobParameterValues) modeltypes.JobParameterValues {
+	oldTypes := make(map[string]modeltypes.JobParameterType, len(oldDefs))
+	for _, d := range oldDefs {
+		oldTypes[d.Name] = d.Type
+	}
+	out := modeltypes.JobParameterValues{}
+	for _, d := range newDefs {
+		v, ok := values[d.Name]
+		if oldTypes[d.Name] != d.Type || !IsSet(d, v, ok) {
+			continue
+		}
+		out[d.Name] = v
+	}
+	return out
+}

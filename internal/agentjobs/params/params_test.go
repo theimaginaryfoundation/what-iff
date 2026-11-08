@@ -194,3 +194,34 @@ func TestStatusAfterSave(t *testing.T) {
 		}
 	}
 }
+
+func TestCarryOverValues(t *testing.T) {
+	oldDefs := []mt.JobParameter{
+		{Name: "topics", Type: mt.JobParameterList},
+		{Name: "region", Type: mt.JobParameterSingleSelect, Options: []string{"US", "EU"}},
+		{Name: "tags", Type: mt.JobParameterMultiSelect, Options: []string{"a", "b"}},
+		{Name: "tone", Type: mt.JobParameterText},
+		{Name: "gone", Type: mt.JobParameterText},
+	}
+	newDefs := []mt.JobParameter{
+		{Name: "topics", Type: mt.JobParameterList},                                        // unchanged: kept
+		{Name: "region", Type: mt.JobParameterSingleSelect, Options: []string{"US"}},       // option removed: dropped
+		{Name: "tags", Type: mt.JobParameterMultiSelect, Options: []string{"a", "b", "c"}}, // option added: kept
+		{Name: "tone", Type: mt.JobParameterSingleSelect, Options: []string{"dry"}},        // type changed: dropped
+		{Name: "added", Type: mt.JobParameterText},                                         // new: missing
+	}
+	values := mt.JobParameterValues{
+		"topics": mt.ListValue("AI"),
+		"region": mt.TextValue("EU"),
+		"tags":   mt.ListValue("a"),
+		"tone":   mt.TextValue("dry"),
+		"gone":   mt.TextValue("x"),
+	}
+	got := CarryOverValues(oldDefs, newDefs, values)
+	if len(got) != 2 || got["topics"].Items[0] != "AI" || got["tags"].Items[0] != "a" {
+		t.Fatalf("CarryOverValues = %+v", got)
+	}
+	if missing := Missing(newDefs, got); !slices.Equal(missing, []string{"region", "tone", "added"}) {
+		t.Fatalf("Missing after carry-over = %v", missing)
+	}
+}
