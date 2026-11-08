@@ -58,6 +58,8 @@ export class NotebookEditorComponent implements FileEditor {
 
   private baseline = '';
   private lastContent: Blob | null = null;
+  /** The serialized text behind each blob handed to the host. */
+  private readonly handedOut = new WeakMap<Blob, string>();
   private generation = 0;
   private undoStack: Notebook[] = [];
   private redoStack: Notebook[] = [];
@@ -92,15 +94,20 @@ export class NotebookEditorComponent implements FileEditor {
   async content(): Promise<Blob> {
     const notebook = this.notebook();
     if (!notebook) throw new Error('The notebook is not loaded');
-    const blob = new Blob([serializeNotebook(notebook)], { type: IPYNB_MIME });
+    const text = serializeNotebook(notebook);
+    const blob = new Blob([text], { type: IPYNB_MIME });
+    this.handedOut.set(blob, text);
     this.lastContent = blob;
     return blob;
   }
 
-  markSaved(): void {
+  markSaved(saved?: Blob): void {
     const notebook = this.notebook();
-    if (notebook) this.baseline = serializeNotebook(notebook);
-    this.setDirty(false);
+    if (!notebook) return this.setDirty(false);
+    const current = serializeNotebook(notebook);
+    // What was saved, which is not the current notebook if the user kept typing during the save.
+    this.baseline = (saved && this.handedOut.get(saved)) ?? current;
+    this.setDirty(current !== this.baseline);
   }
 
   // --- selection ---------------------------------------------------------------------------------

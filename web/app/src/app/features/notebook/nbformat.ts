@@ -130,7 +130,7 @@ export function resolveAttachments(cell: NotebookCell): string {
   const attachments = cell.raw['attachments'];
   if (!isRecord(attachments)) return cell.source;
   return cell.source.replace(/attachment:([^\s)"']+)/g, (whole, name: string) => {
-    const bundle = attachments[decodeURIComponent(name)];
+    const bundle = attachments[safeDecode(name)];
     if (!isRecord(bundle)) return whole;
     const mime = Object.keys(bundle).find(m => m.startsWith('image/') && m !== 'image/svg+xml');
     return mime ? `data:${mime};base64,${joinSource(bundle[mime]).replace(/\s+/g, '')}` : whole;
@@ -151,4 +151,13 @@ export function notebookLanguage(notebook: Pick<Notebook, 'raw'>): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** A name with a stray `%` is not percent-encoded: it is the name as written. */
+function safeDecode(name: string): string {
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
 }

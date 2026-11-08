@@ -1,5 +1,5 @@
 import { deleteCell, duplicateCell, insertCell, moveCell, setCellType, setSource, clearOutputs } from './notebook-commands';
-import { NotebookFormatError, newCell, notebookLanguage, parseNotebook, serializeNotebook, splitSource } from './nbformat';
+import { NotebookCell, NotebookFormatError, newCell, resolveAttachments, notebookLanguage, parseNotebook, serializeNotebook, splitSource } from './nbformat';
 
 /** As Jupyter writes it: one-space indent, source as lines, a trailing newline, keys sorted. */
 const JUPYTER = `{
@@ -137,5 +137,10 @@ describe('nbformat', () => {
     const cleared = JSON.parse(serializeNotebook(clearOutputs(nb))).cells[1];
     expect(cleared.outputs).toEqual([]);
     expect(cleared.execution_count).toBeNull();
+  });
+
+  it('leaves an attachment name that is not valid percent-encoding as written', () => {
+    const cell = { source: '![x](attachment:100%.png)', raw: { attachments: { '100%.png': { 'image/png': 'aGk=' } } } };
+    expect(resolveAttachments(cell as unknown as NotebookCell)).toBe('![x](data:image/png;base64,aGk=)');
   });
 });

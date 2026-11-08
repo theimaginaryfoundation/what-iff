@@ -169,6 +169,16 @@ describe('NotebookEditorComponent', () => {
     expect(asked).toHaveBeenCalledTimes(1);
   });
 
+  it('stays dirty for a change made during a save', async () => {
+    await open(nb([code('a', '1')]), false);
+    const c = fixture.componentInstance;
+    c.addCell('code', 'below');
+    const saved = await c.content();
+    c.addCell('code', 'below');
+    c.markSaved(saved);
+    expect(c.dirty()).toBe(true);
+  });
+
   it('keeps its state when the host hands back the bytes it just saved', async () => {
     await open(nb([code('a', '1')]), false);
     const c = fixture.componentInstance;
