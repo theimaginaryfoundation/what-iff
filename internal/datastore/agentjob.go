@@ -423,7 +423,9 @@ func (d *Datastore) UpdateAgentJobSchedule(ctx context.Context, userID, id uuid.
 	}
 
 	if shouldReactivateAgentJobAfterScheduleSave(existing.Status, nextRunAt) {
-		update = update.SetStatus(agentjob.StatusActive).ClearLastError()
+		// A job missing a parameter value waits for it instead (ADR 0x044).
+		status := params.StatusAfterSave(models.AgentJobStatusActive, len(params.Missing(existing.Parameters, existing.ParameterValues)) > 0)
+		update = update.SetStatus(agentjob.Status(status)).ClearLastError()
 	}
 
 	affected, err := update.Save(ctx)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -146,4 +147,25 @@ func TestUpdateAgentJobParameters_UndefinedPlaceholderChangesNothing(t *testing.
 	got, err := ds.GetAgentJob(ctx, userID, created.ID)
 	require.NoError(t, err)
 	require.Equal(t, "do the thing", got.Prompt)
+}
+
+func TestUpdateAgentJobSchedule_ReactivatedJobStillNeedsValues(t *testing.T) {
+	ds, cleanup := newAgentJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := createAgentJobTestUser(t, ds)
+	job := newsJobModel()
+	job.ParameterValues = mt.JobParameterValues{"topics": mt.ListValue("AI"), "region": mt.TextValue("US")}
+	created, err := ds.CreateAgentJob(ctx, userID, job)
+	require.NoError(t, err)
+	_, err = ds.UpdateAgentJobStatus(ctx, userID, created.ID, models.AgentJobStatusComplete, "")
+	require.NoError(t, err)
+	// Paused/complete jobs keep their status when values are cleared.
+	_, err = ds.UpdateAgentJobParameters(ctx, userID, created.ID, models.AgentJobParametersPatch{ParameterValues: &mt.JobParameterValues{}})
+	require.NoError(t, err)
+
+	next := time.Now().Add(time.Hour)
+	got, err := ds.UpdateAgentJobSchedule(ctx, userID, created.ID, "in an hour", models.AgentJobScheduleTypeAt, nil, &next, "UTC", &next)
+	require.NoError(t, err)
+	require.Equal(t, models.AgentJobStatusNeedsValues, got.Status, "a rescheduled job missing values waits for them instead of going active")
 }

@@ -132,6 +132,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   Favorite-count checks are a **best-effort UI guard** (non-locking count check, not a strict datastore invariant under races).
 - **Job parameters (ADR 0x044):** `agent_jobs.parameters` and `parameter_values` are JSON columns (`modeltypes.JobParameter`, `modeltypes.JobParameterValues`).
   `CreateAgentJob` and `UpdateAgentJobParameters` (prompt, definitions and values together, in one transaction) run `params.Prepare` and return its `*params.ValidationError` unwrapped, then set the status with `params.StatusAfterSave`: active becomes `needs_values` when a value is missing, and `needs_values` becomes active when none is.
+  `UpdateAgentJobSchedule`'s reactivation of a finished job goes to `needs_values` instead of active when a value is missing.
   `UpdateAgentJobStatus` refuses `active` while a value is missing (`ErrAgentJobNeedsValues` wrapping a `*params.MissingError`).
   `toAgentJobModel` derives `missing_parameters`.
   A backup import keeps parameters that still check out and applies the same status rule.
