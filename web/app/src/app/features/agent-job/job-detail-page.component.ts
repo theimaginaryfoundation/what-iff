@@ -1,5 +1,5 @@
 
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, HostListener, OnDestroy, OnInit, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { forkJoin, of } from 'rxjs';
@@ -27,7 +27,17 @@ import { RitualService } from '../../core/services/ritual.service';
 import { resolveDefaultTimezone } from '../../core/utils/timezone.helpers';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
-import { isTerminalStatus, jobStatusDescription, jobStatusLabel, scheduleFailureReason } from './helpers/job-status.helpers';
+import { LeaveConfirmable } from '../../core/guards/confirm-leave.guard';
+import { leaveJobDialog, saveWithMissingValuesDialog } from './helpers/job-dialogs.helpers';
+import { missingParameters } from './helpers/job-params.helpers';
+import {
+  isTerminalStatus,
+  jobStatusDescription,
+  jobStatusLabel,
+  missingParameterLabels,
+  scheduleFailureReason,
+} from './helpers/job-status.helpers';
+import { canRunJobNow, hasMissingParameters } from './helpers/job-vm.helpers';
 import { EntityMarketplaceOutletComponent } from '../../extensions/entity-marketplace-outlet.component';
 import { JobFormComponent } from './components/job-form.component';
 import { JobRunHistoryComponent } from './components/job-run-history.component';
@@ -40,7 +50,7 @@ import { JobRunHistoryComponent } from './components/job-run-history.component';
   styleUrl: './job-detail-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class JobDetailPageComponent implements OnInit, OnDestroy {
+export class JobDetailPageComponent implements OnInit, OnDestroy, LeaveConfirmable {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly agentJobService = inject(AgentJobService);
@@ -50,6 +60,10 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
   private readonly personalityService = inject(PersonalityService);
   private readonly ritualService = inject(RitualService);
   private readonly confirmation = inject(ConfirmationService);
+
+  private readonly jobForm = viewChild(JobFormComponent);
+  /** Set just before navigating away on purpose (after a create or a delete), so the leave guard lets it go. */
+  private leaving = false;
 
   private schedulePreviewTimer: ReturnType<typeof setTimeout> | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -74,6 +88,8 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
   readonly statusLabel = jobStatusLabel;
   readonly statusDescription = jobStatusDescription;
   readonly scheduleFailureReason = scheduleFailureReason;
+  readonly missingParameterLabels = missingParameterLabels;
+  readonly hasMissingParameters = hasMissingParameters;
 
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id');
@@ -178,7 +194,10 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
     void this.router.navigate(['/chat']);
   }
 
-  save(payload: UpdateAgentJobRequest): void {
+  async save(payload: UpdateAgentJobRequest): Promise<void> {
+    const defs = payload.parameters ?? [];
+    const warning = saveWithMissingValuesDialog(defs, missingParameters(defs, payload.parameter_values ?? {}));
+    if (warning && !(await this.confirmation.confirm(warning))) return;
     if (this.isCreateMode()) {
       this.create(payload);
       return;
@@ -223,12 +242,15 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
     if (modelId) request.model_id = modelId;
     if (payload.reasoning_effort) request.reasoning_effort = payload.reasoning_effort;
     if (payload.agent_loop) request.agent_loop = payload.agent_loop;
+    if (payload.parameters?.length) request.parameters = payload.parameters;
+    if (payload.parameter_values && Object.keys(payload.parameter_values).length) request.parameter_values = payload.parameter_values;
 
     this.saving.set(true);
     this.error.set(null);
     this.agentJobService.createAgentJob(request).subscribe({
       next: () => {
         this.saving.set(false);
+        this.leaving = true;
         void this.router.navigate(['/agent-jobs']);
       },
       error: error => {
@@ -288,8 +310,33 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
   }
 
   canRunNow(): boolean {
-    const status = this.job()?.status;
-    return status === 'active' || status === 'paused';
+    const current = this.job();
+    return !!current && canRunJobNow(current);
+  }
+
+  /** Resume is refused while a parameter has no value (ADR 0x044); pausing is always allowed. */
+  canPauseResume(): boolean {
+    const current = this.job();
+    if (!current) return false;
+    return current.status === 'active' || (current.status === 'paused' && !hasMissingParameters(current));
+  }
+
+  /** Asks before leaving with unsaved edits or a job that still needs values (ADR 0x044). */
+  async confirmLeave(): Promise<boolean> {
+    if (this.leaving) return true;
+    const current = this.job();
+    const unsaved = this.jobForm()?.hasUnsavedEdits() ?? false;
+    const missing = !current || this.isCreateMode() ? [] : (current.missing_parameters ?? []);
+    const dialog = leaveJobDialog(unsaved, current?.parameters ?? [], missing);
+    return dialog ? this.confirmation.confirm(dialog) : true;
+  }
+
+  /** Closing the tab or reloading can only get the browser's own prompt. */
+  @HostListener('window:beforeunload', ['$event'])
+  onBeforeUnload(event: BeforeUnloadEvent): void {
+    if (this.leaving || !this.jobForm()?.hasUnsavedEdits()) return;
+    event.preventDefault();
+    event.returnValue = '';
   }
 
   runNow(): void {
@@ -326,7 +373,10 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
     if (!confirmed) return;
 
     this.agentJobService.deleteAgentJob(current.id).subscribe({
-      next: () => void this.router.navigate(['/agent-jobs']),
+      next: () => {
+        this.leaving = true;
+        void this.router.navigate(['/agent-jobs']);
+      },
       error: error => this.error.set(error instanceof Error ? error.message : 'Failed to delete job'),
     });
   }

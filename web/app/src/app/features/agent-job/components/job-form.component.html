@@ -18,6 +18,15 @@
       name="prompt"></textarea>
   </label>
 
+  <app-job-parameters
+    [parameters]="parameters()"
+    [values]="parameterValues()"
+    [prompt]="prompt()"
+    [disabled]="saving()"
+    (parametersChange)="parameters.set($event)"
+    (valuesChange)="parameterValues.set($event)"
+    (promptChange)="prompt.set($event)" />
+
   <div class="grid gap-3 md:grid-cols-2">
     <label class="text-sm text-text-secondary">
       Thread
@@ -157,7 +166,8 @@
       <button
         type="submit"
         class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-primary disabled:opacity-50"
-        [disabled]="saving() || !prompt().trim() || !scheduleInput().trim()">
+        [disabled]="saving() || !prompt().trim() || !scheduleInput().trim() || parameterErrors()"
+        [uiTooltip]="parameterErrors() ? 'Fix the parameter errors first' : ''">
         {{ saving() ? (createMode() ? 'Creating…' : 'Saving…') : (createMode() ? 'Create job' : 'Save changes') }}
       </button>
     </div>

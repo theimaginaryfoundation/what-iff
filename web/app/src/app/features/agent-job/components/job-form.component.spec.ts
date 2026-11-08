@@ -99,4 +99,56 @@ describe('JobFormComponent', () => {
 
         expect(component.hasUnsavedEdits()).toBe(false);
     });
+
+    describe('parameters (ADR 0x044)', () => {
+        const paramJob: AgentJob = {
+            ...job,
+            prompt: 'News on {{topics}}',
+            status: 'needs_values',
+            parameters: [{ name: 'topics', label: 'topics', type: 'list', format: 'bullets' }],
+            parameter_values: {},
+            missing_parameters: ['topics'],
+            updated_at: '2025-01-01T00:05:00Z',
+        };
+
+        beforeEach(() => {
+            fixture.componentRef.setInput('job', paramJob);
+            fixture.detectChanges();
+        });
+
+        it('hydrates definitions and values and treats them as part of the draft', () => {
+            expect(component.parameters()).toEqual(paramJob.parameters);
+            expect(component.hasUnsavedEdits()).toBe(false);
+
+            component.parameterValues.set({ topics: ['AI'] });
+            expect(component.hasUnsavedEdits()).toBe(true);
+
+            component.parameterValues.set({ topics: ['  '] });
+            expect(component.hasUnsavedEdits()).toBe(false);
+        });
+
+        it('submits normalised definitions and cleaned values', () => {
+            const emitSpy = vi.spyOn(component.save, 'emit').mockReturnValue(undefined);
+            component.parameters.set([...paramJob.parameters!, { name: 'gone', type: 'text' }]);
+            component.parameterValues.set({ topics: [' AI ', ''], gone: '', stray: 'x' });
+            component.submit();
+            expect(emitSpy).toHaveBeenCalledWith(expect.objectContaining({
+                parameters: [
+                    { name: 'topics', label: 'topics', type: 'list', format: 'bullets' },
+                    { name: 'gone', label: 'gone', type: 'text' },
+                ],
+                parameter_values: { topics: ['AI'] },
+            }));
+        });
+
+        it('blocks saving while a placeholder has no definition', () => {
+            const submit = () => (fixture.nativeElement as HTMLElement).querySelector('button[type="submit"]') as HTMLButtonElement;
+            expect(submit().disabled).toBe(false);
+
+            component.prompt.set('News on {{topics}} in {{region}}');
+            fixture.detectChanges();
+            expect(component.parameterErrors()).toBe(true);
+            expect(submit().disabled).toBe(true);
+        });
+    });
 });

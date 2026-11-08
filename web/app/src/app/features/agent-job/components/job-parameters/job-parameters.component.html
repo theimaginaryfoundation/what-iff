@@ -1,0 +1,61 @@
+<section class="rounded-xl border border-border-base p-3" aria-labelledby="job-parameters-heading">
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <h2 id="job-parameters-heading" class="inline-flex items-center gap-1 text-sm font-semibold text-text-primary">
+      Parameters
+      <ui-help-hint label="What are job parameters?" heading="Parameters" guide="advanced">
+        Write a placeholder like {{ '{{topics}}' }} in the prompt and define it here. Each run fills in the value you
+        choose, so you can change what the job does without rewriting the prompt, and someone who installs a shared
+        job sets their own. Every parameter needs a value before the job can run.
+      </ui-help-hint>
+    </h2>
+    @if (mode() === 'form') {
+      <button
+        type="button"
+        class="rounded-lg border border-border-base px-3 py-1.5 text-xs text-text-secondary disabled:opacity-50"
+        [disabled]="disabled()"
+        (click)="edit()">
+        {{ parameters().length > 0 ? 'Edit parameters' : 'Add parameters' }}
+      </button>
+    } @else {
+      <button
+        type="button"
+        class="rounded-lg border border-border-base px-3 py-1.5 text-xs text-text-primary disabled:opacity-50"
+        [disabled]="hasErrors()"
+        [attr.aria-describedby]="hasErrors() ? 'job-parameters-done-help' : null"
+        (click)="done()">
+        Done
+      </button>
+    }
+  </div>
+
+  <div class="mt-3">
+    @if (mode() === 'builder') {
+      <app-job-parameters-builder
+        [parameters]="parameters()"
+        [analysis]="analysis()"
+        [disabled]="disabled()"
+        (parametersChange)="parametersChange.emit($event)"
+        (renamed)="onRenamed($event)" />
+      @if (hasErrors()) {
+        <p id="job-parameters-done-help" class="mt-2 text-xs text-text-muted">Fix the errors above to go back to the form.</p>
+      }
+    } @else {
+      @if (analysis().undefinedPlaceholders.length > 0) {
+        <p class="mb-3 rounded-lg border border-danger/40 bg-danger/10 p-2 text-xs text-danger" role="alert">
+          The prompt uses placeholders with no definition. Choose Edit parameters to define them.
+        </p>
+      }
+      @if (parameters().length > 0) {
+        <app-job-parameters-form
+          [parameters]="parameters()"
+          [values]="values()"
+          [disabled]="disabled()"
+          (valuesChange)="valuesChange.emit($event)" />
+      } @else {
+        <p class="text-xs text-text-muted">
+          No parameters. Add some to fill parts of the prompt with values you can change without rewriting it.
+        </p>
+      }
+    }
+  </div>
+</section>

@@ -2,7 +2,14 @@
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
-import { AgentJob, AgentJobScheduleParseRequest, AgentJobSchedulePreview, UpdateAgentJobRequest } from '../../../core/models/agent-job.model';
+import {
+  AgentJob,
+  AgentJobParameter,
+  AgentJobParameterValues,
+  AgentJobScheduleParseRequest,
+  AgentJobSchedulePreview,
+  UpdateAgentJobRequest,
+} from '../../../core/models/agent-job.model';
 import { Chat } from '../../../core/models/chat.model';
 import { Model } from '../../../core/models/model.model';
 import { Personality } from '../../../core/models/personality.model';
@@ -16,6 +23,15 @@ import {
 } from '../../../core/models/turn-settings.model';
 import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
+import {
+  analyzeParameters,
+  cleanParameterValues,
+  hasParameterErrors,
+  normalizeDefinition,
+  sameDefinitions,
+  sameValues,
+} from '../helpers/job-params.helpers';
+import { JobParametersComponent } from './job-parameters/job-parameters.component';
 
 /**
  * The form's values as last hydrated from the job, normalized the way the dirty checks compare
@@ -32,12 +48,14 @@ interface JobFormSnapshot {
   modelId: string;
   reasoningEffort: ReasoningEffortUpdate;
   agentLoop: AgentLoopUpdate;
+  parameters: AgentJobParameter[];
+  parameterValues: AgentJobParameterValues;
 }
 
 @Component({
   selector: 'app-job-form',
   standalone: true,
-  imports: [FormsModule, HelpHintComponent, TooltipDirective],
+  imports: [FormsModule, HelpHintComponent, JobParametersComponent, TooltipDirective],
   templateUrl: './job-form.component.html',
   styleUrl: './job-form.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -66,6 +84,11 @@ export class JobFormComponent {
   /** Turn settings for this job's runs (ADR 0x026); `''` = use the thread's (and its mode's). */
   readonly reasoningEffort = signal<ReasoningEffortUpdate>('');
   readonly agentLoop = signal<AgentLoopUpdate>('');
+  /** Parameter definitions and values (ADR 0x044), saved with the rest of the form. */
+  readonly parameters = signal<AgentJobParameter[]>([]);
+  readonly parameterValues = signal<AgentJobParameterValues>({});
+  /** True while the prompt and parameters don't fit together; the job can't be saved then. */
+  readonly parameterErrors = computed(() => hasParameterErrors(analyzeParameters(this.prompt(), this.parameters())));
   readonly reasoningEffortOptions = REASONING_EFFORT_OPTIONS;
   readonly reasoningEffortDescription = REASONING_EFFORT_DESCRIPTION;
   readonly agentLoopOptions = AGENT_LOOP_OPTIONS;
@@ -86,7 +109,9 @@ export class JobFormComponent {
       this.normalize(this.personalityId()) !== this.normalize(current.personality_id) ||
       this.normalize(this.modelId()) !== this.normalize(current.model_id) ||
       this.reasoningEffort() !== (current.reasoning_effort ?? '') ||
-      this.agentLoop() !== (current.agent_loop ?? '')
+      this.agentLoop() !== (current.agent_loop ?? '') ||
+      !sameDefinitions(this.parameters(), current.parameters) ||
+      !sameValues(this.cleanedValues(), current.parameter_values)
     );
   });
 
@@ -149,7 +174,14 @@ export class JobFormComponent {
       model_id: this.modelId().trim() || '',
       reasoning_effort: this.reasoningEffort(),
       agent_loop: this.agentLoop(),
+      parameters: this.parameters().map(normalizeDefinition),
+      parameter_values: this.cleanedValues(),
     });
+  }
+
+  /** The values as they would be saved: only usable values of defined parameters. */
+  cleanedValues(): AgentJobParameterValues {
+    return cleanParameterValues(this.parameters().map(normalizeDefinition), this.parameterValues());
   }
 
   private normalize(value: string | null | undefined): string {
@@ -173,6 +205,8 @@ export class JobFormComponent {
     this.modelId.set(current.model_id || '');
     this.reasoningEffort.set(current.reasoning_effort ?? '');
     this.agentLoop.set(current.agent_loop ?? '');
+    this.parameters.set((current.parameters ?? []).map(def => ({ ...def, options: def.options ? [...def.options] : undefined })));
+    this.parameterValues.set({ ...(current.parameter_values ?? {}) });
     this.hydratedFormSnapshot = {
       title: this.normalize(current.title),
       prompt: this.normalize(current.prompt),
@@ -183,6 +217,8 @@ export class JobFormComponent {
       modelId: this.normalize(current.model_id),
       reasoningEffort: current.reasoning_effort ?? '',
       agentLoop: current.agent_loop ?? '',
+      parameters: current.parameters ?? [],
+      parameterValues: current.parameter_values ?? {},
     };
   }
 
@@ -198,7 +234,9 @@ export class JobFormComponent {
       this.normalize(this.personalityId()) !== snapshot.personalityId ||
       this.normalize(this.modelId()) !== snapshot.modelId ||
       this.reasoningEffort() !== snapshot.reasoningEffort ||
-      this.agentLoop() !== snapshot.agentLoop
+      this.agentLoop() !== snapshot.agentLoop ||
+      !sameDefinitions(this.parameters(), snapshot.parameters) ||
+      !sameValues(this.cleanedValues(), snapshot.parameterValues)
     );
   }
 
@@ -212,7 +250,9 @@ export class JobFormComponent {
       this.normalize(this.personalityId()) === this.normalize(current.personality_id) &&
       this.normalize(this.modelId()) === this.normalize(current.model_id) &&
       this.reasoningEffort() === (current.reasoning_effort ?? '') &&
-      this.agentLoop() === (current.agent_loop ?? '')
+      this.agentLoop() === (current.agent_loop ?? '') &&
+      sameDefinitions(this.parameters(), current.parameters) &&
+      sameValues(this.cleanedValues(), current.parameter_values)
     );
   }
 }

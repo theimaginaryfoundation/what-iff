@@ -27,12 +27,13 @@ describe('JobFilterBarComponent', () => {
         fixture.detectChanges();
         const selects = fixture.nativeElement.querySelectorAll('select') as NodeListOf<HTMLSelectElement>;
 
-        expect(selects[0].options.length).toBe(5);
+        expect(selects[0].options.length).toBe(6);
         expect(Array.from(selects[0].options).map(option => option.text)).toEqual([
             'All statuses',
             'Active',
             'Paused',
             'Complete',
+            'Needs setup',
             'Failed',
         ]);
         expect(Array.from(selects[1].options).map(option => option.text)).toEqual([
