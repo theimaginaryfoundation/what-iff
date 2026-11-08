@@ -1,7 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 
 import { ChatContextFilesResponse, FileAttachment } from '../../../../../core/models/file-attachment.model';
 import { FileAttachmentService } from '../../../../../core/services/file-attachment.service';
@@ -113,6 +113,20 @@ describe('ContextFilesTabComponent', () => {
     const pending = [...el.querySelectorAll('[data-testid="context-files-pending"] .files-tab__name')].map(n => n.textContent);
     expect(pending).toEqual(['draft.txt']);
     expect(el.textContent).toContain('Not sent yet');
+  });
+
+  it('drops a load in flight when the thread goes away, and is not left loading', async () => {
+    const inFlight = new Subject<ChatContextFilesResponse>();
+    list.mockReturnValue(inFlight);
+    await render();
+    expect(fixture.componentInstance.loading()).toBe(true);
+    expect(inFlight.observed).toBe(true);
+
+    fixture.componentRef.setInput('chatId', null);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(fixture.componentInstance.loading()).toBe(false);
+    expect(inFlight.observed).toBe(false);
   });
 
   it('says so without a thread, and when the thread has no files', async () => {

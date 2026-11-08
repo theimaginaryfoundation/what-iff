@@ -1,4 +1,6 @@
-import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Subscription } from 'rxjs';
 
 import { ChatContextFile, ChatContextFilesResponse, ChatContextReason, FileAttachment } from '../../../../../core/models/file-attachment.model';
 import { FileAttachmentService } from '../../../../../core/services/file-attachment.service';
@@ -34,6 +36,7 @@ const REASON_LABELS: Record<string, string> = {
 })
 export class ContextFilesTabComponent {
   private readonly files = inject(FileAttachmentService);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly contextPanel = inject(ContextPanelService);
   private readonly workspace = inject(FileWorkspaceService);
   private readonly picker = viewChild<ElementRef<HTMLInputElement>>('picker');
@@ -58,7 +61,7 @@ export class ContextFilesTabComponent {
     return this.contextPanel.composerPending().filter(file => !listed.has(file.id));
   });
 
-  private generation = 0;
+  private loadSubscription: Subscription | null = null;
 
   constructor() {
     effect(() => {
@@ -134,7 +137,7 @@ export class ContextFilesTabComponent {
     }
     this.uploadError.set(null);
     this.uploading.set(true);
-    this.files.uploadChatFileAttachment(chatId, file).subscribe({
+    this.files.uploadChatFileAttachment(chatId, file).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: attachment => {
         this.uploading.set(false);
         this.contextPanel.requestComposerAttachment(attachment);
@@ -146,23 +149,22 @@ export class ContextFilesTabComponent {
     });
   }
 
-  private async load(chatId: string | null): Promise<void> {
-    const generation = ++this.generation;
+  private load(chatId: string | null): void {
+    // A newer load replaces whatever is in flight, including when there is no thread any more.
+    this.loadSubscription?.unsubscribe();
+    this.error.set(null);
     if (!chatId) {
       this.response.set(null);
-      this.error.set(null);
+      this.loading.set(false);
       return;
     }
     this.loading.set(true);
-    this.error.set(null);
-    this.files.listChatContextFiles(chatId).subscribe({
+    this.loadSubscription = this.files.listChatContextFiles(chatId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: response => {
-        if (generation !== this.generation) return;
         this.response.set(response);
         this.loading.set(false);
       },
       error: error => {
-        if (generation !== this.generation) return;
         this.error.set(apiErrorMessage(error, "Failed to load the thread's files"));
         this.loading.set(false);
       },
