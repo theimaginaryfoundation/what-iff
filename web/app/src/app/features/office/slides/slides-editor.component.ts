@@ -142,6 +142,7 @@ export class SlidesEditorComponent implements FileEditor {
   private readonly rendered = signal(false);
   private generation = 0;
   private lastContent: Blob | null = null;
+  private readonly savedDecks = new WeakMap<Blob, Deck>();
   /** The bytes the deck was read from and the deck as read: a save patches these rather than rebuilding the file. */
   private original: Uint8Array | null = null;
   private imported: Deck | null = null;
@@ -176,14 +177,17 @@ export class SlidesEditorComponent implements FileEditor {
     const { bytes } = await deckToPptx(deck, { original: this.original, imported: this.imported, factory: this.writer });
     const blob = new Blob([bytes as BlobPart], { type: PPTX_MIME });
     this.lastContent = blob;
+    this.savedDecks.set(blob, deck);
     // The next save patches what this one wrote.
     this.original = bytes;
     this.imported = deck;
     return blob;
   }
 
-  markSaved(): void {
-    this.setDirty(false);
+  markSaved(saved?: Blob): void {
+    // The deck is immutable, so a change made while the save was running is a different object.
+    const deck = saved && this.savedDecks.get(saved);
+    this.setDirty(deck !== undefined && deck !== this.deck());
   }
 
   dismissNotice(): void {

@@ -1,3 +1,4 @@
+import { safeLinkUrl } from '../shared/safe-link';
 import { Paragraph, Run } from '../pptx/deck-model';
 import { htmlToParagraphs } from '../pptx/pptx-text';
 
@@ -61,7 +62,8 @@ function runHtml(run: Run): string {
   if (run.baseline === 'sub') style.push('vertical-align: sub;font-size: smaller');
   const text = escapeHtml(run.text).replace(/\n/g, '<br>');
   const span = style.length ? `<span style="${style.join(';')}">${text}</span>` : `<span>${text}</span>`;
-  return run.link ? `<a href="${escapeHtml(run.link)}">${span}</a>` : span;
+  const link = safeLinkUrl(run.link);
+  return link ? `<a href="${escapeHtml(link)}">${span}</a>` : span;
 }
 
 export function escapeHtml(text: string): string {

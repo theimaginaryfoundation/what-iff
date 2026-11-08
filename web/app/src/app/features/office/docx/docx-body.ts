@@ -1,3 +1,4 @@
+import { safeLinkUrl } from '../shared/safe-link';
 import { FidelityCollector } from '../shared/fidelity';
 import {
   NS,
@@ -425,8 +426,9 @@ export class BodyBuilder {
     this.inlineContent(el, baseTs);
     if (this.length === start) return;
     const properties: Record<string, unknown> = {};
-    if (rel?.target) properties['url'] = anchor ? `${rel.target}#${anchor}` : rel.target;
-    else if (anchor) properties['url'] = `#${anchor}`;
+    const url = safeLinkUrl(rel?.target ? (anchor ? `${rel.target}#${anchor}` : rel.target) : anchor && `#${anchor}`);
+    if (!url) return; // The text stays; a link this app will not follow does not.
+    properties['url'] = url;
     const tooltip = attr(el, NS.w, 'tooltip');
     if (tooltip) properties['tooltip'] = tooltip;
     this.range({
@@ -472,13 +474,14 @@ export class BodyBuilder {
     const fieldType = instruction.split(/\s+/)[0]?.toUpperCase() ?? '';
     if (fieldType === 'HYPERLINK') {
       const m = /HYPERLINK\s+"([^"]+)"/.exec(instruction);
-      if (m && this.length > start)
+      const url = safeLinkUrl(m?.[1]);
+      if (url && this.length > start)
         this.range({
           startIndex: start,
           endIndex: this.length - 1,
           rangeId: this.ctx.nextId('link'),
           rangeType: CUSTOM_RANGE.HYPERLINK,
-          properties: { url: m[1] },
+          properties: { url },
         });
       return;
     }

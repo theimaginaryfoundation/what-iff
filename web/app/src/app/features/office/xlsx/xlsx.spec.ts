@@ -389,6 +389,16 @@ describe('date serials', () => {
   });
 });
 
+describe('delimitedTextToWorkbook', () => {
+  it('converts only numbers that read back exactly, so saving does not rewrite data', () => {
+    const { workbook } = delimitedTextToWorkbook('00123,1.50,12345678901234567890,42,-1.5,1e3,Infinity\n', ',', { id: 'wb', name: 'a.csv' });
+    const cells = workbook.sheets['sheet-1'].cellData[0];
+    expect(Object.values(cells).map(c => [c.v, c.t])).toEqual([
+      ['00123', 1], ['1.50', 1], ['12345678901234567890', 1], [42, 2], [-1.5, 2], ['1e3', 1], ['Infinity', 1],
+    ]);
+  });
+});
+
 describe('parseDelimited', () => {
   it('handles LF rows, quotes and tabs', () => {
     expect(parseDelimited('a\tb\n"c\td"\te\n', '\t')).toEqual([

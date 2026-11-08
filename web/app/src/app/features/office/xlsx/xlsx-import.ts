@@ -1,3 +1,4 @@
+import { safeLinkUrl } from '../shared/safe-link';
 import ExcelJS from 'exceljs';
 
 import { cellA1, parseRangeA1, parseSqref } from '../shared/a1';
@@ -356,7 +357,8 @@ function importCell(
   if (typeof raw === 'object' && raw !== null && 'hyperlink' in raw) {
     const link = raw as ExcelJS.CellHyperlinkValue;
     const text = typeof link.text === 'string' ? link.text : String(link.text ?? link.hyperlink);
-    out.p = hyperlinkDoc(row, col, text, link.hyperlink, link.tooltip);
+    const url = safeLinkUrl(link.hyperlink);
+    if (url) out.p = hyperlinkDoc(row, col, text, url, link.tooltip);
     out.v = text;
     out.t = 1;
     return out;
@@ -776,7 +778,10 @@ export function delimitedTextToWorkbook(text: string, delimiter: ',' | '\t', opt
   rows.forEach((cells, r) => {
     cells.forEach((value, c) => {
       if (value === '') return;
-      const asNumber = /^-?\d+(\.\d+)?$/.test(value) ? Number(value) : null;
+      // Only when the number reads back the same: 00123, 1.50 and long IDs are data, and saving
+      // the file would otherwise rewrite them.
+      const parsed = Number(value);
+      const asNumber = Number.isFinite(parsed) && String(parsed) === value ? parsed : null;
       (sheet.cellData[r] ??= {})[c] = asNumber !== null ? { v: asNumber, t: 2 } : { v: value, t: 1 };
     });
   });

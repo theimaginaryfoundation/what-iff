@@ -87,6 +87,9 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
   private readonly rendered = signal(false);
   private generation = 0;
   private lastContent: Blob | null = null;
+  /** Counts content changes, so a save can tell whether any landed after it started. */
+  private mutations = 0;
+  private readonly savedAt = new WeakMap<Blob, number>();
   private openedReadOnly: boolean | null = null;
 
   /** The thing being edited, for messages: "spreadsheet", "document". */
@@ -146,13 +149,17 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
   async content(): Promise<Blob> {
     const unit = this.unit;
     if (!unit) throw new Error(`The ${this.noun} is not loaded`);
+    const mutations = this.mutations;
     const blob = await this.serialize(unit.save(), this.file());
     this.lastContent = blob;
+    this.savedAt.set(blob, mutations);
     return blob;
   }
 
-  markSaved(): void {
-    this.setDirty(false);
+  markSaved(saved?: Blob): void {
+    // A change made while the save was running is still unsaved.
+    const at = saved && this.savedAt.get(saved);
+    this.setDirty(at !== undefined && at !== this.mutations);
   }
 
   dismissNotice(): void {
@@ -184,6 +191,7 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
       setTimeout(() => (settled = true), SETTLE_MS);
       univerAPI.addEvent(univerAPI.Event.CommandExecuted, (event: { id?: string; type?: number }) => {
         if (readOnly || !settled || event.type !== MUTATION || VIEW_ONLY_MUTATION.test(event.id ?? '')) return;
+        this.mutations += 1;
         this.setDirty(true);
       });
       this.state.set('ready');
