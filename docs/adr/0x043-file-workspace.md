@@ -221,7 +221,7 @@ Widgets need a kernel, so outside Run they show a note pointing there.
 It is in the notebook toolbar in edit mode, so phones do not get it, and JupyterLite takes the cells' place until Back to cells, which asks it to save first.
 
 - **Its own origin.** A same-origin iframe shares `sessionStorage` with its parent, so a notebook's code or output could read the session token. `usableRunUrl` refuses a same-origin URL and Run stays off. `environment.jupyterliteUrl` (`JUPYTERLITE_URL` at image build) points at it; empty leaves Run off.
-- **A bridge.** A small labextension in `web/jupyterlite/extension` writes the host's notebook to JupyterLite's default drive and opens it, so a kernel reads it with plain `open()`. Saves come back over `postMessage` and go through the usual `PUT …/content`, and undo can step over them.
+- **A bridge.** A small labextension in `web/jupyterlite/extension` writes the host's notebook to JupyterLite's default drive, kept in memory so nothing carries over to the next notebook or account, and opens it, so a kernel reads it with plain `open()`. Saves come back over `postMessage` and go through the usual `PUT …/content`, and undo can step over them.
 - **Trust at the boundary.** The host accepts messages only from its own frame on the configured origin, and the extension only from its parent on an origin in `whatiffHostOrigins`.
 - **Packages.** `jupyterlab_widgets` is in the site, so `ipywidgets` work live. Plain imports of common packages install themselves, because Pyodide works from `import` statements in the source; `importlib.import_module` does not trigger that.
 
