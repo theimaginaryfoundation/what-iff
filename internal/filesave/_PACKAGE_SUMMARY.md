@@ -30,3 +30,4 @@ Replaces the content of one of a user's files from the file workspace (ADR 0x043
 ## Testing
 
 - `filesave_test.go` — the happy path (key prefix, hash, size, version, released object, re-index, change event), the conflict path, every refusal, agent files, images.
+- A user save of an agent-authored file honours the same 1 MB cap as the agent's own tools (`models.AgentFileMaxBytes`), so the agent can still edit it afterwards.

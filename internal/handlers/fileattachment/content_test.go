@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/filechange"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -104,4 +106,43 @@ func TestReplaceContent_Unauthorized(t *testing.T) {
 	h.RegisterRoutes(r)
 	r.ServeHTTP(rr, req)
 	require.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestReplaceContent_ChatIDMustBeTheCallersAndSandboxedChatsAreNotNamed(t *testing.T) {
+	row := &models.FileAttachment{ID: uuid.New(), Name: "notes.md", FileType: "text/markdown", S3Key: "old", ContentVersion: 1}
+	var events []filechange.Event
+	filechange.Reset()
+	t.Cleanup(filechange.Reset)
+	filechange.Subscribe(func(_ context.Context, ev filechange.Event) { events = append(events, ev) })
+
+	put := func(chat *models.Chat, err error) int {
+		h, _ := contentHandler(row, true)
+		store := h.ds.(stubStore)
+		store.chatFn = func(context.Context, uuid.UUID, uuid.UUID) (*models.Chat, error) { return chat, err }
+		h.ds = store
+		req, _ := requestWithUser(t, http.MethodPut, "/file-attachment/"+row.ID.String()+"/content?chat_id="+uuid.NewString())
+		req.Body = httptest.NewRequest(http.MethodPut, "/", bytes.NewReader([]byte("x"))).Body
+		rr := httptest.NewRecorder()
+		r := mux.NewRouter()
+		h.RegisterRoutes(r)
+		r.ServeHTTP(rr, req)
+		return rr.Code
+	}
+
+	require.Equal(t, http.StatusNotFound, put(nil, datastore.ErrChatNotFound))
+	require.Empty(t, events, "nothing is saved for someone else's chat")
+	require.Equal(t, http.StatusInternalServerError, put(nil, errors.New("db down")))
+
+	require.Equal(t, http.StatusOK, put(&models.Chat{}, nil))
+	require.NotNil(t, events[0].ChatID)
+
+	require.Equal(t, http.StatusOK, put(&models.Chat{ContextScope: models.ContextScopeSandbox}, nil))
+	require.Nil(t, events[1].ChatID)
+}
+
+func TestReplaceContent_AgentFileCap(t *testing.T) {
+	row := &models.FileAttachment{ID: uuid.New(), Name: "a.md", FileType: "text/markdown", S3Key: "old", ContentVersion: 1, Origin: models.FileOriginAgent}
+	h, _ := contentHandler(row, true)
+	require.Equal(t, http.StatusRequestEntityTooLarge, putContent(t, h, row.ID.String(), make([]byte, models.AgentFileMaxBytes+1), nil).Code)
+	require.Equal(t, http.StatusOK, putContent(t, h, row.ID.String(), make([]byte, models.AgentFileMaxBytes), nil).Code)
 }

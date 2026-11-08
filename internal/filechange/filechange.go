@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+
+	"go.uber.org/zap"
 )
 
 // Kind says what changed.
@@ -66,8 +68,19 @@ func Notify(ctx context.Context, ev Event) {
 	fns := append([]Subscriber(nil), subs...)
 	mu.RUnlock()
 	for _, fn := range fns {
-		fn(ctx, ev)
+		call(ctx, fn, ev)
 	}
+}
+
+// call runs one subscriber; a panic in it must not fail the write that raised the event, or the
+// subscribers after it.
+func call(ctx context.Context, fn Subscriber, ev Event) {
+	defer func() {
+		if r := recover(); r != nil {
+			zap.L().Error("filechange: subscriber panicked", zap.Any("panic", r), zap.String("kind", string(ev.Kind)))
+		}
+	}()
+	fn(ctx, ev)
 }
 
 // Reset drops every subscriber. For tests.

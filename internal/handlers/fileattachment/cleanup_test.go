@@ -23,6 +23,10 @@ type memRows struct {
 	rows map[uuid.UUID]models.FileAttachment
 }
 
+func (m *memRows) GetChat(context.Context, uuid.UUID, uuid.UUID) (*models.Chat, error) {
+	return &models.Chat{}, nil
+}
+
 func newMemRows(rows ...models.FileAttachment) *memRows {
 	m := &memRows{rows: map[uuid.UUID]models.FileAttachment{}}
 	for _, r := range rows {

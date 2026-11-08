@@ -66,7 +66,7 @@ func (f *fakeAgentFileStore) CreateFileAttachment(_ context.Context, userID uuid
 	c := att
 	return &c, nil
 }
-func (f *fakeAgentFileStore) SwapAgentFileObject(_ context.Context, _, id uuid.UUID, oldKey, newKey string) (bool, error) {
+func (f *fakeAgentFileStore) SwapAgentFileObject(_ context.Context, _, id uuid.UUID, oldKey, newKey string, _ int64, _ string) (bool, error) {
 	if f.beforeSwap != nil {
 		f.beforeSwap(id)
 	}

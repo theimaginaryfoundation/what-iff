@@ -62,6 +62,7 @@ func TestResolveAttachmentImage(t *testing.T) {
 		{"full image is one fetch", canonical, []string{canonical}, false, telemetry.ImageSourceCanonical, 1},
 		{"full image skips a row key equal to canonical", canonical, []string{chat}, false, telemetry.ImageSourceChat, 2},
 		{"everything misses", canonical, nil, true, telemetry.ImageSourceNone, 3},
+		{"a saved image's new object beats the old canonical one", shared, []string{shared, canonical}, false, telemetry.ImageSourceS3Key, 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

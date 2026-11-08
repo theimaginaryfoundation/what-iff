@@ -24,6 +24,9 @@ const (
 	FileAttachmentSourceImported FileAttachmentSource = "imported"
 )
 
+// AgentFileMaxBytes caps one agent-authored file, whoever writes it.
+const AgentFileMaxBytes = 1 << 20
+
 // FileAttachment represents a file that has been uploaded and attached to the system
 type FileAttachment struct {
 	ID     uuid.UUID `json:"id"`

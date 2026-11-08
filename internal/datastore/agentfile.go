@@ -43,8 +43,8 @@ func (d *Datastore) FindFileAttachmentsAtPath(ctx context.Context, userID uuid.U
 // happened: false means another writer changed the file first (or it is gone, or not
 // agent-authored), and the caller should drop newKey and re-read. It is SwapFileObject with
 // AgentOnly set; an agent write never repoints the chat copies that share the object.
-func (d *Datastore) SwapAgentFileObject(ctx context.Context, userID, id uuid.UUID, oldKey, newKey string) (bool, error) {
-	return d.SwapFileObject(ctx, userID, id, oldKey, newKey, SwapFileObjectOptions{AgentOnly: true})
+func (d *Datastore) SwapAgentFileObject(ctx context.Context, userID, id uuid.UUID, oldKey, newKey string, sizeBytes int64, sha256Hex string) (bool, error) {
+	return d.SwapFileObject(ctx, userID, id, oldKey, newKey, SwapFileObjectOptions{AgentOnly: true, SizeBytes: sizeBytes, SHA256: sha256Hex})
 }
 
 // CountAgentFiles returns how many agent-authored files the user holds.

@@ -22,6 +22,8 @@ type attachmentStore interface {
 	filedelete.Store
 	// The swap and re-index a content save needs (filesave.Service.Replace).
 	filesave.Store
+	// Whether a save's chat is the caller's, and sandboxed.
+	GetChat(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error)
 }
 
 type attachmentAgent interface {

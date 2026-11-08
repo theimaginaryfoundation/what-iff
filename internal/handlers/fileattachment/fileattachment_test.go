@@ -21,11 +21,19 @@ import (
 )
 
 type stubStore struct {
+	chatFn           func(context.Context, uuid.UUID, uuid.UUID) (*models.Chat, error)
 	listFn           func(context.Context, uuid.UUID, int, int, models.FileAttachmentFilters) (*models.PaginatedResponse, error)
 	getFn            func(context.Context, uuid.UUID, uuid.UUID) (*models.FileAttachment, error)
 	deleteFn         func(context.Context, uuid.UUID, uuid.UUID) error
 	referencedKeysFn func(context.Context, []string) (map[string]bool, error)
 	swapFn           func(context.Context, uuid.UUID, uuid.UUID, string, string, datastore.SwapFileObjectOptions) (bool, error)
+}
+
+func (s stubStore) GetChat(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error) {
+	if s.chatFn != nil {
+		return s.chatFn(ctx, userID, id)
+	}
+	return &models.Chat{}, nil
 }
 
 func (s stubStore) ReferencedFileAttachmentKeys(ctx context.Context, keys []string) (map[string]bool, error) {

@@ -35,6 +35,9 @@ var (
 	ErrInvalidImage = errors.New("the content is not a valid image")
 	// ErrTooLarge means the body is over the service's cap.
 	ErrTooLarge = errors.New("the content is too large")
+	// ErrAgentFileTooLarge means the body is over the cap on agent-authored files, which the
+	// agent's own tools enforce: a bigger file could never be edited by the agent again.
+	ErrAgentFileTooLarge = errors.New("the content is too large for an agent file")
 	// ErrNoStore means no object store is configured, so nothing can be saved.
 	ErrNoStore = errors.New("file storage is not configured")
 )
@@ -121,6 +124,9 @@ func (s *Service) Replace(ctx context.Context, userID uuid.UUID, req Request) (*
 	}
 	if att.IsSkillFile() {
 		return nil, ErrSkillFile
+	}
+	if att.AgentAuthored() && len(req.Content) > models.AgentFileMaxBytes {
+		return nil, ErrAgentFileTooLarge
 	}
 	if ct := mediaType(req.ContentType); ct != "" && ct != mediaType(att.FileType) {
 		return nil, ErrTypeMismatch

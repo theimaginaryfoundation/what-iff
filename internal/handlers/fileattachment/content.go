@@ -10,9 +10,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/filesave"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
 // ReplaceFileAttachmentContent handles PUT /file-attachment/{id}/content (ADR 0x043 §3): the body
@@ -42,7 +44,19 @@ func (h *Handler) ReplaceFileAttachmentContent(w http.ResponseWriter, r *http.Re
 			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid chat_id", err)
 			return
 		}
-		chatID = &cid
+		chat, err := h.ds.GetChat(r.Context(), userID, cid)
+		if err != nil {
+			if errors.Is(err, datastore.ErrChatNotFound) {
+				handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Chat not found", nil)
+			} else {
+				handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to check the chat", err)
+			}
+			return
+		}
+		// A sandboxed chat keeps out of the account's shared context, so a save from it names no chat.
+		if !chat.IsSandboxed() {
+			chatID = &cid
+		}
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, handlerutils.MaxUploadBytes)
@@ -84,6 +98,9 @@ func (h *Handler) ReplaceFileAttachmentContent(w http.ResponseWriter, r *http.Re
 		return
 	case errors.Is(err, filesave.ErrTooLarge):
 		handlerutils.RespondWithError(w, h.logger, http.StatusRequestEntityTooLarge, handlerutils.CodeNotSet, fmt.Sprintf("File too large (max %dMB)", handlerutils.MaxUploadBytes>>20), nil)
+		return
+	case errors.Is(err, filesave.ErrAgentFileTooLarge):
+		handlerutils.RespondWithError(w, h.logger, http.StatusRequestEntityTooLarge, handlerutils.CodeNotSet, fmt.Sprintf("Agent files are limited to %dMB", models.AgentFileMaxBytes>>20), nil)
 		return
 	case errors.Is(err, filesave.ErrNoStore):
 		handlerutils.RespondWithError(w, h.logger, http.StatusServiceUnavailable, handlerutils.CodeNotSet, "File storage not configured", nil)

@@ -21,3 +21,16 @@ func TestNotifyReachesSubscribersInOrderAndSkipsNilFiles(t *testing.T) {
 	Notify(context.Background(), Event{Kind: KindRename, UserID: uuid.New(), File: &models.FileAttachment{Name: "n.md"}, OldName: "o.md"})
 	require.Equal(t, []string{"a:rename", "b:n.md"}, got)
 }
+
+func TestNotifySurvivesAPanickingSubscriber(t *testing.T) {
+	Reset()
+	t.Cleanup(Reset)
+	reached := false
+	Subscribe(func(context.Context, Event) { panic("boom") })
+	Subscribe(func(context.Context, Event) { reached = true })
+
+	require.NotPanics(t, func() {
+		Notify(context.Background(), Event{Kind: KindContent, UserID: uuid.New(), File: &models.FileAttachment{Name: "n.md"}})
+	})
+	require.True(t, reached)
+}

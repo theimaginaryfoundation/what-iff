@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -336,7 +338,8 @@ func (t *AgentFileTool) rewrite(ctx context.Context, chat *models.Chat, file str
 		if err != nil {
 			return agentFileWriteResult{}, err
 		}
-		swapped, err := t.store.SwapAgentFileObject(ctx, chat.UserID, att.ID, att.S3Key, key)
+		sum := sha256.Sum256([]byte(next))
+		swapped, err := t.store.SwapAgentFileObject(ctx, chat.UserID, att.ID, att.S3Key, key, int64(len(next)), hex.EncodeToString(sum[:]))
 		if err != nil {
 			// The swap may have committed before the error surfaced, leaving the row on key, so
 			// key is not dropped: an orphaned object beats a row pointing at a deleted one.
