@@ -150,6 +150,10 @@ function outputPurifier(): ReturnType<typeof DOMPurify> {
   if (purifier) return purifier;
   const instance = DOMPurify(window);
   instance.addHook('afterSanitizeAttributes', node => {
+    // DOMPurify already removes event handlers; output stays script-free even if its defaults move.
+    for (const name of node.getAttributeNames?.() ?? []) {
+      if (/^on/i.test(name)) node.removeAttribute(name);
+    }
     // Output must not phone home when a notebook is opened: only embedded pictures load.
     if (node.tagName === 'IMG' && !/^data:image\//i.test(node.getAttribute('src') ?? '')) node.removeAttribute('src');
     if (node.tagName === 'IMG') node.removeAttribute('srcset');
