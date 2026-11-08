@@ -3,6 +3,8 @@
 // PowerPoint files looked like before. These @font-face rules map each Office name to the
 // closest fonts commonly installed (metric-compatible ones first), so canvas and DOM text in the
 // office editors keep the look of the original. Only local fonts are referenced: nothing is fetched.
+// These names are also in the app's own font stacks, so this is a lazy style that only the office
+// editors link (shared/office-fonts.ts). Injecting it globally changes text across the app.
 @mixin office-alias($name, $locals...) {
   @font-face {
     font-family: $name;

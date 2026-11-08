@@ -1,3 +1,4 @@
+import { useOfficeFonts } from '../shared/office-fonts';
 import { DOCUMENT } from '@angular/common';
 import {
   ChangeDetectionStrategy,
@@ -149,6 +150,7 @@ export class SlidesEditorComponent implements FileEditor {
   private resizeObserver: ResizeObserver | null = null;
 
   constructor() {
+    void useOfficeFonts();
     afterNextRender(() => this.rendered.set(true));
     // The stage exists only once a deck is shown; watch it from then on and fit the slide to it.
     afterRenderEffect(() => {

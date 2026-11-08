@@ -28,7 +28,11 @@
             ],
             "styles": [
               "src/styles.scss",
-              "src/styles/office-fonts.scss",
+              {
+                "input": "src/styles/office-fonts.scss",
+                "bundleName": "office-fonts",
+                "inject": false
+              },
               "node_modules/@ctrl/ngx-emoji-mart/picker.css",
               "node_modules/katex/dist/katex.min.css",
               {

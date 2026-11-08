@@ -1,3 +1,4 @@
+import { useOfficeFonts } from '../shared/office-fonts';
 import { DOCUMENT } from '@angular/common';
 import {
   DestroyRef,
@@ -105,6 +106,8 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
   /** Called whenever the instance is torn down, before a reopen and on destroy. */
   protected onDispose(): void {}
 
+  private readonly fontsReady = useOfficeFonts();
+
   constructor() {
     afterNextRender(() => this.rendered.set(true));
     effect(() => {
@@ -175,7 +178,8 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
     this.setDirty(false);
     try {
       const file = this.file();
-      const [kit, parsed] = await Promise.all([this.loadKit(), this.parse(blob, file)]);
+      // Univer draws on a canvas, which does not repaint when a stylesheet arrives.
+      const [kit, parsed] = await Promise.all([this.loadKit(), this.parse(blob, file), this.fontsReady]);
       if (generation !== this.generation) return;
       this.report.set(parsed.report);
       const readOnly = this.readOnly();
