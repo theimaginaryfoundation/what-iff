@@ -1,4 +1,4 @@
-import { applyCarriageReturns, ansiToHtml, outputViews, sanitizeOutputHtml } from './notebook-outputs';
+import { applyCarriageReturns, ansiToHtml, outputViews, sanitizeOutputHtml, withoutRemoteImages } from './notebook-outputs';
 
 describe('notebook outputs', () => {
   it('merges consecutive writes to a stream and applies carriage returns', () => {
@@ -50,5 +50,28 @@ describe('notebook outputs', () => {
     expect(clean).toContain('data:image/png;base64,AAAA');
     expect(clean).toContain('target="_blank"');
     expect(clean).toContain('rel="noopener noreferrer"');
+  });
+});
+
+describe('nothing loads from elsewhere when a notebook opens', () => {
+  it('strips CSS url(), SVG image and filter hrefs, and remote paint servers from output HTML', () => {
+    const html = sanitizeOutputHtml(
+      '<div style="background-image:url(https://e.test/a.png)">a</div><p style="color:red">b</p>' +
+        '<svg><image href="https://e.test/b.png"></image><image xlink:href="https://e.test/c.png"></image>' +
+        '<filter><feImage href="https://e.test/d.png"></feImage></filter><rect fill="url(https://e.test/e#p)"></rect>' +
+        '<rect fill="url(#local)"></rect></svg><img src="data:image/png;base64,AAAA">',
+    );
+    expect(html).not.toContain('e.test');
+    expect(html).toContain('color:red');
+    expect(html).toContain('url(#local)');
+    expect(html).toContain('data:image/png;base64,AAAA');
+  });
+
+  it('turns remote Markdown images into links, and keeps embedded ones', () => {
+    const md = withoutRemoteImages('![chart](https://e.test/c.png "t") ![ref][r] ![ok](data:image/png;base64,AA) <img src="https://e.test/x.png" alt="x">');
+    expect(md).toContain('[chart](https://e.test/c.png)');
+    expect(md).toContain('[ref][r]');
+    expect(md).toContain('![ok](data:image/png;base64,AA)');
+    expect(md).not.toContain('src="https://e.test/x.png"');
   });
 });

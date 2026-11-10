@@ -1,3 +1,4 @@
+import { withoutRemoteImages } from './notebook-outputs';
 import { DOCUMENT } from '@angular/common';
 import {
   ChangeDetectionStrategy,
@@ -59,7 +60,7 @@ export class NotebookCellComponent {
   readonly stopEditing = output<void>();
 
   readonly highlighted = signal<SafeHtml | null>(null);
-  readonly markdown = computed(() => resolveAttachments(this.cell()));
+  readonly markdown = computed(() => withoutRemoteImages(resolveAttachments(this.cell())));
   readonly prompt = computed(() => {
     const count = this.cell().executionCount;
     return count === null ? '[ ]' : `[${count}]`;

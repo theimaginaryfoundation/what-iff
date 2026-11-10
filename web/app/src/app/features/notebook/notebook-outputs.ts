@@ -73,7 +73,7 @@ function dataView(data: Record<string, unknown>, metadata: Record<string, unknow
   for (const mime of IMAGE_MIMES) {
     if (data[mime] !== undefined) return imageView(mime, joinSource(data[mime]).replace(/\s+/g, ''), metadata[mime]);
   }
-  if (data['text/markdown'] !== undefined) return { kind: 'markdown', text: joinSource(data['text/markdown']) };
+  if (data['text/markdown'] !== undefined) return { kind: 'markdown', text: withoutRemoteImages(joinSource(data['text/markdown'])) };
   if (data['text/latex'] !== undefined) return { kind: 'markdown', text: joinSource(data['text/latex']) };
   if (data[SVG] !== undefined) {
     return { kind: 'image', src: `data:${SVG};charset=utf-8,${encodeURIComponent(joinSource(data[SVG]))}` };
@@ -154,9 +154,18 @@ function outputPurifier(): ReturnType<typeof DOMPurify> {
     for (const name of node.getAttributeNames?.() ?? []) {
       if (/^on/i.test(name)) node.removeAttribute(name);
     }
-    // Output must not phone home when a notebook is opened: only embedded pictures load.
-    if (node.tagName === 'IMG' && !/^data:image\//i.test(node.getAttribute('src') ?? '')) node.removeAttribute('src');
-    if (node.tagName === 'IMG') node.removeAttribute('srcset');
+    // Output must not phone home when a notebook is opened: only embedded pictures load, and
+    // nothing else may name a remote resource (CSS url(), SVG image and filter hrefs, paint servers).
+    for (const name of node.getAttributeNames?.() ?? []) {
+      const value = node.getAttribute(name) ?? '';
+      const lower = name.toLowerCase();
+      if (lower === 'srcset') node.removeAttribute(name);
+      else if (lower === 'src' || (lower.endsWith('href') && node.tagName !== 'A')) {
+        if (!/^data:image\//i.test(value.trim()) && !value.trim().startsWith('#')) node.removeAttribute(name);
+      } else if (/url\s*\(|image-set\s*\(|@import/i.test(value) && !/^\s*url\(\s*['"]?#/i.test(value)) {
+        node.removeAttribute(name);
+      }
+    }
     if (node.tagName === 'A') {
       node.setAttribute('target', '_blank');
       node.setAttribute('rel', 'noopener noreferrer');
@@ -172,4 +181,15 @@ export function sanitizeOutputHtml(html: string): string {
     FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'iframe', 'object', 'embed', 'base', 'meta', 'link', 'video', 'audio', 'source'],
     FORBID_ATTR: ['formaction', 'background'],
   }) as string;
+}
+
+/**
+ * Markdown without pictures that would load from elsewhere when the notebook opens. A remote image
+ * becomes a link to it, which loads nothing until clicked; embedded (data:) images stay.
+ */
+export function withoutRemoteImages(markdown: string): string {
+  return markdown
+    .replace(/!\[([^\]]*)\]\(\s*<?(?!data:)([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/gi, '[$1]($2)')
+    .replace(/!\[([^\]]*)\]\[([^\]]*)\]/g, '[$1][$2]')
+    .replace(/(<img\b[^>]*?)\s(?:src|srcset)\s*=\s*("(?!data:)[^"]*"|'(?!data:)[^']*'|(?!data:)[^\s>"']+)/gi, '$1');
 }
