@@ -185,6 +185,14 @@ func (f *fakeStore) GetUserByID(ctx context.Context, userID uuid.UUID) (*models.
 func (f *fakeStore) SetChatMessageBookmarked(ctx context.Context, userID, messageID uuid.UUID, bookmarked bool) (*models.ChatMessage, error) {
 	return nil, errors.New("not implemented")
 }
+func (f *fakeStore) ListBackgroundNotices(ctx context.Context, userID, chatID uuid.UUID) ([]models.BackgroundNotice, error) {
+	return nil, nil
+}
+
+func (f *fakeStore) DismissBackgroundNotice(ctx context.Context, userID, chatID, id uuid.UUID) error {
+	return nil
+}
+
 func (f *fakeStore) ListChatMessageBookmarks(ctx context.Context, userID, chatID uuid.UUID) ([]*models.ChatMessage, error) {
 	return nil, errors.New("not implemented")
 }

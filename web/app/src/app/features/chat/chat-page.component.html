@@ -217,6 +217,7 @@
           @if (session.pendingPrompt(); as prompt) {
             <app-agent-prompt-card [prompt]="prompt" (answer)="session.answerPrompt(prompt.id, $event)" />
           }
+          <app-background-notices [chatId]="session.thread()?.id ?? null" [settled]="session.settledTurns()" />
           <app-chat-send-outlet />
           <app-discord-composer-toggle />
           <app-buzz-composer-toggle />
