@@ -1,5 +1,5 @@
 import { deleteCell, duplicateCell, insertCell, moveCell, setCellType, setSource, clearOutputs } from './notebook-commands';
-import { NotebookCell, NotebookFormatError, newCell, resolveAttachments, notebookLanguage, parseNotebook, serializeNotebook, splitSource } from './nbformat';
+import { NotebookCell, NotebookFormatError, isDataOutput, isErrorOutput, isStreamOutput, newCell, recordField, resolveAttachments, notebookLanguage, parseNotebook, serializeNotebook, splitSource } from './nbformat';
 
 /** As Jupyter writes it: one-space indent, source as lines, a trailing newline, keys sorted. */
 const JUPYTER = `{
@@ -142,5 +142,15 @@ describe('nbformat', () => {
   it('leaves an attachment name that is not valid percent-encoding as written', () => {
     const cell = { source: '![x](attachment:100%.png)', raw: { attachments: { '100%.png': { 'image/png': 'aGk=' } } } };
     expect(resolveAttachments(cell as unknown as NotebookCell)).toBe('![x](data:image/png;base64,aGk=)');
+  });
+
+  it('narrows outputs by type and reads object fields defensively', () => {
+    expect(isStreamOutput({ output_type: 'stream' })).toBe(true);
+    expect(isErrorOutput({ output_type: 'error' })).toBe(true);
+    expect(isDataOutput({ output_type: 'execute_result' })).toBe(true);
+    expect(isDataOutput({ output_type: 'stream' })).toBe(false);
+    expect(recordField({ a: 1 })).toEqual({ a: 1 });
+    expect(recordField(['a'])).toEqual({});
+    expect(recordField('x')).toEqual({});
   });
 });

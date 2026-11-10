@@ -1,6 +1,6 @@
 import DOMPurify from 'dompurify';
 
-import { joinSource, NotebookOutput } from './nbformat';
+import { NotebookOutput, isDataOutput, isErrorOutput, isStreamOutput, joinSource, recordField } from './nbformat';
 
 /**
  * What a cell's outputs show (ADR 0x043 §8), chosen by MIME type from the richest representation we
@@ -36,25 +36,21 @@ function mergeStreams(outputs: readonly NotebookOutput[]): NotebookOutput[] {
   const merged: NotebookOutput[] = [];
   for (const output of outputs) {
     const last = merged[merged.length - 1];
-    if (output.output_type === 'stream' && last?.output_type === 'stream' && last['name'] === output['name']) {
-      merged[merged.length - 1] = { ...last, text: joinSource(last['text']) + joinSource(output['text']) };
+    if (isStreamOutput(output) && last && isStreamOutput(last) && last.name === output.name) {
+      merged[merged.length - 1] = { ...last, text: joinSource(last.text) + joinSource(output.text) };
     } else merged.push(output);
   }
   return merged;
 }
 
 function outputView(output: NotebookOutput): OutputView | null {
-  switch (output.output_type) {
-    case 'stream':
-      return textView(applyCarriageReturns(joinSource(output['text'])), output['name'] === 'stderr');
-    case 'error':
-      return textView(Array.isArray(output['traceback']) ? output['traceback'].join('\n') : `${output['ename']}: ${output['evalue']}`, true);
-    case 'display_data':
-    case 'execute_result':
-      return dataView((output['data'] ?? {}) as Record<string, unknown>, (output['metadata'] ?? {}) as Record<string, unknown>);
-    default:
-      return null;
+  if (isStreamOutput(output)) return textView(applyCarriageReturns(joinSource(output.text)), output.name === 'stderr');
+  if (isErrorOutput(output)) {
+    const trace = Array.isArray(output.traceback) ? output.traceback.map(String).join('\n') : `${String(output.ename ?? 'Error')}: ${String(output.evalue ?? '')}`;
+    return textView(trace, true);
   }
+  if (isDataOutput(output)) return dataView(recordField(output.data), recordField(output.metadata));
+  return null;
 }
 
 function textView(text: string, stderr = false): OutputView {

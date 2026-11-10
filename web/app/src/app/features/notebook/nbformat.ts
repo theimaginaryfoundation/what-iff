@@ -7,9 +7,49 @@
 
 export type CellType = 'code' | 'markdown' | 'raw';
 
+/**
+ * One cell output as stored. Notebooks come from anywhere, so every field is checked before use;
+ * the known nbformat 4 shapes below are what the guards narrow to.
+ */
 export interface NotebookOutput {
   output_type: string;
   [key: string]: unknown;
+}
+
+export interface StreamOutput extends NotebookOutput {
+  output_type: 'stream';
+  name?: unknown;
+  text?: unknown;
+}
+
+export interface ErrorOutput extends NotebookOutput {
+  output_type: 'error';
+  ename?: unknown;
+  evalue?: unknown;
+  traceback?: unknown;
+}
+
+export interface DataOutput extends NotebookOutput {
+  output_type: 'display_data' | 'execute_result';
+  data?: unknown;
+  metadata?: unknown;
+}
+
+export function isStreamOutput(output: NotebookOutput): output is StreamOutput {
+  return output.output_type === 'stream';
+}
+
+export function isErrorOutput(output: NotebookOutput): output is ErrorOutput {
+  return output.output_type === 'error';
+}
+
+export function isDataOutput(output: NotebookOutput): output is DataOutput {
+  return output.output_type === 'display_data' || output.output_type === 'execute_result';
+}
+
+/** An object field of an output, or an empty one when the file holds something else. */
+export function recordField(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 export interface NotebookCell {
