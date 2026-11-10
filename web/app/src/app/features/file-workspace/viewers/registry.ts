@@ -71,8 +71,12 @@ export function loadEditor(kind: FilePreviewKind): Promise<Type<unknown>> | null
   if (!entry?.edit) return null;
   let promise = loadedEditors.get(kind);
   if (!promise) {
-    promise = entry.edit();
-    loadedEditors.set(kind, promise);
+    const attempt = entry.edit();
+    loadedEditors.set(kind, attempt);
+    attempt.catch(() => {
+      if (loadedEditors.get(kind) === attempt) loadedEditors.delete(kind);
+    });
+    promise = attempt;
   }
   return promise;
 }

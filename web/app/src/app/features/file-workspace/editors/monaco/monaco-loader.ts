@@ -48,7 +48,12 @@ export function loadMonaco(document: Document): Promise<Monaco> {
     };
     return import('monaco-editor');
   })();
-  return monacoPromise;
+  // A failed load is not kept, so the next editor retries instead of failing until a reload.
+  const attempt = monacoPromise;
+  attempt.catch(() => {
+    if (monacoPromise === attempt) monacoPromise = undefined;
+  });
+  return attempt;
 }
 
 /** The loader as a token, so tests can hand components a fake Monaco. */
