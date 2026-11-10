@@ -137,11 +137,9 @@ func isFirstUserMessageResult(results []any, currentMessageID uuid.UUID) bool {
 	return userCount <= 1
 }
 
-// autoSelectMood asks GPT-4.1-mini to pick the best mood from the provided list for the user message.
+// autoSelectMood asks the simple role's model to pick the best mood from the provided list for
+// the user message.
 func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMessage string) *models.Mood {
-	if a.OpenAIProvider == nil {
-		return nil
-	}
 	// Mock/local mode: mood selection is a provider call — deliberately keep
 	// the current mood instead of hitting the deny transport every auto-mood turn.
 	if a.nonVendorLLM() {
