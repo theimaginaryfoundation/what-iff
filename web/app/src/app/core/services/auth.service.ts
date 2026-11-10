@@ -340,7 +340,7 @@ export class AuthService {
 
   async logoutPreferred(provider?: AuthProvider): Promise<void> {
     // Signing out with unsaved edits would strand them: nothing can be saved once signed out.
-    if (this.injector.get(UnsavedChangesService).pending()) {
+    if (this.injector.get(UnsavedChangesService).hasPending()) {
       if (!(await this.injector.get(ConfirmationService).confirmDiscardChanges())) return;
     }
     const resolvedProvider = this.resolveAuthProvider(provider);

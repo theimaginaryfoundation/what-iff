@@ -1,6 +1,5 @@
 import { DOCUMENT } from '@angular/common';
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, input, signal, untracked } from '@angular/core';
-import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { MarkdownModule } from 'ngx-markdown';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
@@ -36,7 +35,6 @@ const MAX_HIGHLIGHT_CHARS = 200_000;
 export class TextViewerComponent {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly document = inject(DOCUMENT);
-  private readonly sanitizer = inject(DomSanitizer);
   private readonly loadMonaco = inject(MONACO_LOADER);
 
   readonly file = input.required<FileAttachment>();
@@ -55,7 +53,7 @@ export class TextViewerComponent {
    * §2): the phone's read-only view, and the raw view everywhere, without an editor instance.
    * Null until it is ready or when the language is unknown; the plain text shows meanwhile.
    */
-  readonly highlighted = signal<SafeHtml | null>(null);
+  readonly highlighted = signal<string | null>(null);
   readonly markdownTooBig = computed(() => this.text().length > MAX_MARKDOWN_RENDER_CHARS);
   readonly csv = computed(() => (this.kind() === 'csv' && this.decoded() ? parseCsv(this.text(), csvDelimiterFor(this.file())) : null));
   readonly canRender = computed(() => this.kind() === 'csv' || (this.kind() === 'markdown' && !this.markdownTooBig()));
@@ -102,7 +100,9 @@ export class TextViewerComponent {
       const html = await monaco.editor.colorize(text, language, { tabSize: 4 });
       // Monaco escapes the text and emits only spans with token classes; nothing from the file
       // reaches the DOM as markup.
-      if (generation === this.generation) this.highlighted.set(this.sanitizer.bypassSecurityTrustHtml(html));
+      // Monaco's colorize output is spans with classes, which Angular's sanitizer keeps as they are,
+      // so it goes through the sanitizer rather than around it.
+      if (generation === this.generation) this.highlighted.set(html);
     } catch {
       // Highlighting is a nicety; the plain text is already shown.
     }

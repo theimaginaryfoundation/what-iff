@@ -9,6 +9,11 @@ export class UnsavedChangesService {
   private readonly _pending = signal(false);
   readonly pending = this._pending.asReadonly();
 
+  /** Whether there are unsaved changes now. */
+  hasPending(): boolean {
+    return this._pending();
+  }
+
   set(pending: boolean): void {
     this._pending.set(pending);
   }
