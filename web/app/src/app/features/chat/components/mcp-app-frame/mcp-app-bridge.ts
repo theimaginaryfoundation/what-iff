@@ -112,7 +112,7 @@ export class McpAppBridge {
         const url = typeof p['url'] === 'string' ? p['url'] : '';
         if (!isWebUrl(url)) throw new RpcFailure(-32602, 'Only http and https links can be opened');
         const opened = await this.deps.openLink(url);
-        if (!opened) throw new RpcFailure(-32000, 'The person chose not to open the link');
+        if (!opened) throw new RpcFailure(-32000, 'The user chose not to open the link');
         return {};
       }
       case 'ui/message': {

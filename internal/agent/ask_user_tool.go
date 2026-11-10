@@ -30,7 +30,7 @@ func askUserResult(payload models.AgentPromptPayload, out promptOutcome) map[str
 	if !out.answered() {
 		return map[string]any{
 			"status": "no_answer",
-			"instruction": "The person did not answer in time. Do not guess and do not keep working on anything that depends on the answer: " +
+			"instruction": "The user did not answer in time. Do not guess and do not keep working on anything that depends on the answer: " +
 				"end your turn now with a short reply that asks the question again, so they can answer when they are back.",
 		}
 	}
@@ -49,7 +49,7 @@ func askUserResult(payload models.AgentPromptPayload, out promptOutcome) map[str
 	if resp.Action != models.AgentPromptAccept {
 		res := map[string]any{
 			"status":      "declined",
-			"instruction": "The person chose not to answer. Carry on without it if you can, using sensible defaults and saying which you chose; otherwise end your turn and say what you need.",
+			"instruction": "The user chose not to answer. Carry on without it if you can, using sensible defaults and saying which you chose; otherwise end your turn and say what you need.",
 		}
 		if resp.Note != "" {
 			res["note"] = resp.Note

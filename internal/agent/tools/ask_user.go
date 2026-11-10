@@ -9,15 +9,15 @@ import (
 )
 
 // AskUserToolDescription tells the model when and how to ask (ADR 0x042).
-const AskUserToolDescription = `Ask the person a question and wait for their answer, or ask their approval before you do something.
+const AskUserToolDescription = `Ask the user a question and wait for their answer, or ask their approval before you do something.
 
 Use it when you need a decision or information only they have, or before an action they would want to OK first (sending something on their behalf, deleting or overwriting their data, spending money, anything hard to undo). Don't use it for things you can find out yourself, to confirm something they already told you, or for small choices with a sensible default: make the call and say what you chose.
 
-Questions: send 1 to 4 in "questions". Give each question 2 to 4 short options when the likely answers are known (the person can always write their own answer instead), or no options for an open question. Put your recommended option first and add " (Recommended)" to its label. Set multi_select when several options can apply. Set optional on a question the person can reasonably leave unanswered, such as "Anything else I should know?".
+Questions: send 1 to 4 in "questions". Give each question 2 to 4 short options when the likely answers are known (the user can always write their own answer instead), or no options for an open question. Put your recommended option first and add " (Recommended)" to its label. Set multi_select when several options can apply. Set optional on a question the user can reasonably leave unanswered, such as "Anything else I should know?".
 
 Approval: send "approval" instead of "questions", saying what you want to do and why.
 
-The tool returns the person's answers. If they don't answer in time, it says so: then stop working and end your turn by asking in your reply.`
+The tool returns the user's answers. If they don't answer in time, it says so: then stop working and end your turn by asking in your reply.`
 
 // MaxAskUserQuestions bounds one ask_user call.
 const MaxAskUserQuestions = 4
@@ -51,7 +51,7 @@ var AskUserToolSpec = FunctionToolSpec{
 					},
 					"options": map[string]interface{}{
 						"type":        "array",
-						"description": "2 to 4 choices; omit for an open question. The person can always answer in their own words instead.",
+						"description": "2 to 4 choices; omit for an open question. The user can always answer in their own words instead.",
 						"items": map[string]interface{}{
 							"type": "object",
 							"properties": map[string]interface{}{
@@ -74,7 +74,7 @@ var AskUserToolSpec = FunctionToolSpec{
 					},
 					"optional": map[string]interface{}{
 						"type":        "boolean",
-						"description": "Whether the person can leave this question unanswered. Everything else must be answered before they can send.",
+						"description": "Whether the user can leave this question unanswered. Everything else must be answered before they can send.",
 					},
 				},
 				"required":             []string{"question"},
