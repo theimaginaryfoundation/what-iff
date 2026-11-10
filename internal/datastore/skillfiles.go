@@ -249,6 +249,8 @@ func (d *Datastore) PutSkillFile(ctx context.Context, userID, ritualID uuid.UUID
 		if existing != nil {
 			row, err := tx.FileAttachment.UpdateOneID(existing.ID).
 				SetS3Key(obj.Key).SetFileType(obj.FileType).SetSizeBytes(obj.Size).
+				// New bytes are a new version, so cached downloads revalidate; the old hash no longer applies.
+				AddContentVersion(1).ClearContentSha256().
 				Save(ctx)
 			if err != nil {
 				return result{}, err
@@ -314,6 +316,8 @@ func (d *Datastore) ReplaceSkillFileObject(ctx context.Context, userID, ritualID
 		}
 		if err := tx.FileAttachment.UpdateOneID(id).
 			SetS3Key(obj.Key).SetFileType(obj.FileType).SetSizeBytes(obj.Size).
+			// New bytes are a new version, so cached downloads revalidate; the old hash no longer applies.
+			AddContentVersion(1).ClearContentSha256().
 			Exec(ctx); err != nil {
 			return "", err
 		}

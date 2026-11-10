@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/filechange"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -463,4 +466,30 @@ func TestReadFileText_RefusesAnAgentFileOutsideItsPrefix(t *testing.T) {
 	msg, ok := AsFileRefusal(err)
 	require.True(t, ok)
 	require.Contains(t, msg, "could not be read")
+}
+
+func TestAgentFiles_ChangeEventDescribesTheNewContent(t *testing.T) {
+	fx := newAgentFileFixture()
+	chat := fx.chat(uuid.New())
+	var events []filechange.Event
+	filechange.Subscribe(func(_ context.Context, ev filechange.Event) {
+		if ev.UserID == fx.userID && ev.Kind == filechange.KindContent {
+			events = append(events, ev)
+		}
+	})
+	res := callJSON(t, fx.tool.Write, chat, map[string]any{"action": "create", "path": "log.txt", "content": "a"})
+	requireOK(t, res)
+	id := res["file"].(map[string]any)["id"].(string)
+	before := len(events)
+
+	requireOK(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "append", "file": id, "content": "b"}))
+	require.Len(t, events, before+1)
+	ev := events[len(events)-1]
+	row := fx.store.rows[uuid.MustParse(id)]
+	require.Equal(t, row.S3Key, ev.File.S3Key)
+	require.NotEmpty(t, ev.File.ContentSHA256)
+	require.NotNil(t, ev.File.SizeBytes)
+	sum := sha256.Sum256(fx.objects.objs[row.S3Key])
+	require.Equal(t, hex.EncodeToString(sum[:]), ev.File.ContentSHA256, "the hash is of the new bytes")
+	require.Equal(t, int64(len(fx.objects.objs[row.S3Key])), *ev.File.SizeBytes)
 }

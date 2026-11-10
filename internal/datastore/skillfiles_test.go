@@ -109,6 +109,7 @@ func TestSkillFiles_CreateListCountReplaceDeleteAndGalleryExclusion(t *testing.T
 	require.Equal(t, "skills/forms/references", files[0].Folder)
 	require.Equal(t, "skills/forms/scripts", files[1].Folder)
 	require.Equal(t, "users/u/skills/s/v2_fill.py", files[1].S3Key)
+	require.Equal(t, 2, files[1].ContentVersion, "new bytes are a new version, so a cached download revalidates")
 
 	removed, err := ds.DeleteSkillFiles(ctx, userID, skill.ID, []uuid.UUID{script.ID})
 	require.NoError(t, err)
