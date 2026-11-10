@@ -67,6 +67,15 @@ describe('nothing loads from elsewhere when a notebook opens', () => {
     expect(html).toContain('data:image/png;base64,AAAA');
   });
 
+  it('drops style that uses any function but colour and size ones, including escaped ones', () => {
+    const html = sanitizeOutputHtml(
+      '<p style="background:\\75 rl(https://e.test/a)">a</p><p style="cursor:-webkit-image-set(\'https://e.test/b\' 1x)">b</p>' +
+        '<p style="color:rgb(1,2,3);width:calc(100% - 2px)">c</p>',
+    );
+    expect(html).not.toContain('e.test');
+    expect(html).toContain('rgb(1,2,3)');
+  });
+
   it('turns remote Markdown images into links, and keeps embedded ones', () => {
     const md = withoutRemoteImages('![chart](https://e.test/c.png "t") ![ref][r] ![ok](data:image/png;base64,AA) <img src="https://e.test/x.png" alt="x">');
     expect(md).toContain('[chart](https://e.test/c.png)');

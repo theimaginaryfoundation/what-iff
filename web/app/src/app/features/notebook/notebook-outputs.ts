@@ -162,7 +162,13 @@ function outputPurifier(view: Window & typeof globalThis): ReturnType<typeof DOM
       if (lower === 'srcset') node.removeAttribute(name);
       else if (lower === 'src' || (lower.endsWith('href') && node.tagName !== 'A')) {
         if (!/^data:image\//i.test(value.trim()) && !value.trim().startsWith('#')) node.removeAttribute(name);
-      } else if (/url\s*\(|image-set\s*\(|@import/i.test(value) && !/^\s*url\(\s*['"]?#/i.test(value)) {
+      } else if (lower === 'style') {
+        // Style is only partly trusted, so it is kept narrow: a declaration may use colour and
+        // size functions, nothing else. Any other function (url, image-set, element, vendor
+        // variants) or a backslash escape, which can spell one, drops the whole attribute.
+        const plain = value.replace(/\b(?:rgba?|hsla?|calc|var)\(/gi, '');
+        if (/[(\\@]/.test(plain)) node.removeAttribute(name);
+      } else if ((/url\s*\(|image-set\s*\(|@import/i.test(value) || /\\[\s\S]*\(/.test(value)) && !/^\s*url\(\s*['"]?#[\w-]+['"]?\s*\)\s*$/i.test(value)) {
         node.removeAttribute(name);
       }
     }
