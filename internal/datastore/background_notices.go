@@ -97,6 +97,7 @@ func (ds *Datastore) ListBackgroundNotices(ctx context.Context, userID, chatID u
 			ID:        r.ID,
 			ChatID:    r.ChatID,
 			Step:      models.BackgroundStep(r.Step),
+			Role:      models.BackgroundStep(r.Step).Role(),
 			Code:      r.Code,
 			Provider:  r.Provider,
 			Model:     r.Model,

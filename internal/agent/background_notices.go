@@ -73,11 +73,17 @@ func (r *backgroundRun) outcome() models.BackgroundOutcome {
 	return out
 }
 
-// step records how a step ended. Only a failure at, or on the way to, a provider is the
-// account's to know about; anything else (the database, a bug, the checkpoint running out of
-// time or the server stopping) stays in the logs.
+// step records how a step ended. Only a failure the account can fix is theirs to know about: at,
+// or on the way to, a provider, or no model chosen for the step's role. Anything else (the
+// database, a bug, the checkpoint running out of time or the server stopping) stays in the logs.
+// A role switched off counts as success, so its earlier notices clear.
 func (r *backgroundRun) step(step models.BackgroundStep, err error) {
 	if err == nil {
+		r.succeeded(step)
+		return
+	}
+	if errors.Is(err, ErrUtilityRoleOff) {
+		// Switched off by choice: nothing to tell, and nothing earlier still to show.
 		r.succeeded(step)
 		return
 	}
@@ -94,6 +100,8 @@ func backgroundNoticeFor(step models.BackgroundStep, err error) (models.Backgrou
 	var call *UtilityCallError
 	var missing *providerkeys.NotConfiguredError
 	switch {
+	case errors.Is(err, ErrUtilityRoleNotSet):
+		return models.BackgroundNotice{Step: step, Code: models.BackgroundNoticeModelNotSet}, true
 	case errors.Is(err, errUtilityProviderMissing) && errors.As(err, &call):
 		// Nothing was asked: this deployment can't reach the provider at all.
 		return models.BackgroundNotice{Step: step, Code: models.BackgroundNoticeProviderNotConfigured, Provider: call.Provider, Model: call.Model}, true
@@ -130,4 +138,19 @@ func (a *Agent) settleBackgroundRun(ctx context.Context, userID, chatID uuid.UUI
 		a.logger.Warn("failed to record background notices",
 			zap.String("chat_id", chatID.String()), zap.Error(err))
 	}
+}
+
+// recordTurnUtility saves at once how one of a turn's own utility calls on a chat went (a step
+// such as models.BackgroundStepChatName): its notice when it failed in a way the account can
+// fix, or the end of an earlier one when it succeeded. Best effort, like settleBackgroundRun.
+func (a *Agent) recordTurnUtility(ctx context.Context, userID, chatID uuid.UUID, step models.BackgroundStep, err error) {
+	if chatID == uuid.Nil {
+		return
+	}
+	run := &backgroundRun{failures: map[models.BackgroundStep]models.BackgroundNotice{}, successes: map[models.BackgroundStep]bool{}}
+	run.step(step, err)
+	if out := run.outcome(); len(out.Failed) == 0 && len(out.Succeeded) == 0 {
+		return
+	}
+	a.settleBackgroundRun(ctx, userID, chatID, run)
 }

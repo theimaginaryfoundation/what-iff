@@ -66,6 +66,9 @@ func (h *Handler) ParseSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	preview, err := h.scheduleParser.ParseAgentJobSchedule(r.Context(), userID, req.ScheduleInput, tz, now)
+	if handlerutils.RespondIfProviderNotConfigured(w, h.logger, err) || handlerutils.RespondIfUtilityRoleUnavailable(w, h.logger, err) {
+		return
+	}
 	if err != nil {
 		h.logger.Debug("failed to parse schedule", zap.Error(err))
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Failed to interpret schedule", err)

@@ -66,6 +66,12 @@ const (
 	// ErrCodeProviderNotConfigured: the request needed a model provider the
 	// account has no key for. Details is {"provider": "<name>"}.
 	ErrCodeProviderNotConfigured = "provider_not_configured"
+	// ErrCodeUtilityModelNotSet: the request needed background work whose utility role has no
+	// model chosen. Details is {"role": "<role>"}.
+	ErrCodeUtilityModelNotSet = "utility_model_not_set"
+	// ErrCodeUtilityRoleOff: the request needed background work whose utility role is switched
+	// off. Details is {"role": "<role>"}.
+	ErrCodeUtilityRoleOff = "utility_role_off"
 	// ErrCodeReauthenticationRequired: the action needs the account owner to
 	// confirm it (for example with the current password), and that confirmation
 	// was missing or wrong. Answered with 403, not 401: the session is valid.
@@ -135,6 +141,8 @@ var AllErrorCodes = []string{
 	ErrCodeSystemPromptTooLong,
 	ErrCodeBuzzTermsRequired,
 	ErrCodeProviderNotConfigured,
+	ErrCodeUtilityModelNotSet,
+	ErrCodeUtilityRoleOff,
 	ErrCodeReauthenticationRequired,
 	ErrCodeProviderUnreachable,
 	ErrCodeProviderKeyRejected,

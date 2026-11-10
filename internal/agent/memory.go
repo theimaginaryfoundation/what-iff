@@ -241,6 +241,7 @@ func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.U
 	liveMemories := []*models.Memory{}
 	prompt := MemoryQueryPrompt
 	memoryQuery, err := a.getMemoryQuery(ctx, userID, prompt, userMessage)
+	a.recordTurnUtility(ctx, userID, chatID, models.BackgroundStepMemoryQuery, err)
 	if errors.Is(err, ErrUtilityRoleOff) || errors.Is(err, ErrUtilityRoleNotSet) {
 		// No model to search with, by choice or not yet: the turn goes on with what it has, not
 		// as a failed memory load.
