@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 )
 
 const AccountBackupFormatVersion = 1
@@ -120,6 +122,10 @@ type AccountBackupAgentJob struct {
 	LastRunAt     *time.Time           `json:"last_run_at,omitempty"`
 	LastError     string               `json:"last_error,omitempty"`
 	RunCount      int                  `json:"run_count"`
+	// Parameters and ParameterValues are the job's parameters (ADR 0x044); a backup is the
+	// owner's own data, so it keeps the values too.
+	Parameters      []modeltypes.JobParameter     `json:"parameters,omitempty"`
+	ParameterValues modeltypes.JobParameterValues `json:"parameter_values,omitempty"`
 	// TurnSettingValues are the job's reasoning effort and agent loop (ADR 0x026).
 	TurnSettingValues
 	CreatedAt time.Time `json:"created_at"`

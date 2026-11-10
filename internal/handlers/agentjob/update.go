@@ -10,6 +10,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -28,6 +29,10 @@ type updateAgentJobRequest struct {
 	// Omit to keep; "" clears.
 	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
 	AgentLoop       *string `json:"agent_loop,omitempty"`
+	// Parameters / ParameterValues replace the job's parameters (ADR 0x044); omit to keep.
+	// They are saved together with the prompt and checked against it.
+	Parameters      *[]modeltypes.JobParameter     `json:"parameters,omitempty"`
+	ParameterValues *modeltypes.JobParameterValues `json:"parameter_values,omitempty"`
 }
 
 func (h *Handler) UpdateAgentJob(w http.ResponseWriter, r *http.Request) {
@@ -88,17 +93,23 @@ func (h *Handler) UpdateAgentJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Update prompt (optional).
+	// Update the prompt and parameters together (optional): each is only valid against the others.
+	patch := models.AgentJobParametersPatch{Parameters: req.Parameters, ParameterValues: req.ParameterValues}
 	if req.Prompt != nil {
 		prompt := strings.TrimSpace(*req.Prompt)
 		if prompt == "" {
 			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "prompt cannot be empty", nil)
 			return
 		}
-
-		updated, err = h.provider.UpdateAgentJobPrompt(r.Context(), userID, id, prompt)
+		patch.Prompt = &prompt
+	}
+	if !patch.IsZero() {
+		updated, err = h.provider.UpdateAgentJobParameters(r.Context(), userID, id, patch)
 		if err == datastore.ErrAgentJobNotFound {
 			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "AgentJob not found", nil)
+			return
+		}
+		if h.respondIfParamsError(w, err) {
 			return
 		}
 		if err != nil {
@@ -138,9 +149,9 @@ func (h *Handler) UpdateAgentJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var patch models.SetAgentJobOverridesPatch
+	var overrides models.SetAgentJobOverridesPatch
 	if req.PersonalityID != nil {
-		patch.UpdatePersonality = true
+		overrides.UpdatePersonality = true
 		trimmed := strings.TrimSpace(*req.PersonalityID)
 		if trimmed != "" {
 			parsedID, parseErr := uuid.Parse(trimmed)
@@ -148,11 +159,11 @@ func (h *Handler) UpdateAgentJob(w http.ResponseWriter, r *http.Request) {
 				handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid personality_id", parseErr)
 				return
 			}
-			patch.PersonalityID = &parsedID
+			overrides.PersonalityID = &parsedID
 		}
 	}
 	if req.ModelID != nil {
-		patch.UpdateModel = true
+		overrides.UpdateModel = true
 		trimmed := strings.TrimSpace(*req.ModelID)
 		if trimmed != "" {
 			parsedID, parseErr := uuid.Parse(trimmed)
@@ -160,7 +171,7 @@ func (h *Handler) UpdateAgentJob(w http.ResponseWriter, r *http.Request) {
 				handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid model_id", parseErr)
 				return
 			}
-			patch.ModelID = &parsedID
+			overrides.ModelID = &parsedID
 		}
 	}
 	if req.ReasoningEffort != nil {
@@ -169,8 +180,8 @@ func (h *Handler) UpdateAgentJob(w http.ResponseWriter, r *http.Request) {
 			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "reasoning_effort must be one of off, low, medium, high (or empty to clear)", nil)
 			return
 		}
-		patch.UpdateReasoningEffort = true
-		patch.TurnSettings.ReasoningEffort = value
+		overrides.UpdateReasoningEffort = true
+		overrides.TurnSettings.ReasoningEffort = value
 	}
 	if req.AgentLoop != nil {
 		value, _, ok := models.ParseAgentLoopUpdate(req.AgentLoop)
@@ -178,11 +189,11 @@ func (h *Handler) UpdateAgentJob(w http.ResponseWriter, r *http.Request) {
 			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "agent_loop must be standard or advanced (or empty to clear)", nil)
 			return
 		}
-		patch.UpdateAgentLoop = true
-		patch.TurnSettings.AgentLoop = value
+		overrides.UpdateAgentLoop = true
+		overrides.TurnSettings.AgentLoop = value
 	}
-	if patch.UpdatePersonality || patch.UpdateModel || patch.UpdateReasoningEffort || patch.UpdateAgentLoop {
-		updated, err = h.provider.SetAgentJobOverrides(r.Context(), userID, id, patch)
+	if overrides.UpdatePersonality || overrides.UpdateModel || overrides.UpdateReasoningEffort || overrides.UpdateAgentLoop {
+		updated, err = h.provider.SetAgentJobOverrides(r.Context(), userID, id, overrides)
 		if err == datastore.ErrAgentJobNotFound {
 			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "AgentJob not found", nil)
 			return

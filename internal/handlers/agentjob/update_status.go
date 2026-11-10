@@ -51,6 +51,9 @@ func (h *Handler) UpdateAgentJobStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job, err := h.provider.UpdateAgentJobStatus(r.Context(), userID, id, req.Status, "")
+	if h.respondIfParamsError(w, err) {
+		return
+	}
 	if err == datastore.ErrAgentJobNotFound {
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "AgentJob not found", nil)
 		return

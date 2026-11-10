@@ -12,6 +12,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/featuregate"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 
 	"go.uber.org/zap"
 )
@@ -27,6 +28,9 @@ type createAgentJobToolArgs struct {
 	ModelOverride    string   `json:"model_override,omitempty"`
 	UseCurrentThread *bool    `json:"use_current_thread,omitempty"`
 	ThreadID         string   `json:"thread_id,omitempty"`
+	// Parameters define the prompt's {{name}} placeholders; ParameterValues fill them (ADR 0x044).
+	Parameters      []modeltypes.JobParameter `json:"parameters,omitempty"`
+	ParameterValues []jobParamValueArg        `json:"parameter_values,omitempty"`
 }
 
 type createAgentJobToolResult struct {
@@ -39,7 +43,11 @@ type createAgentJobToolResult struct {
 	HumanSummary string                      `json:"human_summary,omitempty"`
 	NextRunAt    *time.Time                  `json:"next_run_at,omitempty"`
 	ThreadID     string                      `json:"thread_id,omitempty"`
-	Error        string                      `json:"error,omitempty"`
+	Status       models.AgentJobStatus       `json:"status,omitempty"`
+	// MissingParameters are the parameters still without a value (ADR 0x044).
+	MissingParameters []string `json:"missing_parameters,omitempty"`
+	Note              string   `json:"note,omitempty"`
+	Error             string   `json:"error,omitempty"`
 }
 
 func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args []byte) (string, error) {
@@ -79,6 +87,11 @@ func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args 
 			Success: false,
 			Error:   "prompt is required",
 		})
+	}
+
+	paramValues, err := mergeJobParamValues(nil, toolArgs.ParameterValues)
+	if err != nil {
+		return marshalAgentJobToolResult(createAgentJobToolResult{Success: false, Error: err.Error()})
 	}
 
 	// Where the job runs: thread_id names a conversation ("current", an id, or "new");
@@ -138,6 +151,9 @@ func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args 
 		Status:        models.AgentJobStatusActive,
 		NextRunAt:     nextRunAt,
 		RunCount:      0,
+
+		Parameters:      toolArgs.Parameters,
+		ParameterValues: paramValues,
 	}
 
 	newJob.ChatID = thread
@@ -160,6 +176,9 @@ func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args 
 	}
 
 	created, err := a.ds.CreateAgentJob(ctx, chat.UserID, newJob)
+	if msg := jobParamsToolError(err); msg != "" {
+		return marshalAgentJobToolResult(createAgentJobToolResult{Success: false, Error: msg})
+	}
 	if err != nil {
 		a.logger.Error("failed to create agent job via tool",
 			zap.String("user_id", chat.UserID.String()),
@@ -192,6 +211,10 @@ func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args 
 		Timezone:     created.Timezone,
 		HumanSummary: preview.HumanSummary,
 		NextRunAt:    created.NextRunAt,
+		Status:       created.Status,
+
+		MissingParameters: created.MissingParameters,
+		Note:              missingParamsNote(created.MissingParameters),
 	}
 	if created.ChatID != nil {
 		result.ThreadID = created.ChatID.String()

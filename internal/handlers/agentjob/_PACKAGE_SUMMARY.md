@@ -17,9 +17,15 @@ HTTP API for **agent jobs** — async/scheduled assistant work: CRUD, prompt/tit
 ## Non-obvious decisions
 
 - Schedule strings and timezones interact with `internal/agentjobs/schedule` — keep error messages aligned with UI.
+- **Job parameters (ADR 0x044):** create and update carry `parameters` and `parameter_values`.
+  Update saves the prompt, definitions and values in one `UpdateAgentJobParameters` call, since each is only valid against the others; the datastore checks them and sets the status.
+  `params.go` maps the errors: a `*params.ValidationError` answers 400 `job_parameters_invalid` with it as details, and a missing value answers 409 `job_needs_values` with `missing_parameters`.
+  Resuming (`PUT /status` active) and `POST /run` are refused while a parameter has no value, whatever the status.
 
 ## Testing
 
+- `create_test.go` — parameters reach the datastore; an undefined placeholder is a 400 with details.
+- `run_test.go` — run now refuses a job missing parameter values (409).
 - `update_test.go` — update flows, including partial `personality_id` / `model_id` patches and **400** on invalid overrides.
 
 ## Related documentation

@@ -6,6 +6,8 @@ import (
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
 	"github.com/google/uuid"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 )
 
 // AgentJob holds the schema definition for the AgentJob entity.
@@ -46,7 +48,7 @@ func (AgentJob) Fields() []ent.Field {
 			NotEmpty().
 			Comment("IANA timezone used to interpret recurring schedules (cron). Absolute timestamps (run_at/next_run_at/last_run_at) are stored as UTC instants."),
 		field.Enum("status").
-			Values("active", "paused", "complete", "failed").
+			Values("active", "paused", "complete", "failed", "needs_values").
 			Default("active").
 			Comment("Current job status"),
 		field.Time("next_run_at").
@@ -73,6 +75,12 @@ func (AgentJob) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("Optional model override applied for this job run"),
+		field.JSON("parameters", []modeltypes.JobParameter{}).
+			Optional().
+			Comment("Definitions of the prompt's {{name}} placeholders (ADR 0x044); shared with the job"),
+		field.JSON("parameter_values", modeltypes.JobParameterValues{}).
+			Optional().
+			Comment("The owner's parameter values by name (ADR 0x044); never published"),
 	}, turnSettingFields("agent job")...)
 }
 

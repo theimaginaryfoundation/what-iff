@@ -311,7 +311,7 @@ func (t *ListTool) listJobs(ctx context.Context, chat *models.Chat, a listArgs) 
 	meta := listPageMeta{Page: pageNum, Limit: limit, TotalCount: page.TotalCount}
 	activeNote := ""
 	if !a.IncludeCompleted {
-		activeNote = "Active jobs only; pass include_completed=true to also see paused jobs and finished/failed one-offs."
+		activeNote = "Active jobs only; pass include_completed=true to also see paused jobs, jobs waiting for parameter values and finished/failed one-offs."
 	}
 	note := joinNotes(activeNote, listJobPromptNote, listTruncationNote("jobs", meta, len(items)))
 	return t.okPaged(listKindJobs, items, note, meta)
@@ -336,6 +336,8 @@ func (t *ListTool) getJob(ctx context.Context, chat *models.Chat, id uuid.UUID) 
 		}
 	}
 	sort.Strings(item.SkillIDs)
+	item.Parameters = j.Parameters
+	item.ParameterValues = j.ParameterValues
 	return t.ok(listKindJobs, []listItem{item}, "The job in full: description is its whole prompt.")
 }
 
@@ -346,6 +348,8 @@ func jobListItem(j *models.AgentJob) listItem {
 		Description: strings.TrimSpace(j.Prompt),
 		Status:      string(j.Status),
 		Schedule:    j.ScheduleInput,
+
+		MissingParameters: j.MissingParameters,
 	}
 	if j.Title != nil {
 		item.Name = *j.Title

@@ -25,6 +25,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/toolcall"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/ent/userpreference"
+	"github.com/theimaginaryfoundation/what-iff/internal/agentjobs/params"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/skills"
 )
@@ -648,16 +649,25 @@ func (d *Datastore) importBackupAgentJobs(ctx context.Context, targetUserID uuid
 			res.Conflict++
 			continue
 		}
+		// Parameters are checked like a save; a record that doesn't fit is kept without them,
+		// and a job missing values waits for them rather than running (ADR 0x044).
+		defs, values, perr := params.Prepare(rec.Prompt, rec.Parameters, rec.ParameterValues)
+		if perr != nil {
+			defs, values = nil, nil
+		}
+		status := params.StatusAfterSave(rec.Status, len(params.Missing(defs, values)) > 0)
 		create := d.dbClient.AgentJob.Create().
 			SetID(rec.ID).
 			SetOwnerID(targetUserID).
 			SetPrompt(rec.Prompt).
+			SetParameters(defs).
+			SetParameterValues(values).
 			SetNillableReasoningEffort(entEffort[agentjob.ReasoningEffort](rec.ReasoningEffort)).
 			SetNillableAgentLoop(entLoop[agentjob.AgentLoop](rec.AgentLoop)).
 			SetScheduleInput(rec.ScheduleInput).
 			SetScheduleType(agentjob.ScheduleType(rec.ScheduleType)).
 			SetTimezone(rec.Timezone).
-			SetStatus(agentjob.Status(rec.Status)).
+			SetStatus(agentjob.Status(status)).
 			SetRunCount(rec.RunCount).
 			SetCreatedAt(rec.CreatedAt).
 			SetUpdatedAt(rec.UpdatedAt)

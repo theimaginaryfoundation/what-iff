@@ -580,7 +580,7 @@ func TestUpdateAgentJobTitle_WrongOwner(t *testing.T) {
 	require.ErrorIs(t, err, ErrAgentJobNotFound)
 }
 
-func TestUpdateAgentJobPrompt_HappyPath(t *testing.T) {
+func TestUpdateAgentJobParameters_PromptHappyPath(t *testing.T) {
 	ds, cleanup := newAgentJobTestDatastore(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -589,21 +589,21 @@ func TestUpdateAgentJobPrompt_HappyPath(t *testing.T) {
 	created, err := ds.CreateAgentJob(ctx, userID, baseAgentJobModel())
 	require.NoError(t, err)
 
-	got, err := ds.UpdateAgentJobPrompt(ctx, userID, created.ID, "new prompt")
+	got, err := ds.UpdateAgentJobParameters(ctx, userID, created.ID, models.AgentJobParametersPatch{Prompt: ptr("new prompt")})
 	require.NoError(t, err)
 	require.Equal(t, "new prompt", got.Prompt)
 }
 
-func TestUpdateAgentJobPrompt_NotFound(t *testing.T) {
+func TestUpdateAgentJobParameters_PromptNotFound(t *testing.T) {
 	ds, cleanup := newAgentJobTestDatastore(t)
 	defer cleanup()
 
 	userID := createAgentJobTestUser(t, ds)
-	_, err := ds.UpdateAgentJobPrompt(context.Background(), userID, uuid.New(), "p")
+	_, err := ds.UpdateAgentJobParameters(context.Background(), userID, uuid.New(), models.AgentJobParametersPatch{Prompt: ptr("p")})
 	require.ErrorIs(t, err, ErrAgentJobNotFound)
 }
 
-func TestUpdateAgentJobPrompt_WrongOwner(t *testing.T) {
+func TestUpdateAgentJobParameters_PromptWrongOwner(t *testing.T) {
 	ds, cleanup := newAgentJobTestDatastore(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -613,7 +613,7 @@ func TestUpdateAgentJobPrompt_WrongOwner(t *testing.T) {
 	created, err := ds.CreateAgentJob(ctx, userID, baseAgentJobModel())
 	require.NoError(t, err)
 
-	_, err = ds.UpdateAgentJobPrompt(ctx, otherUserID, created.ID, "p")
+	_, err = ds.UpdateAgentJobParameters(ctx, otherUserID, created.ID, models.AgentJobParametersPatch{Prompt: ptr("p")})
 	require.ErrorIs(t, err, ErrAgentJobNotFound)
 }
 

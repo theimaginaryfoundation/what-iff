@@ -2890,6 +2890,47 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+    post:
+      summary: Create agent job
+      description: >-
+        Creates an AgentJob. The schedule input is read in natural language. Every `{{name}}`
+        placeholder in the prompt needs a parameter definition (ADR 0x044); a job created with a
+        parameter that has no value gets status `needs_values`.
+      tags: [AgentJob Management]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentJobRequest'
+      responses:
+        '201':
+          description: AgentJob created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentJob'
+        '400':
+          description: >-
+            Invalid request data, schedule or timezone. Parameter problems use code
+            job_parameters_invalid with details (AgentJobParametersError).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /agent-job/schedule/parse:
     post:
       summary: Parse agent job schedule
@@ -2955,7 +2996,12 @@ paths:
                 $ref: '#/components/schemas/Error'
     put:
       summary: Update agent job
-      description: Updates an AgentJob title, prompt, and/or schedule input
+      description: >-
+        Updates an AgentJob. The prompt, parameter definitions and parameter values are saved
+        together and checked against each other (ADR 0x044); the status becomes `needs_values` when
+        an active job is saved with a parameter that has no value, and `active` again once a
+        `needs_values` job's values are all set. Parameter problems answer 400 with code
+        job_parameters_invalid and details (AgentJobParametersError).
       tags: [AgentJob Management]
       parameters:
         - name: id
@@ -3027,7 +3073,7 @@ paths:
   /agent-job/{id}/status:
     put:
       summary: Update agent job status
-      description: Pauses or resumes an AgentJob
+      description: Pauses or resumes an AgentJob. A job with a parameter that has no value can't be resumed (409).
       tags: [AgentJob Management]
       parameters:
         - name: id
@@ -3058,6 +3104,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The job has a parameter with no value (code job_needs_values; details.missing_parameters lists them)
           content:
             application/json:
               schema:
@@ -3101,6 +3153,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The job has a parameter with no value (code job_needs_values; details.missing_parameters lists them)
           content:
             application/json:
               schema:
@@ -10562,7 +10620,10 @@ components:
 
     AgentJobStatus:
       type: string
-      enum: [active, paused, complete, failed]
+      enum: [active, paused, complete, failed, needs_values]
+      description: >-
+        `needs_values`: the job has a parameter with no value and can't run until it gets one
+        (ADR 0x044). `paused` is always the user's choice.
       example: "active"
 
     AgentJob:
@@ -10622,6 +10683,18 @@ components:
         run_count:
           type: integer
           minimum: 0
+        parameters:
+          type: array
+          description: Definitions of the prompt's `{{name}}` placeholders, in form order (ADR 0x044).
+          items:
+            $ref: '#/components/schemas/AgentJobParameter'
+        parameter_values:
+          $ref: '#/components/schemas/AgentJobParameterValues'
+        missing_parameters:
+          type: array
+          description: Names of the parameters without a usable value, in definition order. Derived.
+          items:
+            type: string
         created_at:
           type: string
           format: date-time
@@ -10646,6 +10719,93 @@ components:
         run_count: 0
         created_at: "2026-02-23T00:00:00Z"
         updated_at: "2026-02-23T00:00:00Z"
+
+    AgentJobParameter:
+      type: object
+      description: One `{{name}}` placeholder of a job prompt (ADR 0x044). All parameters are required.
+      properties:
+        name:
+          type: string
+          pattern: '^[A-Za-z_][A-Za-z0-9_]*$'
+        label:
+          type: string
+          description: What the form shows; defaults to the name.
+        description:
+          type: string
+        type:
+          type: string
+          enum: [single_select, multi_select, text, list]
+        options:
+          type: array
+          description: The choices, for single_select and multi_select (at least one, unique).
+          items:
+            type: string
+        format:
+          type: string
+          enum: [comma, bullets]
+          description: >-
+            multi_select and list only. comma joins the values on one line (default for
+            multi_select); bullets renders a Markdown bullet list (default for list).
+      required: [name, type]
+
+    AgentJobParameterValues:
+      type: object
+      description: >-
+        The owner's parameter values by name: a string for text and single_select, an array of
+        strings for multi_select and list. Never published with a shared job.
+      additionalProperties:
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+
+    AgentJobParametersError:
+      type: object
+      description: The details of a job_parameters_invalid error.
+      properties:
+        undefined_placeholders:
+          type: array
+          items:
+            type: string
+        problems:
+          type: array
+          items:
+            type: string
+
+    CreateAgentJobRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        prompt:
+          type: string
+        schedule_input:
+          type: string
+          description: Natural-language schedule input
+        timezone:
+          type: string
+          description: Optional IANA timezone
+        chat_id:
+          type: string
+          format: uuid
+        personality_id:
+          type: string
+          format: uuid
+        model_id:
+          type: string
+          format: uuid
+        reasoning_effort:
+          $ref: '#/components/schemas/ReasoningEffort'
+        agent_loop:
+          $ref: '#/components/schemas/AgentLoop'
+        parameters:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentJobParameter'
+        parameter_values:
+          $ref: '#/components/schemas/AgentJobParameterValues'
+      required: [prompt, schedule_input]
 
     AgentJobScheduleParseRequest:
       type: object
@@ -10722,6 +10882,15 @@ components:
           type: string
           nullable: true
           description: Optional IANA timezone (used when schedule_input is provided)
+        parameters:
+          type: array
+          description: Replaces the job's parameter definitions. Preserved when absent.
+          items:
+            $ref: '#/components/schemas/AgentJobParameter'
+        parameter_values:
+          allOf:
+            - $ref: '#/components/schemas/AgentJobParameterValues'
+          description: Replaces the job's parameter values. Preserved when absent.
 
     UpdateAgentJobStatusRequest:
       type: object

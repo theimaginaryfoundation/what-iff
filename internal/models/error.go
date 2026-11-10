@@ -55,6 +55,13 @@ const (
 	// ErrCodeBuzzTermsRequired: a Buzz community has join terms the owner has not yet
 	// accepted for the persona; details.policy carries them (ADR 0x028).
 	ErrCodeBuzzTermsRequired = "buzz_terms_required"
+	// ErrCodeJobParametersInvalid: a job's prompt, parameter definitions or values don't fit
+	// together (ADR 0x044). Answered with 400; details is {"undefined_placeholders": [...],
+	// "problems": [...]}.
+	ErrCodeJobParametersInvalid = "job_parameters_invalid"
+	// ErrCodeJobNeedsValues: the job can't be activated or run until every parameter has a value
+	// (ADR 0x044). Answered with 409; details is {"missing_parameters": [...]}.
+	ErrCodeJobNeedsValues = "job_needs_values"
 
 	// ErrCodeProviderNotConfigured: the request needed a model provider the
 	// account has no key for. Details is {"provider": "<name>"}.
