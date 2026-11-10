@@ -146,9 +146,9 @@ function escapeHtml(text: string): string {
 // Its own instance: hooks on the shared one would reach the chat's clipboard code.
 let purifier: ReturnType<typeof DOMPurify> | null = null;
 
-function outputPurifier(): ReturnType<typeof DOMPurify> {
+function outputPurifier(view: Window & typeof globalThis): ReturnType<typeof DOMPurify> {
   if (purifier) return purifier;
-  const instance = DOMPurify(window);
+  const instance = DOMPurify(view);
   instance.addHook('afterSanitizeAttributes', node => {
     // DOMPurify already removes event handlers; output stays script-free even if its defaults move.
     for (const name of node.getAttributeNames?.() ?? []) {
@@ -178,8 +178,9 @@ function outputPurifier(): ReturnType<typeof DOMPurify> {
 /** Tables and text survive; scripts, handlers, forms, frames and stylesheets do not. */
 export function sanitizeOutputHtml(html: string): string {
   // Without a DOM (server rendering, a worker) nothing can be sanitized, so the HTML shows as text.
-  if (typeof window === 'undefined' || !window.document) return escapeHtml(html);
-  return outputPurifier().sanitize(html, {
+  const view = typeof window === 'undefined' ? undefined : window;
+  if (!view?.document) return escapeHtml(html);
+  return outputPurifier(view).sanitize(html, {
     FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'iframe', 'object', 'embed', 'base', 'meta', 'link', 'video', 'audio', 'source'],
     FORBID_ATTR: ['formaction', 'background'],
   }) as string;
