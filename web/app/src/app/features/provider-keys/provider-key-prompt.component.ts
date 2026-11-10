@@ -119,7 +119,7 @@ export class ProviderKeyPromptComponent {
     this.preferences.getUserPreferences().subscribe({ error: () => undefined });
     // A failed read asks nothing: the step is a courtesy over a working app, and chats show
     // what a role with nothing chosen keeps from running.
-    this.utilityModels.get().subscribe({ next: u => this.utility.set(u), error: () => undefined });
-    this.presence.hasPersonality().subscribe({ next: has => this.pastOnboarding.set(has), error: () => undefined });
+    this.utilityModels.get().subscribe({ next: u => this.utility.set(u), error: () => this.utility.set(null) });
+    this.presence.hasPersonality().subscribe({ next: has => this.pastOnboarding.set(has), error: () => this.pastOnboarding.set(false) });
   }
 }
