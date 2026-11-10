@@ -10,6 +10,8 @@ import { ChangeDetectionStrategy, Component, effect, signal, input, output } fro
 export class TabsComponent {
   readonly ariaLabel = input<string | null>(null);
   readonly activeId = input<string | null>(null);
+  /** `sm` is for tabs inside a small surface, such as a card. */
+  readonly size = input<'sm' | 'md'>('md');
   readonly activeIdChange = output<string>();
   readonly selectedId = signal<string | null>(null);
   private readonly tabs: Array<{ id: string; element: HTMLButtonElement }> = [];

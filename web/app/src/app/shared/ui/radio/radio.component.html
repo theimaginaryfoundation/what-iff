@@ -1,0 +1,12 @@
+<input
+  type="radio"
+  class="ui-radio"
+  [name]="name()"
+  [checked]="checked()"
+  [disabled]="disabled()"
+  [attr.value]="value()"
+  [attr.id]="inputId()"
+  [attr.aria-label]="ariaLabel()"
+  [attr.data-testid]="testId()"
+  (change)="onChange($event)"
+/>

@@ -39,7 +39,11 @@ type Handler struct {
 	// messageAgent is used by CreateChatMessage; it defaults to agent but can be overridden for tests.
 	messageAgent MessageAgent
 	welcomeAgent WelcomeMessageAgent
-	cfg          HandlerConfig
+	// promptAgent answers a running turn's questions (ADR 0x042); defaults to agent.
+	promptAgent PromptAgent
+	// appAgent serves MCP Apps' views and tool calls (ADR 0x042); defaults to agent.
+	appAgent MCPAppAgent
+	cfg      HandlerConfig
 	// importTimeout bounds one background chat import (chatImportJobTimeout; tests shorten it).
 	importTimeout time.Duration
 	// files overrides agent.FileStore() for object cleanup; tests set it, nil uses the agent's.
@@ -59,7 +63,7 @@ func (h *Handler) objectStore() storage.FileStore {
 
 // NewHandler creates a new assistant handler instance
 func NewHandler(ds Store, logger *zap.Logger, agent *agent.Agent, cfg HandlerConfig) *Handler {
-	return &Handler{
+	h := &Handler{
 		ds:           ds,
 		logger:       logger,
 		agent:        agent,
@@ -69,6 +73,11 @@ func NewHandler(ds Store, logger *zap.Logger, agent *agent.Agent, cfg HandlerCon
 
 		importTimeout: chatImportJobTimeout,
 	}
+	if agent != nil {
+		h.promptAgent = agent
+		h.appAgent = agent
+	}
+	return h
 }
 
 // RegisterRoutes registers all chat-related routes
@@ -84,6 +93,9 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	chatRouter.HandleFunc("/{chatId}/chat-message/{messageId}/bookmark", h.SetChatMessageBookmark).Methods("PATCH")
 	chatRouter.HandleFunc("/{chatId}/bookmarks", h.GetChatMessageBookmarks).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/active-job", h.GetActiveChatJob).Methods("GET")
+	chatRouter.HandleFunc("/{chatId}/prompts/{promptId}/answer", h.AnswerPrompt).Methods("POST")
+	chatRouter.HandleFunc("/{chatId}/tool-calls/{toolCallId}/app", h.GetMCPAppView).Methods("GET")
+	chatRouter.HandleFunc("/{chatId}/tool-calls/{toolCallId}/app/tools/call", h.CallMCPAppTool).Methods("POST")
 	chatRouter.HandleFunc("/{chatId}/chat-message", h.GetChatMessages).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/chat-message", h.CreateChatMessage).Methods("POST")
 	chatRouter.HandleFunc("/{chatId}/welcome-message", h.CreateWelcomeMessage).Methods("POST")

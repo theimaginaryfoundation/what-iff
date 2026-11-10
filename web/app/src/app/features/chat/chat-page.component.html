@@ -214,6 +214,9 @@
             (retryUserMessage)="retryUserMessageFromList($event)"
             (loadOlder)="session.loadOlderMessages()"
           />
+          @if (session.pendingPrompt(); as prompt) {
+            <app-agent-prompt-card [prompt]="prompt" (answer)="session.answerPrompt(prompt.id, $event)" />
+          }
           <app-chat-send-outlet />
           <app-discord-composer-toggle />
           <app-buzz-composer-toggle />
@@ -242,6 +245,7 @@
             [busyNotice]="composerBusyNotice()"
             [modelPickerDisabled]="session.composerBusy() || session.thread()?.archived === true"
             [isGenerating]="session.isGenerating()"
+            [canSteer]="session.canSteer()"
             [generationRetryTarget]="retryableUserTurn()"
             (draftChange)="session.draft.set($event)"
             (send)="send($event)"

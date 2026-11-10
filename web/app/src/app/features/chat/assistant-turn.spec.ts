@@ -1,5 +1,5 @@
 import { CHAT_TURN_WAITING_STATES } from '../../core/models/job.model';
-import { chatTurnWaitingLabel, parseChatTurnAdvancedProgress, parseChatTurnToolCalls, parseChatTurnWaiting } from './assistant-turn';
+import { chatTurnWaitingLabel, parseChatTurnAdvancedProgress, parseChatTurnPrompt, parseChatTurnToolCalls, parseChatTurnWaiting } from './assistant-turn';
 
 describe('parseChatTurnAdvancedProgress', () => {
     it('reads the step and plan of an Advanced turn, dropping malformed plan items', () => {
@@ -68,5 +68,19 @@ describe('parseChatTurnWaiting', () => {
 
   it('labels the wait', () => {
     expect(chatTurnWaitingLabel('reply')).toBe('Waiting for the previous reply…');
+  });
+});
+
+describe('parseChatTurnPrompt', () => {
+  it('reads the pending prompt', () => {
+    const prompt = { id: 'p1', source: 'agent', payload: { kind: 'approval', title: 'Send it' }, expires_at: '2026-11-07T12:00:00Z' };
+    expect(parseChatTurnPrompt(JSON.stringify({ tool_calls: [], prompt }))).toEqual(prompt);
+  });
+
+  it('is null without one, or when malformed', () => {
+    expect(parseChatTurnPrompt(undefined)).toBeNull();
+    expect(parseChatTurnPrompt(JSON.stringify({ tool_calls: [] }))).toBeNull();
+    expect(parseChatTurnPrompt(JSON.stringify({ prompt: { id: 'p1' } }))).toBeNull();
+    expect(parseChatTurnPrompt('{not json')).toBeNull();
   });
 });

@@ -19,13 +19,22 @@ type agentTestHooks struct {
 	ChatTurnStore chatTurnStore
 	// ImageGenerationPreference replaces the read of the user's image vendor preference.
 	ImageGenerationPreference func(ctx context.Context, userID uuid.UUID) (models.ModelProvider, error)
+	// PromptStore replaces the datastore behind agent prompts (ADR 0x042); PromptTimeout replaces
+	// their wait.
+	PromptStore   agentPromptStore
+	PromptTimeout time.Duration
+	// SteerStore replaces the datastore behind steering (ADR 0x042).
+	SteerStore steerStore
 }
 
 func (h agentTestHooks) anySet() bool {
 	return h.GetMemoriesOverride != nil ||
 		h.LoadHistoryOverride != nil ||
 		h.ChatTurnStore != nil ||
-		h.ImageGenerationPreference != nil
+		h.ImageGenerationPreference != nil ||
+		h.PromptStore != nil ||
+		h.PromptTimeout != 0 ||
+		h.SteerStore != nil
 }
 
 // assertNoTestHooksInProduction panics if any test hook is set outside of `go test`.

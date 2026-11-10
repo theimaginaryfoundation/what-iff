@@ -17,6 +17,7 @@ export * from './icon-button/icon-button.component';
 export * from './icons';
 export * from './modal/modal.component';
 export * from './overlay/overlay.component';
+export * from './radio/radio.component';
 export * from './sheet/sheet.component';
 export * from './spinner/spinner.component';
 export * from './tabs/tab-panel.component';

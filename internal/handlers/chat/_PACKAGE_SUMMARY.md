@@ -6,6 +6,9 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 
 ## Responsibilities
 
+- **Agent prompts** (`prompts.go`, ADR 0x042): `POST /chat/{chatId}/prompts/{promptId}/answer` records the person's answer to a question the running turn asked (ask_user or an MCP elicitation) through `PromptAgent`; 404 for another chat's or account's prompt, 409 when it no longer waits, 400 for an answer that does not fit.
+- **Follow-ups** (ADR 0x042): `CreateChatMessage` takes `steer: true` for a message sent while a turn runs, which that turn takes in at its next step.
+- **MCP Apps** (`mcp_apps.go`, ADR 0x042): `GET /chat/{chatId}/tool-calls/{toolCallId}/app` returns a tool call's view (HTML with its CSP, the tool's input and result, `Cache-Control: no-store`) and `POST .../app/tools/call` runs the view's tool calls on its own connector (403 for a tool not visible to apps), through `MCPAppAgent`.
 - **Loaded skills** (`skills.go`, ADR 0x035): `GET /chat/{chatId}/loaded-skills` lists the skills the agent loaded in the thread with `load_skill` (mode and message skills are not loaded state) and `DELETE /chat/{chatId}/loaded-skills/{ritualId}` unloads one, for the thread's Tools panel.
 - **Files in context** (`contextfiles.go`, ADR 0x043 §4): `GET /chat/{chatId}/context-files` returns `agent.ContextFilesForChat` for the thread's Files tab, plus the container status the private build reports; without an agent it returns an empty list.
 

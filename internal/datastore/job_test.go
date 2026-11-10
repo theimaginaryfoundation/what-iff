@@ -38,6 +38,7 @@ func createJobTestSchema(t *testing.T, db *sql.DB) {
 		draft_agent_run json,
 		job_run json,
 		progress text,
+		steer bool NOT NULL DEFAULT false,
 		user_jobs uuid NOT NULL,
 		FOREIGN KEY (user_jobs) REFERENCES users(id)
 	)`)
@@ -53,6 +54,7 @@ func createJobTestSchema(t *testing.T, db *sql.DB) {
 			tool_error text,
 			chat_message_tool_calls uuid,
 			job_draft_tool_calls uuid,
+			app json,
 			step integer DEFAULT 0
 		)`)
 	require.NoError(t, err)
@@ -1146,6 +1148,7 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 				tool_error text,
 				chat_message_tool_calls uuid,
 				job_draft_tool_calls uuid,
+				app json,
 				step integer DEFAULT 0
 			)`,
 		`ALTER TABLE chats ADD COLUMN source text`,
@@ -1164,6 +1167,7 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 			draft_agent_run json,
 			job_run json,
 			progress text,
+			steer bool NOT NULL DEFAULT false,
 			created_at datetime NOT NULL,
 			updated_at datetime NOT NULL,
 			user_jobs uuid NOT NULL

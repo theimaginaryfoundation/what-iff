@@ -1,0 +1,58 @@
+/*
+ * The radio that goes with `ui-checkbox`: same border, focus ring and accent, in a circle. Flowbite's
+ * base layer gives `[type="radio"]` its own checked image and a focus ring shadow; both are replaced.
+ */
+:host {
+  display: inline-flex;
+  flex: none;
+  vertical-align: middle;
+}
+
+.ui-radio {
+  appearance: none;
+  background: var(--color-surface-input);
+  background-image: none;
+  border: 1.5px solid color-mix(in srgb, var(--color-accent) 45%, var(--color-border-base));
+  border-radius: 999px;
+  color: var(--color-accent);
+  cursor: pointer;
+  flex: none;
+  height: 1rem;
+  margin: 0;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+  width: 1rem;
+}
+
+/* A global stylesheet draws its own disc in a radio's ::before/::after; this one draws none. */
+.ui-radio::before,
+.ui-radio::after {
+  content: none;
+  display: none;
+}
+
+/* Flowbite paints a checked radio's background with the accent (!important), which is what we want;
+ * the dot is drawn over it as a gradient in place of Flowbite's own image. */
+.ui-radio:checked,
+.ui-radio:checked:focus {
+  background-color: var(--color-accent);
+  background-image: radial-gradient(circle, var(--cta-text, #fff) 0 0.1875rem, transparent 0.21875rem);
+  border-color: var(--color-accent);
+  box-shadow: none;
+}
+
+.ui-radio:focus {
+  box-shadow: none;
+  outline: none;
+}
+
+.ui-radio:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.ui-radio:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

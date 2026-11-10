@@ -78,6 +78,9 @@ func setToolCallFields(create *ent.ToolCallCreate, tc *models.ToolCall) {
 	if tc.Step > 0 {
 		create.SetStep(tc.Step)
 	}
+	if tc.App != nil {
+		create.SetApp(tc.App)
+	}
 }
 
 // attachJobDraftToolCallsTx moves every draft tool call of jobID onto messageID.

@@ -7,6 +7,7 @@ import { JobService } from '../../core/services/job.service';
 import { MessageService } from '../../core/services/message.service';
 import { ChatMessage, JobRun } from '../../core/models/message.model';
 import {
+  AgentPrompt,
   CHAT_TURN_WAITING_STATES,
   ChatTurnAdvancedProgress,
   ChatTurnProgress,
@@ -84,6 +85,9 @@ export class AssistantTurn {
   private readonly _liveToolCalls = signal<readonly ChatTurnToolCall[]>([]);
   private readonly _waitingOn = signal<ChatTurnWaiting | null>(null);
   private readonly _advancedProgress = signal<ChatTurnAdvancedProgress | null>(null);
+  private readonly _pendingPrompt = signal<AgentPrompt | null>(null);
+  /** Prompts answered from this tab, hidden until the job's progress stops showing them. */
+  private readonly answeredPromptIds = new Set<string>();
   private readonly _jobRun = signal<FollowedJobRun | null>(null);
   /** Live model reasoning for the pending reply; replaced wholesale on each job snapshot. */
   private readonly _pendingAssistantDraftReasoning = signal('');
@@ -115,6 +119,8 @@ export class AssistantTurn {
   readonly waitingOn = this._waitingOn.asReadonly();
   /** An Advanced turn's current step and plan (ADR 0x026); null on Standard turns and when idle. */
   readonly advancedProgress = this._advancedProgress.asReadonly();
+  /** The question the in-flight turn is waiting on the person to answer (ADR 0x042); null otherwise. */
+  readonly pendingPrompt = this._pendingPrompt.asReadonly();
   readonly pendingAssistantDraftReasoning = this._pendingAssistantDraftReasoning.asReadonly();
   /** The chat-keyed run being followed, when the in-flight turn is one (not a reply to the user); null otherwise. */
   readonly jobRun = this._jobRun.asReadonly();
@@ -134,6 +140,21 @@ export class AssistantTurn {
   private readonly cancellationPending = computed(() => {
     const activeJobId = this._activeChatJobId();
     return !!activeJobId && activeJobId === this._cancelRequestedJobId();
+  });
+  /**
+   * True while a send would reach the running turn as a follow-up (ADR 0x042): the user's own turn
+   * is mid-inference with its job known (not a scheduled job's run, not a send still in flight,
+   * not being stopped).
+   */
+  readonly canSteer = computed(() => {
+    const jobId = this._activeChatJobId();
+    return (
+      this.inferenceGenerating() &&
+      !this.cancellationPending() &&
+      !this._jobRun() &&
+      !!jobId &&
+      jobId !== AssistantTurn.PENDING_SEND_JOB_ID
+    );
   });
   /** True while the assistant is generating (core inference pending and/or UI streaming). */
   readonly isGenerating = computed(() => (this.inferenceGenerating() && !this.cancellationPending()) || this.isStreaming());
@@ -434,6 +455,8 @@ export class AssistantTurn {
         if (toolCalls) this._liveToolCalls.set(toolCalls);
         this._waitingOn.set(parseChatTurnWaiting(job.progress));
         this._advancedProgress.set(parseChatTurnAdvancedProgress(job.progress));
+        const prompt = inferenceRunningStatus(job.status) ? parseChatTurnPrompt(job.progress) : null;
+        this._pendingPrompt.set(prompt && !this.answeredPromptIds.has(prompt.id) ? prompt : null);
       }
     }
     const cancelPendingForJob = this._cancelRequestedJobId() === job.id;
@@ -522,6 +545,22 @@ export class AssistantTurn {
     this._liveToolCalls.set([]);
     this._waitingOn.set(null);
     this._advancedProgress.set(null);
+    this._pendingPrompt.set(null);
+  }
+
+  /**
+   * Hides a prompt this tab just answered at once, rather than until the worker picks the answer
+   * up and rewrites the progress (up to a poll later). Undone when the answer fails to send.
+   */
+  markPromptAnswered(promptId: string, answered: boolean): void {
+    if (answered) {
+      this.answeredPromptIds.add(promptId);
+      if (this._pendingPrompt()?.id === promptId) this._pendingPrompt.set(null);
+      return;
+    }
+    this.answeredPromptIds.delete(promptId);
+    // Re-apply the last snapshot on the next poll so the card comes back.
+    this.appliedProgressKey = null;
   }
 
   /** Ends the current thread's job polls (the server-side jobs keep running). */
@@ -544,6 +583,25 @@ export function parseChatTurnToolCalls(progress: string | undefined): ChatTurnTo
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The question a chat_message job's turn waits on (ADR 0x042), from its progress payload; null when
+ * there is none or it is malformed.
+ */
+export function parseChatTurnPrompt(progress: string | undefined): AgentPrompt | null {
+  if (!progress) return null;
+  try {
+    const prompt = (JSON.parse(progress) as Partial<ChatTurnProgress>).prompt;
+    if (!prompt || typeof prompt.id !== 'string' || !prompt.payload || typeof prompt.payload.kind !== 'string') return null;
+    return prompt;
+  } catch {
+    return null;
+  }
+}
+
+function inferenceRunningStatus(status: Job['status']): boolean {
+  return status === 'pending' || status === 'processing';
 }
 
 const CHAT_TURN_WAITING = new Set<string>(CHAT_TURN_WAITING_STATES);

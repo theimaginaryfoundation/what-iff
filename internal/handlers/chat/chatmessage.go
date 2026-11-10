@@ -28,6 +28,9 @@ type createChatMessageRequest struct {
 	Attachments    []*models.FileAttachment `json:"attachments,omitempty"`
 	Rituals        []*models.Ritual         `json:"rituals,omitempty"`
 	ClientTimezone string                   `json:"client_timezone,omitempty"`
+	// Steer: sent while a turn in the chat is still running, for that turn to take in at its next
+	// step (ADR 0x042); it runs as its own turn if the running one finishes first.
+	Steer bool `json:"steer,omitempty"`
 }
 
 // CreateChatMessage creates a new chat message from the user and initiates the agent processing
@@ -70,6 +73,7 @@ func (h *Handler) CreateChatMessage(w http.ResponseWriter, r *http.Request) {
 		ResponseID:  req.ResponseID,
 		Attachments: req.Attachments,
 		Rituals:     req.Rituals,
+		Steer:       req.Steer,
 	}
 
 	// Call the agent to handle the message. Prefer client timezone when provided.

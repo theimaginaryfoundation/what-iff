@@ -105,9 +105,13 @@ func (a *Agent) runToolRounds(
 		}
 		allToolCalls = append(allToolCalls, modelToolCalls...)
 		allGeneratedAttachments = append(allGeneratedAttachments, generatedAttachments...)
-		adapter.AppendToolResults(toolResults)
+		// Follow-ups the person sent meanwhile go in after this round's results (ADR 0x042).
+		appendToolResultsWithSteering(adapter, toolResults, a.takeSteering(ctx, chatCtx))
 
-		if round == maxToolCallRounds-1 {
+		// A question went unanswered (ADR 0x042): stop calling tools and have the model ask in its
+		// reply, as at the round cap. An Advanced step ends here with the results pending, and the
+		// run wraps up (advancedRun.loop).
+		if round == maxToolCallRounds-1 || (chatCtx != nil && chatCtx.awaitingUser) {
 			if opts.endStepAtCap {
 				return nil, allToolCalls, allGeneratedAttachments, true, nil
 			}
@@ -179,6 +183,7 @@ func (a *Agent) executeToolUses(ctx context.Context, chatCtx *chatContext, round
 			tc.ToolError = r.Output
 		} else {
 			tc.ToolOutput = r.Output
+			tc.App = chatCtx.takeMCPApp(uses[i].ID)
 		}
 		modelToolCalls[i] = tc
 	}
@@ -268,7 +273,7 @@ func (a *Agent) executeToolUseWithRecovery(ctx context.Context, chatCtx *chatCon
 			}
 		}()
 
-		output, generatedAttachments, err := a.dispatchToolUse(ctx, chatCtx, use)
+		output, generatedAttachments, err := a.dispatchToolUse(withToolUseID(ctx, use.ID), chatCtx, use)
 		toolErr = err
 		if err != nil {
 			result.IsErr = true

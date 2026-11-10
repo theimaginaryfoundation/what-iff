@@ -3,7 +3,7 @@ import { SpinnerComponent } from '../spinner/spinner.component';
 import { isActivationKey } from '../helpers/keyboard.helpers';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
-export type ButtonSize = 'sm' | 'md';
+export type ButtonSize = 'xs' | 'sm' | 'md';
 export type ButtonType = 'button' | 'submit' | 'reset';
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
@@ -13,7 +13,9 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   danger: 'border-transparent bg-[var(--danger)] text-white hover:brightness-95',
 };
 
+/** `xs` is for surfaces with many actions; it grows back to a comfortable target on touch screens. */
 const SIZE_CLASSES: Record<ButtonSize, string> = {
+  xs: 'min-h-7 px-2.5 py-1 text-xs [@media(pointer:coarse)]:min-h-9 [@media(pointer:coarse)]:px-3',
   sm: 'min-h-9 px-3 py-1.5 text-xs',
   md: 'min-h-11 px-4 py-2 text-sm',
 };

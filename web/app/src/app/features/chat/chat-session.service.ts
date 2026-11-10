@@ -17,6 +17,7 @@ import { Model } from '../../core/models/model.model';
 import { Ritual } from '../../core/models/ritual.model';
 import { AgentLoop, ReasoningEffort, TurnSettingValues, TurnSettingsPatch } from '../../core/models/turn-settings.model';
 import { apiErrorMessage } from '../../core/utils/api-error.helpers';
+import { AgentPromptResponse } from '../../core/models/job.model';
 import {
   AUTOSAVE_DEBOUNCE_MS,
   CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS,
@@ -98,6 +99,8 @@ export class ChatSessionService implements OnDestroy {
   readonly waitingOn = this.turn.waitingOn;
   /** The in-flight Advanced turn's step and plan, or null. */
   readonly advancedProgress = this.turn.advancedProgress;
+  /** The question the in-flight turn is waiting on the person to answer (ADR 0x042), or null. */
+  readonly pendingPrompt = this.turn.pendingPrompt;
   readonly pendingAssistantDraftReasoning = this.turn.pendingAssistantDraftReasoning;
   readonly draft: WritableSignal<string> = signal('');
   readonly model: Signal<Model | null> = this._model.asReadonly();
@@ -112,6 +115,8 @@ export class ChatSessionService implements OnDestroy {
   readonly jobRun = this.turn.jobRun;
   /** True while that run is generating: the composer says so instead of just holding the send. */
   readonly jobRunActive = this.turn.jobRunActive;
+  /** True while a send would reach the user's running turn as a follow-up (ADR 0x042). */
+  readonly canSteer = this.turn.canSteer;
   readonly hasMoreOlderMessages = signal(false);
   readonly loadingOlderMessages = signal(false);
   private readonly _contextCheckpointToken = signal(0);
@@ -451,8 +456,13 @@ export class ChatSessionService implements OnDestroy {
     const message = text.trim();
     // `_thread` still holds the previous thread until the new one's getChat resolves; never
     // let a send in that window post to the thread the user just navigated away from.
-    if (!chat || !this.isActiveThread(chat.id) || !message || this.isGenerating()) {
+    if (!chat || !this.isActiveThread(chat.id) || !message) {
       return { status: 'skipped' };
+    }
+    if (this.isGenerating()) {
+      // Mid-turn, a text message goes to the running turn as a follow-up (ADR 0x042); files wait.
+      if (!this.canSteer() || attachments.length > 0) return { status: 'skipped' };
+      return this.sendFollowUp(chat.id, message, options);
     }
 
     this.turn.beginSend();
@@ -501,6 +511,33 @@ export class ChatSessionService implements OnDestroy {
     return { status: 'sent' };
   }
 
+  /**
+   * Sends a follow-up while the user's turn runs (ADR 0x042). It is saved and shown like any
+   * message; the running turn reads it at its next step, or, if that turn finishes first, it runs
+   * as the next turn (picked up by the active-turn watch). The running turn stays the one followed.
+   */
+  private async sendFollowUp(chatId: string, message: string, options: ChatSendMessageOptions): Promise<ChatSendMessageResult> {
+    this.draft.set('');
+    this.draftService.clearDraft(chatId);
+    try {
+      await firstValueFrom(this.messageService.sendMessage(chatId, {
+        message: `${options.contextPrefix ?? ''}${message}`,
+        origin: 'User',
+        steer: true,
+      }));
+    } catch (error) {
+      const typedAhead = this.isActiveThread(chatId) ? this.draft() : (this.draftService.getDraft(chatId)?.message ?? '');
+      const restored = restoreFailedSend(message, typedAhead);
+      this.draftService.saveDraft(chatId, restored);
+      if (!this.isActiveThread(chatId)) return { status: 'failed', error };
+      this.draft.set(restored);
+      this._error.set(apiErrorMessage(error, 'Failed to send message'));
+      return { status: 'failed', error };
+    }
+    if (this.isActiveThread(chatId)) this._error.set(null);
+    return { status: 'sent' };
+  }
+
   async retryUserMessage(message: ChatMessage): Promise<void> {
     const chat = this._thread();
     if (!chat || !this.isActiveThread(chat.id) || message.origin !== 'User' || this.isGenerating()) return;
@@ -529,6 +566,30 @@ export class ChatSessionService implements OnDestroy {
 
   cancelGeneration(): void {
     this.turn.cancelGeneration();
+  }
+
+  /**
+   * Sends the answer to the question the in-flight turn is waiting on (ADR 0x042). The card hides
+   * at once; on failure it comes back and the error is shown (a 409 means the turn stopped
+   * waiting: it expired, was answered in another tab, or the turn ended).
+   */
+  answerPrompt(promptId: string, response: AgentPromptResponse): void {
+    const threadId = this.activeThreadId;
+    if (!threadId) return;
+    this.turn.markPromptAnswered(promptId, true);
+    this.subscriptions.add(
+      this.messageService.answerPrompt(threadId, promptId, response).pipe(take(1)).subscribe({
+        error: err => {
+          if (!this.isActiveThread(threadId)) return;
+          if (err?.status === 409) {
+            this._error.set('That question is no longer waiting for an answer.');
+            return;
+          }
+          this.turn.markPromptAnswered(promptId, false);
+          this._error.set(apiErrorMessage(err, 'Failed to send your answer'));
+        },
+      }),
+    );
   }
 
   /** Refetches the active thread's metadata (name, model, personality) without touching messages. */

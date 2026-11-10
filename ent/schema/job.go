@@ -57,6 +57,9 @@ func (Job) Fields() []ent.Field {
 		field.Text("progress").
 			Optional().
 			Comment("Optional JSON-encoded progress payload for long-running jobs (e.g. chat import imported/skipped/total counts)"),
+		field.Bool("steer").
+			Default(false).
+			Comment("A chat_message sent while an earlier turn in the chat was still running (ADR 0x042): that turn delivers it at its next step and cancels this job; if it finishes first, this job runs as a normal turn"),
 	}
 }
 

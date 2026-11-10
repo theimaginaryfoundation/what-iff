@@ -106,6 +106,10 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			out, err := updatePlanTool(chatCtx, input)
 			return out, nil, err
 		},
+		tools.AskUserToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.askUserTool(ctx, chatCtx, input)
+			return out, nil, err
+		},
 		tools.ListMoodsToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			out, err := a.listMoodsTool(ctx, chatCtx, input)
 			return out, nil, err
@@ -200,7 +204,8 @@ func (a *Agent) dispatchMCPToolUse(ctx context.Context, chatCtx *chatContext, us
 		}
 		return "", nil, fmt.Errorf("mcp tool %q is not loaded for this chat; call %q first", use.Name, tools.LoadToolsToolSpec.Name)
 	}
-	out, err := a.mcpClient.CallToolByFullNameWithSessionStateDetailed(ctx, servers, use.Name, use.Input, sessionStateFromChatContext(chatCtx))
+	// A server may ask the person for input while its tool runs (elicitation, ADR 0x042).
+	out, err := a.mcpClient.CallToolByFullNameWithSessionStateDetailed(a.elicitationContext(ctx, chatCtx), servers, use.Name, use.Input, sessionStateFromChatContext(chatCtx))
 	if err != nil {
 		return "", nil, err
 	}
@@ -209,6 +214,10 @@ func (a *Agent) dispatchMCPToolUse(ctx context.Context, chatCtx *chatContext, us
 		// Media in an error result is not kept: no handler returns attachments alongside an error,
 		// and keeping them would send them to the model, the sandbox turn files and the saved reply.
 		return "", nil, err
+	}
+	if out.UIResourceURI != "" {
+		// The tool has an MCP App (ADR 0x042): the saved call carries what the chat needs to show it.
+		chatCtx.recordMCPApp(toolUseIDFrom(ctx), mcpAppForResult(out))
 	}
 	return out.Output, out.GeneratedAttachments, nil
 }

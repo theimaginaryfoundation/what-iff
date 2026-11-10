@@ -25,8 +25,10 @@ import { UserPreferencesService } from '../../core/services/user-preferences.ser
 import { ToolCall } from '../../core/models/toolcall.model';
 import { ChatComposerComponent } from './components/chat-composer/chat-composer.component';
 import { MessageListComponent } from './components/message-list/message-list.component';
+import { AgentPromptCardComponent } from './components/agent-prompt-card/agent-prompt-card.component';
 import { ThreadBookmarksComponent } from './components/thread-bookmarks/thread-bookmarks.component';
 import { MessageService } from '../../core/services/message.service';
+import { McpAppService } from '../../core/services/mcp-app.service';
 import { PersonaPickerDialogComponent } from '../personality/picker/persona-picker-dialog.component';
 import { personalityCoverUrl } from '../personality/helpers/cover-image.helpers';
 import { startChatFailureAlert } from '../personality/helpers/start-chat-failure.helpers';
@@ -87,6 +89,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
   selector: 'app-chat-page',
   standalone: true,
   imports: [
+    AgentPromptCardComponent,
     CommonModule,
     ChatSendOutletComponent,
     DiscordComposerToggleComponent,
@@ -137,6 +140,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   readonly threadList = inject(ThreadListService);
   readonly contextPanel = inject(ContextPanelService);
   private readonly scratchpad = inject(ScratchpadService);
+  private readonly mcpApps = inject(McpAppService);
 
   readonly models = toSignal(this.modelService.models$, { initialValue: [] });
   /** What the composer says while a scheduled job's run holds the thread (ADR 0x039), else null. */
@@ -521,6 +525,16 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.sendGate.enterChat();
     this.sendGate.refresh();
+    // An MCP App asked to send a message (ui/message, ADR 0x042): it goes in the composer for the
+    // person to read and send, never straight to the agent.
+    this.subscriptions.add(
+      this.mcpApps.composerText$.subscribe(text => {
+        const current = this.session.draft().trim();
+        this.session.draft.set(current ? `${current}
+
+${text}` : text);
+      }),
+    );
     this.subscriptions.add(
       this.router.events.pipe(
         filter((event): event is NavigationEnd => event instanceof NavigationEnd),

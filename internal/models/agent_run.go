@@ -24,4 +24,5 @@ const (
 	AgentRunEndStepLimit   = modeltypes.AgentRunEndStepLimit
 	AgentRunEndCancelled   = modeltypes.AgentRunEndCancelled
 	AgentRunEndFailed      = modeltypes.AgentRunEndFailed
+	AgentRunEndNeedsInput  = modeltypes.AgentRunEndNeedsInput
 )

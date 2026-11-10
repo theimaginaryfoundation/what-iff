@@ -33,6 +33,7 @@ func toToolCallModel(e *ent.ToolCall) *models.ToolCall {
 		ToolOutput:    e.ToolOutput,
 		ToolError:     e.ToolError,
 		Step:          e.Step,
+		App:           e.App,
 		CreatedAt:     e.CreatedAt,
 		UpdatedAt:     e.UpdatedAt,
 	}

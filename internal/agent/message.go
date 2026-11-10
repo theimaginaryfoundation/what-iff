@@ -182,6 +182,8 @@ type Agent struct {
 
 	// turns tracks this process's live chat turns for the per-chat turn gate (chat_turn_gate.go).
 	turns chatTurnTracker
+	// prompts wakes turns waiting on an agent prompt this instance answered (ADR 0x042).
+	prompts promptWaiters
 }
 
 // nonVendorLLM reports whether assistant generation is served by anything
@@ -710,6 +712,7 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 		Reference:   chatMessage.ID.String(),
 		Status:      models.JobStatusPending,
 		DraftDeltas: []string{},
+		Steer:       request.Steer,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create job: %w", err)
@@ -957,6 +960,23 @@ type chatContext struct {
 	loadedTools map[string]struct{}
 	// skills are the turn's skills: scope, loaded set, active set (ADR 0x035; see prepareTurnSkills).
 	skills *turnSkills
+	// promptJob is the job a person can answer prompts on (ask_user, MCP elicitation; ADR 0x042):
+	// set only on an interactive web turn, nil wherever nobody is there to answer (relays,
+	// scheduled runs, webhooks, sub-agents).
+	promptJob *models.Job
+	// promptWaited is the time the turn spent waiting on the person, which the Advanced run's
+	// duration limit leaves out.
+	promptWaited time.Duration
+	// awaitingUser is set when a prompt went unanswered: the turn should end and ask in its reply.
+	awaitingUser bool
+	// mcpApps are the MCP Apps of this turn's MCP tool calls, by provider tool-call id (ADR 0x042),
+	// until executeToolUses puts them on the saved calls.
+	mcpApps map[string]*models.ToolCallApp
+	// elicitations counts the MCP elicitation requests shown this turn (maxElicitationsPerTurn).
+	elicitations int
+	// steerNotes are the follow-ups the person sent while the turn ran and it took in (ADR 0x042),
+	// kept for an Advanced run's compacted work log.
+	steerNotes []string
 	// mcpSessions stores MCP session ids for this single conversation turn.
 	mcpSessions map[string]string
 }
@@ -1028,6 +1048,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 		a.setJobStatusFailed(ctx, chatJob, err)
 		return nil, err
 	}
+	chatCtx.promptJob = interactivePromptJob(chatJob, chatCtx)
 	// Resolve active mood and load mood-driven rituals before determining action type
 	// (a mood may inject image-generation rituals). Mode skills are injected into the
 	// mode context segment, not the user message.
@@ -1353,11 +1374,24 @@ func (a *Agent) finishGeneration(ctx context.Context, userID uuid.UUID, chatMess
 // mock mode exercises the code real chat runs (streamed-text reconciliation,
 // tool-call recording, personality/mood, save).
 func (a *Agent) generateAssistantForMessageMock(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
-	// The mock adapter offers no tools to a model, but record the same agent-tool set the real
-	// paths do (no MCP discovery: mock mode is hermetic), so a scripted tool call is gated exactly
-	// like a real model's.
+	// The mock adapter offers no tools to a model, but record the same tool set the real paths do,
+	// so a scripted tool call is gated exactly like a real model's. That set includes the
+	// turn-only tools and the chat's MCP connectors (see below); a chat with none attached
+	// discovers nothing, so mock e2e stays hermetic.
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	chatCtx.setOfferedTools(policy.offeredAgentToolNames())
+	offered := policy.offeredAgentToolNames()
+	// Turn-only tools (update_plan, ask_user) and MCP tools are offered too, so the mock's echo
+	// directives can drive them locally (provider/mock_directives.go).
+	for _, spec := range turnOnlyToolSpecs(chatCtx) {
+		offered[spec.Name] = struct{}{}
+	}
+	if policy.toolsEnabled {
+		for _, spec := range a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs) {
+			offered[spec.Name] = struct{}{}
+		}
+	}
+	chatCtx.setOfferedTools(offered)
+	a.prepareTurnLoadableTools(ctx, chatCtx, offered)
 
 	build := func(*provider.ModelContext) (provider.AgentAdapter, error) {
 		return provider.NewMockAdapter(provider.MockAdapterConfig{

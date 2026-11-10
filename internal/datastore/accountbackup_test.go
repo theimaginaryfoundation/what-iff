@@ -157,6 +157,7 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			tool_error text,
 			chat_message_tool_calls uuid,
 			job_draft_tool_calls uuid,
+			app json,
 			step integer DEFAULT 0
 		)`,
 		`CREATE TABLE agent_jobs (
