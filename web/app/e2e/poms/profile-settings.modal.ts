@@ -6,6 +6,9 @@ import { AppShell } from './app-shell.page';
  * sidebar's "Open profile for <username>" button; a real modal (ui-modal),
  * not a route change.
  */
+/** A utility role, as the Background models section names it. */
+export type BackgroundRole = 'memory' | 'memory_merge' | 'simple' | 'personality';
+
 export class ProfileSettingsModal {
   private readonly shell: AppShell;
 
@@ -71,21 +74,39 @@ export class ProfileSettingsModal {
     return this.page.getByTestId('background-models');
   }
 
-  /** The select for one utility role (memory, simple, personality). */
-  backgroundModelSelect(role: 'memory' | 'simple' | 'personality'): Locator {
+  /** The model select for one utility role. */
+  backgroundModelSelect(role: BackgroundRole): Locator {
     return this.page.getByTestId(`background-model-${role}`);
   }
 
   /**
-   * Picks an option of a role's select (by index; 0 is Default) and waits for the save, a PUT
-   * for a model or a DELETE for Default, so a caller can reload right after.
+   * Picks an option of a role's model select (by index, or 'off') and waits for the save, so a
+   * caller can reload right after.
    */
-  async chooseBackgroundModel(role: 'memory' | 'simple' | 'personality', index: number): Promise<void> {
-    const saved = this.page.waitForResponse(
-      (res) => res.url().includes(`/utility-models/${role}`) && ['PUT', 'DELETE'].includes(res.request().method()),
-    );
-    await this.backgroundModelSelect(role).selectOption({ index });
+  async chooseBackgroundModel(role: BackgroundRole, option: number | 'off'): Promise<void> {
+    const saved = this.page.waitForResponse((res) => res.url().includes(`/utility-models/${role}`) && res.request().method() === 'PUT');
+    await this.backgroundModelSelect(role).selectOption(option === 'off' ? { value: 'off' } : { index: option });
     await saved;
+  }
+
+  /** Picks a role's model by its id and waits for the save. */
+  async chooseBackgroundModelById(role: BackgroundRole, modelId: string): Promise<void> {
+    const saved = this.page.waitForResponse((res) => res.url().includes(`/utility-models/${role}`) && res.request().method() === 'PUT');
+    await this.backgroundModelSelect(role).selectOption({ value: modelId });
+    await saved;
+  }
+
+  /**
+   * Puts a role back on the value its select had (a model's id or 'off'). A role that had
+   * nothing chosen can't go back to that, since a choice can't be cleared, so it stays as it is.
+   */
+  async restoreBackgroundModel(role: BackgroundRole, value: string): Promise<void> {
+    if (!value || value === (await this.backgroundModelSelect(role).inputValue())) return;
+    if (value === 'off') {
+      await this.chooseBackgroundModel(role, 'off');
+    } else {
+      await this.chooseBackgroundModelById(role, value);
+    }
   }
 
   /** Dismisses the announcement modal first — it intercepts the click. */

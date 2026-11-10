@@ -43,6 +43,8 @@ export type SpecificErrorCode =
   | 'quota_exceeded'
   | 'system_prompt_too_long'
   | 'provider_not_configured'
+  | 'utility_model_not_set'
+  | 'utility_role_off'
   | 'reauthentication_required'
   | 'provider_unreachable'
   | 'provider_key_rejected'

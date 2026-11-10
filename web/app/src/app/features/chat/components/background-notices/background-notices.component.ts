@@ -11,7 +11,10 @@ import { ProfileSettingsModalService } from '../../../profile-settings/profile-s
 type NoticeAction = 'add-key' | 'background-models' | null;
 
 interface NoticeView {
-  id: string;
+  /** The notices shown as this one: a role's, with one cause. */
+  ids: string[];
+  /** Tracks the view across reloads. */
+  key: string;
   /** What didn't happen. */
   what: string;
   /** Why, and what happens next. */
@@ -25,11 +28,38 @@ function article(word: string): string {
   return /^[aeiou]/i.test(word) ? 'an' : 'a';
 }
 
+/** What didn't happen, for a step shown on its own. */
 const STEP_COPY: Record<string, string> = {
   memory: "Memories from this chat weren't saved.",
   scratchpad: "The scratchpad wasn't updated from this chat.",
   summary: "This chat's summary wasn't updated.",
+  memory_query: "Replies in this chat aren't drawing on memories.",
+  chat_name: "This chat wasn't named.",
+  mood_select: "The mood didn't change on its own.",
+  expression_pick: "The expression didn't change with the reply.",
 };
+
+/** A step's work in a few words, for a role's notices shown together. */
+const STEP_SHORT: Record<string, string> = {
+  memory: 'saving memories',
+  scratchpad: 'updating the scratchpad',
+  summary: 'summarizing',
+  memory_query: 'finding memories for replies',
+  chat_name: 'naming the chat',
+  mood_select: 'choosing a mood',
+  expression_pick: 'picking expressions',
+};
+
+/** Notices with one role and one cause read as one, so a broken model is one notice, not four. */
+function groupKey(n: BackgroundNotice): string {
+  const fallback = n.step.startsWith('fallback_');
+  return [fallback ? n.step : (n.role ?? n.step), n.code, n.provider ?? '', n.model ?? ''].join('|');
+}
+
+/** "a, b and c". */
+function listed(items: string[]): string {
+  return items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
 
 /**
  * Background work on this chat that failed or fell back (ADR 0x027 section 6), with the fix
@@ -55,10 +85,18 @@ export class BackgroundNoticesComponent {
   /** The chat's notices as the server sent them, less any dismissed here since. */
   private readonly raw = signal<BackgroundNotice[]>([]);
   /**
-   * What each notice says. Derived rather than worked out once on load, so the words follow
-   * whether accounts supply keys, which may still be loading on a direct visit to a chat.
+   * What each notice says, a role's notices with one cause together. Derived rather than worked
+   * out once on load, so the words follow whether accounts supply keys, which may still be
+   * loading on a direct visit to a chat.
    */
-  readonly notices = computed(() => this.raw().map(n => this.view(n)));
+  readonly notices = computed(() => {
+    const groups = new Map<string, BackgroundNotice[]>();
+    for (const n of this.raw()) {
+      const key = groupKey(n);
+      groups.set(key, [...(groups.get(key) ?? []), n]);
+    }
+    return [...groups.entries()].map(([key, group]) => this.view(key, group));
+  });
   /** The chat the shown notices belong to; another chat's are never shown. */
   private shownFor: string | null = null;
   /**
@@ -97,21 +135,21 @@ export class BackgroundNoticesComponent {
     }
   }
 
-  async dismiss(id: string): Promise<void> {
+  /** Dismisses every notice shown as one. */
+  async dismiss(ids: string[]): Promise<void> {
     const chatId = this.chatId();
     if (!chatId) return;
-    this.dismissed.add(id);
-    this.raw.update(list => list.filter(n => n.id !== id));
-    try {
-      await firstValueFrom(this.service.dismiss(chatId, id));
-    } catch (error) {
-      // Logged like a failed load, so the failure itself doesn't go unseen.
-      console.warn('Failed to dismiss a background notice:', error);
-      // Show it again, but only on its own chat: the person may have moved to another meanwhile.
-      if (chatId === this.chatId()) {
-        this.dismissed.delete(id);
-        await this.load(chatId);
-      }
+    ids.forEach(id => this.dismissed.add(id));
+    this.raw.update(list => list.filter(n => !ids.includes(n.id)));
+    const results = await Promise.allSettled(ids.map(id => firstValueFrom(this.service.dismiss(chatId, id))));
+    const failed = results.filter(r => r.status === 'rejected');
+    if (failed.length === 0) return;
+    // Logged like a failed load, so the failure itself doesn't go unseen.
+    console.warn('Failed to dismiss a background notice:', (failed[0] as PromiseRejectedResult).reason);
+    // Show it again, but only on its own chat: the person may have moved to another meanwhile.
+    if (chatId === this.chatId()) {
+      ids.forEach(id => this.dismissed.delete(id));
+      await this.load(chatId);
     }
   }
 
@@ -123,36 +161,50 @@ export class BackgroundNoticesComponent {
     }
   }
 
-  private view(n: BackgroundNotice): NoticeView {
-    const view = this.describe(n);
+  private view(key: string, group: BackgroundNotice[]): NoticeView {
+    const view = { ...this.describe(group), ids: group.map(n => n.id), key };
     // Where the deployment supplies the keys, it also chooses the models: nothing here is the
     // person's to fix, so the notice only informs.
     return this.keys.accountsSupplyKeys() ? view : { ...view, action: null, actionLabel: '' };
   }
 
-  private describe(n: BackgroundNotice): NoticeView {
-    const times = n.count > 1 ? ` This has happened ${n.count} times.` : '';
+  private describe(group: BackgroundNotice[]): Omit<NoticeView, 'ids' | 'key'> {
+    const n = group[0];
+    const count = group.reduce((most, g) => Math.max(most, g.count), 0);
+    const times = count > 1 ? ` This has happened ${count} times.` : '';
+    // A role this app doesn't know yet (a newer server's) gets a general sentence rather than
+    // its raw name.
+    const roleLabel = (role: string | undefined) => (role ? UTILITY_ROLE_COPY[role as UtilityRole]?.label : undefined);
     if (n.step.startsWith('fallback_')) {
-      const role = n.step.slice('fallback_'.length) as UtilityRole;
-      // A role this app doesn't know yet (a newer server's) gets a general sentence rather than
-      // its raw name.
-      const label = UTILITY_ROLE_COPY[role]?.label;
+      const label = roleLabel(n.step.slice('fallback_'.length));
       return {
-        id: n.id,
-        what: label
-          ? `The model chosen for ${label} wasn't available, so another was used.`
-          : "A model chosen for background work wasn't available, so another was used.",
-        why: `It may have been turned off, or its provider removed.${times}`,
+        what: label ? `The model chosen for ${label} wasn't available.` : "A model chosen for background work wasn't available.",
+        why: `It may have been turned off, or its provider removed. Choose another.${times}`,
         action: 'background-models',
         actionLabel: 'Change background models',
       };
     }
-    const what = STEP_COPY[n.step] ?? "Some background work on this chat didn't finish.";
+    const label = roleLabel(n.role);
+    const shorts = group.map(g => STEP_SHORT[g.step]).filter((s): s is string => !!s);
+    const what =
+      group.length > 1 && label && shorts.length === group.length
+        ? `${label} didn't run on this chat: ${listed(shorts)}.`
+        : (STEP_COPY[n.step] ?? "Some background work on this chat didn't finish.");
+    if (n.code === 'model_not_set') {
+      if (!this.keys.accountsSupplyKeys()) {
+        return { what, why: `This server hasn't chosen a model for it.${times}`, action: null, actionLabel: '' };
+      }
+      return {
+        what,
+        why: `No model is chosen for ${label ?? 'this background work'}.${times}`,
+        action: 'background-models',
+        actionLabel: 'Choose background models',
+      };
+    }
     const provider = n.provider || 'The provider';
     if (n.code === 'provider_not_configured') {
       if (!this.keys.accountsSupplyKeys()) {
         return {
-          id: n.id,
           what,
           why: `${provider} isn't set up on this server${n.model ? ` for ${n.model}` : ''}.${times}`,
           action: null,
@@ -160,7 +212,6 @@ export class BackgroundNoticesComponent {
         };
       }
       return {
-        id: n.id,
         what,
         why: `There's no ${provider} key${n.model ? ` for ${n.model}` : ''}. Add one, or choose another background model.${times}`,
         action: 'add-key',
@@ -168,7 +219,6 @@ export class BackgroundNoticesComponent {
       };
     }
     return {
-      id: n.id,
       what,
       why: `${provider} returned an error${n.model ? ` (${n.model})` : ''}. It runs again as the chat goes on, and this goes away once it works.${times}`,
       action: 'background-models',

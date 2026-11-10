@@ -7,7 +7,7 @@ import { environment } from '@environments/environment';
 import { UtilityModels } from '../models/utility-model.model';
 import { UtilityModelsService } from './utility-models.service';
 
-const BODY: UtilityModels = { accounts_choose: true, roles: [{ role: 'memory', account_model_id: null, deployment_model_id: null, built_in_model: 'gpt-5.6-luna' }] };
+const BODY: UtilityModels = { accounts_choose: true, roles: [{ role: 'memory', account: null, deployment: null }] };
 
 describe('UtilityModelsService', () => {
   let service: UtilityModelsService;
@@ -30,13 +30,15 @@ describe('UtilityModelsService', () => {
     expect(got).toEqual(BODY);
   });
 
-  it("chooses and clears a role's model", () => {
-    service.choose('simple', 'model-1').subscribe();
+  it("chooses a role's model with how it works, or switches the role off", () => {
+    service.choose('simple', { model_id: 'model-1', reasoning_effort: 'low', service_tier: 'flex' }).subscribe();
     const put = http.expectOne({ method: 'PUT', url: `${environment.apiUrl}/utility-models/simple` });
-    expect(put.request.body).toEqual({ model_id: 'model-1' });
+    expect(put.request.body).toEqual({ model_id: 'model-1', reasoning_effort: 'low', service_tier: 'flex' });
     put.flush(BODY);
 
-    service.clear('simple').subscribe();
-    http.expectOne({ method: 'DELETE', url: `${environment.apiUrl}/utility-models/simple` }).flush(BODY);
+    service.switchOff('simple').subscribe();
+    const off = http.expectOne({ method: 'PUT', url: `${environment.apiUrl}/utility-models/simple` });
+    expect(off.request.body).toEqual({ off: true });
+    off.flush(BODY);
   });
 });

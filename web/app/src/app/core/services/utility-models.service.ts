@@ -3,11 +3,12 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
-import { UtilityModels, UtilityRole } from '../models/utility-model.model';
+import { UtilityModelChoice, UtilityModels, UtilityRole } from '../models/utility-model.model';
 
 /**
  * The models the account's background work runs on, one per utility role. Each
- * write answers with every role after it.
+ * write answers with every role after it. A choice is replaced, never cleared:
+ * where accounts choose, nothing stands behind it.
  */
 @Injectable({ providedIn: 'root' })
 export class UtilityModelsService {
@@ -18,13 +19,13 @@ export class UtilityModelsService {
     return this.http.get<UtilityModels>(this.baseUrl);
   }
 
-  /** Chooses the account's model for a role. */
-  choose(role: UtilityRole, modelId: string): Observable<UtilityModels> {
-    return this.http.put<UtilityModels>(`${this.baseUrl}/${role}`, { model_id: modelId });
+  /** Chooses the account's model for a role, with how it's asked to work. */
+  choose(role: UtilityRole, choice: UtilityModelChoice): Observable<UtilityModels> {
+    return this.http.put<UtilityModels>(`${this.baseUrl}/${role}`, choice);
   }
 
-  /** Clears the account's choice, so the role runs on its default. */
-  clear(role: UtilityRole): Observable<UtilityModels> {
-    return this.http.delete<UtilityModels>(`${this.baseUrl}/${role}`);
+  /** Switches a role off: its work stops until a model is chosen again. */
+  switchOff(role: UtilityRole): Observable<UtilityModels> {
+    return this.http.put<UtilityModels>(`${this.baseUrl}/${role}`, { off: true });
   }
 }

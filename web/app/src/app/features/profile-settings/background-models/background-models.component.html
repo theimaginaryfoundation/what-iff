@@ -4,29 +4,86 @@
     <small>The models that save memories, name threads and write personalities. Changes save immediately.</small>
 
     @for (row of rows(); track row.role) {
-      <label class="background-models__field">
-        <span class="background-models__label">{{ row.label }}</span>
-        <small>{{ row.covers }}</small>
-        <select
-          [attr.data-testid]="'background-model-' + row.role"
-          [disabled]="saving() !== null"
-          [uiTooltip]="row.label + ' runs on this model'"
-          (change)="onChange(row, $any($event.target))"
-        >
-          <option value="" [selected]="!row.chosen">{{ row.defaultLabel }}</option>
-          @if (row.chosenUnlisted) {
-            <option [value]="row.chosen" disabled selected>Chosen model is unavailable; using {{ row.defaultLabel }}</option>
-          }
-          @for (model of models(); track model.id) {
-            <option [value]="model.id" [selected]="model.id === row.chosen">{{ modelLabel(model) }}</option>
-          }
-        </select>
-      </label>
+      <div class="background-models__role" [attr.data-testid]="'background-role-' + row.role">
+        <label class="background-models__field">
+          <span class="background-models__label">{{ row.label }}</span>
+          <small>{{ row.covers }}</small>
+          <select
+            data-control="model"
+            [attr.data-testid]="'background-model-' + row.role"
+            [disabled]="saving() !== null"
+            [uiTooltip]="row.label + ' runs on this model'"
+            (change)="onModelChange(row, $any($event.target))"
+          >
+            @if (!row.chosen) {
+              <option value="" selected>Choose a model</option>
+            }
+            @if (row.chosenUnlisted) {
+              <option [value]="row.chosen" selected>Chosen model is unavailable</option>
+            }
+            @for (model of models(); track model.id) {
+              <option [value]="model.id" [selected]="model.id === row.chosen">{{ modelLabel(model) }}</option>
+            }
+            <option [value]="offValue" [selected]="row.chosen === offValue">Off</option>
+          </select>
+        </label>
+
+        @if (row.chosen === offValue) {
+          <p class="background-models__note" data-testid="background-role-off">Off. {{ row.stops }}</p>
+        } @else if (!row.chosen && row.deploymentChooses) {
+          <p class="background-models__note" data-testid="background-role-deployment">This server's choice is used until you choose one.</p>
+        } @else if (!row.chosen) {
+          <p class="background-models__note background-models__note--warn" role="status" data-testid="background-role-not-set">
+            Nothing chosen yet. {{ row.stops }}
+          </p>
+        } @else if (row.chosenUnlisted) {
+          <p class="background-models__note background-models__note--warn" role="status" data-testid="background-role-unavailable">
+            Its model was turned off or its provider removed, so this doesn't run. Choose another model.
+          </p>
+        }
+
+        @if (row.model && (row.effortOptions.length > 0 || row.offersTier)) {
+          <div class="background-models__options">
+            @if (row.effortOptions.length > 0) {
+              <label class="background-models__option">
+                <span>Thinking</span>
+                <select
+                  data-control="effort"
+                  [attr.data-testid]="'background-effort-' + row.role"
+                  [disabled]="saving() !== null"
+                  (change)="onEffortChange(row, $any($event.target))"
+                >
+                  <option value="" [selected]="!row.effort">Model's default</option>
+                  @for (option of row.effortOptions; track option.value) {
+                    <option [value]="option.value" [selected]="option.value === row.effort">{{ option.label }}</option>
+                  }
+                </select>
+              </label>
+            }
+            @if (row.offersTier) {
+              <label class="background-models__option">
+                <span>Speed</span>
+                <select
+                  data-control="tier"
+                  [attr.data-testid]="'background-tier-' + row.role"
+                  [disabled]="saving() !== null"
+                  (change)="onTierChange(row, $any($event.target))"
+                >
+                  <option value="" [selected]="!row.tier">Standard</option>
+                  @for (option of tierOptions; track option.value) {
+                    <option [value]="option.value" [selected]="option.value === row.tier">{{ option.label }}</option>
+                  }
+                </select>
+              </label>
+            }
+          </div>
+        }
+      </div>
     }
 
     @if (modelsFailed() && !modelsLoaded()) {
       <p class="background-models__error" role="status" data-testid="background-models-unloaded">
-        Your models couldn't be loaded, so only Default is offered. Reopen Settings to try again.
+        Your models couldn't be loaded, so only Off is offered. Reopen Settings to try again.
       </p>
     }
     @if (error()) {
