@@ -105,9 +105,8 @@ func (a *Agent) runToolRounds(
 		}
 		allToolCalls = append(allToolCalls, modelToolCalls...)
 		allGeneratedAttachments = append(allGeneratedAttachments, generatedAttachments...)
-		// Follow-ups the person sent meanwhile ride on this round's results (ADR 0x042).
-		withSteerNote(toolResults, a.takeSteering(ctx, chatCtx))
-		adapter.AppendToolResults(toolResults)
+		// Follow-ups the person sent meanwhile go in after this round's results (ADR 0x042).
+		appendToolResultsWithSteering(adapter, toolResults, a.takeSteering(ctx, chatCtx))
 
 		// A question went unanswered (ADR 0x042): stop calling tools and have the model ask in its
 		// reply, as at the round cap. An Advanced step ends here with the results pending, and the

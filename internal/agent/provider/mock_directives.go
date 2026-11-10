@@ -59,6 +59,20 @@ func parseMockDirectives(text string) ([]mockDirective, string) {
 	return directives, strings.TrimSpace(strings.Join(rest, "\n"))
 }
 
+// mockUserNotesSummary lists the user turns added mid-turn (steering), so a local click-through
+// can see a follow-up reached the turn.
+func mockUserNotesSummary(notes []string) string {
+	if len(notes) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\nMessages from you while I worked:")
+	for _, n := range notes {
+		fmt.Fprintf(&b, "\n- %s", strings.ReplaceAll(n, "\n", " "))
+	}
+	return b.String()
+}
+
 // mockToolSummary is the mock's closing note on the tool results it was given.
 func mockToolSummary(batches [][]ToolResult) string {
 	var b strings.Builder

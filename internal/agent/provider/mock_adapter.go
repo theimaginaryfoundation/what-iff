@@ -65,6 +65,8 @@ type MockAdapter struct {
 	appendedBatches [][]ToolResult
 	// continuations records ContinueWith input for test inspection.
 	continuations []string
+	// userNotes records AppendUserNote input (steering) for test inspection.
+	userNotes []string
 	// grown estimates the tokens the conversation has gained since the first call (replies, tool
 	// results, continuations), so reported input grows as a real model's does.
 	grown int64
@@ -152,7 +154,7 @@ func (m *MockAdapter) callDirectives(ctx context.Context, directives []mockDirec
 	if rest == "" {
 		rest = "Done."
 	}
-	resp, err := m.streamText(ctx, rest+mockToolSummary(m.appendedBatches))
+	resp, err := m.streamText(ctx, rest+mockToolSummary(m.appendedBatches)+mockUserNotesSummary(m.userNotes))
 	return resp, nil, err
 }
 

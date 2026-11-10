@@ -50,9 +50,8 @@ func TestTakeSteering_FramesClaimedMessages(t *testing.T) {
 	a := steerTestAgent(store)
 	chatCtx := promptTestChatCtx()
 
-	note := a.takeSteering(context.Background(), chatCtx)
-	assert.Contains(t, note, "sent these 2 messages while you were working")
-	assert.Contains(t, note, "<user_message>\nuse the blue one\n</user_message>")
+	texts := a.takeSteering(context.Background(), chatCtx)
+	assert.Equal(t, []string{"use the blue one", "and hurry"}, texts, "blank messages are dropped")
 	assert.Equal(t, []string{"use the blue one", "and hurry"}, chatCtx.steerNotes)
 	assert.Empty(t, a.takeSteering(context.Background(), chatCtx), "claimed once")
 }
@@ -69,6 +68,37 @@ func TestTakeSteering_OnlyOnInteractiveTurnsAndSurvivesErrors(t *testing.T) {
 	assert.Empty(t, a.takeSteering(context.Background(), promptTestChatCtx()))
 }
 
+func TestSteerUserTurn_TagsTheMessagesAsMidRun(t *testing.T) {
+	turn := steerUserTurn([]string{"use the blue one", "and hurry"})
+	assert.Equal(t, steerMidRunTag+"\n\nuse the blue one\n\nand hurry", turn)
+
+	note := steerToolNote([]string{"use the blue one", "and hurry"})
+	assert.Contains(t, note, "sent these 2 messages mid-run")
+	assert.Contains(t, note, "<user_message>\nuse the blue one\n</user_message>")
+}
+
+// toolOnlyAdapter hides MockAdapter's AppendUserNote, standing in for an adapter without it.
+type toolOnlyAdapter struct{ inner *provider.MockAdapter }
+
+func (t toolOnlyAdapter) Call(ctx context.Context) (*provider.GenerateResponse, []provider.ToolUse, error) {
+	return t.inner.Call(ctx)
+}
+func (t toolOnlyAdapter) AppendToolResults(r []provider.ToolResult) { t.inner.AppendToolResults(r) }
+func (t toolOnlyAdapter) ForceFinalResponse(ctx context.Context) (*provider.GenerateResponse, error) {
+	return t.inner.ForceFinalResponse(ctx)
+}
+func (t toolOnlyAdapter) SetTextDeltaHandler(h func(string)) { t.inner.SetTextDeltaHandler(h) }
+func (t toolOnlyAdapter) WebSearchCompletedCount() int       { return 0 }
+
+func TestAppendToolResultsWithSteering_FallsBackToTheToolResult(t *testing.T) {
+	mock := provider.NewMockAdapter(provider.MockAdapterConfig{Mode: provider.MockModeEcho})
+	appendToolResultsWithSteering(toolOnlyAdapter{mock}, []provider.ToolResult{{ID: "a", Output: "out"}}, []string{"stop after this"})
+	require.Len(t, mock.AppendedBatches(), 1)
+	assert.Contains(t, mock.AppendedBatches()[0][0].Output, "stop after this")
+	assert.Contains(t, mock.AppendedBatches()[0][0].Output, "not from a tool")
+	assert.Empty(t, mock.UserNotes())
+}
+
 func TestWithSteerNote(t *testing.T) {
 	results := []provider.ToolResult{{ID: "a", Output: "first"}, {ID: "b", Output: "second"}}
 	withSteerNote(results, "NOTE")
@@ -77,9 +107,9 @@ func TestWithSteerNote(t *testing.T) {
 	withSteerNote(nil, "NOTE") // no panic
 }
 
-// A follow-up sent mid-round reaches the next call on that round's tool results, while the saved
-// tool call keeps the tool's own output.
-func TestToolRounds_SteeringRidesOnToolResults(t *testing.T) {
+// A follow-up sent mid-round reaches the next call as a user turn of its own, tagged as mid-run,
+// after that round's tool results, which (like the saved tool call) keep the tool's own output.
+func TestToolRounds_SteeringIsAUserTurnAfterTheToolResults(t *testing.T) {
 	store := &queuedSteerStore{queued: []datastore.SteerMessage{{Message: "actually, French please"}}}
 	a := steerTestAgent(store)
 	adapter := provider.NewMockAdapter(provider.MockAdapterConfig{Mode: provider.MockModeScripted, Script: []provider.MockScriptStep{
@@ -94,7 +124,8 @@ func TestToolRounds_SteeringRidesOnToolResults(t *testing.T) {
 	assert.Equal(t, "Voilà.", res.Text)
 	batches := adapter.AppendedBatches()
 	require.Len(t, batches, 1)
-	assert.Contains(t, batches[0][0].Output, "actually, French please")
+	assert.NotContains(t, batches[0][0].Output, "French", "the tool result stays the tool's")
+	require.Equal(t, []string{steerMidRunTag + "\n\nactually, French please"}, adapter.UserNotes())
 	require.Len(t, calls, 1)
 	assert.NotContains(t, calls[0].ToolError+calls[0].ToolOutput, "French", "the saved call keeps the tool's output")
 }

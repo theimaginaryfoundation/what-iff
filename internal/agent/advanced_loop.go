@@ -327,14 +327,14 @@ func (r *advancedRun) loop(ctx context.Context) (*provider.GenerateResponse, err
 			// says, rather than finishing without it. Not when a limit has been reached: the
 			// message then stays queued and runs as the next turn.
 			if r.limitReached(step) == "" && ctx.Err() == nil {
-				if note := r.a.takeSteering(ctx, r.chatCtx); note != "" {
+				if texts := r.a.takeSteering(ctx, r.chatCtx); len(texts) > 0 {
 					r.last = res
 					if r.hooks.transcript != nil {
 						r.lastCall = r.hooks.transcript.currentCall()
 					}
 					r.stalls = 0
 					r.saveDraft()
-					r.adapter.(provider.Continuer).ContinueWith(note)
+					r.adapter.(provider.Continuer).ContinueWith(steerUserTurn(texts))
 					continue
 				}
 			}

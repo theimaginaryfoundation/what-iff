@@ -68,6 +68,8 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 - **Context overflow:** `IsContextOverflowError` (`context_overflow.go`) recognises each provider's "input does not fit the window" refusal, which the Advanced loop recovers from by compacting.
 - **Advanced-loop adapter interfaces (ADR 0x026):** every adapter `runGeneration` drives embeds `usageLog` (optional `UsageReporter.CallUsage`, each call's input/cached/cache-write/output/reasoning tokens, including a call discarded by a truncation retry) and implements `Continuer.ContinueWith`, which records the last final reply in the adapter's history (OpenAI: already server-side via `previous_response_id`) and appends a user turn.
   The local adapter does neither.
+- **`UserNoteAppender` (`user_note.go`, ADR 0x042):** every built-in adapter can add a user turn right after the tool results it just appended (`AppendUserNote`); a follow-up the person sends mid-turn (steering) goes in that way.
+  Claude adds a user message (merged with the tool-result turn), OpenAI Responses a user item after the function outputs, the Chat Completions adapters a user message after the tool messages (the shape `ForceFinalResponse` already sends).
 - **`GenerateResponse`:** Normalized completion type from either provider.
   Carries **`StopReason`** — the provider's own verbatim account of why generation ended (`end_turn`, `max_tokens`, `refusal`, `incomplete`, …), sourced from `Message.StopReason` on Anthropic and from `IncompleteDetails.Reason` (falling back to `Status`) on the Responses API, and from `finish_reason` on the Xiaomi Chat Completions adapter (`length` = truncated).
   The agent's empty-turn guard reads it to surface a clearer truncation message.

@@ -65,32 +65,26 @@ Notes:
 
 const CreateAgentJobToolDescription = `Schedule a future reminder / follow-up / check-in / task for the current user.
 
-This tool schedules exactly ONE job per tool call.
+This tool schedules exactly ONE job per tool call. When it fires, the job runs as a turn in a conversation the user sees, so write its prompt so that turn makes sense to them.
 
 When to use
-Call this tool when BOTH are true:
-
-1) The user refers to a future time (e.g., "in an hour", "tomorrow", "next week", a clock time, or "every day at 7am"), AND
-2) They are asking you to act at that time (remind / ping / message / follow up / check in / ask them something).
-
-Examples that SHOULD trigger this tool (even if "agent job" or "schedule" isn't mentioned):
+Schedule a job whenever one would be useful to the user: when they ask for one, and when it follows naturally from what you're doing together. For example:
 - "Remind me in an hour to stretch."
 - "Send me a message tomorrow about the report."
-- "In two hours, check in whether I've done X."
 - "Every day at 7am, remind me to do Y."
-- "Once a week on Monday, ask me if I finished Z."
+- They say the results come in on Friday: a Friday check-in to go over them.
+- You've started something that needs a look later (a deploy, a long-running task, a reply they're waiting on): a follow-up when it's due.
 
-If the request is vague but clearly about a future reminder (e.g., "remind me about this later", "follow up at some point"), ask the user to pick a time before calling the tool.
+When the user asked for it, schedule it. When it's your idea, or the time, the wording or how often it should run is unclear, ask first: with ask_user when you have it (an approval saying what you'd schedule and when, or a question with the likely times as options), otherwise in your reply. Don't pester: offer a job when it would really help, not after every message.
 
-If the what of the reminder is unclear (e.g., "remind me later about this" with no context), briefly clarify or infer a short summary from recent conversation, and include that in the prompt.
+If the request is clearly about later but has no time (e.g., "remind me about this later"), ask for one, or offer a sensible default.
 
-If the user is only describing plans and not asking you to act later (e.g., "I should do this in an hour", "Tomorrow I'll work on Y"), do NOT schedule unless they confirm they want a reminder.
+If the what is unclear (e.g., "remind me later about this" with no context), infer a short summary from the conversation and put it in the prompt.
 
-If you think a scheduled job would help but the user didn't ask for one, or you're unsure of the time, wording or how often it should run, ask before creating it: with ask_user when you have it (an approval saying what you'd schedule and when, or a question with the likely times as options), otherwise in your reply.
-
-Do NOT use this tool for general planning/scheduling advice (e.g., "Help me plan my week", "What's a good schedule for X?") unless the user then asks for a specific reminder.
-
-Do NOT use this tool for reminders that are only for you or other agents; it is only for reminders sent to the user.
+Be careful with jobs that make jobs:
+- When you are running as a scheduled job yourself, don't create another job unless that job's instructions ask for it (a snooze, a follow-up it was set up to arrange).
+- Never write a job prompt that tells the future run to schedule further jobs; to repeat something, create one recurring job instead of a chain of one-off jobs.
+- Before creating a job, check list (kind="jobs") for one that already covers it, and change that one (update_agent_job) instead of adding a duplicate.
 
 When a reminder you created fires and the user replies with "remind me again in X" or "snooze this to Y", use this tool again to schedule the new reminder.
 

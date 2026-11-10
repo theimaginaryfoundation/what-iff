@@ -75,11 +75,14 @@ Before each model call, the running turn **claims** queued steer jobs in its cha
 A claim is a conditional update that moves the job from pending/processing to cancelled with error code `delivered_to_running_turn`.
 The claimed job's worker sees the cancel (`watchChatJobCancel`) and exits without running a turn.
 
-- **Where the text goes:** mid-step, on the last of the round's tool results.
-  Every provider accepts that, whereas a user message between tool results and the next call is refused by some (Mistral, for one).
+- **Where the text goes:** a **user turn of its own**, right after the round's tool results (`provider.UserNoteAppender`, implemented by every built-in adapter).
+  The person's words stay theirs: not a system message, which would promote their text above the conversation, and not text inside a tool's output.
+  A user message after tool results is already what the Chat Completions adapters send in `ForceFinalResponse`, and Anthropic merges it with the tool-result turn.
+  An adapter without the hook gets the old fallback: the note is folded into the last tool result, framed as coming from the user.
   When an Advanced step ends with an answer, the follow-up becomes a continuation and the run goes on, even if its plan was done.
-  The text is framed as coming from the user, not from a tool.
   It is also kept in `chatContext.steerNotes` so a compacted run's work log still has it.
+- **Tagged as mid-run:** the turn starts with `[Sent mid-run, while you were still working on my request]`, so the model reads it as the user adding to (or changing) the request it is working on, not as a new request after a finished one.
+- **A Standard turn's final answer:** when the model is already writing its final answer with no further tool call, the follow-up isn't forced in. The turn is functionally done, so the message runs as the next turn (decided with Gori).
 - **Nothing is lost:** a message the running turn never reaches (a Standard turn's final answer, a limit, the run ending first) is still a queued turn and runs next. The claim is conditional, so a message is either taken in or answered by its own turn, never both.
 - **Client:** while the person's own turn generates, Enter and Send still work, but only for text. Attachments and slash commands wait, because the running turn cannot take files.
   The message is posted with `steer: true` and the running turn stays the one followed.
@@ -140,7 +143,8 @@ Mock turns now also offer the turn-only tools and the chat's MCP tools (a chat w
 - **End the turn to ask (no blocking).** It is durable and holds no worker, but mid-run approvals become impossible, and MCP elicitation must be answered inside the tool call anyway. The timeout keeps the blocking bounded.
 - **Store answers on the job row.** A JSON column on `job` would save a table, but prompts need a conditional answer, an expiry and a history across a turn's several prompts; a row each is simpler to reason about.
 - **Steering as a separate endpoint and table.** A queue of notes on the running job would need its own fallback for notes the turn never reaches. Reusing the message and turn-gate queue makes that fallback free, and the follow-up shows in the thread as the message it is.
-- **A real user message for steering.** Appending a user turn after tool results is cleaner for Anthropic and OpenAI, but some Chat Completions providers refuse `tool → user`. A per-adapter `AppendUserNote` can replace the tool-result fold later.
+- **Folding the follow-up into the last tool result.** It was the first version: accepted by every provider, but it put the person's words inside a tool's output. A user turn of its own reads right to the model and is already a shape every adapter sends, so the fold is only the fallback.
+- **A system message for the follow-up.** It would raise the person's text above the conversation (a prompt-injection shape), and Anthropic takes no system messages mid-conversation.
 - **Render MCP Apps on a separate sandbox origin now.** It is the spec's recommendation and the right end state, but it needs a second origin with its own deploy (overlay infra). The opaque-origin sandbox is safe for the host and good enough to start.
 
 ## Consequences
