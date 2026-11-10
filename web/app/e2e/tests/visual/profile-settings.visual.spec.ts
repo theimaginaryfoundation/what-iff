@@ -84,6 +84,7 @@ test(
       if (active instanceof HTMLElement) active.blur();
     });
 
-    await expect(section).toHaveScreenshot('profile-settings-background-models.png', { animations: 'disabled' });
+    // The section can show page chrome at its edge, the sidebar's per-account button included.
+    await expect(section).toHaveScreenshot('profile-settings-background-models.png', { animations: 'disabled', mask: commonMasks(page) });
   },
 );
