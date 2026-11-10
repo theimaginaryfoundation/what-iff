@@ -78,6 +78,7 @@ export class PdfEditorComponent implements FileEditor {
   private generation = 0;
 
   private lastContent: Blob | null = null;
+  private readonly savedState = new WeakMap<Blob, string>();
 
   constructor() {
     afterNextRender(() => {
@@ -97,14 +98,25 @@ export class PdfEditorComponent implements FileEditor {
 
   async content(): Promise<Blob> {
     if (!this.doc) return this.blob();
+    const state = this.annotationState();
     const bytes = await this.doc.saveDocument();
     this.lastContent = new Blob([bytes as BlobPart], { type: 'application/pdf' });
+    this.savedState.set(this.lastContent, state);
     return this.lastContent;
   }
 
-  markSaved(): void {
+  markSaved(saved?: Blob): void {
+    // An annotation made while the save was running is not in the saved bytes, so it stays unsaved.
+    const state = saved && this.savedState.get(saved);
+    if (state !== undefined && state !== this.annotationState()) return this.setDirty(true);
     this.doc?.annotationStorage.resetModified();
     this.setDirty(false);
+  }
+
+  /** A fingerprint of the annotations, which pdf.js computes for its own change tracking. */
+  private annotationState(): string {
+    const storage = this.doc?.annotationStorage as unknown as { serializable?: { hash?: string } } | undefined;
+    return storage?.serializable?.hash ?? '';
   }
 
   setTool(tool: PdfTool): void {

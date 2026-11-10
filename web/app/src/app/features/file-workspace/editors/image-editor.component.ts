@@ -137,8 +137,12 @@ export class ImageEditorComponent implements FileEditor {
     const { imageData, hideLoadingSpinner } = this.editor.getCurrentImgData({ name: baseName(this.file().name), extension, quality: 0.92 }, 1);
     hideLoadingSpinner?.();
     if (imageData.imageCanvas) {
-      const blob = await new Promise<Blob | null>(resolve => imageData.imageCanvas!.toBlob(resolve, type, 0.92));
-      if (blob) return blob;
+      // The canonical name: browsers do not know image/jpg, and fall back to PNG for any type they
+      // cannot encode (WebP on Safari), which would store PNG bytes under the file's type.
+      const wanted = `image/${extension}`;
+      const blob = await new Promise<Blob | null>(resolve => imageData.imageCanvas!.toBlob(resolve, wanted, 0.92));
+      if (blob && blob.type !== wanted) throw new Error(`This browser cannot write ${extension.toUpperCase()} images. Use Save as with another format, or download it.`);
+      if (blob) return new Blob([blob], { type });
     }
     if (!imageData.imageBase64) throw new Error('the editor produced no image');
     const response = await fetch(imageData.imageBase64);

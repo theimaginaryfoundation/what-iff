@@ -9,7 +9,7 @@ const file: FileAttachment = { id: 'f-1', user_id: 'u', name: 'report.pdf', file
 
 function fakes() {
   const state = {
-    storage: { onSetModified: null as null | (() => void), onResetModified: null as null | (() => void), resets: 0 },
+    storage: { hash: '', onSetModified: null as null | (() => void), onResetModified: null as null | (() => void), resets: 0 },
     saved: 0,
     destroyed: 0,
     modes: [] as number[],
@@ -20,6 +20,9 @@ function fakes() {
   const doc = {
     numPages: 2,
     annotationStorage: {
+      get serializable() {
+        return { hash: state.storage.hash };
+      },
       set onSetModified(fn: (() => void) | null) {
         state.storage.onSetModified = fn;
       },
@@ -133,6 +136,16 @@ describe('PdfEditorComponent', () => {
     expect(fake.state.storage.resets).toBe(1);
     expect(fixture.componentInstance.dirty()).toBe(false);
     expect(dirty).toEqual([true, false]);
+  });
+
+  it('stays dirty for an annotation made while a save was running', async () => {
+    fake.state.storage.onSetModified!();
+    fake.state.storage.hash = 'a';
+    const saved = await fixture.componentInstance.content();
+    fake.state.storage.hash = 'b';
+    fixture.componentInstance.markSaved(saved);
+    expect(fixture.componentInstance.dirty()).toBe(true);
+    expect(fake.state.storage.resets).toBe(0);
   });
 
   it('closes the document on destroy', () => {

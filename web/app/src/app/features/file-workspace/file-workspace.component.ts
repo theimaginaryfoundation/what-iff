@@ -141,7 +141,7 @@ export class FileWorkspaceComponent {
 
   // Editing (ADR 0x043 §3).
   readonly mode = signal<'view' | 'edit'>('view');
-  readonly editable = computed(() => this.canEdit() && hasEditor(this.kind()) && this.state() === 'ready');
+  readonly editable = computed(() => this.canEdit() && hasEditor(this.kind(), this.file().file_type) && this.state() === 'ready');
   readonly editorDirty = signal(false);
   readonly saving = signal(false);
   readonly saveError = signal<string | null>(null);
@@ -355,7 +355,13 @@ export class FileWorkspaceComponent {
       }
       folder = normalizeFolderPath(rawFolder) ?? '';
     }
-    const content = this.editorRef ? await this.editorRef.instance.content() : this.blob();
+    let content: Blob | null;
+    try {
+      content = this.editorRef ? await this.editorRef.instance.content() : this.blob();
+    } catch (error) {
+      this.saveAsError.set(error instanceof Error ? error.message : 'This file could not be prepared for saving.');
+      return;
+    }
     if (!content) return;
     this.saveAsOpen.set(false);
     this.saveAs.emit({ name, folder, blob: content });
