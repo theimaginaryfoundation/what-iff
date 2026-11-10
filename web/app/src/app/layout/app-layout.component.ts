@@ -29,6 +29,8 @@ import { CommandPaletteService } from '../core/services/command-palette.service'
 import { KeyboardShortcutService, ShortcutHandle } from '../core/services/keyboard-shortcut.service';
 import { NavService } from '../core/services/nav.service';
 import { RightPanelService } from '../core/services/right-panel.service';
+import { FileWorkspacePanelComponent } from '../features/file-workspace/file-workspace-panel.component';
+import { FileWorkspaceService } from '../features/file-workspace/file-workspace.service';
 import { SearchApiService } from '../core/services/search-api.service';
 import { ThemeService } from '../core/services/theme.service';
 import { GeneratePersonalityModalService } from '../core/services/generate-personality-modal.service';
@@ -71,6 +73,7 @@ import {
   selector: 'app-layout',
   standalone: true,
   imports: [
+    FileWorkspacePanelComponent,
     AppSidebarComponent,
     CommandPaletteComponent,
     ContextPanelComponent,
@@ -117,6 +120,7 @@ export class AppLayoutComponent implements OnInit, OnDestroy {
   /** Path (no query or fragment) of the last completed navigation; see closeMobileSidebarOnPathChange. */
   private lastPath = AppLayoutComponent.pathOf(this.router.url);
   readonly rightPanelService = inject(RightPanelService);
+  readonly workspace = inject(FileWorkspaceService);
   readonly rightPanelContext = inject(ContextPanelService);
   private readonly document = inject(DOCUMENT);
   private readonly mobileMenu = viewChild<ElementRef<HTMLButtonElement>>('mobileMenu');

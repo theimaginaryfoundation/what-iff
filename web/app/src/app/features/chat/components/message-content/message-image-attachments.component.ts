@@ -1,10 +1,12 @@
-import { CommonModule, DOCUMENT } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
 
 import { FileAttachment } from '../../../../core/models/file-attachment.model';
 import { AuthImagePipe } from '../../../../core/pipes/auth-image.pipe';
 import { ImageGalleryService } from '../../../../core/services/image-gallery.service';
+import { saveBlobAsFile } from '../../../../core/utils/download.helpers';
+import { FileWorkspaceService } from '../../../file-workspace/file-workspace.service';
 import { ImageIconComponent } from '../../../../shared/ui/icons/icons';
 
 @Component({
@@ -15,11 +17,11 @@ import { ImageIconComponent } from '../../../../shared/ui/icons/icons';
     <div class="message-images" [class.message-images--full]="size() === 'full'" aria-label="Message images">
       @for (attachment of attachments(); track attachment.id) {
         <figure class="message-images__card">
-          <div class="message-images__preview">
+          <button type="button" class="message-images__preview" [attr.aria-label]="'Open ' + attachment.name" (click)="open(attachment)">
             @if (previewUrl(attachment) | authImage | async; as src) {
               <img [src]="src" [alt]="attachment.name" loading="lazy" />
             }
-          </div>
+          </button>
           <figcaption class="message-images__footer">
             <span class="message-images__name">
               <ui-image-icon [size]="14" />
@@ -52,11 +54,15 @@ import { ImageIconComponent } from '../../../../shared/ui/icons/icons';
     .message-images__preview {
       align-items: center;
       background: var(--color-surface-muted);
+      border: 0;
+      cursor: zoom-in;
       display: flex;
       justify-content: center;
       max-height: 18rem;
       min-height: 8rem;
       overflow: hidden;
+      padding: 0;
+      width: 100%;
     }
 
     .message-images__preview img {
@@ -126,22 +132,20 @@ export class MessageImageAttachmentsComponent {
    */
   readonly size = input<'thumbnail' | 'full'>('thumbnail');
 
-  private readonly document = inject(DOCUMENT);
   private readonly http = inject(HttpClient);
   private readonly imageGallery = inject(ImageGalleryService);
+  private readonly workspace = inject(FileWorkspaceService);
 
   previewUrl(attachment: FileAttachment): string {
     return this.imageGallery.getImageUrl(attachment.id, this.size());
   }
 
+  /** Opens the image in the workspace beside the thread (ADR 0x043 §5). */
+  open(attachment: FileAttachment): void {
+    this.workspace.requestOpen(attachment.id);
+  }
+
   download(attachment: FileAttachment): void {
-    this.http.get(this.imageGallery.getImageUrl(attachment.id, 'full'), { responseType: 'blob' }).subscribe(blob => {
-      const url = URL.createObjectURL(blob);
-      const anchor = this.document.createElement('a');
-      anchor.href = url;
-      anchor.download = attachment.name || `image-${attachment.id}`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-    });
+    this.http.get(this.imageGallery.getImageUrl(attachment.id, 'full'), { responseType: 'blob' }).subscribe(blob => saveBlobAsFile(blob, attachment.name || `image-${attachment.id}`));
   }
 }

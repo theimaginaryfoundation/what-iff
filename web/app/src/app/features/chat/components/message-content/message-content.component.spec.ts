@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { SecurityContext, provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
+import { Router, provideRouter } from '@angular/router';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { MARKED_EXTENSIONS, SANITIZE, provideMarkdown } from 'ngx-markdown';
 
@@ -16,6 +17,7 @@ describe('MessageContentComponent', () => {
             imports: [MessageContentComponent],
             providers: [
                 provideZonelessChangeDetection(),
+                provideRouter([]),
                 provideHttpClient(withXhr()),
                 provideHttpClientTesting(),
                 provideMarkdown({
@@ -125,6 +127,19 @@ describe('MessageContentComponent', () => {
         expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:download');
     });
 
+    it('opens a non-image attachment in the file workspace from the pill', () => {
+        const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+        fixture.componentRef.setInput('attachments', [fileAttachment('doc-1', 'notes.txt', 'text/plain')]);
+        fixture.detectChanges();
+
+        const pill = fixture.nativeElement.querySelector('[data-testid="message-attachment"]') as HTMLElement;
+        expect(pill.querySelector('button.message-attachment__open')?.textContent?.trim()).toBe('notes.txt');
+        (pill.querySelector('button.message-attachment__open') as HTMLButtonElement).click();
+
+        expect(navigate).toHaveBeenCalledWith([], { queryParams: { file: 'doc-1' }, queryParamsHandling: 'merge', replaceUrl: false });
+        httpMock.expectNone(req => req.urlWithParams.includes('/file-attachment/doc-1'));
+    });
+
     it('downloads a non-image attachment from the pill click', () => {
         vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:file-download');
         vi.spyOn(URL, 'revokeObjectURL').mockReturnValue(undefined);
@@ -139,7 +154,7 @@ describe('MessageContentComponent', () => {
         fixture.componentRef.setInput('attachments', [fileAttachment('doc-1', 'notes.txt', 'text/plain')]);
         fixture.detectChanges();
 
-        const button = fixture.nativeElement.querySelector('button.rounded-full') as HTMLButtonElement;
+        const button = fixture.nativeElement.querySelector('button.message-attachment__download') as HTMLButtonElement;
         button.click();
 
         httpMock.expectOne(req => req.urlWithParams.includes('/file-attachment/doc-1'))

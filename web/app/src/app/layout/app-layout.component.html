@@ -37,10 +37,15 @@
     }
     <router-outlet />
   </main>
-  @if (showRightPanel() && rightPanelService.visible()) {
-    <app-right-panel-host class="app-layout__right-panel" />
+  @if (showRightPanel() && (rightPanelService.visible() || workspace.dockedOpen())) {
+    <app-right-panel-host class="app-layout__right-panel" [class.app-layout__right-panel--workspace]="workspace.dockedOpen()" />
   }
 </div>
+@if (showMobileSheet() && workspace.floatingOpen()) {
+  @defer (on immediate) {
+    <app-file-workspace-panel />
+  }
+}
 <app-command-palette />
 <app-profile-settings-modal-host />
 <app-provider-key-prompt />

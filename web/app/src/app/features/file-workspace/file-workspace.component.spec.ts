@@ -1,52 +1,47 @@
+import { Component, input, provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
-import { MARKED_EXTENSIONS, provideMarkdown } from 'ngx-markdown';
 import { NEVER, of, Subject, throwError } from 'rxjs';
 
-import { FileAttachment } from '../../../core/models/file-attachment.model';
-import { ConfirmationService } from '../../../core/services/confirmation.service';
-import { FileAttachmentService } from '../../../core/services/file-attachment.service';
-import { latexMathExtension } from '../../../core/utils/latex-math.helpers';
-import { FileViewerComponent } from './file-viewer.component';
+import { FileAttachment } from '../../core/models/file-attachment.model';
+import { ConfirmationService } from '../../core/services/confirmation.service';
+import { FileAttachmentService } from '../../core/services/file-attachment.service';
+import { FileWorkspaceComponent } from './file-workspace.component';
+import { VIEWER_LOADER } from './viewers/registry';
 
-function file(overrides: Partial<FileAttachment> = {}): FileAttachment {
-  return {
-    id: 'f-1',
-    user_id: 'u-1',
-    name: 'notes.txt',
-    file_type: 'text/plain',
-    created_at: '2026-05-01T00:00:00Z',
-    ...overrides,
-  };
+@Component({ standalone: true, template: `<p class="fake-viewer">{{ file().name }}:{{ blob().size }}</p>` })
+class FakeViewerComponent {
+  readonly file = input.required<FileAttachment>();
+  readonly blob = input.required<Blob>();
 }
 
-const textBlob = (text: string, type = 'text/plain') => new Blob([text], { type });
+function file(overrides: Partial<FileAttachment> = {}): FileAttachment {
+  return { id: 'f-1', user_id: 'u-1', name: 'notes.txt', file_type: 'text/plain', created_at: '2026-05-01T00:00:00Z', ...overrides };
+}
 
-describe('FileViewerComponent', () => {
-  let fixture: ComponentFixture<FileViewerComponent>;
+const textBlob = (text: string) => new Blob([text], { type: 'text/plain' });
+
+describe('FileWorkspaceComponent', () => {
+  let fixture: ComponentFixture<FileWorkspaceComponent>;
   let download: ReturnType<typeof vi.fn>;
   let alert: ReturnType<typeof vi.fn>;
+  let loadViewer: ReturnType<typeof vi.fn<(kind: string) => Promise<unknown> | null>>;
 
   beforeEach(async () => {
     download = vi.fn().mockReturnValue(of(textBlob('hello')));
     alert = vi.fn().mockResolvedValue(undefined);
-    globalThis.URL.createObjectURL ??= () => '';
-    globalThis.URL.revokeObjectURL ??= () => undefined;
-    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:viewer');
-    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
-
+    loadViewer = vi.fn((kind: string) => (kind === 'none' ? null : Promise.resolve(FakeViewerComponent)));
     await TestBed.configureTestingModule({
-      imports: [FileViewerComponent],
+      imports: [FileWorkspaceComponent],
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
-        provideMarkdown({ markedExtensions: [{ provide: MARKED_EXTENSIONS, useFactory: latexMathExtension, multi: true }] }),
         { provide: FileAttachmentService, useValue: { downloadFileAttachment: download } },
         { provide: ConfirmationService, useValue: { alert } },
+        { provide: VIEWER_LOADER, useValue: (kind: string) => loadViewer(kind) },
       ],
     }).compileComponents();
-    fixture = TestBed.createComponent(FileViewerComponent);
+    fixture = TestBed.createComponent(FileWorkspaceComponent);
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -55,14 +50,13 @@ describe('FileViewerComponent', () => {
     fixture.componentRef.setInput('file', value);
     fixture.detectChanges();
     await fixture.whenStable();
-    // The text is decoded after an await on the blob; give it a turn, then render.
     await new Promise(resolve => setTimeout(resolve));
     fixture.detectChanges();
     await fixture.whenStable();
     return fixture.nativeElement as HTMLElement;
   }
 
-  /** Names the viewer saved files as, by watching the temporary download link it clicks. */
+  /** Names the workspace saved files as, by watching the temporary download link it clicks. */
   function watchSaves(): string[] {
     const saved: string[] = [];
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
@@ -74,80 +68,36 @@ describe('FileViewerComponent', () => {
   const button = (el: HTMLElement, label: string) =>
     [...el.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 
-  it('shows a text file as text, never as markup', async () => {
-    download.mockReturnValue(of(textBlob('<b>bold?</b>\nline two')));
-    const el = await show(file({ name: 'page.html', file_type: 'text/html' }));
+  it('shows an error, instead of loading forever, when the viewer cannot be loaded', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    loadViewer.mockReturnValueOnce(Promise.reject(new Error('stale chunk')));
+    await show(file());
+    expect(fixture.componentInstance.state()).toBe('error');
+  });
 
+  it('fetches the bytes once and hands them with the file to the viewer for its kind', async () => {
+    const el = await show(file());
     expect(download).toHaveBeenCalledWith('f-1');
-    const pre = el.querySelector('pre.file-viewer__text');
-    expect(pre?.textContent).toBe('<b>bold?</b>\nline two');
-    expect(el.querySelector('b')).toBeNull();
-  });
-
-  it('renders Markdown, with the raw text a click away', async () => {
-    download.mockReturnValue(of(textBlob('# Title\n\nSome *text*.')));
-    const el = await show(file({ name: 'notes.md', file_type: 'text/markdown' }));
-
-    expect(el.querySelector('markdown')).not.toBeNull();
-    expect(el.querySelector('pre.file-viewer__text')).toBeNull();
-
-    button(el, 'Raw')!.click();
-    fixture.detectChanges();
-    expect(el.querySelector('markdown')).toBeNull();
-    expect(el.querySelector('pre.file-viewer__text')?.textContent).toBe('# Title\n\nSome *text*.');
-  });
-
-  it('renders LaTeX math in Markdown', async () => {
-    download.mockReturnValue(of(textBlob('Norm: $\\lVert x \\rVert$\n\n$$\nx_i^2\n$$')));
-    const el = await show(file({ name: 'notes.md', file_type: 'text/markdown' }));
-
-    await vi.waitFor(() => expect(el.querySelectorAll('.katex')).toHaveLength(2));
-    expect(el.querySelectorAll('.katex-display')).toHaveLength(1);
-  });
-
-  it('shows a CSV as a table with its header row', async () => {
-    download.mockReturnValue(of(textBlob('name,score\nAda,"9,5"\n')));
-    const el = await show(file({ name: 'scores.csv', file_type: 'text/csv' }));
-
-    const headers = [...el.querySelectorAll('th')].map(th => th.textContent);
-    const cells = [...el.querySelectorAll('td')].map(td => td.textContent);
-    expect(headers).toEqual(['name', 'score']);
-    expect(cells).toEqual(['Ada', '9,5']);
-  });
-
-  it('shows a PDF in the browser viewer from a PDF-typed object URL', async () => {
-    download.mockReturnValue(of(new Blob(['%PDF-1.7'], { type: 'application/octet-stream' })));
-    const el = await show(file({ name: 'report.pdf', file_type: 'application/pdf' }));
-
-    if (!fixture.componentInstance.pdfInline) {
-      expect(button(el, 'Download')).toBeDefined();
-      return;
-    }
-    const blob = vi.mocked(URL.createObjectURL).mock.lastCall?.[0] as Blob;
-    expect(blob.type).toBe('application/pdf');
-    expect(el.querySelector('iframe.file-viewer__frame')).not.toBeNull();
+    expect(loadViewer).toHaveBeenCalledWith('text');
+    expect(el.querySelector('.fake-viewer')?.textContent).toBe('notes.txt:5');
   });
 
   it('offers a download, without fetching, for a file it cannot show', async () => {
     const saved = watchSaves();
     download.mockReturnValue(of(new Blob(['PK'])));
-    const el = await show(file({ name: 'letter.docx', file_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }));
-
+    const el = await show(file({ name: 'bundle.zip', file_type: 'application/zip' }));
     expect(download).not.toHaveBeenCalled();
     expect(el.textContent).toContain('There is no preview for this kind of file.');
-
     button(el, 'Download')!.click();
     expect(download).toHaveBeenCalledWith('f-1');
-    expect(saved).toEqual(['letter.docx']);
+    expect(saved).toEqual(['bundle.zip']);
   });
 
   it('downloads the bytes it already has instead of fetching them again', async () => {
     const saved = watchSaves();
     const el = await show(file());
     download.mockClear();
-
     (el.querySelector('button[aria-label="Download file"]') as HTMLButtonElement).click();
-
     expect(download).not.toHaveBeenCalled();
     expect(saved).toEqual(['notes.txt']);
   });
@@ -157,21 +107,12 @@ describe('FileViewerComponent', () => {
     const saved = watchSaves();
     await show(file({ name: 'bundle.zip', file_type: 'application/zip' }));
     download.mockReturnValue(pending);
-
     fixture.componentInstance.download();
     fixture.componentInstance.download();
     expect(download).toHaveBeenCalledTimes(1);
-
     pending.next(new Blob(['PK']));
     expect(saved).toEqual(['bundle.zip']);
     expect(fixture.componentInstance.downloading()).toBe(false);
-  });
-
-  it('says so when a "text" file is really binary', async () => {
-    download.mockReturnValue(of(new Blob([new Uint8Array([0x00, 0x01, 0x02, 0x00])])));
-    const el = await show(file({ name: 'data.json', file_type: 'application/json' }));
-    expect(el.textContent).toContain('does not look like text');
-    expect(el.querySelector('pre.file-viewer__text')).toBeNull();
   });
 
   it('reports a failed load and still offers the download', async () => {
@@ -194,24 +135,21 @@ describe('FileViewerComponent', () => {
     fixture.componentRef.setInput('file', file({ id: 'first' }));
     fixture.detectChanges();
     const el = await show(file({ id: 'second' }));
-
-    slow.next(textBlob('first'));
+    slow.next(textBlob('first!'));
     await new Promise(resolve => setTimeout(resolve));
     fixture.detectChanges();
-    expect(el.querySelector('pre.file-viewer__text')?.textContent).toBe('second');
+    expect(el.querySelector('.fake-viewer')?.textContent).toBe('notes.txt:6');
   });
 
   it('renames keeping the extension, and emits nothing for an unchanged name', async () => {
     const renamed = vi.fn();
     fixture.componentInstance.rename.subscribe(renamed);
     await show(file({ name: 'notes.txt' }));
-
     fixture.componentInstance.startRename();
     expect(fixture.componentInstance.renameDraft()).toBe('notes');
     fixture.componentInstance.renameDraft.set('journal');
     fixture.componentInstance.submitRename();
     expect(renamed).toHaveBeenCalledWith({ id: 'f-1', name: 'journal.txt' });
-
     renamed.mockClear();
     fixture.componentInstance.startRename();
     fixture.componentInstance.submitRename();
@@ -222,6 +160,30 @@ describe('FileViewerComponent', () => {
     download.mockReturnValue(NEVER);
     fixture.componentRef.setInput('personalityName', 'Aster');
     const el = await show(file({ personality_id: 'p-1', source: 'imported' }));
-    expect(el.querySelector('.file-viewer__meta')?.textContent).toContain('Document of Aster');
+    expect(el.querySelector('.file-workspace__meta')?.textContent).toContain('Document of Aster');
+  });
+
+  it('shows the host-specific controls it is asked for', async () => {
+    download.mockReturnValue(NEVER);
+    fixture.componentRef.setInput('backLabel', 'Gallery');
+    fixture.componentRef.setInput('showNavigation', true);
+    fixture.componentRef.setInput('showMove', true);
+    let el = await show(file());
+    expect(el.querySelector('.file-workspace__back')?.textContent).toContain('Gallery');
+    expect(el.querySelector('button[aria-label="Close file"]')).toBeNull();
+    expect(button(el, 'Prev')).toBeDefined();
+    expect(button(el, 'Move to…')).toBeDefined();
+
+    fixture.componentRef.setInput('backLabel', null);
+    fixture.componentRef.setInput('showNavigation', false);
+    fixture.componentRef.setInput('showMove', false);
+    fixture.componentRef.setInput('expandable', true);
+    fixture.componentRef.setInput('showGalleryLink', true);
+    el = await show(file({ chat_id: 'c-1' }));
+    expect(el.querySelector('.file-workspace__back')).toBeNull();
+    expect(el.querySelector('button[aria-label="Close file"]')).not.toBeNull();
+    expect(el.querySelector('button[aria-label="Expand file"]')).not.toBeNull();
+    expect(button(el, 'Prev')).toBeUndefined();
+    expect(el.querySelector('a.file-workspace__link')?.textContent).toContain('Open in gallery');
   });
 });
