@@ -53,7 +53,8 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
   }
 
   protected async serialize(data: DocDocument): Promise<Blob> {
-    const { bytes } = await documentToDocx(data, this.original ?? undefined);
+    const { bytes, report } = await documentToDocx(data, this.original ?? undefined);
+    this.exportReport.set(report);
     return new Blob([bytes as BlobPart], { type: DOCX_MIME });
   }
 }

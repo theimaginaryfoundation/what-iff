@@ -213,7 +213,7 @@ export async function packageToDocument(pkg: OoxmlPackage, opts: DocxImportOptio
     body.sectionBreaks!.push({ sectionId: nextId('s'), ...section.setup, startIndex: at });
   }
   body.sectionBreaks!.sort((a, b) => a.startIndex - b.startIndex);
-  if (sectionSetups.length) fidelity.warn('Multiple sections flattened to the last page setup');
+  if (sectionSetups.length) fidelity.drop('Section page setups (all pages take the last one)');
 
   Object.assign(tableSource, builder.tableSource);
   Object.assign(drawings, builder.drawings);

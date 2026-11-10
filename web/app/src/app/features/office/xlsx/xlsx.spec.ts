@@ -400,6 +400,10 @@ describe('delimitedTextToWorkbook', () => {
 });
 
 describe('parseDelimited', () => {
+  it('treats a quote inside an unquoted field as a character, so rows do not merge', () => {
+    expect(parseDelimited('1,5" screen\n2,7" tab\n', ',')).toEqual([['1', '5" screen'], ['2', '7" tab']]);
+  });
+
   it('handles LF rows, quotes and tabs', () => {
     expect(parseDelimited('a\tb\n"c\td"\te\n', '\t')).toEqual([
       ['a', 'b'],

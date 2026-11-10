@@ -1,3 +1,4 @@
+import { savedLinkUrl } from '../shared/safe-link';
 import { FidelityCollector, FidelityReport } from '../shared/fidelity';
 import {
   NS,
@@ -129,16 +130,19 @@ class DocxWriter {
     this.noteWordIds = wordNoteIds(Object.keys(this.doc.notes ?? {}));
     if (this.source) {
       for (const part of [...Object.values(this.doc.headers ?? {}), ...Object.values(this.doc.footers ?? {})]) {
-        if (part.docxPath && this.source.pkg.has(part.docxPath))
+        if (part.docxPath && this.source.pkg.has(part.docxPath)) {
           this.preloadedRels.set(part.docxPath, await this.source.partRels(part.docxPath));
+          this.preloadedXml.set(part.docxPath, await this.source.pkg.text(part.docxPath));
+        }
       }
     }
     const sectPr = this.sectPrXml(this.doc.documentStyle, (kind, id) => this.headerFooterPart(pkg, docRels, addRel, kind, id));
     const bodyXml = this.bodyXml(this.doc.body, this.doc, pkg, docRels, addRel, mainPath, sectPr);
+    const mainRoot = rootNamespaces(this.source ? await this.source.pkg.text(mainPath) : null);
     pkg.put(
       mainPath,
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-        `<w:document ${NAMESPACES}><w:body>${bodyXml}${sectPr}</w:body></w:document>`,
+        `<w:document ${mainRoot}><w:body>${bodyXml}${sectPr}</w:body></w:document>`,
     );
     await this.notesParts(pkg, docRels, addRel, mainPath);
     if (this.source) {
@@ -274,7 +278,8 @@ class DocxWriter {
     };
     const xml = this.bodyXml(source.body, scope, pkg, partRels, addRel, path);
     const tag = kind === 'header' ? 'w:hdr' : 'w:ftr';
-    pkg.put(path, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><${tag} ${NAMESPACES}>${xml}</${tag}>`);
+    const root = rootNamespaces(this.preloadedXml.get(path));
+    pkg.put(path, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><${tag} ${root}>${xml}</${tag}>`);
     if (partRels.entries.length) pkg.put(`${dirOf(path)}_rels/${baseOf(path)}.rels`, relsXml(partRels));
     if (!this.source?.hasOverride(`/${path}`))
       this.overrides.push({
@@ -286,6 +291,8 @@ class DocxWriter {
 
   /** Header and footer rels were read ahead of time (sectPrXml is synchronous). */
   private readonly preloadedRels = new Map<string, PartRels>();
+  /** The original header and footer parts, for their root namespaces. */
+  private readonly preloadedXml = new Map<string, string | null>();
   private partRelsSync(path: string): PartRels {
     return this.preloadedRels.get(path) ?? { entries: [], next: 1 };
   }
@@ -508,7 +515,7 @@ class DocxWriter {
         emitText(i, rangeEnd, runXml);
         inner.push(...out.splice(saved));
         if (range.rangeType === CUSTOM_RANGE.HYPERLINK) {
-          const url = String(range.properties?.['url'] ?? '');
+          const url = savedLinkUrl(range.properties);
           const tooltip = range.properties?.['tooltip'] ? ` w:tooltip="${escapeXml(String(range.properties['tooltip']))}"` : '';
           if (url.startsWith('#')) out.push(`<w:hyperlink w:anchor="${escapeXml(url.slice(1))}"${tooltip}>${inner.join('')}</w:hyperlink>`);
           else {
@@ -923,6 +930,19 @@ function splitTop(xml: string): { name: string; xml: string }[] {
 }
 
 const NAMESPACES = `xmlns:w="${NS.w}" xmlns:r="${NS.r}" xmlns:wp="${NS.wp}" xmlns:a="${NS.a}" xmlns:pic="${NS.pic}" xmlns:mc="${NS.mc}" xmlns:v="${NS.v}"`;
+
+/**
+ * The root element's namespace declarations: ours, plus every one the original part declared and
+ * its mc:Ignorable list. Kept content (text boxes as mc:Choice Requires="wps", w14 attributes)
+ * names those prefixes, and Markup Compatibility requires them declared on the root.
+ */
+export function rootNamespaces(originalXml: string | null | undefined): string {
+  const attrs = new Map<string, string>();
+  const start = originalXml ? /<(?:\w+:)?(?:document|hdr|ftr)\b([^>]*)>/.exec(originalXml)?.[1] ?? '' : '';
+  for (const m of start.matchAll(/\s(xmlns:\w+|mc:Ignorable)="([^"]*)"/g)) attrs.set(m[1], m[2]);
+  for (const m of NAMESPACES.matchAll(/(xmlns:\w+)="([^"]*)"/g)) attrs.set(m[1], m[2]);
+  return [...attrs].map(([name, value]) => `${name}="${escapeXml(value)}"`).join(' ');
+}
 
 function cellBorderXml(name: string, b: DocTableCellBorder | undefined): string {
   if (!b) return '';

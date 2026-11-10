@@ -1,4 +1,4 @@
-import { safeLinkUrl } from '../shared/safe-link';
+import { linkProperties } from '../shared/safe-link';
 import ExcelJS from 'exceljs';
 
 import { cellA1, parseRangeA1, parseSqref } from '../shared/a1';
@@ -357,8 +357,7 @@ function importCell(
   if (typeof raw === 'object' && raw !== null && 'hyperlink' in raw) {
     const link = raw as ExcelJS.CellHyperlinkValue;
     const text = typeof link.text === 'string' ? link.text : String(link.text ?? link.hyperlink);
-    const url = safeLinkUrl(link.hyperlink);
-    if (url) out.p = hyperlinkDoc(row, col, text, url, link.tooltip);
+    if (link.hyperlink) out.p = hyperlinkDoc(row, col, text, link.hyperlink, link.tooltip);
     out.v = text;
     out.t = 1;
     return out;
@@ -420,7 +419,7 @@ function richTextDoc(row: number, col: number, runs: { text: string; style: Univ
 function hyperlinkDoc(row: number, col: number, text: string, url: string, tooltip?: string): UniverCellDoc {
   const doc = cellDoc(row, col, text, []);
   doc.body.customRanges = [
-    { startIndex: 0, endIndex: Math.max(0, text.length - 1), rangeId: `link-${row}-${col}`, rangeType: 0, properties: { url, tooltip } },
+    { startIndex: 0, endIndex: Math.max(0, text.length - 1), rangeId: `link-${row}-${col}`, rangeType: 0, properties: { ...linkProperties(url), tooltip } },
   ];
   return doc;
 }
@@ -817,7 +816,8 @@ export function parseDelimited(text: string, delimiter: string): string[][] {
       } else field += ch;
       continue;
     }
-    if (ch === '"') quoted = true;
+    // A quote opens a quoted field only at its start; elsewhere (5" screen) it is just a character.
+    if (ch === '"' && field === '') quoted = true;
     else if (ch === delimiter) {
       row.push(field);
       field = '';

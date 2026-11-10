@@ -87,9 +87,11 @@ export class SlidesEditorComponent implements FileEditor {
   readonly state = signal<'loading' | 'ready' | 'error'>('loading');
   readonly error = signal<string | null>(null);
   readonly report = signal<FidelityReport | null>(null);
+  /** What the last save wrote without (a CSV keeps one sheet, the writers report what they drop). */
+  protected readonly exportReport = signal<FidelityReport | null>(null);
   readonly losses = computed<readonly string[]>(() => {
-    const report = this.report();
-    return report ? describeLosses(report) : [];
+    const all = [this.report(), this.exportReport()].flatMap(report => (report ? describeLosses(report) : []));
+    return [...new Set(all)];
   });
   readonly warnings = computed<readonly string[]>(() => this.report()?.warnings.map(w => w.feature) ?? []);
   readonly noticeDismissed = signal(false);
@@ -176,13 +178,14 @@ export class SlidesEditorComponent implements FileEditor {
 
   async content(): Promise<Blob> {
     const deck = this.deck();
-    const { bytes } = await deckToPptx(deck, { original: this.original, imported: this.imported, factory: this.writer });
+    const { bytes, report } = await deckToPptx(deck, { original: this.original, imported: this.imported, factory: this.writer });
+    this.exportReport.set(report);
     const blob = new Blob([bytes as BlobPart], { type: PPTX_MIME });
     this.lastContent = blob;
     this.savedDecks.set(blob, deck);
-    // The next save patches what this one wrote.
-    this.original = bytes;
-    this.imported = deck;
+    // Every save patches the file as it was opened, against the deck read from it. Patching what an
+    // earlier save wrote would not work: shapes added since opening have no id in that file, so they
+    // would be inserted again, and shapes deleted after that save would stay.
     return blob;
   }
 

@@ -14,3 +14,18 @@ export function safeLinkUrl(url: string | null | undefined): string | null {
   const scheme = /^[a-z][a-z0-9+.-]*:/i.exec(normalized)?.[0].toLowerCase();
   return scheme && ALLOWED_SCHEMES.has(scheme) ? url : null;
 }
+
+/**
+ * A link's properties in a Univer model. A link this app will not follow keeps its target for the
+ * saved file under `keptUrl`, with an empty `url`, so it is shown but cannot be opened here.
+ */
+export function linkProperties(url: string): { url: string; keptUrl?: string } {
+  const safe = safeLinkUrl(url);
+  return safe ? { url: safe } : { url: '', keptUrl: url };
+}
+
+/** The target to write back to the file for a link's properties. */
+export function savedLinkUrl(properties: Record<string, unknown> | undefined): string {
+  const kept = properties?.['keptUrl'];
+  return typeof kept === 'string' && kept ? kept : String(properties?.['url'] ?? '');
+}

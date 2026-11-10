@@ -74,9 +74,11 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
   readonly state = signal<'loading' | 'ready' | 'error'>('loading');
   readonly error = signal<string | null>(null);
   readonly report = signal<FidelityReport | null>(null);
+  /** What the last save wrote without (a CSV keeps one sheet, the writers report what they drop). */
+  protected readonly exportReport = signal<FidelityReport | null>(null);
   readonly losses = computed<readonly string[]>(() => {
-    const report = this.report();
-    return report ? describeLosses(report) : [];
+    const all = [this.report(), this.exportReport()].flatMap(report => (report ? describeLosses(report) : []));
+    return [...new Set(all)];
   });
   readonly warnings = computed<readonly string[]>(() => this.report()?.warnings.map(w => w.feature) ?? []);
   readonly noticeDismissed = signal(false);

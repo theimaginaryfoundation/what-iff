@@ -1,3 +1,4 @@
+import { savedLinkUrl } from '../shared/safe-link';
 import ExcelJS from 'exceljs';
 
 import { rangeA1 } from '../shared/a1';
@@ -123,12 +124,12 @@ function exportCells(ws: ExcelJS.Worksheet, sheet: UniverSheet, styles: Record<s
 }
 
 function cellValue(cell: UniverCell, style: UniverStyle | null | undefined, fidelity: FidelityCollector, where: string): ExcelJS.CellValue {
-  const link = cell.p?.body.customRanges?.find(r => r.rangeType === 0 && typeof r.properties?.['url'] === 'string');
+  const link = cell.p?.body.customRanges?.find(r => r.rangeType === 0 && savedLinkUrl(r.properties) !== '');
   const text = cell.p ? cell.p.body.dataStream.replace(/[\r\n]+$/, '') : undefined;
   if (link) {
     return {
       text: text ?? String(cell.v ?? ''),
-      hyperlink: String(link.properties?.['url']),
+      hyperlink: savedLinkUrl(link.properties),
       tooltip: link.properties?.['tooltip'] as string | undefined,
     };
   }

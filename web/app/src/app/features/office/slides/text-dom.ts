@@ -50,14 +50,19 @@ function paragraphHtml(p: Paragraph): string {
 
 function runHtml(run: Run): string {
   const style: string[] = [];
-  if (run.color) style.push(`color: ${run.color}`);
-  if (run.fontSize) style.push(`font-size: ${run.fontSize}pt`);
-  if (run.fontFace) style.push(`font-family: ${run.fontFace}`);
+  // Values come from the file and end up in a style attribute rendered as trusted HTML, so each
+  // must be a plain value that cannot add declarations or load anything.
+  const color = cssColor(run.color);
+  if (color) style.push(`color: ${color}`);
+  if (run.fontSize && Number.isFinite(Number(run.fontSize))) style.push(`font-size: ${Number(run.fontSize)}pt`);
+  const font = cssFontFamily(run.fontFace);
+  if (font) style.push(`font-family: ${font}`);
   if (run.bold) style.push('font-weight: bold');
   if (run.italic) style.push('font-style: italic');
   const decoration = [run.underline ? 'underline' : '', run.strike ? 'line-through' : ''].filter(Boolean).join(' ');
   if (decoration) style.push(`text-decoration: ${decoration}`);
-  if (run.highlight) style.push(`background-color: ${run.highlight}`);
+  const highlight = cssColor(run.highlight);
+  if (highlight) style.push(`background-color: ${highlight}`);
   if (run.baseline === 'super') style.push('vertical-align: super;font-size: smaller');
   if (run.baseline === 'sub') style.push('vertical-align: sub;font-size: smaller');
   const text = escapeHtml(run.text).replace(/\n/g, '<br>');
@@ -121,4 +126,16 @@ export function keywordSizePt(value: string): number | undefined {
     'xxx-large': 36,
   };
   return map[value];
+}
+
+/** A colour as a hex value or a keyword, or null. */
+export function cssColor(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return /^#[0-9a-f]{3,8}$/i.test(value) || /^[a-z]{3,20}$/i.test(value) ? value : null;
+}
+
+/** A font name, quoted, or null when it holds anything a font name does not. */
+export function cssFontFamily(value: string | null | undefined): string | null {
+  const name = value?.replace(/["']/g, '').trim();
+  return name && /^[\p{L}\p{N} _.,-]{1,100}$/u.test(name) ? `'${name}'` : null;
 }

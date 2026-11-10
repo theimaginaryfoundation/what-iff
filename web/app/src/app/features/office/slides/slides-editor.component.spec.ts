@@ -140,12 +140,24 @@ describe('SlidesEditorComponent', () => {
     c.markSaved();
     expect(c.dirty()).toBe(false);
 
-    // The next save patches what the first one wrote.
+    // A second save in the same session: a shape added before the first save is moved, another is
+    // deleted, and neither duplicates nor lingers.
+    c.goTo(0);
+    c.selectedId.set(inserted.id);
+    key(el, 'ArrowRight', { shiftKey: true });
+    const ellipse = c.slide().elements.find(e => e.kind === 'shape' && e.shapeType === 'ellipse')!;
+    c.selectedId.set(ellipse.id);
+    c.deleteSelected();
     c.goTo(1);
     c.setNotes('Second save notes');
     const again = await pptxToDeck(await (await c.content()).arrayBuffer(), { id: 'x', name: 'x.pptx' }, parse);
     expect(again.deck.slides[1].notes).toBe('Second save notes');
-    expect(again.deck.slides[0].elements.find(e => e.kind === 'shape' && e.shapeType === 'ellipse')).toBeDefined();
+    expect(again.deck.slides[0].elements.find(e => e.kind === 'shape' && e.shapeType === 'ellipse')).toBeUndefined();
+    const typed = again.deck.slides[0].elements.filter(
+      e => e.kind === 'shape' && e.text?.paragraphs[0]?.runs[0]?.text === 'Typed',
+    );
+    expect(typed).toHaveLength(1);
+    expect(again.deck.slides[0].elements).toHaveLength(back.deck.slides[0].elements.length - 1);
   });
 
   it('asks to save on Ctrl+S only while editable, and keeps shortcuts out of text being typed', async () => {

@@ -78,9 +78,15 @@ export class SheetsEditorComponent extends UniverEditorBase<UniverWorkbook, Work
   protected async serialize(data: UniverWorkbook, file: FileAttachment): Promise<Blob> {
     if (previewKindFor(file) === 'csv') {
       const first = data.sheets[data.sheetOrder[0]];
+      const others = data.sheetOrder.length - 1;
+      this.exportReport.set({
+        dropped: others > 0 ? [{ feature: 'Sheets after the first (a CSV file holds one sheet)', count: others }] : [],
+        warnings: [],
+      });
       return new Blob([sheetToCsv(first, csvDelimiterFor(file))], { type: file.file_type || 'text/csv' });
     }
-    const { bytes } = await workbookToXlsx(data, this.preserved);
+    const { bytes, report } = await workbookToXlsx(data, this.preserved);
+    this.exportReport.set(report);
     // A workbook with macros stays macro-enabled; the file type says so to the host.
     return new Blob([bytes as BlobPart], { type: hasMacros(this.preserved) ? XLSM_MIME : XLSX_MIME });
   }

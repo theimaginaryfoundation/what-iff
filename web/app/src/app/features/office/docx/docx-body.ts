@@ -1,4 +1,4 @@
-import { safeLinkUrl } from '../shared/safe-link';
+import { linkProperties } from '../shared/safe-link';
 import { FidelityCollector } from '../shared/fidelity';
 import {
   NS,
@@ -173,7 +173,7 @@ export class BodyBuilder {
       case 'ins':
       case 'moveTo':
         this.blocks(el);
-        this.ctx.fidelity.warn('Tracked changes accepted', this.ctx.where);
+        this.ctx.fidelity.drop('Tracked changes (accepted)', this.ctx.where);
         return;
       case 'del':
       case 'moveFrom':
@@ -426,9 +426,9 @@ export class BodyBuilder {
     this.inlineContent(el, baseTs);
     if (this.length === start) return;
     const properties: Record<string, unknown> = {};
-    const url = safeLinkUrl(rel?.target ? (anchor ? `${rel.target}#${anchor}` : rel.target) : anchor && `#${anchor}`);
-    if (!url) return; // The text stays; a link this app will not follow does not.
-    properties['url'] = url;
+    const target = rel?.target ? (anchor ? `${rel.target}#${anchor}` : rel.target) : anchor ? `#${anchor}` : '';
+    if (!target) return;
+    Object.assign(properties, linkProperties(target));
     const tooltip = attr(el, NS.w, 'tooltip');
     if (tooltip) properties['tooltip'] = tooltip;
     this.range({
@@ -474,14 +474,13 @@ export class BodyBuilder {
     const fieldType = instruction.split(/\s+/)[0]?.toUpperCase() ?? '';
     if (fieldType === 'HYPERLINK') {
       const m = /HYPERLINK\s+"([^"]+)"/.exec(instruction);
-      const url = safeLinkUrl(m?.[1]);
-      if (url && this.length > start)
+      if (m && this.length > start)
         this.range({
           startIndex: start,
           endIndex: this.length - 1,
           rangeId: this.ctx.nextId('link'),
           rangeType: CUSTOM_RANGE.HYPERLINK,
-          properties: { url },
+          properties: linkProperties(m[1]),
         });
       return;
     }
@@ -498,7 +497,7 @@ export class BodyBuilder {
       properties: { instruction, fieldType, sourceKind: 'simple', cachedResult: this.body.dataStream.slice(start) },
     });
     if (fieldType !== 'PAGE' && fieldType !== 'NUMPAGES' && fieldType !== 'DATE' && fieldType !== 'TIME')
-      this.ctx.fidelity.warn('Fields kept as their last result', this.ctx.where);
+      this.ctx.fidelity.drop('Fields (kept as their last result)', this.ctx.where);
   }
 
   // --- drawings ----------------------------------------------------------------------------------

@@ -282,8 +282,6 @@ export class FileWorkspaceComponent {
     const editor = this.editorRef?.instance;
     const file = this.file();
     if (!editor || this.saving()) return;
-    const losses = editor.losses?.() ?? [];
-    if (losses.length && !opts.overwrite && !(await this.confirmLossySave(losses))) return;
     this.saving.set(true);
     this.saveError.set(null);
     let content: Blob;
@@ -297,6 +295,13 @@ export class FileWorkspaceComponent {
       return;
     }
     try {
+      // Asked once the content exists: writing it is what tells an editor everything it dropped.
+      const losses = editor.losses?.() ?? [];
+      if (losses.length && !opts.overwrite) {
+        this.saving.set(false);
+        if (!(await this.confirmLossySave(losses))) return;
+        this.saving.set(true);
+      }
       const ifMatch = opts.overwrite ? null : this.loadedVersion;
       const updated = await new Promise<FileAttachment>((resolve, reject) =>
         this.files.replaceContent(file.id, content, file.file_type, ifMatch, this.chatId()).pipe(take(1)).subscribe({ next: resolve, error: reject }),
