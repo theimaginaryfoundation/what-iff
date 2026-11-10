@@ -7,7 +7,8 @@ import { Model } from '../../../core/models/model.model';
 import { UtilityChoice, UtilityModels, UtilityRole } from '../../../core/models/utility-model.model';
 import { ModelService } from '../../../core/services/model.service';
 import { UtilityModelsService } from '../../../core/services/utility-models.service';
-import { BackgroundModelsComponent, OFF_VALUE } from './background-models.component';
+import { OFF_VALUE } from '../../../core/utils/background-models';
+import { BackgroundModelsComponent } from './background-models.component';
 
 const MODELS: Model[] = [
   { id: 'luna', name: 'gpt-5.6-luna', display_name: 'GPT-5.6 Luna', description: '', tool_support: true, provider: 'openai', reasoning_support: 'optional' },

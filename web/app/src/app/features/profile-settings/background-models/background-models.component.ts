@@ -15,11 +15,9 @@ import { ModelService } from '../../../core/services/model.service';
 import { UtilityModelsService } from '../../../core/services/utility-models.service';
 import { apiErrorMessage, hasErrorCode } from '../../../core/utils/api-error.helpers';
 import { UTILITY_ROLE_COPY } from '../../../core/utils/utility-role-copy';
-import { isConnectionGroup } from '../../chat/helpers/model-picker.helpers';
+import { OFF_VALUE, backgroundModelLabel } from '../../../core/utils/background-models';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
-/** The model select's value for a role switched off. */
-export const OFF_VALUE = 'off';
 
 /** What the tier select offers, after the API's default. */
 export const SERVICE_TIER_OPTIONS: readonly TurnSettingOption<UtilityServiceTier>[] = [
@@ -49,11 +47,6 @@ interface RoleRow {
   deploymentChooses: boolean;
   /** The deployment switched the role off, so with no choice of the account's it doesn't run. */
   deploymentOff: boolean;
-}
-
-/** How a model is named in a background-model select: with its connection, for a connection's model. */
-export function backgroundModelLabel(model: Model): string {
-  return isConnectionGroup(model) && model.connection_name ? `${model.display_name} · ${model.connection_name}` : model.display_name;
 }
 
 /**
