@@ -1,4 +1,4 @@
-import { applyCarriageReturns, ansiToHtml, outputViews, sanitizeOutputHtml, withoutRemoteImages } from './notebook-outputs';
+import { applyCarriageReturns, ansiToHtml, notebookLoaders, outputViews, sanitizeOutputHtml, withoutRemoteImages } from './notebook-outputs';
 
 describe('notebook outputs', () => {
   it('merges consecutive writes to a stream and applies carriage returns', () => {
@@ -29,16 +29,66 @@ describe('notebook outputs', () => {
     expect(view({ 'image/png': 'AA\nAA\n', 'text/plain': 'x' }, { 'image/png': { width: 40 } })).toEqual({ kind: 'image', src: 'data:image/png;base64,AAAA', width: 40 });
     expect(view({ 'text/markdown': ['# a'] })).toEqual({ kind: 'markdown', text: '# a' });
     expect(view({ 'application/json': { a: 1 } })).toEqual({ kind: 'json', text: '{\n  "a": 1\n}' });
-    expect(view({ 'application/vnd.jupyter.widget-view+json': {} })).toEqual({ kind: 'unsupported', mime: 'application/vnd.jupyter.widget-view+json' });
+    expect(view({ 'application/x-unknown': {} })).toEqual({ kind: 'unsupported', mime: 'application/x-unknown' });
   });
 
-  it('prefers the fallback over scripted HTML, and shows SVG only as an image', () => {
+  it('offers scripted output with its best static fallback, and shows SVG only as an image', () => {
     const view = (data: Record<string, unknown>) => outputViews([{ output_type: 'execute_result', data, metadata: {} }])[0];
-    expect(view({ 'text/html': '<div id="p"></div><script>plot()</script>', 'image/png': 'AAAA' })).toMatchObject({ kind: 'image' });
-    expect(view({ 'text/html': '<script>x()</script>', 'text/plain': '<Figure>' })).toEqual({ kind: 'text', text: '<Figure>', stderr: false });
+    expect(view({ 'text/html': '<div id="p"></div><script>plot()</script>', 'image/png': 'AAAA' })).toMatchObject({ kind: 'interactive', fallback: { kind: 'image' } });
+    expect(view({ 'text/html': '<div></div><script>x()</script>', 'text/plain': '<Figure>' })).toMatchObject({ kind: 'interactive', fallback: { kind: 'text', text: '<Figure>' } });
+    expect(view({ 'text/html': '<div></div><script>x()</script>' })).toMatchObject({ kind: 'interactive', fallback: null });
     const svg = view({ 'image/svg+xml': '<svg onload="x()"/>' });
     expect(svg.kind).toBe('image');
     expect((svg as { src: string }).src.startsWith('data:image/svg+xml')).toBe(true);
+  });
+
+  it('builds a frame for Plotly and Vega from their own data, safe inside the script', () => {
+    const doc = (data: Record<string, unknown>) => (outputViews([{ output_type: 'display_data', data, metadata: {} }])[0] as { document: string }).document;
+    const plotly = doc({ 'application/vnd.plotly.v1+json': { data: [{ y: ['</script><script>evil()</script>'] }], layout: {} }, 'text/plain': 'Figure' });
+    expect(plotly).toContain('plotly.min.js');
+    expect(plotly).toContain('Plotly.newPlot');
+    expect(plotly).not.toContain('</script><script>evil()');
+    expect(doc({ 'application/vnd.vegalite.v5+json': { mark: 'bar' } })).toContain('vega-lite@5');
+    expect(doc({ 'application/vnd.vegalite.v6+json': { mark: 'bar' } })).toContain('vega-lite@6');
+    expect(doc({ 'application/vnd.vega.v5.3+json': {} })).toContain('vegaEmbed');
+  });
+
+  it('holds every frame to a policy with no forms, no base, and https only', () => {
+    const [view] = outputViews([{ output_type: 'display_data', data: { 'text/html': '<script>x()</script><p>a</p>' }, metadata: {} }]);
+    const policy = /Content-Security-Policy" content="([^"]*)"/.exec((view as { document: string }).document)?.[1];
+    expect(policy).toContain("default-src 'none'");
+    expect(policy).toContain("form-action 'none'");
+    expect(policy).toContain("base-uri 'none'");
+    expect(policy).not.toMatch(/http:|\*/);
+  });
+
+  it('measures the body, so a frame can shrink to its content', () => {
+    const [view] = outputViews([{ output_type: 'display_data', data: { 'text/html': '<script>x()</script><p>a</p>' }, metadata: {} }]);
+    expect((view as { document: string }).document).toContain('document.body.getBoundingClientRect().height');
+  });
+
+  it('adds require only for output that uses it', () => {
+    const doc = (html: string) => (outputViews([{ output_type: 'display_data', data: { 'text/html': html }, metadata: {} }])[0] as { document: string }).document;
+    expect(doc('<p>a</p><script>require(["x"], f)</script>')).toContain('require.js');
+    expect(doc('<p>a</p><script>x()</script>')).not.toContain('require.js');
+  });
+
+  it('points a widget at Run, whatever its fallback', () => {
+    expect(outputViews([{ output_type: 'display_data', data: { 'application/vnd.jupyter.widget-view+json': {}, 'text/plain': 'IntSlider()' }, metadata: {} }])).toEqual([{ kind: 'widget' }]);
+  });
+
+  it('treats library loaders as nothing to show, and hands them to every frame', () => {
+    const load = { output_type: 'display_data', metadata: {}, data: { 'text/html': '<script>window.Lib=1</script>' } };
+    const bokeh = { output_type: 'display_data', metadata: {}, data: { 'application/javascript': 'window.Bokeh=1', 'application/vnd.bokehjs_load.v0+json': '', 'text/html': '<div>Loading</div>' } };
+    const js = { output_type: 'display_data', metadata: {}, data: { 'application/javascript': 'window.J=1', 'text/plain': '<Js>' } };
+    const plain = { output_type: 'stream', name: 'stdout', text: 'x' };
+    expect(outputViews([load, bokeh])).toEqual([]);
+    const loaders = notebookLoaders([{ outputs: [load, plain] }, { outputs: [bokeh, js] }]);
+    expect(loaders).toBe('<script>window.Lib=1</script><script>window.Bokeh=1</script>');
+    expect(outputViews([js])[0].kind).toBe('interactive');
+    const [plot] = outputViews([{ output_type: 'display_data', metadata: {}, data: { 'text/html': '<div></div>', 'application/javascript': 'draw()' } }], loaders);
+    expect((plot as { document: string }).document).toContain('window.Bokeh=1');
+    expect((plot as { document: string }).document).toContain('draw()');
   });
 
   it('strips everything active from HTML output', () => {

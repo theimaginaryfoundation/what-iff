@@ -302,8 +302,44 @@ Verification: the converters over the three real files and a fixture with a text
 
 - **Format.** `nbformat.ts` reads and writes nbformat 4 by hand and keeps what it does not model in `raw`, so metadata, attachments and unknown fields survive, and an untouched notebook writes back byte for byte. Formats before 4 are refused with a reason.
 - **Cells.** At rest a cell is rendered Markdown (the chat's renderer with KaTeX, `attachment:` images resolved) or colourized code. Only the cell being edited holds a Monaco editor, and off-screen cells skip layout through `content-visibility`, so long notebooks stay responsive. Structural edits are pure commands with whole-version undo; a run of typing in one cell is one step. Jupyter's command-mode keys work (`a`, `b`, `dd`, `m`, `y`, arrows, Enter, Escape, Shift+Enter).
-- **Outputs are untrusted.** Picked by MIME type from the richest safe representation. Scripts never run. HTML goes through a dedicated DOMPurify instance that removes scripts, handlers, forms, frames and stylesheets, and only embedded pictures load, so opening a notebook cannot phone home. SVG shows through an `<img>`, where it cannot script. Output is `contain`ed, so a `position: fixed` element cannot cover the app. Scripted HTML steps aside for a picture or text fallback; widgets get a note.
-- **Not done:** formats before 4; widget state and script-driven plots render as their fallback.
+- **Outputs are untrusted.** Picked by MIME type from the richest safe representation. Scripts never run in the page (see step 12 for the sandboxed frames). HTML goes through a dedicated DOMPurify instance that removes scripts, handlers, forms, frames and stylesheets, and only embedded pictures load, so opening a notebook cannot phone home. SVG shows through an `<img>`, where it cannot script. Output is `contain`ed, so a `position: fixed` element cannot cover the app. Scripted HTML steps aside for a picture or text fallback; widgets get a note.
+- **Not done:** formats before 4.
+
+### Step 12 as built: Run with JupyterLite (2026-11-07)
+
+Two decisions differ from §8:
+
+- **JupyterLite gets its own origin, not `/jupyterlite/`.** A same-origin iframe shares `sessionStorage` with its parent, so a notebook's code or output could read the session token. `usableRunUrl` refuses a same-origin URL, so Run stays off rather than running unsafely. The site holds no credentials and receives only the notebook.
+- **A bridge, not a custom contents drive.** A small labextension (`web/jupyterlite/extension`) writes the host's notebook to JupyterLite's in-memory default drive and opens it, so a kernel reads it and its neighbours with plain `open()`. The extension reports saves back, and the host persists them through its usual `PUT …/content`.
+
+How it fits together:
+
+- **Entering Run.** Run is in the notebook toolbar in edit mode, so phones do not get it. JupyterLite takes the cells' place. Back to cells asks it to save first.
+- **Saving.** A save inside JupyterLite becomes the notebook's new state and goes through the host's normal save, and undo can step back over it.
+- **Trust at the boundary.** The host accepts messages only from its own frame on the configured origin. The extension accepts them only from its parent on an origin in `whatiffHostOrigins`.
+- **Build and configuration.** `make jupyterlite` builds the 65 MB site with versions pinned, and `make jupyterlite-serve` serves it on :4203 for development. `environment.jupyterliteUrl` (`JUPYTERLITE_URL` at image build) points at it; empty leaves Run off.
+
+Hosting requirements for production:
+
+- A static host on its own origin, such as a separate subdomain; it needs nothing from the API.
+- The app's origin in `JUPYTERLITE_HOST_ORIGINS` at build time.
+- `frame-ancestors` limited to the app.
+- A correct WASM MIME type.
+
+Live widgets work in Run: `jupyterlab_widgets` is in the site build, and a slider drove Python and back in Chromium. Plain `import numpy`, `pandas`, `matplotlib`, `ipywidgets` and `plotly` install themselves. `importlib.import_module` does not trigger that, because Pyodide works from the `import` statements in the source.
+
+Script-driven output in the viewer (a decision of 2026-11-07, which relaxes step 11's "scripts never run"):
+
+- **Asked for, per notebook.** Nothing runs on open; the reader sees the output's static fallback and a button. The choice lasts until another file opens and is not stored.
+- **Contained.** Each output runs in its own frame with `sandbox="allow-scripts"` and nothing else, so it has an opaque origin. In Chromium a hostile output could not reach the token, storage, cookies or the parent page, open a popup or navigate the app. A frame's policy limits it to https and blocks forms and `<base>`. The host listens to a frame only for its height, identified by its window.
+- **The trade-off, accepted.** After the click, output can load libraries from CDNs and could send the data it was saved with to any https host. The notebook's frames hold only that notebook's data.
+- **What draws.** Plotly and Vega-Lite or Vega from their own MIME data, with pinned libraries from jsDelivr; other scripted HTML as it is. Outputs that only load a library, such as Plotly's `init_notebook_mode` or Bokeh's `output_notebook`, show nothing and are included in each frame. Plotly, Vega-Lite and a loader-dependent output were checked in Chromium; real Bokeh and Altair output was not.
+- **Widgets** need a kernel, so outside Run they show a note pointing there.
+
+Production hosts: `notebooks.whatiff.chat` and `notebooks-dev.whatiff.chat`, each an S3 bucket behind CloudFront, deployed from the private repo.
+Python loads from the jsDelivr CDN at run time, the kernel's default, which was accepted on 2026-11-07 rather than self-hosting hundreds of megabytes.
+
+Verified in Chromium against the composed stack: the frame could not read the app's token, Python ran, read its own notebook with `open()`, a save reached `PUT …/content`, and the output showed in our cells.
 
 ## Step 0 results (2026-11-06)
 

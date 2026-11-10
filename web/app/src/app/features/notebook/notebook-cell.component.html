@@ -20,7 +20,7 @@
       <pre class="nb-cell__code nb-cell__code--raw">{{ c.source }}</pre>
     }
     @if (c.type === 'code' && c.outputs.length) {
-      <app-notebook-output class="nb-cell__outputs" [outputs]="c.outputs" />
+      <app-notebook-output class="nb-cell__outputs" [outputs]="c.outputs" [loaders]="loaders()" [interactive]="interactive()" (allowInteractive)="allowInteractive.emit()" />
     }
   </div>
 </div>

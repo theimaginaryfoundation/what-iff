@@ -6,6 +6,7 @@ import { FileAttachment } from '../../core/models/file-attachment.model';
 import { fakeMonaco } from '../file-workspace/editors/fake-monaco.spec-helper';
 import { MONACO_LOADER } from '../file-workspace/editors/monaco/monaco-loader';
 import { IPYNB_MIME, NotebookEditorComponent } from './notebook-editor.component';
+import { JUPYTERLITE_URL, usableRunUrl } from './notebook-run.config';
 
 const nb = (cells: unknown[]) => new Blob([JSON.stringify({ cells, metadata: { language_info: { name: 'python' } }, nbformat: 4, nbformat_minor: 5 }, null, 1) + '\n']);
 const code = (id: string, source: string, outputs: unknown[] = []) => ({ cell_type: 'code', id, metadata: {}, source: [source], outputs, execution_count: outputs.length ? 1 : null });
@@ -20,7 +21,12 @@ describe('NotebookEditorComponent', () => {
     fake = fakeMonaco();
     await TestBed.configureTestingModule({
       imports: [NotebookEditorComponent],
-      providers: [provideZonelessChangeDetection(), provideMarkdown(), { provide: MONACO_LOADER, useValue: () => Promise.resolve(fake.monaco) }],
+      providers: [
+        provideZonelessChangeDetection(),
+        provideMarkdown(),
+        { provide: MONACO_LOADER, useValue: () => Promise.resolve(fake.monaco) },
+        { provide: JUPYTERLITE_URL, useValue: 'https://notebooks.example.test/lab/index.html' },
+      ],
     }).compileComponents();
   });
 
@@ -191,5 +197,154 @@ describe('NotebookEditorComponent', () => {
     await settle();
     expect(c.cells().map(x => x.uid)).toEqual(uids);
     expect(c.dirty()).toBe(false);
+  });
+
+  it('runs script-driven output only after the reader asks, sandboxed, until another file opens', async () => {
+    const scripted = { output_type: 'display_data', metadata: {}, data: { 'text/html': '<div></div><script>window.x=1</script>', 'text/plain': '<Figure>' } };
+    const el = await open(nb([code('a', 'plot()', [scripted]), code('b', 'plot()', [scripted])]));
+    expect(el.querySelector('iframe')).toBeNull();
+    expect(el.querySelector('.nb-output--text')?.textContent).toContain('<Figure>');
+    const offers = el.querySelectorAll<HTMLButtonElement>('.nb-output__more');
+    expect(offers).toHaveLength(2);
+    offers[0].click();
+    await settle();
+    const frames = el.querySelectorAll('iframe');
+    expect(frames).toHaveLength(2);
+    expect(frames[0].getAttribute('sandbox')).toBe('allow-scripts');
+    expect(frames[0].getAttribute('srcdoc')).toContain('window.x=1');
+    expect(el.querySelector('.nb-output__more')).toBeNull();
+    fixture.componentRef.setInput('blob', nb([code('c', 'plot()', [scripted])]));
+    fixture.detectChanges();
+    await vi.waitFor(() => expect(fixture.componentInstance.cells()[0].raw['id']).toBe('c'));
+    await settle();
+    expect(el.querySelector('iframe')).toBeNull();
+  });
+
+  it('sizes a frame from its own messages only', async () => {
+    const scripted = { output_type: 'display_data', metadata: {}, data: { 'text/html': '<script>x()</script><p>a</p>' } };
+    const el = await open(nb([code('a', 'p', [scripted])]));
+    (el.querySelector('.nb-output__more') as HTMLButtonElement).click();
+    await settle();
+    const frame = el.querySelector('iframe') as HTMLIFrameElement;
+    const own = {} as Window;
+    Object.defineProperty(frame, 'contentWindow', { value: own });
+    const height = (source: unknown, value: unknown) =>
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'nb-output-height', height: value }, source: source as MessageEventSource }));
+    height(window, 500);
+    await settle();
+    expect(frame.style.height).toBe('360px');
+    height(own, 500);
+    await settle();
+    expect(frame.style.height).toBe('500px');
+    height(own, 99999);
+    await settle();
+    expect(frame.style.height).toBe('1600px');
+    height(own, 'x');
+    await settle();
+    expect(frame.style.height).toBe('1600px');
+  });
+
+  describe('Run', () => {
+    const ORIGIN = 'https://notebooks.example.test';
+
+    async function run(): Promise<{ el: HTMLElement; frame: HTMLIFrameElement; posted: ReturnType<typeof vi.fn> }> {
+      const el = await open(nb([code('a', '1')]), false);
+      (el.querySelector('.notebook__tool--primary') as HTMLButtonElement).click();
+      await settle();
+      const frame = el.querySelector('iframe') as HTMLIFrameElement;
+      const posted = vi.fn();
+      Object.defineProperty(frame, 'contentWindow', { value: { postMessage: posted } });
+      return { el, frame, posted };
+    }
+
+    const message = (frame: HTMLIFrameElement, data: unknown, origin = ORIGIN) =>
+      window.dispatchEvent(new MessageEvent('message', { data, origin, source: frame.contentWindow as unknown as MessageEventSource }));
+
+    it('frames the runner sandboxed, and hands it the notebook once it is ready', async () => {
+      const { frame, posted } = await run();
+      expect(frame.getAttribute('src')).toBe(`${ORIGIN}/lab/index.html`);
+      expect(frame.getAttribute('sandbox')).toContain('allow-scripts');
+      expect(posted).not.toHaveBeenCalled();
+      message(frame, { type: 'whatiff:ready' });
+      expect(posted).toHaveBeenCalledTimes(1);
+      const [sent, origin] = posted.mock.calls[0];
+      expect(origin).toBe(ORIGIN);
+      expect(sent.type).toBe('whatiff:open');
+      expect(sent.name).toBe('a.ipynb');
+      expect(sent.content.cells[0].id).toBe('a');
+    });
+
+    it('adopts what the runner saves, outputs included, and asks the host to save', async () => {
+      const { frame } = await run();
+      const asked = vi.fn();
+      fixture.componentInstance.saveRequested.subscribe(asked);
+      message(frame, { type: 'whatiff:ready' });
+      const stream = { output_type: 'stream', name: 'stdout', text: ['1\n'] };
+      message(frame, { type: 'whatiff:save', content: { cells: [code('a', 'print(1)', [stream])], metadata: {}, nbformat: 4, nbformat_minor: 5 } });
+      expect(asked).toHaveBeenCalledTimes(1);
+      const out = await saved();
+      expect(out.cells[0].source).toEqual(['print(1)']);
+      expect(out.cells[0].outputs).toEqual([stream]);
+      expect(fixture.componentInstance.dirty()).toBe(true);
+      fixture.componentInstance.undo();
+      expect(fixture.componentInstance.cells()[0].source).toBe('1');
+    });
+
+    it('ignores messages from other origins or windows, and saves that are not notebooks', async () => {
+      const { frame, posted } = await run();
+      const asked = vi.fn();
+      fixture.componentInstance.saveRequested.subscribe(asked);
+      message(frame, { type: 'whatiff:ready' }, 'https://evil.example.test');
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'whatiff:ready' }, origin: ORIGIN, source: window }));
+      expect(posted).not.toHaveBeenCalled();
+      message(frame, { type: 'whatiff:ready' });
+      message(frame, { type: 'whatiff:save', content: { nope: true } });
+      message(frame, { type: 'whatiff:save', content: 'x' });
+      expect(asked).not.toHaveBeenCalled();
+    });
+
+    it('lets the runner save before going back to the cells', async () => {
+      const { el, frame, posted } = await run();
+      message(frame, { type: 'whatiff:ready' });
+      fixture.detectChanges();
+      fixture.componentInstance.stopRun();
+      expect(posted).toHaveBeenLastCalledWith({ type: 'whatiff:close' }, ORIGIN);
+      expect(fixture.componentInstance.running()).toBe(true);
+      message(frame, { type: 'whatiff:closed' });
+      expect(fixture.componentInstance.running()).toBe(false);
+      await settle();
+      expect(el.querySelector('iframe')).toBeNull();
+      expect(el.querySelector('app-notebook-cell')).not.toBeNull();
+    });
+
+    it('stops running when the host goes back to view mode', async () => {
+      await run();
+      fixture.componentRef.setInput('readOnly', true);
+      await settle();
+      expect(fixture.componentInstance.running()).toBe(false);
+    });
+
+    it('offers no Run without a runner', async () => {
+      TestBed.overrideProvider(JUPYTERLITE_URL, { useValue: null });
+      const el = await open(nb([code('a', '1')]), false);
+      expect(el.querySelector('.notebook__tool--primary')).toBeNull();
+      fixture.componentInstance.startRun();
+      expect(fixture.componentInstance.running()).toBe(false);
+    });
+
+    it('accepts a runner only on another origin', () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const app = 'https://app.example.test';
+      expect(usableRunUrl('https://notebooks.example.test/lab/index.html', app)).toBe('https://notebooks.example.test/lab/index.html');
+      expect(usableRunUrl('https://app.example.test/jupyterlite/lab/index.html', app)).toBeNull();
+      expect(error).toHaveBeenCalled();
+      expect(usableRunUrl('__JUPYTERLITE_URL__', app)).toBeNull();
+      expect(usableRunUrl('javascript:alert(1)', app)).toBeNull();
+      expect(usableRunUrl('http://notebooks.example.test/lab/index.html', app)).toBeNull();
+      expect(usableRunUrl('http://localhost:4203/lab/index.html', app)).toBe('http://localhost:4203/lab/index.html');
+      expect(usableRunUrl('', app)).toBeNull();
+      expect(usableRunUrl(undefined, app)).toBeNull();
+      error.mockRestore();
+    });
   });
 });

@@ -51,6 +51,17 @@
     border-color: var(--accent);
     color: var(--accent);
   }
+
+  &--primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+}
+
+.notebook__hint {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
 }
 
 .notebook__cells {

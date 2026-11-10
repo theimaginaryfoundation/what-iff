@@ -1,6 +1,23 @@
 <div class="notebook">
-  @if (!readOnly() && state() === 'ready') {
+  @if (running()) {
     <div class="notebook__toolbar" role="toolbar" aria-label="Notebook">
+      <button type="button" class="notebook__tool" (click)="stopRun()">Back to cells</button>
+      <span class="notebook__hint">Code runs in your browser, not on our servers. Saving here saves the file.</span>
+    </div>
+    <app-notebook-run
+      [url]="runUrl!"
+      [name]="file().name"
+      [notebook]="runNotebook()"
+      (saved)="onRunSaved($event)"
+      (closed)="running.set(false)"
+    />
+  } @else if (!readOnly() && state() === 'ready') {
+    <div class="notebook__toolbar" role="toolbar" aria-label="Notebook">
+      @if (runUrl) {
+        <div class="notebook__group">
+          <button type="button" class="notebook__tool notebook__tool--primary" (click)="startRun()">Run</button>
+        </div>
+      }
       <div class="notebook__group">
         <button type="button" class="notebook__tool" (click)="addCell('code', 'below')">+ Code</button>
         <button type="button" class="notebook__tool" (click)="addCell('markdown', 'below')">+ Markdown</button>
@@ -42,7 +59,9 @@
       </div>
     </div>
   }
-  @if (state() === 'loading') {
+  @if (running()) {
+    <!-- The runner above stands in for the cells. -->
+  } @else if (state() === 'loading') {
     <p class="notebook__placeholder" role="status">Loading the notebook…</p>
   } @else if (state() === 'error') {
     <p class="notebook__placeholder" role="alert">{{ error() }}</p>
@@ -57,6 +76,9 @@
           [active]="activeUid() === cell.uid"
           [editing]="editingUid() === cell.uid"
           [readOnly]="readOnly()"
+          [loaders]="loaders()"
+          [interactive]="interactiveAllowed()"
+          (allowInteractive)="interactiveAllowed.set(true)"
           (click)="select(cell)"
           (dblclick)="startEditing(cell.uid)"
           (sourceChange)="onSourceChange(cell.uid, $event)"
