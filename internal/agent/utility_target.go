@@ -107,6 +107,11 @@ func (a *Agent) resolveUtilityTarget(ctx context.Context, role provider.UtilityR
 		}
 	}
 	settle(false)
+	if unusable != nil && !choiceUnusable(unusable) {
+		// The last choice couldn't be checked (a database error, say): that says nothing about
+		// the choice, so it isn't the account's to fix.
+		return utilityTarget{}, fmt.Errorf("resolve %s model: %w", role, unusable)
+	}
 	if unusable != nil {
 		return utilityTarget{}, &models.UtilityRoleUnavailableError{Role: role, Err: fmt.Errorf("%w: %w", models.ErrUtilityModelUnavailable, unusable)}
 	}

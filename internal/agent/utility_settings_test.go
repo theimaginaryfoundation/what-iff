@@ -257,3 +257,27 @@ func TestUtilityTargetFor_CarriesTheChoicesEffortAndTier(t *testing.T) {
 	require.Equal(t, models.UtilityServiceTierFlex, got.serviceTier)
 	require.Equal(t, models.ReasoningEffortLow, got.chatContext().reasoningEffort, "gpt-5.1 takes an optional effort")
 }
+
+// A choice that can't be checked because the database failed isn't the account's to fix: the
+// call fails with the database's error, not as a model that can't be used.
+func TestUtilityTargetFor_ADatabaseErrorIsNotAnUnusableChoice(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	alice := apicontext.WithUserID(context.Background(), f.alice)
+	f.choose(t, models.UtilityScopeAccount, f.alice, models.UtilityRoleSimple, f.catalog.ID)
+	// The model's row can't be read: its table is gone. Foreign keys off first, or dropping it
+	// would cascade to the setting.
+	conn, err := f.db.Conn(context.Background())
+	require.NoError(t, err)
+	_, err = conn.ExecContext(context.Background(), "PRAGMA foreign_keys = OFF")
+	require.NoError(t, err)
+	_, err = conn.ExecContext(context.Background(), "DROP TABLE models")
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+
+	_, err = f.a.utilityTargetFor(alice, provider.UtilityRoleSimple)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, models.ErrUtilityModelUnavailable)
+	_, notice := backgroundNoticeFor(models.BackgroundStepChatName, err)
+	require.False(t, notice, "a database error stays in the logs")
+}
