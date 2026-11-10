@@ -37,7 +37,7 @@
 - **Superseded messages:** `ChatMessage.SupersededAt` / `SupersededBy` (`json:"-"`) mark a message taken back and the reply that replaced it (agent `SupersedeTurn` / `RegenerateTurn`).
   `ChatMessageFilters.IncludeSuperseded` (`json:"-"`) lists them too; off by default, so they are hidden wherever messages are listed.
 - **Utility roles (`utility.go`):** `UtilityRole` (`memory`, `memory_merge`, `simple`, `personality`) groups background work that runs on the same model (ADR 0x027 section 6).
-  `UtilityRoleUnavailableError` is work that didn't run because its role is off (`ErrUtilityRoleOff`) or has no model (`ErrUtilityRoleNotSet`); the error codes `utility_model_not_set` and `utility_role_off` name them to clients.
+  `UtilityRoleUnavailableError` is work that didn't run because its role is off (`ErrUtilityRoleOff`), has no model (`ErrUtilityRoleNotSet`) or has only models that can't be used (`ErrUtilityModelUnavailable`, wrapping the cause); the error codes `utility_model_not_set`, `utility_role_off` and `utility_model_unavailable` name them to clients.
   A `BackgroundStep` knows its role (`Role`), so notices can be shown by role.
   A `UtilityModelSetting` chooses a model, with an optional reasoning effort and `UtilityServiceTier`, or switches its role off (`Off`, no `ModelID`); `UtilityChoice` is how the API reports one scope's.
   `UsesOpenAIResponsesAPI` (`model_defaults.go`) reports a catalog model on OpenAI's own Responses API, the only one that takes a service tier or continues a stored conversation.

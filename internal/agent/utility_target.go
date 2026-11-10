@@ -77,35 +77,38 @@ func (a *Agent) resolveUtilityTarget(ctx context.Context, role provider.UtilityR
 		return utilityTarget{}, fmt.Errorf("read utility model settings: %w", err)
 	}
 	var unusable error
-	fellBack := false
+	// settle tells the run how the role's choice went: a fallback notice only when an unusable
+	// choice was passed over for one that ran, and a cleared one otherwise. A role whose every
+	// choice was unusable says so through its steps' own notices instead.
+	settle := func(ranOnFallback bool) {
+		run := backgroundRunFrom(ctx)
+		if ranOnFallback && choiceUnusable(unusable) && ctx.Err() == nil {
+			run.failed(models.BackgroundNotice{Step: models.BackgroundFallbackStep(role), Code: models.BackgroundNoticeModelUnavailable})
+			return
+		}
+		run.succeeded(models.BackgroundFallbackStep(role))
+	}
 	for _, scope := range a.utilityScopes() {
 		for _, s := range settings {
 			if s.Role != role || s.Scope != scope {
 				continue
 			}
 			if s.Off() {
-				if !fellBack {
-					backgroundRunFrom(ctx).succeeded(models.BackgroundFallbackStep(role))
-				}
+				settle(false)
 				return utilityTarget{}, &models.UtilityRoleUnavailableError{Role: role, Err: ErrUtilityRoleOff}
 			}
 			t, err := a.settingTarget(ctx, userID, s)
 			if err == nil {
-				if !fellBack {
-					backgroundRunFrom(ctx).succeeded(models.BackgroundFallbackStep(role))
-				}
+				settle(unusable != nil)
 				return t, nil
 			}
-			fellBack = true
 			a.recordUtilityFallback(ctx, role, scope, *s.ModelID, err)
 			unusable = err
 		}
 	}
-	if !fellBack {
-		backgroundRunFrom(ctx).succeeded(models.BackgroundFallbackStep(role))
-	}
+	settle(false)
 	if unusable != nil {
-		return utilityTarget{}, unusable
+		return utilityTarget{}, &models.UtilityRoleUnavailableError{Role: role, Err: fmt.Errorf("%w: %w", models.ErrUtilityModelUnavailable, unusable)}
 	}
 	return utilityTarget{}, &models.UtilityRoleUnavailableError{Role: role, Err: ErrUtilityRoleNotSet}
 }
@@ -146,6 +149,14 @@ func (a *Agent) settingTarget(ctx context.Context, userID uuid.UUID, s models.Ut
 	return t, nil
 }
 
+// choiceUnusable reports whether err says a chosen model can't be used, rather than that the
+// settings couldn't be read: the account can fix the first by choosing again.
+func choiceUnusable(err error) bool {
+	var missing *providerkeys.NotConfiguredError
+	return errors.Is(err, ErrModelDisabled) || errors.Is(err, ErrConnectionUnavailable) ||
+		errors.Is(err, datastore.ErrExperimentalModelNotAllowed) || errors.As(err, &missing)
+}
+
 // recordUtilityFallback logs and counts a role passing over a choice it couldn't use, or
 // settings it couldn't read (an empty scope).
 func (a *Agent) recordUtilityFallback(ctx context.Context, role provider.UtilityRole, scope models.UtilityScope, modelID uuid.UUID, err error) {
@@ -160,14 +171,6 @@ func (a *Agent) recordUtilityFallback(ctx context.Context, role provider.Utility
 	a.logger.Warn("utility role is passing over a choice it can't use", append(fields,
 		zap.String("reason", reason),
 		zap.Error(err))...)
-	// Only a choice that can't be used is the account's to know about; a failed read (a
-	// database hiccup, or the checkpoint running out of time) says nothing about the choice.
-	if scope != "" && (errors.Is(err, ErrModelDisabled) || errors.Is(err, ErrConnectionUnavailable)) && ctx.Err() == nil {
-		backgroundRunFrom(ctx).failed(models.BackgroundNotice{
-			Step: models.BackgroundFallbackStep(role),
-			Code: models.BackgroundNoticeModelUnavailable,
-		})
-	}
 	a.metrics().Add(ctx, telemetry.UtilityModelFallbacks, 1,
 		telemetry.AttrUtilityRole.String(string(role)),
 		telemetry.AttrUtilityScope.String(string(scope)),
