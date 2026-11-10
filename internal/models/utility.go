@@ -1,6 +1,10 @@
 package models
 
-import "github.com/google/uuid"
+import (
+	"errors"
+
+	"github.com/google/uuid"
+)
 
 // UtilityRole groups background work that runs on the same model (ADR 0x027
 // section 6).
@@ -118,3 +122,21 @@ type SetUtilityModelRequest struct {
 	ReasoningEffort *ReasoningEffort    `json:"reasoning_effort"`
 	ServiceTier     *UtilityServiceTier `json:"service_tier"`
 }
+
+// ErrUtilityRoleOff is utility work whose role is switched off: it doesn't run.
+var ErrUtilityRoleOff = errors.New("this utility role is switched off")
+
+// ErrUtilityRoleNotSet is utility work whose role has no model chosen at any scope: it doesn't
+// run until one is.
+var ErrUtilityRoleNotSet = errors.New("no model is chosen for this utility role")
+
+// UtilityRoleUnavailableError is utility work that didn't run because of its role's choice:
+// Err is ErrUtilityRoleOff or ErrUtilityRoleNotSet, and Role says which role.
+type UtilityRoleUnavailableError struct {
+	Role UtilityRole
+	Err  error
+}
+
+func (e *UtilityRoleUnavailableError) Error() string { return string(e.Role) + ": " + e.Err.Error() }
+
+func (e *UtilityRoleUnavailableError) Unwrap() error { return e.Err }

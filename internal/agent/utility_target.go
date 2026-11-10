@@ -18,12 +18,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// ErrUtilityRoleOff is a utility call whose role is switched off: its work doesn't run.
-var ErrUtilityRoleOff = errors.New("this utility role is switched off")
-
-// ErrUtilityRoleNotSet is a utility call whose role has no model chosen at any scope: its work
-// doesn't run until one is.
-var ErrUtilityRoleNotSet = errors.New("no model is chosen for this utility role")
+// ErrUtilityRoleOff and ErrUtilityRoleNotSet are a utility call that didn't run because of its
+// role's choice; the call fails with a models.UtilityRoleUnavailableError naming the role.
+var (
+	ErrUtilityRoleOff    = models.ErrUtilityRoleOff
+	ErrUtilityRoleNotSet = models.ErrUtilityRoleNotSet
+)
 
 // utilityTarget is the model a utility call runs on.
 type utilityTarget struct {
@@ -68,7 +68,7 @@ func (t utilityTarget) usesResponsesAPI() bool {
 // failed read of the settings fails the call.
 func (a *Agent) resolveUtilityTarget(ctx context.Context, role provider.UtilityRole) (utilityTarget, error) {
 	if a.ds == nil {
-		return utilityTarget{}, ErrUtilityRoleNotSet
+		return utilityTarget{}, &models.UtilityRoleUnavailableError{Role: role, Err: ErrUtilityRoleNotSet}
 	}
 	userID, _ := middleware.GetUserIDFromContext(ctx)
 	settings, err := a.ds.ListUtilityModelSettings(ctx, userID)
@@ -87,7 +87,7 @@ func (a *Agent) resolveUtilityTarget(ctx context.Context, role provider.UtilityR
 				if !fellBack {
 					backgroundRunFrom(ctx).succeeded(models.BackgroundFallbackStep(role))
 				}
-				return utilityTarget{}, ErrUtilityRoleOff
+				return utilityTarget{}, &models.UtilityRoleUnavailableError{Role: role, Err: ErrUtilityRoleOff}
 			}
 			t, err := a.settingTarget(ctx, userID, s)
 			if err == nil {
@@ -107,7 +107,7 @@ func (a *Agent) resolveUtilityTarget(ctx context.Context, role provider.UtilityR
 	if unusable != nil {
 		return utilityTarget{}, unusable
 	}
-	return utilityTarget{}, ErrUtilityRoleNotSet
+	return utilityTarget{}, &models.UtilityRoleUnavailableError{Role: role, Err: ErrUtilityRoleNotSet}
 }
 
 // utilityScopes are the scopes whose choices count, first wins. An account chooses only where it

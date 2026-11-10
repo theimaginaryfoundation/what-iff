@@ -96,7 +96,8 @@ func (a *Agent) resolveActiveMood(ctx context.Context, userID uuid.UUID, chatCtx
 		return moods[0]
 	}
 
-	selected := a.autoSelectMood(ctx, moods, userMessage)
+	selected, err := a.autoSelectMood(ctx, moods, userMessage)
+	a.recordTurnUtility(ctx, userID, chat.ID, models.BackgroundStepMoodSelect, err)
 	if selected != nil {
 		a.persistActiveMood(ctx, userID, chat.ID, selected)
 	}
@@ -138,13 +139,13 @@ func isFirstUserMessageResult(results []any, currentMessageID uuid.UUID) bool {
 }
 
 // autoSelectMood asks the simple role's model to pick the best mood from the provided list for
-// the user message.
-func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMessage string) *models.Mood {
+// the user message. It returns nil for no pick, and the call's error when the model call failed.
+func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMessage string) (*models.Mood, error) {
 	// Mock/local mode: mood selection is a provider call — deliberately keep
 	// the current mood instead of hitting the deny transport every auto-mood turn.
 	if a.nonVendorLLM() {
 		a.logger.Debug("mock/local mode: skipping auto mood selection")
-		return nil
+		return nil, nil
 	}
 
 	// Build a compact mood summary for the prompt.
@@ -175,7 +176,7 @@ func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMe
 	})
 	if err != nil {
 		a.logger.Warn("mood auto-select: inference failed", zap.Error(err))
-		return nil
+		return nil, err
 	}
 
 	raw := strings.TrimSpace(out)
@@ -188,14 +189,14 @@ func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMe
 		a.logger.Warn("mood auto-select: failed to parse structured response",
 			zap.String("raw", raw),
 			zap.Error(err))
-		return nil
+		return nil, nil
 	}
 	for _, k := range moods {
 		if k.ID == selectedID {
-			return k
+			return k, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func parseMoodAutoSelectResult(raw string) (uuid.UUID, error) {

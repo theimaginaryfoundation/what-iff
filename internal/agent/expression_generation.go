@@ -69,7 +69,8 @@ func buildExpressionPickUserMessageBody(catalogBlock string) string {
 // so picking runs in full agent context. Instructions reuse the merged system prompt from the fork (via
 // BuildOpenAIResponseParams). When inferenceModelCtx is nil, uses a minimal standalone prompt (defensive).
 //
-// On classifier failure or invalid output, returns nil id (no portrait); callers should not assume a default slot.
+// On invalid output, returns nil id (no portrait); callers should not assume a default slot. A
+// failed model call is returned, so the turn can tell the account when it's theirs to fix.
 func (a *Agent) PickGenerationExpression(ctx context.Context, userID, personalityID uuid.UUID, inferenceModelCtx *provider.ModelContext, userTurn, assistantReply string) (*uuid.UUID, string, error) {
 	slots, err := a.ds.ListPersonalityExpressions(ctx, userID, personalityID)
 	if err != nil {
@@ -114,8 +115,7 @@ Assistant reply to evaluate:
 
 	out, err := a.CallUtility(ctx, req)
 	if err != nil {
-		a.logger.Warn("expression picker model call failed", zap.Error(err))
-		return nil, "", nil
+		return nil, "", fmt.Errorf("expression picker model call: %w", err)
 	}
 
 	raw := strings.TrimSpace(out)

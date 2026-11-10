@@ -121,11 +121,12 @@ func TestIsFirstUserMessageInChat_ListErrorReturnsFalse(t *testing.T) {
 
 // --- autoSelectMood ---
 
-func TestAutoSelectMood_NilProviderReturnsNil(t *testing.T) {
+func TestAutoSelectMood_NotSetReturnsTheError(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
-	got := a.autoSelectMood(context.Background(), []*models.Mood{{ID: uuid.New()}}, "hi")
+	got, err := a.autoSelectMood(context.Background(), []*models.Mood{{ID: uuid.New()}}, "hi")
 	require.Nil(t, got)
+	require.ErrorIs(t, err, ErrUtilityRoleNotSet, "the turn can tell the account")
 }
 
 func TestAutoSelectMood_NonVendorLLMReturnsNil(t *testing.T) {
@@ -136,11 +137,12 @@ func TestAutoSelectMood_NonVendorLLMReturnsNil(t *testing.T) {
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), mockLLM: true, OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	got := a.autoSelectMood(context.Background(), []*models.Mood{{ID: uuid.New()}}, "hi")
+	got, err := a.autoSelectMood(withTestUtilityModels(context.Background()), []*models.Mood{{ID: uuid.New()}}, "hi")
+	require.NoError(t, err)
 	require.Nil(t, got)
 }
 
-func TestAutoSelectMood_ProviderErrorReturnsNil(t *testing.T) {
+func TestAutoSelectMood_ProviderErrorIsReturned(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -148,8 +150,10 @@ func TestAutoSelectMood_ProviderErrorReturnsNil(t *testing.T) {
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	got := a.autoSelectMood(context.Background(), []*models.Mood{{ID: uuid.New()}}, "hi")
+	got, err := a.autoSelectMood(withTestUtilityModels(context.Background()), []*models.Mood{{ID: uuid.New()}}, "hi")
 	require.Nil(t, got)
+	var call *UtilityCallError
+	require.ErrorAs(t, err, &call)
 }
 
 func TestAutoSelectMood_ParseErrorReturnsNil(t *testing.T) {
@@ -158,7 +162,8 @@ func TestAutoSelectMood_ParseErrorReturnsNil(t *testing.T) {
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	got := a.autoSelectMood(context.Background(), []*models.Mood{{ID: uuid.New()}}, "hi")
+	got, err := a.autoSelectMood(withTestUtilityModels(context.Background()), []*models.Mood{{ID: uuid.New()}}, "hi")
+	require.NoError(t, err, "a reply that can't be read is not the account's to fix")
 	require.Nil(t, got)
 }
 
@@ -170,7 +175,8 @@ func TestAutoSelectMood_SuccessReturnsMatchingMood(t *testing.T) {
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 	moods := []*models.Mood{{ID: uuid.New()}, {ID: moodID, Name: "Match"}}
-	got := a.autoSelectMood(withTestUtilityModels(context.Background()), moods, "hi")
+	got, err := a.autoSelectMood(withTestUtilityModels(context.Background()), moods, "hi")
+	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, "Match", got.Name)
 }
@@ -181,7 +187,8 @@ func TestAutoSelectMood_SuccessNoMatchingMoodReturnsNil(t *testing.T) {
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	got := a.autoSelectMood(context.Background(), []*models.Mood{{ID: uuid.New()}}, "hi")
+	got, err := a.autoSelectMood(withTestUtilityModels(context.Background()), []*models.Mood{{ID: uuid.New()}}, "hi")
+	require.NoError(t, err)
 	require.Nil(t, got)
 }
 

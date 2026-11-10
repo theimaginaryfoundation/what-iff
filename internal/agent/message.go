@@ -2968,6 +2968,7 @@ func (a *Agent) finalizeChat(ctx context.Context, userID uuid.UUID, chatMessage,
 		chatName, err := a.generateChatName(nameCtx, chatMessage.Message)
 		cancelName()
 		doneChatName()
+		a.recordTurnUtility(ctx, userID, chatCtx.chat.ID, models.BackgroundStepChatName, err)
 		if err != nil {
 			a.logger.Error("failed to generate chat name", zap.Error(err))
 		} else {
@@ -3133,8 +3134,13 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	a.withBackgroundNotices(checkpointCtx, userID, chatMessage.ChatID, func(checkpointCtx context.Context) {
 		memory, err := a.utilityTargetFor(checkpointCtx, provider.UtilityRoleMemory)
 		if err != nil {
-			// Every step runs on the memory role's model: with none to use, none runs.
+			// Every step runs on the memory role's model: with none to use, none runs, and each
+			// says why (or, for a role switched off, clears what it said before).
 			a.logCheckpointSkipped(chatMessage.ChatID, err)
+			run := backgroundRunFrom(checkpointCtx)
+			for _, step := range []models.BackgroundStep{models.BackgroundStepScratchpad, models.BackgroundStepMemory, models.BackgroundStepSummary} {
+				run.step(step, err)
+			}
 			return
 		}
 		checkpointCtx = withUtilityTarget(checkpointCtx, provider.UtilityRoleMemory, memory)

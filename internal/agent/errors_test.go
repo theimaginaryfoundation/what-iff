@@ -19,5 +19,8 @@ func TestFailureCode(t *testing.T) {
 	})
 	require.Equal(t, models.ErrCodeProviderNotConfigured, failureCode(missingKey))
 	require.Equal(t, models.ErrCodeQuotaExceeded, failureCode(fmt.Errorf("%w for user x", ErrQuotaExceeded)))
+	require.Equal(t, models.ErrCodeUtilityModelNotSet, failureCode(fmt.Errorf("generate personality: %w",
+		&models.UtilityRoleUnavailableError{Role: models.UtilityRolePersonality, Err: ErrUtilityRoleNotSet})))
+	require.Equal(t, models.ErrCodeUtilityRoleOff, failureCode(&models.UtilityRoleUnavailableError{Role: models.UtilityRoleSimple, Err: ErrUtilityRoleOff}))
 	require.Empty(t, failureCode(errors.New("model overloaded")), "a failure without a stable code records none")
 }

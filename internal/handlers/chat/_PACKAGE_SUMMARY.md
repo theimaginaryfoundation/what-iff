@@ -10,7 +10,7 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 - **Follow-ups** (ADR 0x042): `CreateChatMessage` takes `steer: true` for a message sent while a turn runs, which that turn takes in at its next step.
 - **MCP Apps** (`mcp_apps.go`, ADR 0x042): `GET /chat/{chatId}/tool-calls/{toolCallId}/app` returns a tool call's view (HTML with its CSP, the tool's input and result, `Cache-Control: no-store`) and `POST .../app/tools/call` runs the view's tool calls on its own connector (403 for a tool not visible to apps), through `MCPAppAgent`.
 - **Background notices** (`background_notices.go`, ADR 0x027 section 6): `GET /chat/{chatId}/background-notices` lists the chat's background work that failed or fell back and that the account hasn't dismissed, and `POST /chat/{chatId}/background-notices/{noticeId}/dismiss` hides one until its cause changes.
-  A notice states the step and the cause; the client says what to do about it.
+  A notice states the step, the role it runs on (`role`, from the step) and the cause; the client says what to do about it, and shows a role's notices together.
 - **Loaded skills** (`skills.go`, ADR 0x035): `GET /chat/{chatId}/loaded-skills` lists the skills the agent loaded in the thread with `load_skill` (mode and message skills are not loaded state) and `DELETE /chat/{chatId}/loaded-skills/{ritualId}` unloads one, for the thread's Tools panel.
 - **Files in context** (`contextfiles.go`, ADR 0x043 §4): `GET /chat/{chatId}/context-files` returns `agent.ContextFilesForChat` for the thread's Files tab, plus the container status the private build reports; without an agent it returns an empty list.
 

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -226,4 +227,46 @@ func TestUtilityCall_TimeoutStaysATimeoutOnEveryAPI(t *testing.T) {
 			require.Empty(t, out.Succeeded, "nor a success: the next checkpoint redoes the step")
 		})
 	}
+}
+
+// No model chosen for a step's role is the account's to fix, so it becomes a notice; a role
+// switched off is their choice, so it counts as success and clears what was there.
+func TestBackgroundRun_NotSetIsANoticeAndOffClears(t *testing.T) {
+	t.Parallel()
+	n, ok := backgroundNoticeFor(models.BackgroundStepMemory, fmt.Errorf("checkpoint: %w", ErrUtilityRoleNotSet))
+	require.True(t, ok)
+	require.Equal(t, models.BackgroundNotice{Step: models.BackgroundStepMemory, Code: models.BackgroundNoticeModelNotSet}, n)
+
+	_, run := withBackgroundRun(context.Background())
+	run.step(models.BackgroundStepScratchpad, ErrUtilityRoleOff)
+	require.Equal(t, models.BackgroundOutcome{Succeeded: []models.BackgroundStep{models.BackgroundStepScratchpad}}, run.outcome())
+}
+
+// A turn's own calls save how they went at once, each as its own step under the simple role,
+// so one succeeding never clears another's failure; a failure that isn't the account's to fix
+// writes nothing.
+func TestRecordTurnUtility_EachCallItsOwnStep(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	ctx := context.Background()
+	chat, err := f.ent.Chat.Create().SetName("c").SetOwnerID(f.alice).Save(ctx)
+	require.NoError(t, err)
+	call := &UtilityCallError{Provider: "Mistral", Model: "mistral-small-latest", Err: errors.New("400")}
+
+	f.a.recordTurnUtility(ctx, f.alice, chat.ID, models.BackgroundStepChatName, ErrUtilityRoleNotSet)
+	f.a.recordTurnUtility(ctx, f.alice, chat.ID, models.BackgroundStepExpressionPick, call)
+	f.a.recordTurnUtility(ctx, f.alice, chat.ID, models.BackgroundStepMoodSelect, errors.New("unreadable reply"))
+	got, err := f.a.ds.ListBackgroundNotices(ctx, f.alice, chat.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	for _, n := range got {
+		require.Equal(t, models.UtilityRoleSimple, n.Role)
+	}
+
+	f.a.recordTurnUtility(ctx, f.alice, chat.ID, models.BackgroundStepChatName, nil)
+	got, err = f.a.ds.ListBackgroundNotices(ctx, f.alice, chat.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "chat naming's success clears its own notice only")
+	require.Equal(t, models.BackgroundStepExpressionPick, got[0].Step)
+	require.Equal(t, models.BackgroundNoticeProviderError, got[0].Code)
 }

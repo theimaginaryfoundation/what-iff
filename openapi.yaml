@@ -3055,6 +3055,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '409':
+          description: >-
+            Schedule parsing needs a model the account can't use:
+            `provider_not_configured` (no key for its provider, named in
+            `details`), or `utility_model_not_set` / `utility_role_off` (the
+            simple role has no model chosen, or is switched off; `details.role`
+            names it)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
           content:
@@ -12117,18 +12128,29 @@ components:
           type: string
           description: >-
             What didn't happen: `scratchpad`, `memory` or `summary` (a checkpoint
-            step), or `fallback_<role>` (a utility role passed over the model
-            chosen for it during a checkpoint; today that is the `memory` role).
+            step); `memory_query`, `chat_name`, `mood_select` or
+            `expression_pick` (a turn's own background calls); or
+            `fallback_<role>` (a utility role passed over the model chosen for
+            it). Each is its own notice, so one succeeding never clears
+            another's.
+        role:
+          allOf:
+            - $ref: '#/components/schemas/UtilityRole'
+          description: >-
+            The utility role the step runs on, so a client can show a role's
+            notices together. Missing for a step this server doesn't know.
         code:
           type: string
-          enum: [provider_not_configured, provider_error, model_unavailable]
+          enum: [provider_not_configured, provider_error, model_unavailable, model_not_set]
           description: >-
             Why. `provider_not_configured`: the account has no key for
             `provider` (or the deployment can't reach it at all).
             `provider_error`: the provider was asked and failed; background work
             runs again as the chat goes on. `model_unavailable`: the chosen model
             couldn't be used (turned off, or its connection gone or
-            unreachable), so the role ran on its next choice or its default.
+            unreachable), so the role ran on its next choice, or, with none,
+            didn't run. `model_not_set`: no model is chosen for the role, so the
+            step didn't run. A role switched off makes no notice.
         provider:
           type: string
           description: The provider the step went to, when known.
@@ -15568,6 +15590,8 @@ components:
         - system_prompt_too_long
         - buzz_terms_required
         - provider_not_configured
+        - utility_model_not_set
+        - utility_role_off
         - reauthentication_required
         - provider_unreachable
         - provider_key_rejected
