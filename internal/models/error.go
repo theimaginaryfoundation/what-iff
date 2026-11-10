@@ -72,6 +72,10 @@ const (
 	// ErrCodeUtilityRoleOff: the request needed background work whose utility role is switched
 	// off. Details is {"role": "<role>"}.
 	ErrCodeUtilityRoleOff = "utility_role_off"
+	// ErrCodeUtilityModelUnavailable: the request needed background work whose utility role's
+	// chosen model can't be used any more (turned off, its connection gone, or experimental after
+	// the account opted out). Details is {"role": "<role>"}.
+	ErrCodeUtilityModelUnavailable = "utility_model_unavailable"
 	// ErrCodeReauthenticationRequired: the action needs the account owner to
 	// confirm it (for example with the current password), and that confirmation
 	// was missing or wrong. Answered with 403, not 401: the session is valid.
@@ -143,6 +147,7 @@ var AllErrorCodes = []string{
 	ErrCodeProviderNotConfigured,
 	ErrCodeUtilityModelNotSet,
 	ErrCodeUtilityRoleOff,
+	ErrCodeUtilityModelUnavailable,
 	ErrCodeReauthenticationRequired,
 	ErrCodeProviderUnreachable,
 	ErrCodeProviderKeyRejected,

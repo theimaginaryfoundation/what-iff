@@ -111,6 +111,8 @@ func backgroundNoticeFor(step models.BackgroundStep, err error) (models.Backgrou
 			n.Model = call.Model
 		}
 		return n, true
+	case errors.Is(err, models.ErrUtilityModelUnavailable):
+		return models.BackgroundNotice{Step: step, Code: models.BackgroundNoticeModelUnavailable}, true
 	case errors.As(err, &call):
 		return models.BackgroundNotice{Step: step, Code: models.BackgroundNoticeProviderError, Provider: call.Provider, Model: call.Model}, true
 	}

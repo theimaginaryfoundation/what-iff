@@ -22,5 +22,10 @@ func TestFailureCode(t *testing.T) {
 	require.Equal(t, models.ErrCodeUtilityModelNotSet, failureCode(fmt.Errorf("generate personality: %w",
 		&models.UtilityRoleUnavailableError{Role: models.UtilityRolePersonality, Err: ErrUtilityRoleNotSet})))
 	require.Equal(t, models.ErrCodeUtilityRoleOff, failureCode(&models.UtilityRoleUnavailableError{Role: models.UtilityRoleSimple, Err: ErrUtilityRoleOff}))
+	require.Equal(t, models.ErrCodeUtilityModelUnavailable, failureCode(&models.UtilityRoleUnavailableError{Role: models.UtilityRoleSimple,
+		Err: fmt.Errorf("%w: %w", models.ErrUtilityModelUnavailable, ErrModelDisabled)}))
+	require.Equal(t, models.ErrCodeProviderNotConfigured, failureCode(&models.UtilityRoleUnavailableError{Role: models.UtilityRoleSimple,
+		Err: fmt.Errorf("%w: %w", models.ErrUtilityModelUnavailable, &providerkeys.NotConfiguredError{Provider: models.ModelProviderAnthropic})}),
+		"a removed key is named as the missing key")
 	require.Empty(t, failureCode(errors.New("model overloaded")), "a failure without a stable code records none")
 }

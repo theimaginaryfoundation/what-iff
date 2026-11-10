@@ -26,6 +26,8 @@ func failureCode(err error) string {
 		return models.ErrCodeUtilityModelNotSet
 	case errors.Is(err, ErrUtilityRoleOff):
 		return models.ErrCodeUtilityRoleOff
+	case errors.Is(err, models.ErrUtilityModelUnavailable):
+		return models.ErrCodeUtilityModelUnavailable
 	case errors.Is(err, ErrQuotaExceeded):
 		return models.ErrCodeQuotaExceeded
 	case errors.Is(err, ErrNoModelSelected):

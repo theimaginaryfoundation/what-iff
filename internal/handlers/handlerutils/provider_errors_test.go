@@ -48,8 +48,9 @@ func TestRespondIfProviderNotConfigured_OtherErrors(t *testing.T) {
 // role in details; anything else is left for the caller.
 func TestRespondIfUtilityRoleUnavailable(t *testing.T) {
 	for err, want := range map[error]string{
-		fmt.Errorf("parse: %w", &models.UtilityRoleUnavailableError{Role: models.UtilityRoleSimple, Err: models.ErrUtilityRoleNotSet}): models.ErrCodeUtilityModelNotSet,
-		&models.UtilityRoleUnavailableError{Role: models.UtilityRoleSimple, Err: models.ErrUtilityRoleOff}:                             models.ErrCodeUtilityRoleOff,
+		fmt.Errorf("parse: %w", &models.UtilityRoleUnavailableError{Role: models.UtilityRoleSimple, Err: models.ErrUtilityRoleNotSet}):      models.ErrCodeUtilityModelNotSet,
+		&models.UtilityRoleUnavailableError{Role: models.UtilityRoleSimple, Err: models.ErrUtilityRoleOff}:                                  models.ErrCodeUtilityRoleOff,
+		&models.UtilityRoleUnavailableError{Role: models.UtilityRoleSimple, Err: fmt.Errorf("%w: gone", models.ErrUtilityModelUnavailable)}: models.ErrCodeUtilityModelUnavailable,
 	} {
 		rec := httptest.NewRecorder()
 		require.True(t, RespondIfUtilityRoleUnavailable(rec, zap.NewNop(), err))
