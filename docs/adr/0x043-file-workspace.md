@@ -296,6 +296,15 @@ Found by the browser pass:
 
 Verification: the converters over the three real files and a fixture with a text box, footnote, bookmark, internal link and comment; the same files edited and saved in Chromium, with the saved bytes compared part by part; independent reads with openpyxl, python-docx, python-pptx and LibreOffice. Microsoft Office itself has not opened these files yet.
 
+### Step 11 as built: notebook viewer and editor (2026-11-07)
+
+`features/notebook/`, as §8 planned, one component that is both viewer and editor (`editInPlace`):
+
+- **Format.** `nbformat.ts` reads and writes nbformat 4 by hand and keeps what it does not model in `raw`, so metadata, attachments and unknown fields survive, and an untouched notebook writes back byte for byte. Formats before 4 are refused with a reason.
+- **Cells.** At rest a cell is rendered Markdown (the chat's renderer with KaTeX, `attachment:` images resolved) or colourized code. Only the cell being edited holds a Monaco editor, and off-screen cells skip layout through `content-visibility`, so long notebooks stay responsive. Structural edits are pure commands with whole-version undo; a run of typing in one cell is one step. Jupyter's command-mode keys work (`a`, `b`, `dd`, `m`, `y`, arrows, Enter, Escape, Shift+Enter).
+- **Outputs are untrusted.** Picked by MIME type from the richest safe representation. Scripts never run. HTML goes through a dedicated DOMPurify instance that removes scripts, handlers, forms, frames and stylesheets, and only embedded pictures load, so opening a notebook cannot phone home. SVG shows through an `<img>`, where it cannot script. Output is `contain`ed, so a `position: fixed` element cannot cover the app. Scripted HTML steps aside for a picture or text fallback; widgets get a note.
+- **Not done:** formats before 4; widget state and script-driven plots render as their fallback.
+
 ## Step 0 results (2026-11-06)
 
 The four spikes ran on `spike/file-workspace` (throwaway; scripts under `web/app/spike-scripts/`, the Monaco route at `/spike/monaco`), in headless Chromium.

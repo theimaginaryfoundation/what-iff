@@ -1,0 +1,72 @@
+<div class="notebook">
+  @if (!readOnly() && state() === 'ready') {
+    <div class="notebook__toolbar" role="toolbar" aria-label="Notebook">
+      <div class="notebook__group">
+        <button type="button" class="notebook__tool" (click)="addCell('code', 'below')">+ Code</button>
+        <button type="button" class="notebook__tool" (click)="addCell('markdown', 'below')">+ Markdown</button>
+      </div>
+      <div class="notebook__group" role="group" aria-label="Cell type">
+        @for (type of cellTypes; track type.value) {
+          <button
+            type="button"
+            class="notebook__tool"
+            [attr.aria-pressed]="activeCell()?.type === type.value"
+            [disabled]="!activeCell()"
+            (click)="setActiveType(type.value)"
+          >
+            {{ type.label }}
+          </button>
+        }
+      </div>
+      <div class="notebook__group">
+        <button type="button" class="notebook__tool" aria-label="Move cell up" [disabled]="activeIndex() <= 0" (click)="moveActive(-1)">↑</button>
+        <button
+          type="button"
+          class="notebook__tool"
+          aria-label="Move cell down"
+          [disabled]="activeIndex() === -1 || activeIndex() >= cells().length - 1"
+          (click)="moveActive(1)"
+        >
+          ↓
+        </button>
+        <button type="button" class="notebook__tool" [disabled]="!activeCell()" (click)="duplicateActive()">Duplicate</button>
+        <button type="button" class="notebook__tool" [disabled]="!activeCell()" (click)="deleteActive()">Delete</button>
+      </div>
+      <div class="notebook__group">
+        <button type="button" class="notebook__tool" [disabled]="!activeCell()?.outputs?.length" (click)="clearActiveOutputs()">Clear output</button>
+        <button type="button" class="notebook__tool" [disabled]="!hasOutputs()" (click)="clearAllOutputs()">Clear all</button>
+      </div>
+      <div class="notebook__group">
+        <button type="button" class="notebook__tool" [disabled]="!canUndo()" (click)="undo()">Undo</button>
+        <button type="button" class="notebook__tool" [disabled]="!canRedo()" (click)="redo()">Redo</button>
+      </div>
+    </div>
+  }
+  @if (state() === 'loading') {
+    <p class="notebook__placeholder" role="status">Loading the notebook…</p>
+  } @else if (state() === 'error') {
+    <p class="notebook__placeholder" role="alert">{{ error() }}</p>
+  } @else {
+    <div class="notebook__cells">
+      @for (cell of cells(); track cell.uid) {
+        <app-notebook-cell
+          [attr.data-cell]="cell.uid"
+          [class.nb-cell--active]="activeUid() === cell.uid"
+          [cell]="cell"
+          [language]="language()"
+          [active]="activeUid() === cell.uid"
+          [editing]="editingUid() === cell.uid"
+          [readOnly]="readOnly()"
+          (click)="select(cell)"
+          (dblclick)="startEditing(cell.uid)"
+          (sourceChange)="onSourceChange(cell.uid, $event)"
+          (saveRequested)="saveRequested.emit()"
+          (runNext)="next()"
+          (stopEditing)="stopEditing()"
+        />
+      } @empty {
+        <p class="notebook__placeholder">This notebook has no cells yet.</p>
+      }
+    </div>
+  }
+</div>
