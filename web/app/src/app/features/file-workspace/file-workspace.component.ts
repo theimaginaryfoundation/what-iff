@@ -181,9 +181,11 @@ export class FileWorkspaceComponent {
         },
       );
       const subscription = untracked(() =>
-        this.files.downloadFileAttachment(file.id).subscribe({
-          next: blob => {
+        this.files.downloadFileContent(file.id).subscribe({
+          next: ({ blob, version }) => {
             if (generation !== this.generation) return;
+            // The version of these bytes, which the file row (possibly cached) may not match.
+            if (version !== null) this.loadedVersion = version;
             this.blob.set(blob);
             // A viewer that failed to load stays an error even when the bytes arrive after it.
             if (this.state() !== 'error') this.state.set('ready');
@@ -364,9 +366,10 @@ export class FileWorkspaceComponent {
     const file = this.file();
     this.state.set('loading');
     const generation = this.generation;
-    this.files.downloadFileAttachment(file.id).pipe(take(1)).subscribe({
-      next: blob => {
+    this.files.downloadFileContent(file.id).pipe(take(1)).subscribe({
+      next: ({ blob, version }) => {
         if (generation !== this.generation) return;
+        if (version !== null) this.loadedVersion = version;
         this.blob.set(blob);
         this.state.set('ready');
       },

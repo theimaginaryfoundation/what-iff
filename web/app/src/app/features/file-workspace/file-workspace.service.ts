@@ -5,6 +5,7 @@ import { Subscription } from 'rxjs';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
+import { UnsavedChangesService } from '../../core/services/unsaved-changes.service';
 
 /** Which page hosts the workspace. The gallery shows it in place; the chat beside or over the thread. */
 export type WorkspaceHost = 'chat' | 'gallery';
@@ -51,6 +52,7 @@ export class FileWorkspaceService {
   private readonly _chatId = signal<string | null>(null);
   private readonly stored = signal<StoredState>(readStored());
   private readonly _band = signal<WorkspaceBand>(this.measureBand());
+  private readonly unsavedChanges = inject(UnsavedChangesService);
   private readonly _unsaved = signal(false);
 
   readonly host = this._host.asReadonly();
@@ -140,6 +142,7 @@ export class FileWorkspaceService {
   setUnsaved(unsaved: boolean): void {
     const released = this._unsaved() && !unsaved;
     this._unsaved.set(unsaved);
+    this.unsavedChanges.set(unsaved);
     if (released) this._band.set(this.measureBand());
   }
 

@@ -74,8 +74,8 @@ export class CodeEditorComponent implements FileEditor {
       void this.mount();
     });
     effect(() => {
+      // Only new bytes reload the text. A rename or move changes file() and must not touch edits.
       const blob = this.blob();
-      this.file();
       if (!this.rendered) return;
       // After a save the host hands back this editor's own bytes; reloading them would discard
       // what was typed since, and the undo history and cursor with it.

@@ -2,7 +2,7 @@ import { Component, input, output, provideZonelessChangeDetection, signal } from
 import { HttpErrorResponse } from '@angular/common/http';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { NEVER, of, Subject, throwError } from 'rxjs';
+import { NEVER, Observable, map, of, Subject, throwError } from 'rxjs';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../core/services/confirmation.service';
@@ -50,6 +50,7 @@ const textBlob = (text: string) => new Blob([text], { type: 'text/plain' });
 describe('FileWorkspaceComponent', () => {
   let fixture: ComponentFixture<FileWorkspaceComponent>;
   let download: ReturnType<typeof vi.fn>;
+  let downloadVersion: number | null;
   let alert: ReturnType<typeof vi.fn>;
   let replaceContent: ReturnType<typeof vi.fn>;
   let confirmDiscard: ReturnType<typeof vi.fn>;
@@ -57,6 +58,7 @@ describe('FileWorkspaceComponent', () => {
 
   beforeEach(async () => {
     download = vi.fn().mockReturnValue(of(textBlob('hello')));
+    downloadVersion = null;
     alert = vi.fn().mockResolvedValue(undefined);
     replaceContent = vi.fn().mockImplementation((id: string) => of(file({ id, content_version: 2 })));
     confirmDiscard = vi.fn().mockResolvedValue(true);
@@ -66,7 +68,7 @@ describe('FileWorkspaceComponent', () => {
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
-        { provide: FileAttachmentService, useValue: { downloadFileAttachment: download, replaceContent } },
+        { provide: FileAttachmentService, useValue: { downloadFileAttachment: download, downloadFileContent: (id: string) => (download as unknown as (id: string) => Observable<Blob>)(id).pipe(map((blob: Blob) => ({ blob, version: downloadVersion }))), replaceContent } },
         { provide: ConfirmationService, useValue: { alert, confirmDiscardChanges: confirmDiscard } },
         { provide: VIEWER_LOADER, useValue: (kind: string) => loadViewer(kind) },
         { provide: EDITOR_LOADER, useValue: (kind: string) => (kind === 'none' ? null : Promise.resolve(FakeEditorComponent)) },
@@ -257,6 +259,14 @@ describe('FileWorkspaceComponent', () => {
     expect(editor.marked).toBe(1);
     expect(changed).toHaveBeenCalledWith(expect.objectContaining({ id: 'f-1', content_version: 2 }));
     expect(await fixture.componentInstance.blob()!.text()).toBe('new text');
+  });
+
+  it('sends the version of the downloaded bytes, not the possibly stale file row', async () => {
+    downloadVersion = 5;
+    const { editor } = await startEditing();
+    editor.edit('new text');
+    await fixture.componentInstance.save();
+    expect(replaceContent.mock.calls[0][3]).toBe(5);
   });
 
   it('turns a stale version into the conflict dialog, with reload, overwrite and save-as', async () => {

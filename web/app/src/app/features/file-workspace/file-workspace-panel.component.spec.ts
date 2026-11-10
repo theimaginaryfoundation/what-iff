@@ -36,7 +36,7 @@ describe('FileWorkspacePanelComponent', () => {
         provideZonelessChangeDetection(),
         provideRouter([]),
         { provide: ImageGalleryService, useValue: { getFileInfo: () => of(row), renameImage: rename } },
-        { provide: FileAttachmentService, useValue: { downloadFileAttachment: () => of(new Blob(['x'])), deleteFileAttachment: remove } },
+        { provide: FileAttachmentService, useValue: { downloadFileAttachment: () => of(new Blob(['x'])), downloadFileContent: () => of({ blob: new Blob(['x']), version: null }), deleteFileAttachment: remove } },
         { provide: ConfirmationService, useValue: { confirm, alert: vi.fn() } },
       ],
     }).compileComponents();

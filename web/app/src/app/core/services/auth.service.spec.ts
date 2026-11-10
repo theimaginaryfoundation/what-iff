@@ -7,6 +7,8 @@ import { Router } from '@angular/router';
 import { environment } from '../../../environments/environment';
 import { ExternalAuthProvider, NoopExternalAuthProvider } from '../auth/external-auth.provider';
 import { AuthService } from './auth.service';
+import { ConfirmationService } from './confirmation.service';
+import { UnsavedChangesService } from './unsaved-changes.service';
 import { LoggerService } from './logger.service';
 
 const PROFILE_URL = `${environment.apiUrl}/user/profile`;
@@ -59,5 +61,44 @@ describe('AuthService session check at startup', () => {
     expect(sessionStorage.getItem('access_token')).toBeNull();
     expect(sessionStorage.getItem('refresh_token')).toBeNull();
     expect(TestBed.inject(AuthService).isLoggedIn()).toBe(false);
+  });
+});
+
+describe('AuthService sign-out with unsaved edits', () => {
+  const confirmDiscardChanges = vi.fn();
+  const navigate = vi.fn();
+
+  beforeEach(() => {
+    sessionStorage.setItem('access_token', 'access');
+    confirmDiscardChanges.mockReset();
+    navigate.mockReset();
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: Router, useValue: { navigate } },
+        { provide: ExternalAuthProvider, useClass: NoopExternalAuthProvider },
+        { provide: LoggerService, useValue: { error: vi.fn() } },
+        { provide: ConfirmationService, useValue: { confirmDiscardChanges } },
+      ],
+    });
+    TestBed.inject(UnsavedChangesService).set(true);
+  });
+
+  afterEach(() => sessionStorage.clear());
+
+  it('stays signed in when the user keeps editing', async () => {
+    confirmDiscardChanges.mockResolvedValue(false);
+    await TestBed.inject(AuthService).logoutPreferred('local');
+    expect(sessionStorage.getItem('access_token')).toBe('access');
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('signs out once the user agrees to discard the edits', async () => {
+    confirmDiscardChanges.mockResolvedValue(true);
+    await TestBed.inject(AuthService).logoutPreferred('local');
+    expect(sessionStorage.getItem('access_token')).toBeNull();
+    expect(navigate).toHaveBeenCalledWith(['/auth/login']);
   });
 });

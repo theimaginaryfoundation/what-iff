@@ -37,6 +37,17 @@ describe('CodeEditorComponent', () => {
     fixture.detectChanges();
   }
 
+  it('keeps edits when the file is renamed or moved', async () => {
+    await open(file(), 'a');
+    const model = fake.models.get('vfs:///notes.py?id=f-1')!;
+    model.type('edited');
+    fixture.componentRef.setInput('file', file({ name: 'renamed.py' }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(model.getValue()).toBe('edited');
+    expect(fixture.componentInstance.dirty()).toBe(true);
+  });
+
   it('keeps typing that lands during a save, and does not reload its own saved bytes', async () => {
     await open(file(), 'a');
     const model = fake.models.get('vfs:///notes.py?id=f-1')!;
