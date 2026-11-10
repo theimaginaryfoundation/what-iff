@@ -353,29 +353,76 @@ function insertDrawing(xml: string, relId: string): string {
  * Runs after the preserved parts are in the package: adds the sheet and workbook relationships and
  * extension lists that point at slicers and timelines, rewrites sheet ids (ExcelJS numbers sheets
  * afresh, and caches address pivots by id), adds and removes `Slicer_` names, and places new frames.
+ *
+ * The part graph, which ExcelJS knows nothing of, so every edge is written here:
+ *
+ *   workbook.xml ──rel + x14/x15 ext──▶ slicerCache*.xml, timelineCache*.xml  (+ a Slicer_ name each)
+ *   sheet*.xml   ──rel + x14/x15 ext──▶ slicer*.xml, timeline*.xml           (the visible slicers)
+ *   sheet*.xml   ──rel──▶ drawing*.xml, which holds each slicer's frame (graphicFrame anchor)
+ *   slicerCache  ──tabId + pivotTable name──▶ a pivot on a sheet, or ──tableId──▶ a table
+ *
+ * Invariants: every relationship id is fresh in its rels part, a sheet's slicer list is split by
+ * kind (pivot slicers in the x14 ext, table slicers in the x15 one), and a cache's tabId is the
+ * sheet's id after this save.
  */
 export async function injectSlicerReferences(bytes: Uint8Array, preserved: SlicerPreserved, saveMime: string): Promise<Uint8Array> {
   if (!hasSlicerParts(preserved) && !Object.keys(preserved.edits?.anchors ?? {}).length) return bytes;
   const pkg = await OoxmlPackage.open(bytes);
-  const wbPath = 'xl/workbook.xml';
-  let wbXml = (await pkg.text(wbPath)) ?? '';
+  const book = await readWorkbookSheets(pkg);
+  const kindOf = await renumberCacheSheetIds(pkg, preserved, book.newIds);
+  const contentOverrides: string[] = [];
+  const sheetNames = new Set([
+    ...Object.keys(preserved.sheetSlicers),
+    ...Object.keys(preserved.sheetTimelines),
+    ...Object.keys(preserved.edits?.anchors ?? {}),
+  ]);
+  for (const name of sheetNames) {
+    const sheetPath = book.sheetPaths.get(name);
+    if (sheetPath) await patchSheet(pkg, preserved, name, sheetPath, kindOf, contentOverrides);
+  }
+  await patchWorkbook(pkg, preserved, book.wbXml, book.wbRels);
+  if (contentOverrides.length) {
+    const ct = (await pkg.text('[Content_Types].xml')) ?? '';
+    pkg.put('[Content_Types].xml', ct.replace('</Types>', `${contentOverrides.join('')}</Types>`));
+  }
+  return pkg.save(saveMime);
+}
+
+const WORKBOOK_PATH = 'xl/workbook.xml';
+
+/** Each sheet's part path and its id after this save, by name. */
+async function readWorkbookSheets(pkg: OoxmlPackage): Promise<{
+  wbXml: string;
+  wbRels: Relationship[];
+  sheetPaths: Map<string, string>;
+  newIds: Map<string, string>;
+}> {
+  const wbXml = (await pkg.text(WORKBOOK_PATH)) ?? '';
   const wb = parseXml(wbXml).documentElement;
-  const wbRels = [...(await pkg.rels(wbPath)).values()];
+  const wbRels = [...(await pkg.rels(WORKBOOK_PATH)).values()];
   const sheetPaths = new Map<string, string>();
   const newIds = new Map<string, string>();
   for (const sheet of children(children(wb, SS, 'sheets')[0], SS, 'sheet')) {
     const name = sheet.getAttribute('name') ?? '';
     const rel = wbRels.find(r => r.id === attr(sheet, NS.r, 'id'));
-    if (rel) sheetPaths.set(name, resolveTarget(wbPath, rel.target));
+    if (rel) sheetPaths.set(name, resolveTarget(WORKBOOK_PATH, rel.target));
     newIds.set(name, sheet.getAttribute('sheetId') ?? '');
   }
+  return { wbXml, wbRels, sheetPaths, newIds };
+}
+
+/** Points each slicer cache's pivots at their sheets' new ids; returns each cache's kind by name. */
+async function renumberCacheSheetIds(
+  pkg: OoxmlPackage,
+  preserved: SlicerPreserved,
+  newIds: Map<string, string>,
+): Promise<Map<string, 'pivot' | 'table'>> {
   const kindOf = new Map<string, 'pivot' | 'table'>();
   for (const path of preserved.slicerCaches) {
     const xml = await pkg.text(path);
     if (!xml) continue;
     const cache = parseSlicerCache(xml, path);
     kindOf.set(cache.name, cache.kind);
-    // Addressed by the sheet's id, which this save may have changed.
     const fixed = xml.replace(/(<(?:[\w]+:)?pivotTable\b[^>]*\btabId=")([^"]*)(")/g, (whole, a: string, id: string, c: string) => {
       const name = Object.entries(preserved.sheetIds).find(([, old]) => old === id)?.[0];
       const now = name ? newIds.get(name) : undefined;
@@ -383,55 +430,78 @@ export async function injectSlicerReferences(bytes: Uint8Array, preserved: Slice
     });
     if (fixed !== xml) pkg.put(path, fixed);
   }
-  const contentOverrides: string[] = [];
-  for (const name of new Set([...Object.keys(preserved.sheetSlicers), ...Object.keys(preserved.sheetTimelines), ...Object.keys(preserved.edits?.anchors ?? {})])) {
-    const sheetPath = sheetPaths.get(name);
-    if (!sheetPath) continue;
-    const rels = [...(await pkg.rels(sheetPath)).values()];
-    const nextId = allocator(rels);
-    let xml = (await pkg.text(sheetPath)) ?? '';
-    const pivotRefs: string[] = [];
-    const tableRefs: string[] = [];
-    for (const part of preserved.sheetSlicers[name] ?? []) {
-      const id = nextId();
-      rels.push({ id, type: REL_SLICER, target: relativeTo(sheetPath, part), external: false });
-      const partXml = (await pkg.text(part)) ?? '';
-      const table = parseSlicerPart(partXml).some(s => kindOf.get(s.cache) === 'table');
-      (table ? tableRefs : pivotRefs).push(`<x14:slicer r:id="${id}"/>`);
-    }
-    const timelineRefs = (preserved.sheetTimelines[name] ?? []).map(part => {
-      const id = nextId();
-      rels.push({ id, type: REL_TIMELINE, target: relativeTo(sheetPath, part), external: false });
-      return `<x15:timelineRef r:id="${id}"/>`;
-    });
-    let exts = '';
-    if (pivotRefs.length) exts += `<ext xmlns:x14="${X14}" uri="${EXT_SHEET_PIVOT_SLICERS}"><x14:slicerList>${pivotRefs.join('')}</x14:slicerList></ext>`;
-    if (tableRefs.length) exts += `<ext xmlns:x15="${X15}" uri="${EXT_SHEET_TABLE_SLICERS}"><x14:slicerList xmlns:x14="${X14}">${tableRefs.join('')}</x14:slicerList></ext>`;
-    if (timelineRefs.length) exts += `<ext xmlns:x15="${X15}" uri="${EXT_SHEET_TIMELINES}"><x15:timelineRefs>${timelineRefs.join('')}</x15:timelineRefs></ext>`;
-    xml = addExtensions(xml, 'worksheet', exts);
-    const frames = preserved.edits?.anchors[name] ?? [];
-    if (frames.length) {
-      const own = rels.find(r => r.type === REL_DRAWING);
-      if (own) {
-        const drawingPath = resolveTarget(sheetPath, own.target);
-        const drawing = (await pkg.text(drawingPath)) ?? '';
-        const close = drawing.lastIndexOf('</');
-        pkg.put(drawingPath, `${drawing.slice(0, close)}${frames.join('')}${drawing.slice(close)}`);
-      } else {
-        let n = 1;
-        while (pkg.has(`xl/drawings/drawingS${n}.xml`)) n++;
-        const drawingPath = `xl/drawings/drawingS${n}.xml`;
-        pkg.put(drawingPath, `${XML_HEAD}<xdr:wsDr xmlns:xdr="${XDR}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">${frames.join('')}</xdr:wsDr>`);
-        contentOverrides.push(`<Override PartName="/${drawingPath}" ContentType="${CT_DRAWING}"/>`);
-        const id = nextId();
-        rels.push({ id, type: REL_DRAWING, target: relativeTo(sheetPath, drawingPath), external: false });
-        xml = insertDrawing(xml, id);
-      }
-    }
-    if (!/xmlns:r=/.test(xml.slice(0, 800))) xml = xml.replace('<worksheet ', `<worksheet xmlns:r="${NS.r}" `);
-    pkg.put(sheetPath, xml);
-    pkg.put(relsPathFor(sheetPath), relsXml(rels));
+  return kindOf;
+}
+
+/** One sheet: relationships and extension lists for its slicers and timelines, and new frames. */
+async function patchSheet(
+  pkg: OoxmlPackage,
+  preserved: SlicerPreserved,
+  name: string,
+  sheetPath: string,
+  kindOf: Map<string, 'pivot' | 'table'>,
+  contentOverrides: string[],
+): Promise<void> {
+  const rels = [...(await pkg.rels(sheetPath)).values()];
+  const nextId = allocator(rels);
+  let xml = (await pkg.text(sheetPath)) ?? '';
+  const pivotRefs: string[] = [];
+  const tableRefs: string[] = [];
+  for (const part of preserved.sheetSlicers[name] ?? []) {
+    const id = nextId();
+    rels.push({ id, type: REL_SLICER, target: relativeTo(sheetPath, part), external: false });
+    const partXml = (await pkg.text(part)) ?? '';
+    const table = parseSlicerPart(partXml).some(s => kindOf.get(s.cache) === 'table');
+    (table ? tableRefs : pivotRefs).push(`<x14:slicer r:id="${id}"/>`);
   }
+  const timelineRefs = (preserved.sheetTimelines[name] ?? []).map(part => {
+    const id = nextId();
+    rels.push({ id, type: REL_TIMELINE, target: relativeTo(sheetPath, part), external: false });
+    return `<x15:timelineRef r:id="${id}"/>`;
+  });
+  let exts = '';
+  if (pivotRefs.length) exts += `<ext xmlns:x14="${X14}" uri="${EXT_SHEET_PIVOT_SLICERS}"><x14:slicerList>${pivotRefs.join('')}</x14:slicerList></ext>`;
+  if (tableRefs.length) exts += `<ext xmlns:x15="${X15}" uri="${EXT_SHEET_TABLE_SLICERS}"><x14:slicerList xmlns:x14="${X14}">${tableRefs.join('')}</x14:slicerList></ext>`;
+  if (timelineRefs.length) exts += `<ext xmlns:x15="${X15}" uri="${EXT_SHEET_TIMELINES}"><x15:timelineRefs>${timelineRefs.join('')}</x15:timelineRefs></ext>`;
+  xml = addExtensions(xml, 'worksheet', exts);
+  xml = await placeFrames(pkg, sheetPath, xml, rels, nextId, preserved.edits?.anchors[name] ?? [], contentOverrides);
+  if (!/xmlns:r=/.test(xml.slice(0, 800))) xml = xml.replace('<worksheet ', `<worksheet xmlns:r="${NS.r}" `);
+  pkg.put(sheetPath, xml);
+  pkg.put(relsPathFor(sheetPath), relsXml(rels));
+}
+
+/** Adds new slicer frames to the sheet's drawing, making one when the sheet has none. */
+async function placeFrames(
+  pkg: OoxmlPackage,
+  sheetPath: string,
+  sheetXml: string,
+  rels: Relationship[],
+  nextId: () => string,
+  frames: readonly string[],
+  contentOverrides: string[],
+): Promise<string> {
+  if (!frames.length) return sheetXml;
+  const own = rels.find(r => r.type === REL_DRAWING);
+  if (own) {
+    const drawingPath = resolveTarget(sheetPath, own.target);
+    const drawing = (await pkg.text(drawingPath)) ?? '';
+    const close = drawing.lastIndexOf('</');
+    pkg.put(drawingPath, `${drawing.slice(0, close)}${frames.join('')}${drawing.slice(close)}`);
+    return sheetXml;
+  }
+  let n = 1;
+  while (pkg.has(`xl/drawings/drawingS${n}.xml`)) n++;
+  const drawingPath = `xl/drawings/drawingS${n}.xml`;
+  pkg.put(drawingPath, `${XML_HEAD}<xdr:wsDr xmlns:xdr="${XDR}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">${frames.join('')}</xdr:wsDr>`);
+  contentOverrides.push(`<Override PartName="/${drawingPath}" ContentType="${CT_DRAWING}"/>`);
+  const id = nextId();
+  rels.push({ id, type: REL_DRAWING, target: relativeTo(sheetPath, drawingPath), external: false });
+  return insertDrawing(sheetXml, id);
+}
+
+/** The workbook: cache relationships and extension lists, and the `Slicer_` defined names. */
+async function patchWorkbook(pkg: OoxmlPackage, preserved: SlicerPreserved, wbXmlIn: string, wbRels: Relationship[]): Promise<void> {
+  let wbXml = wbXmlIn;
   const nextWbId = allocator(wbRels);
   const pivotCaches: string[] = [];
   const tableCaches: string[] = [];
@@ -439,12 +509,12 @@ export async function injectSlicerReferences(bytes: Uint8Array, preserved: Slice
     const xml = await pkg.text(path);
     if (!xml) continue;
     const id = nextWbId();
-    wbRels.push({ id, type: REL_SLICER_CACHE, target: relativeTo(wbPath, path), external: false });
+    wbRels.push({ id, type: REL_SLICER_CACHE, target: relativeTo(WORKBOOK_PATH, path), external: false });
     (parseSlicerCache(xml, path).kind === 'table' ? tableCaches : pivotCaches).push(`<x14:slicerCache r:id="${id}"/>`);
   }
   const timelineCaches = preserved.timelineCaches.map(path => {
     const id = nextWbId();
-    wbRels.push({ id, type: REL_TIMELINE_CACHE, target: relativeTo(wbPath, path), external: false });
+    wbRels.push({ id, type: REL_TIMELINE_CACHE, target: relativeTo(WORKBOOK_PATH, path), external: false });
     return `<x15:timelineCacheRef r:id="${id}"/>`;
   });
   let bookExts = '';
@@ -458,11 +528,6 @@ export async function injectSlicerReferences(bytes: Uint8Array, preserved: Slice
   wbXml = wbXml.replace(/<definedNames>\s*<\/definedNames>/, '');
   if (preserved.edits?.addNames.length) wbXml = mergeDefinedNamesXml(wbXml, preserved.edits.addNames.map(name => ({ name, value: '#N/A' })));
   if (!/xmlns:r=/.test(wbXml.slice(0, 800))) wbXml = wbXml.replace('<workbook ', `<workbook xmlns:r="${NS.r}" `);
-  pkg.put(wbPath, wbXml);
-  pkg.put(relsPathFor(wbPath), relsXml(wbRels));
-  if (contentOverrides.length) {
-    const ct = (await pkg.text('[Content_Types].xml')) ?? '';
-    pkg.put('[Content_Types].xml', ct.replace('</Types>', `${contentOverrides.join('')}</Types>`));
-  }
-  return pkg.save(saveMime);
+  pkg.put(WORKBOOK_PATH, wbXml);
+  pkg.put(relsPathFor(WORKBOOK_PATH), relsXml(wbRels));
 }
