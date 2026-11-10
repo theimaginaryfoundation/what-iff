@@ -13,8 +13,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const generatePersonalityModel = "gpt-5.1"
-
 const generatePersonalityPrompt = `You are designing a single, coherent system prompt for a custom AI companion ("personality") for this user.
 
 Your job is to create prompts that feel deep, specific, and alive, not flat or generic. Avoid vague descriptions like “you are a helpful, friendly assistant.” Instead, anchor each personality in a place, a role, and a set of values and boundaries.

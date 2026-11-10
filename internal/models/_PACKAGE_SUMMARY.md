@@ -36,7 +36,8 @@
   `ChatMessage.ExcludeFromMemory` is the one stored trace of a turn: set on both messages of a save-off turn (`chat_message.exclude_from_memory`, nullable), never in the API (`json:"-"`).
 - **Superseded messages:** `ChatMessage.SupersededAt` / `SupersededBy` (`json:"-"`) mark a message taken back and the reply that replaced it (agent `SupersedeTurn` / `RegenerateTurn`).
   `ChatMessageFilters.IncludeSuperseded` (`json:"-"`) lists them too; off by default, so they are hidden wherever messages are listed.
-- **Utility roles (`utility.go`):** `UtilityRole` (`memory`, `simple`, `personality`) groups background work that runs on the same model (ADR 0x027 section 6).
+- **Utility roles (`utility.go`):** `UtilityRole` (`memory`, `memory_merge`, `simple`, `personality`) groups background work that runs on the same model (ADR 0x027 section 6).
+  A `UtilityModelSetting` chooses a model or switches its role off (`Off`, no `ModelID`); `UtilityChoice` is how the API reports one scope's.
   `UtilityRoles` lists them in display order and `Valid` checks one.
   They live here, not in `agent/provider`, so code that can't import the agent, such as the datastore, can name a role.
 - **Error envelope (`error.go`):** `ErrorResponse` plus the error-code registry — `ErrCode*` constants and `GenericErrorCode(status)`.

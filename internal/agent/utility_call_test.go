@@ -36,6 +36,19 @@ func recordingServer(t *testing.T, body string) (*httptest.Server, *string, *map
 	return srv, &path, &req
 }
 
+// testUtilityModel is the model tests run utility roles on: an OpenAI model, so calls go to the
+// Responses API.
+const testUtilityModel = "gpt-5.4-mini"
+
+// withTestUtilityModels pins every utility role under ctx to testUtilityModel, for tests whose
+// agent has no settings to choose from.
+func withTestUtilityModels(ctx context.Context) context.Context {
+	for _, role := range models.UtilityRoles {
+		ctx = withUtilityTarget(ctx, role, utilityTarget{name: testUtilityModel, provider: string(models.ModelProviderOpenAI)})
+	}
+	return ctx
+}
+
 var utilityTestRequest = provider.UtilityRequest{
 	Role:         provider.UtilityRoleSimple,
 	Instructions: "name it",
@@ -49,12 +62,12 @@ func TestCallUtility_SimpleRoleUsesResponsesAPI(t *testing.T) {
 	client := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL(srv.URL))
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: provider.NewOpenAIProvider(nil, &client, nil, nil)}
 
-	out, err := a.CallUtility(context.Background(), utilityTestRequest)
+	out, err := a.CallUtility(withTestUtilityModels(context.Background()), utilityTestRequest)
 	require.NoError(t, err)
 	require.Equal(t, "named", out)
 	got := reqs()
 	require.Len(t, got, 1)
-	require.Equal(t, models.UtilityModelName, got[0]["model"])
+	require.Equal(t, testUtilityModel, got[0]["model"])
 	require.Equal(t, "json_schema", got[0]["text"].(map[string]any)["format"].(map[string]any)["type"])
 }
 
@@ -139,18 +152,6 @@ func TestCallUtility_RefusesInvalidRequest(t *testing.T) {
 	require.ErrorIs(t, err, provider.ErrInvalidUtilityRequest)
 }
 
-// Every role's built-in model is named with its provider and routes to the Responses API on
-// that alone, without needing the catalog to know the model.
-func TestUtilityBuiltIn_EveryRoleRoutesToResponsesAPI(t *testing.T) {
-	t.Parallel()
-	for _, role := range models.UtilityRoles {
-		model, modelProvider := utilityBuiltIn(role)
-		require.Equal(t, models.ModelProviderOpenAI, modelProvider, "%s -> %s", role, model)
-		require.False(t, models.UsesAnthropicMessagesAPI(string(modelProvider), model), model)
-		require.False(t, models.UsesOpenAIChatCompletionsAPI(string(modelProvider), model), model)
-	}
-}
-
 // A conversation sent to the Responses API loses the images it can't take, and the call goes
 // ahead; each drop is counted by reason so it shows up rather than vanishing.
 func TestCallUtility_CountsImagesLeftOut(t *testing.T) {
@@ -169,7 +170,7 @@ func TestCallUtility_CountsImagesLeftOut(t *testing.T) {
 		{MediaType: "image/png"},
 	}, false)
 
-	out, err := a.CallUtility(context.Background(), provider.UtilityRequest{
+	out, err := a.CallUtility(withTestUtilityModels(context.Background()), provider.UtilityRequest{
 		Role: provider.UtilityRoleMemory, CallPath: telemetry.CallPathConversationSummary, Context: mc, Input: "summarize",
 	})
 	require.NoError(t, err)

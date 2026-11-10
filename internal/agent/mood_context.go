@@ -13,8 +13,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const moodAutoSelectModel = models.UtilityModelName
-
 type moodAutoSelectResult struct {
 	MoodID string `json:"mood_id"`
 }
@@ -186,12 +184,10 @@ func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMe
 	// We rely on OpenAI structured output enforcement here; parser intentionally
 	// expects JSON-only text (no prose wrappers or concatenated objects).
 	a.logger.Debug("mood auto-select: raw structured output",
-		zap.String("model", moodAutoSelectModel),
 		zap.String("raw", raw))
 	selectedID, err := parseMoodAutoSelectResult(raw)
 	if err != nil {
 		a.logger.Warn("mood auto-select: failed to parse structured response",
-			zap.String("model", moodAutoSelectModel),
 			zap.String("raw", raw),
 			zap.Error(err))
 		return nil

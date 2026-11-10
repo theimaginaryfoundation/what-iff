@@ -313,8 +313,6 @@ func (s *Server) setupRoutes() {
 	memoryEmbeddingBackfillCfg := agent.MemoryEmbeddingBackfillConfig{
 		LockKey: s.config.MemoryEmbeddingBackfillLockKey,
 	}
-	// Taken before the variable below shadows the package.
-	utilityBuiltIn := agent.UtilityBuiltInModel
 	agent := agent.NewAgent(dataStore, s.logger, s.telemetry, fileStore, agentCfg)
 	s.chatAgent = agent
 	agent.StartMemoryEmbeddingBackfill(s.lifecycleCtx, memoryEmbeddingBackfillCfg)
@@ -462,7 +460,7 @@ func (s *Server) setupRoutes() {
 	)
 	mountAccountKeyRoutes(authRouter, keyResolver, accountKeys, connectionsHandler)
 	provideraccess.NewHandler(keyResolver, s.logger).RegisterRoutes(authRouter)
-	utilitymodel.NewHandler(dataStore, utilityBuiltIn, keyResolver, s.logger).RegisterRoutes(authRouter)
+	utilitymodel.NewHandler(dataStore, keyResolver, s.logger).RegisterRoutes(authRouter)
 	toolsHandler.RegisterRoutes(authRouter)
 	searchHandler.RegisterRoutes(authRouter)
 

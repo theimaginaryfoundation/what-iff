@@ -3,10 +3,10 @@ package agent
 // A utility call (provider.UtilityRequest) runs in two steps:
 //
 //  1. Resolution (utility_target.go): the call's role picks its model. The account's choice
-//     comes first, where accounts bring their own keys; then the deployment's; then the
-//     role's built-in model. A choice that can't be used falls back to the next, logged and
-//     counted. Checkpoint steps whose model follows the chat pick theirs in
-//     archival_models.go instead.
+//     comes first, where accounts bring their own keys; then the deployment's. A choice that
+//     can't be used falls back to the next, logged and counted. A role switched off, or with
+//     nothing chosen, doesn't run: the call fails with ErrUtilityRoleOff or
+//     ErrUtilityRoleNotSet before anything is sent.
 //  2. Dispatch (here): the request is validated, then rendered for the API the model speaks
 //     (Anthropic Messages, Chat Completions, or OpenAI's Responses) and sent through the
 //     same provider clients a chat turn on that model uses. A failure names the provider it
@@ -46,7 +46,11 @@ func (a *Agent) callUtility(ctx context.Context, req provider.UtilityRequest) (u
 	if err := req.Validate(); err != nil {
 		return utilityReply{}, err
 	}
-	return a.callUtilityTarget(ctx, a.utilityTargetFor(ctx, req.Role), req)
+	t, err := a.utilityTargetFor(ctx, req.Role)
+	if err != nil {
+		return utilityReply{}, err
+	}
+	return a.callUtilityTarget(ctx, t, req)
 }
 
 // callUtilityTarget makes a utility call on a given model rather than its role's, for the
