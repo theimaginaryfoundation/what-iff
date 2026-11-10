@@ -65,22 +65,33 @@ func TestBackgroundNoticeFor(t *testing.T) {
 	run.step(models.BackgroundStepMemory, call) // a nil run records nothing, and doesn't panic
 }
 
-// Inside a run, a role passing over a chosen model records a fallback notice; resolving
-// without falling back records the fallback step as clear, so an old notice goes away.
+// Inside a run, a role passing over a chosen model for one that runs records a fallback notice;
+// resolving without falling back records the fallback step as clear, so an old notice goes away.
+// With every choice unusable there is nothing to fall back to: the call fails as unavailable, and
+// the step's own notice says so.
 func TestBackgroundRun_RecordsFallbacks(t *testing.T) {
 	t.Parallel()
 	f := newConnectionFixture(t)
 	ctx, run := withBackgroundRun(apicontext.WithUserID(context.Background(), f.alice))
 	f.choose(t, models.UtilityScopeAccount, f.alice, models.UtilityRoleMemory, f.aliceModel.ID)
+	f.choose(t, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleMemory, f.catalog.ID)
+	f.choose(t, models.UtilityScopeAccount, f.alice, models.UtilityRoleSimple, f.aliceModel.ID)
 	_, err := f.ent.Model.UpdateOneID(f.aliceModel.ID).SetDeleted(true).Save(context.Background())
 	require.NoError(t, err)
 
-	f.a.utilityTargetFor(ctx, provider.UtilityRoleMemory)
-	f.a.utilityTargetFor(ctx, provider.UtilityRoleSimple)
+	_, err = f.a.utilityTargetFor(ctx, provider.UtilityRoleMemory)
+	require.NoError(t, err, "memory runs on the deployment's choice")
+	_, err = f.a.utilityTargetFor(ctx, provider.UtilityRolePersonality)
+	require.ErrorIs(t, err, ErrUtilityRoleNotSet)
+	_, err = f.a.utilityTargetFor(ctx, provider.UtilityRoleSimple)
+	require.ErrorIs(t, err, models.ErrUtilityModelUnavailable, "simple had only alice's choice")
+	n, ok := backgroundNoticeFor(models.BackgroundStepChatName, err)
+	require.True(t, ok)
+	require.Equal(t, models.BackgroundNoticeModelUnavailable, n.Code)
 
 	out := run.outcome()
 	require.Equal(t, []models.BackgroundNotice{{Step: "fallback_memory", Code: models.BackgroundNoticeModelUnavailable}}, out.Failed)
-	require.Equal(t, []models.BackgroundStep{"fallback_simple"}, out.Succeeded)
+	require.ElementsMatch(t, []models.BackgroundStep{"fallback_personality", "fallback_simple"}, out.Succeeded)
 }
 
 // One checkpoint resolves a role and calls a step several times; it reports each step once,
@@ -269,4 +280,16 @@ func TestRecordTurnUtility_EachCallItsOwnStep(t *testing.T) {
 	require.Len(t, got, 1, "chat naming's success clears its own notice only")
 	require.Equal(t, models.BackgroundStepExpressionPick, got[0].Step)
 	require.Equal(t, models.BackgroundNoticeProviderError, got[0].Code)
+}
+
+// A checkpoint with no memory model leaves notices only for the steps it would have run, so each
+// can clear once a model is chosen: a sandboxed chat has no scratchpad step, and a chat with no
+// personality runs only its summary.
+func TestCheckpointNoticeSteps(t *testing.T) {
+	t.Parallel()
+	withPersonality := &models.Chat{PersonalityID: uuid.New()}
+	sandboxed := &models.Chat{PersonalityID: uuid.New(), ContextScope: models.ContextScopeSandbox}
+	require.ElementsMatch(t, []models.BackgroundStep{models.BackgroundStepSummary, models.BackgroundStepScratchpad, models.BackgroundStepMemory}, checkpointNoticeSteps(withPersonality))
+	require.ElementsMatch(t, []models.BackgroundStep{models.BackgroundStepSummary, models.BackgroundStepMemory}, checkpointNoticeSteps(sandboxed))
+	require.ElementsMatch(t, []models.BackgroundStep{models.BackgroundStepSummary}, checkpointNoticeSteps(&models.Chat{}))
 }

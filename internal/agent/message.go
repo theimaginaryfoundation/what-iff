@@ -3138,7 +3138,7 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 			// says why (or, for a role switched off, clears what it said before).
 			a.logCheckpointSkipped(chatMessage.ChatID, err)
 			run := backgroundRunFrom(checkpointCtx)
-			for _, step := range []models.BackgroundStep{models.BackgroundStepScratchpad, models.BackgroundStepMemory, models.BackgroundStepSummary} {
+			for _, step := range checkpointNoticeSteps(chatCtx.chat) {
 				run.step(step, err)
 			}
 			return
@@ -3155,6 +3155,20 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 			zap.String("chat_id", chatMessage.ChatID.String()),
 			zap.Duration("budget", checkpointTimeout))
 	}
+}
+
+// checkpointNoticeSteps are the steps a checkpoint on chat would run with a memory model, so a
+// skipped checkpoint leaves notices only for steps whose later success can clear them.
+func checkpointNoticeSteps(chat *models.Chat) []models.BackgroundStep {
+	steps := []models.BackgroundStep{models.BackgroundStepSummary}
+	runScratchpad, _ := checkpointSteps(chat, false)
+	if runScratchpad {
+		steps = append(steps, models.BackgroundStepScratchpad)
+	}
+	if _, runExtraction := checkpointSteps(chat, runScratchpad); runExtraction {
+		steps = append(steps, models.BackgroundStepMemory)
+	}
+	return steps
 }
 
 // logCheckpointSkipped logs a checkpoint that can't run because its memory model can't be

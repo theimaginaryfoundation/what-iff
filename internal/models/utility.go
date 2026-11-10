@@ -130,8 +130,14 @@ var ErrUtilityRoleOff = errors.New("this utility role is switched off")
 // run until one is.
 var ErrUtilityRoleNotSet = errors.New("no model is chosen for this utility role")
 
+// ErrUtilityModelUnavailable is utility work whose role's chosen models all can't be used (turned
+// off, gone with their connection, unreachable, their key removed, or experimental after the
+// account opted out): it doesn't run until one can be. The cause is wrapped with it.
+var ErrUtilityModelUnavailable = errors.New("the model chosen for this utility role can't be used")
+
 // UtilityRoleUnavailableError is utility work that didn't run because of its role's choice:
-// Err is ErrUtilityRoleOff or ErrUtilityRoleNotSet, and Role says which role.
+// Err is ErrUtilityRoleOff, ErrUtilityRoleNotSet or ErrUtilityModelUnavailable, and Role says
+// which role.
 type UtilityRoleUnavailableError struct {
 	Role UtilityRole
 	Err  error

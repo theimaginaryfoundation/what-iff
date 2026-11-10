@@ -53,8 +53,9 @@ const (
 	BackgroundNoticeProviderNotConfigured = ErrCodeProviderNotConfigured
 	// BackgroundNoticeProviderError: the provider was asked and failed.
 	BackgroundNoticeProviderError = "provider_error"
-	// BackgroundNoticeModelUnavailable: the model chosen for a role couldn't be used, so the
-	// role ran on its next choice, or, with none, didn't run.
+	// BackgroundNoticeModelUnavailable: the model chosen for a role couldn't be used. On a
+	// fallback step the role ran on its next choice; on any other step, it had none, so the step
+	// didn't run.
 	BackgroundNoticeModelUnavailable = "model_unavailable"
 	// BackgroundNoticeModelNotSet: no model is chosen for the step's role, so it didn't run.
 	BackgroundNoticeModelNotSet = "model_not_set"
