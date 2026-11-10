@@ -150,6 +150,8 @@ export class ImageEditorComponent implements FileEditor {
       if (blob) return new Blob([blob], { type });
     }
     if (!imageData.imageBase64) throw new Error('the editor produced no image');
+    // Only the editor's own pixels: fetch is how a data URL becomes bytes, never a way to load a URL.
+    if (!/^data:image\//i.test(imageData.imageBase64)) throw new Error('the editor produced an image that is not inline data');
     const response = await fetch(imageData.imageBase64);
     const bytes = await response.arrayBuffer();
     return new Blob([bytes], { type });
