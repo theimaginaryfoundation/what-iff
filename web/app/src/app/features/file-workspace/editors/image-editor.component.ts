@@ -21,7 +21,12 @@ import { FileEditor } from './file-editor';
 type FilerobotCtor = typeof import('filerobot-image-editor').default;
 type Filerobot = InstanceType<FilerobotCtor>;
 
-/** Loads the Filerobot image editor (MIT) on first use; a token so tests can hand in a fake. */
+/**
+ * Loads the Filerobot image editor (MIT) on first use; a token so tests can hand in a fake.
+ * Filerobot is a React app with its own React 18 (and react-konva, styled-components) nested under
+ * it in node_modules. It runs as an isolated island in its container: nothing of ours talks to its
+ * React, and it is only in this lazy chunk, so the app's bundle does not carry it.
+ */
 export const FILEROBOT_LOADER = new InjectionToken<() => Promise<FilerobotCtor>>('FILEROBOT_LOADER', {
   providedIn: 'root',
   factory: () => () => import('filerobot-image-editor').then(m => m.default),
