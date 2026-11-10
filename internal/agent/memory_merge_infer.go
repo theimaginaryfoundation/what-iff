@@ -273,7 +273,6 @@ func (a *Agent) inferMemoryMergeGroupsOpenAI(ctx context.Context, userID uuid.UU
 		Input:           formatMemoryMergeCandidateList(candidates),
 		MaxOutputTokens: memoryMergeMaxOutputTokens,
 		SafetyUserID:    userID.String(),
-		ServiceTier:     provider.UtilityServiceTierFlex,
 		Schema: &provider.UtilitySchema{
 			Name:        "MemoryMergeGrouping",
 			Description: "Memory merge grouping JSON",

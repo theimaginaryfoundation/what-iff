@@ -8,6 +8,7 @@ Serves an account's choice of model for each utility role: the background work, 
 
 - `GET /utility-models` returns `models.UtilityModels`: every role in `models.UtilityRoles` order, with the account's choice and the deployment's (`models.UtilityChoice`: a model, or off); with neither, the role is not set.
 - `PUT /utility-models/{role}` chooses the account's model for a role (`model_id`) or switches it off (`off`), exactly one of the two, and answers with every role after the change.
+  A model choice may carry a `reasoning_effort` and a `service_tier`; a tier goes only on a model on OpenAI's own Responses API (`offersServiceTier`), the only API that takes one, and Off takes neither.
   There is no clearing: where accounts choose, nothing stands behind their choice, so a cleared role would quietly stop running.
 
 ## Dependencies
@@ -27,7 +28,7 @@ Serves an account's choice of model for each utility role: the background work, 
 
 ## Testing
 
-- `handler_test.go` — over a fake store: every role in order with both scopes, Off and not set, never another account's choice; choosing a model, then Off, and no clearing route; refusals (a model the account can't use, neither or both of a model and off, an unknown role, no signed-in account) that change nothing; a deployment that supplies the keys refusing account writes; a catalog model without a key refused as `provider_not_configured`; a deleted account answered 401; and a model that can't be read answered 500 before anything is saved.
+- `handler_test.go` — over a fake store: every role in order with both scopes, Off and not set, never another account's choice; choosing a model, then Off, and no clearing route; an effort and tier saved and reported, and refused when unknown, on Off, or (the tier) on a model whose API offers none; refusals (a model the account can't use, neither or both of a model and off, an unknown role, no signed-in account) that change nothing; a deployment that supplies the keys refusing account writes; a catalog model without a key refused as `provider_not_configured`; a deleted account answered 401; and a model that can't be read answered 500 before anything is saved.
 
 ## Related documentation
 

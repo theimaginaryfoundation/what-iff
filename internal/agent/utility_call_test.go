@@ -184,25 +184,31 @@ func TestCallUtility_CountsImagesLeftOut(t *testing.T) {
 	}
 }
 
-// GLM always reasons, so a utility call on it bounds the reasoning low and raises the cap, or
-// the reasoning can use the whole cap and leave no answer.
-func TestCallUtilityOn_ZAIBoundsReasoning(t *testing.T) {
+// GLM always reasons, so a utility call on it carries the role's effort the way a chat turn
+// does, the model's default when the role sets none, and always the raised cap, or the
+// reasoning can use a small cap and leave no answer.
+func TestCallUtilityOn_ZAITakesTheRoleEffort(t *testing.T) {
 	t.Parallel()
-	srv, path, req := recordingServer(t, `{"id":"m","type":"message","role":"assistant","model":"glm-5","content":[{"type":"text","text":"named"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
-	a := &Agent{logger: zap.NewNop(), ZAIProvider: provider.NewClaudeProviderWithBaseURL("k", srv.URL, nil, nil)}
+	for effort, want := range map[models.ReasoningEffort]string{
+		"":                        string(provider.ZAIReasoningEffort),
+		models.ReasoningEffortOff: "low",
+	} {
+		srv, path, req := recordingServer(t, `{"id":"m","type":"message","role":"assistant","model":"glm-5","content":[{"type":"text","text":"named"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+		a := &Agent{logger: zap.NewNop(), ZAIProvider: provider.NewClaudeProviderWithBaseURL("k", srv.URL, nil, nil)}
 
-	out, err := a.callUtilityOn(context.Background(), utilityTarget{name: "glm-5", provider: string(models.ModelProviderZAI)}, utilityTestRequest)
-	require.NoError(t, err)
-	require.Equal(t, "named", out.Text)
-	require.Equal(t, "/v1/messages", *path)
-	cfg := (*req)["output_config"].(map[string]any)
-	require.Equal(t, "low", cfg["effort"])
-	require.Equal(t, "json_schema", cfg["format"].(map[string]any)["type"], "the schema survives")
-	require.EqualValues(t, provider.ReasoningMaxOutputTokens, (*req)["max_tokens"])
+		out, err := a.callUtilityOn(context.Background(), utilityTarget{name: "glm-5", provider: string(models.ModelProviderZAI), reasoningEffort: effort}, utilityTestRequest)
+		require.NoError(t, err)
+		require.Equal(t, "named", out.Text)
+		require.Equal(t, "/v1/messages", *path)
+		cfg := (*req)["output_config"].(map[string]any)
+		require.Equal(t, want, cfg["effort"], "role effort %q", effort)
+		require.Equal(t, "json_schema", cfg["format"].(map[string]any)["type"], "the schema survives")
+		require.EqualValues(t, provider.ReasoningMaxOutputTokens, (*req)["max_tokens"])
+	}
 }
 
-// A built-in model named without its provider is routed on the catalog's provider: a z.ai
-// model goes to z.ai with its reasoning bounded.
+// A model named without its provider is routed on the catalog's provider: a z.ai model goes to
+// z.ai, with its reasoning bounded.
 func TestCallUtilityOn_InfersBuiltInProvider(t *testing.T) {
 	t.Parallel()
 	srv, path, req := recordingServer(t, `{"id":"m","type":"message","role":"assistant","model":"glm-5.3","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
@@ -211,5 +217,29 @@ func TestCallUtilityOn_InfersBuiltInProvider(t *testing.T) {
 	_, err := a.callUtilityOn(context.Background(), utilityTarget{name: "glm-5.3"}, utilityTestRequest)
 	require.NoError(t, err)
 	require.Equal(t, "/v1/messages", *path)
-	require.Equal(t, "low", (*req)["output_config"].(map[string]any)["effort"])
+	require.EqualValues(t, provider.ReasoningMaxOutputTokens, (*req)["max_tokens"])
+}
+
+// On the Responses API a call carries the role's effort, limited to what the model supports,
+// and the role's tier; with neither set, the request asks for neither, whatever the call site.
+func TestCallUtilityOn_ResponsesTakesTheRoleEffortAndTier(t *testing.T) {
+	t.Parallel()
+	srv, reqs := capturingResponsesServer(t, responseTextJSONBody("resp_1", "named"))
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
+	openAI := string(models.ModelProviderOpenAI)
+
+	req := utilityTestRequest
+	req.ServiceTier = provider.UtilityServiceTierPriority // a call site's tier doesn't count
+	_, err := a.callUtilityOn(context.Background(), utilityTarget{name: "gpt-5.1", provider: openAI}, req)
+	require.NoError(t, err)
+	_, err = a.callUtilityOn(context.Background(), utilityTarget{name: "gpt-5.1", provider: openAI,
+		reasoningEffort: models.ReasoningEffortOff, serviceTier: models.UtilityServiceTierFlex}, utilityTestRequest)
+	require.NoError(t, err)
+
+	got := reqs()
+	require.Len(t, got, 2)
+	require.NotContains(t, got[0], "reasoning")
+	require.NotContains(t, got[0], "service_tier")
+	require.Equal(t, "none", got[1]["reasoning"].(map[string]any)["effort"])
+	require.Equal(t, "flex", got[1]["service_tier"])
 }

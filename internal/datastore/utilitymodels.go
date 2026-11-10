@@ -14,10 +14,10 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
-// ErrInvalidUtilitySetting is a utility model setting that can't exist: an unknown role or
-// scope, or a scope written with the wrong owner (the deployment's has no user; an account's
-// has one). Handlers check the role before calling and choose the scope and owner themselves,
-// so reaching it means a caller has a bug.
+// ErrInvalidUtilitySetting is a utility model setting that can't exist: an unknown role, scope,
+// reasoning effort or service tier, a scope written with the wrong owner (the deployment's has
+// no user; an account's has one), or Off with an effort or tier. Handlers check these before
+// calling and choose the scope and owner themselves, so reaching it means a caller has a bug.
 var ErrInvalidUtilitySetting = errors.New("invalid utility model setting")
 
 // validateUtilitySetting refuses a role, scope and owner no setting can have. Writing and
@@ -52,38 +52,45 @@ func (ds *Datastore) ListUtilityModelSettings(ctx context.Context, userID uuid.U
 	}
 	out := make([]models.UtilityModelSetting, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, models.UtilityModelSetting{
+		s := models.UtilityModelSetting{
 			Scope:   models.UtilityScope(r.Scope),
 			Role:    models.UtilityRole(r.Role),
 			ModelID: r.ModelID,
-		})
+		}
+		if r.ReasoningEffort != nil {
+			s.ReasoningEffort = models.ReasoningEffort(*r.ReasoningEffort)
+		}
+		if r.ServiceTier != nil {
+			s.ServiceTier = models.UtilityServiceTier(*r.ServiceTier)
+		}
+		out = append(out, s)
 	}
 	return out, nil
 }
 
-// SetUtilityModel chooses modelID for role at scope, for the account userID, or
-// for the deployment when userID is uuid.Nil, replacing any earlier choice. A nil
-// modelID switches the role off.
+// SetUtilityModel saves s, a choice for s.Role at s.Scope, for the account userID,
+// or for the deployment when userID is uuid.Nil, replacing any earlier choice. A
+// nil s.ModelID switches the role off.
 //
 // The model must be one the chooser can use, or ErrModelNotFound: an account
 // chooses from the catalog and its own connections' models, and the deployment,
 // whose choice applies to every account, from the catalog only.
-func (ds *Datastore) SetUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID *uuid.UUID) error {
-	err := ds.setUtilityModel(ctx, scope, userID, role, modelID)
+func (ds *Datastore) SetUtilityModel(ctx context.Context, userID uuid.UUID, s models.UtilityModelSetting) error {
+	err := ds.setUtilityModel(ctx, userID, s)
 	if ent.IsConstraintError(err) {
 		// Two writes for the same role raced: both cleared nothing, and the other one saved
 		// first. Once more replaces it, so the last write wins.
-		err = ds.setUtilityModel(ctx, scope, userID, role, modelID)
+		err = ds.setUtilityModel(ctx, userID, s)
 	}
 	return err
 }
 
-func (ds *Datastore) setUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID *uuid.UUID) error {
+func (ds *Datastore) setUtilityModel(ctx context.Context, userID uuid.UUID, s models.UtilityModelSetting) error {
 	tx, err := ds.dbClient.Tx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin utility model setting: %w", err)
 	}
-	if err := setUtilityModelTx(ctx, tx, scope, userID, role, modelID); err != nil {
+	if err := setUtilityModelTx(ctx, tx, userID, s); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -93,9 +100,15 @@ func (ds *Datastore) setUtilityModel(ctx context.Context, scope models.UtilitySc
 	return nil
 }
 
-func setUtilityModelTx(ctx context.Context, tx *ent.Tx, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID *uuid.UUID) error {
+func setUtilityModelTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, s models.UtilityModelSetting) error {
+	scope, role, modelID := s.Scope, s.Role, s.ModelID
 	if err := validateUtilitySetting(scope, userID, role); err != nil {
 		return err
+	}
+	badEffort := s.ReasoningEffort != "" && !s.ReasoningEffort.Valid()
+	offWithOptions := modelID == nil && (s.ReasoningEffort != "" || s.ServiceTier != "")
+	if badEffort || !s.ServiceTier.Valid() || offWithOptions {
+		return fmt.Errorf("%w: reasoning effort %q, service tier %q, model %v", ErrInvalidUtilitySetting, s.ReasoningEffort, s.ServiceTier, modelID)
 	}
 	switch {
 	case modelID == nil:
@@ -124,6 +137,12 @@ func setUtilityModelTx(ctx context.Context, tx *ent.Tx, scope models.UtilityScop
 		SetScope(string(scope)).
 		SetRole(string(role)).
 		SetNillableModelID(modelID)
+	if s.ReasoningEffort != "" {
+		create.SetReasoningEffort(string(s.ReasoningEffort))
+	}
+	if s.ServiceTier != "" {
+		create.SetServiceTier(string(s.ServiceTier))
+	}
 	if userID != uuid.Nil {
 		create.SetUserID(userID)
 	}

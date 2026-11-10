@@ -3284,7 +3284,7 @@ export interface paths {
                         "application/json": components["schemas"]["UtilityModels"];
                     };
                 };
-                /** @description Neither a model nor `off`, both, or a model the account can't use */
+                /** @description Neither a model nor `off`, both, a model the account can't use, an unknown effort or tier, an effort or tier with `off`, or a tier on a model whose API offers none */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -16008,7 +16008,16 @@ export interface components {
              * @description The chosen model, or null when the role is off.
              */
             model_id: string | null;
+            /** @description The reasoning effort the role's calls ask for (ADR 0x026), limited to what the model supports; null leaves the model's own default. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description The service tier the role's calls ask for; null leaves the API's default. */
+            service_tier?: components["schemas"]["UtilityServiceTier"] | null;
         };
+        /**
+         * @description How fast, and at what price, a call asks to be processed: `priority` is faster and pricier, `flex` slower and cheaper. Only models on OpenAI's own Responses API offer a tier.
+         * @enum {string}
+         */
+        UtilityServiceTier: "priority" | "flex";
         /** @description A role's choices. With neither, the role is not set, and its work doesn't run. */
         UtilityRoleModel: {
             role: components["schemas"]["UtilityRole"];
@@ -16022,7 +16031,7 @@ export interface components {
             accounts_choose: boolean;
             roles: components["schemas"]["UtilityRoleModel"][];
         };
-        /** @description Exactly one of `model_id` and `off`. */
+        /** @description Exactly one of `model_id` and `off`; a reasoning effort and service tier go with a model only. */
         SetUtilityModelRequest: {
             /**
              * Format: uuid
@@ -16031,6 +16040,10 @@ export interface components {
             model_id?: string;
             /** @description True switches the role off. */
             off?: boolean;
+            /** @description With a model only. Null or missing leaves the model's own default. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description With a model on OpenAI's Responses API only. Null or missing leaves the API's default. */
+            service_tier?: components["schemas"]["UtilityServiceTier"] | null;
         };
         /**
          * @description A model provider.

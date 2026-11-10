@@ -17,8 +17,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/anthropics/anthropic-sdk-go"
-
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -75,6 +73,8 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 	if req.PreviousResponseID != "" && !t.usesResponsesAPI() {
 		return utilityReply{}, fmt.Errorf("model %q cannot continue a stored Responses conversation", t.name)
 	}
+	// The tier is the role's choice, not the call site's.
+	req.ServiceTier = t.serviceTier
 	lite := t.chatContext()
 	// A connection's flavor decides its API before anything about the model's name: a
 	// connection model is routed only by its connection, a built-in one only by its provider.
@@ -86,10 +86,13 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 			return utilityReply{}, err
 		}
 		params := provider.UtilityClaudeParams(t.name, req)
+		// The role's effort goes on as a chat turn's does. z.ai takes only output_config.effort,
+		// always, with the raised cap: GLM always reasons, and left alone it can spend a small
+		// cap and answer nothing.
 		if t.connection == nil && models.IsZAIModel(t.provider, t.name) {
-			// GLM always reasons; left alone it can spend the whole cap and answer nothing.
-			// Background work wants little of it, as a chat turn with a low effort does.
-			provider.ApplyZAIReasoningEffort(&params, anthropic.OutputConfigEffortLow)
+			provider.ApplyZAIReasoningEffort(&params, provider.ZAIReasoningEffortFor(lite.reasoningEffort))
+		} else {
+			provider.ApplyClaudeReasoning(&params, lite.reasoningEffort)
 		}
 		msg, err := prov.Call(ctx, params)
 		if err != nil {
@@ -107,7 +110,9 @@ func (a *Agent) callUtilityOn(ctx context.Context, t utilityTarget, req provider
 			return utilityReply{}, fmt.Errorf("OpenAI model %q requested but no OpenAI provider is configured", t.name)
 		}
 		a.recordDroppedImages(ctx, t.name, req.Context)
-		resp, err := a.OpenAIProvider.CallWithRetry(ctx, provider.UtilityResponsesParams(t.name, req))
+		params := provider.UtilityResponsesParams(t.name, req)
+		provider.ApplyOpenAIReasoning(&params, lite.reasoningEffort)
+		resp, err := a.OpenAIProvider.CallWithRetry(ctx, params)
 		if err != nil {
 			return utilityReply{}, t.callError(err)
 		}
@@ -130,6 +135,7 @@ func (a *Agent) callUtilityChatCompletions(ctx context.Context, t utilityTarget,
 		if a.GeminiProvider == nil {
 			return "", fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", t.name)
 		}
+		provider.ApplyGeminiReasoning(&params, lite.reasoningEffort)
 		adapter = provider.NewGeminiAdapter(a.GeminiProvider, params, nil, nil, a.logger)
 	} else {
 		var err error

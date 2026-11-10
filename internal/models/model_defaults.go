@@ -544,6 +544,15 @@ func UsesOpenAIChatCompletionsAPI(provider, name string) bool {
 	}
 }
 
+// UsesOpenAIResponsesAPI reports whether a catalog model is driven through OpenAI's own
+// Responses API: an OpenAI model on neither of the other APIs. A connection model never is,
+// which callers check themselves.
+func UsesOpenAIResponsesAPI(provider, name string) bool {
+	return !UsesAnthropicMessagesAPI(provider, name) &&
+		!UsesOpenAIChatCompletionsAPI(provider, name) &&
+		providerForModel(provider, name) == ModelProviderOpenAI
+}
+
 // IsExperimentalProvider reports whether a provider is gated behind the per-user
 // enable_experimental_models flag. Currently none — Gemini/Qwen/GLM/Mistral/MiMo/
 // DeepSeek graduated. Re-add dogfood vendors in IsExperimentalModelRecord.

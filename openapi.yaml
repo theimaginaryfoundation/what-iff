@@ -1764,7 +1764,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/UtilityModels'
         '400':
-          description: Neither a model nor `off`, both, or a model the account can't use
+          description: >-
+            Neither a model nor `off`, both, a model the account can't use, an
+            unknown effort or tier, an effort or tier with `off`, or a tier on a
+            model whose API offers none
           content:
             application/json:
               schema:
@@ -12041,6 +12044,25 @@ components:
           format: uuid
           nullable: true
           description: The chosen model, or null when the role is off.
+        reasoning_effort:
+          allOf:
+            - $ref: '#/components/schemas/ReasoningEffort'
+          nullable: true
+          description: >-
+            The reasoning effort the role's calls ask for (ADR 0x026), limited to
+            what the model supports; null leaves the model's own default.
+        service_tier:
+          allOf:
+            - $ref: '#/components/schemas/UtilityServiceTier'
+          nullable: true
+          description: The service tier the role's calls ask for; null leaves the API's default.
+    UtilityServiceTier:
+      type: string
+      enum: [priority, flex]
+      description: >-
+        How fast, and at what price, a call asks to be processed: `priority` is
+        faster and pricier, `flex` slower and cheaper. Only models on OpenAI's
+        own Responses API offer a tier.
     UtilityRoleModel:
       type: object
       required: [role, account, deployment]
@@ -12077,7 +12099,9 @@ components:
             $ref: '#/components/schemas/UtilityRoleModel'
     SetUtilityModelRequest:
       type: object
-      description: Exactly one of `model_id` and `off`.
+      description: >-
+        Exactly one of `model_id` and `off`; a reasoning effort and service tier
+        go with a model only.
       properties:
         model_id:
           type: string
@@ -12086,6 +12110,18 @@ components:
         off:
           type: boolean
           description: True switches the role off.
+        reasoning_effort:
+          allOf:
+            - $ref: '#/components/schemas/ReasoningEffort'
+          nullable: true
+          description: With a model only. Null or missing leaves the model's own default.
+        service_tier:
+          allOf:
+            - $ref: '#/components/schemas/UtilityServiceTier'
+          nullable: true
+          description: >-
+            With a model on OpenAI's Responses API only. Null or missing leaves the
+            API's default.
     ModelProvider:
       type: string
       description: A model provider.
