@@ -51,6 +51,11 @@ interface RoleRow {
   deploymentOff: boolean;
 }
 
+/** How a model is named in a background-model select: with its connection, for a connection's model. */
+export function backgroundModelLabel(model: Model): string {
+  return isConnectionGroup(model) && model.connection_name ? `${model.display_name} · ${model.connection_name}` : model.display_name;
+}
+
 /**
  * Whether a model takes a service tier: only OpenAI's own Responses API does, so a catalog OpenAI
  * model. The server checks the same and refuses a tier anywhere else.
@@ -120,9 +125,7 @@ export class BackgroundModelsComponent implements OnInit {
     }
   }
 
-  modelLabel(model: Model): string {
-    return isConnectionGroup(model) && model.connection_name ? `${model.display_name} · ${model.connection_name}` : model.display_name;
-  }
+  readonly modelLabel = backgroundModelLabel;
 
   /**
    * A new model, or Off. A model keeps the effort and tier set before, where it takes them. The
