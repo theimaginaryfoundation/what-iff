@@ -68,7 +68,7 @@ func (FileAttachment) Fields() []ent.Field {
 		field.UUID("created_by_chat_id", uuid.UUID{}).
 			Optional().
 			Nillable().
-			Comment("Conversation the agent created the file in; the owner for agent edits when there is no personality."),
+			Comment("Conversation the agent created the file in (always set since ADR 0x043, so a conversation's files can be listed); the owner for agent edits when there is no personality."),
 		field.Time("updated_at").
 			Optional().
 			Nillable().

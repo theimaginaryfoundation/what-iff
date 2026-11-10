@@ -1,0 +1,94 @@
+<section class="files-tab" aria-label="Files in this thread">
+  <div class="files-tab__head">
+    <div class="files-tab__label-row">
+      <span class="files-tab__label">Files the agent sees</span>
+      <ui-help-hint label="Which files count?" heading="Files in context" align="end">
+        Files attached to recent messages, files the agent looked up or wrote in this thread, and the files of the skills it has
+        loaded. The agent's workspace holds each of them by name, so when two share a name only the newest is there.
+      </ui-help-hint>
+    </div>
+    <div class="files-tab__actions">
+      <button type="button" class="files-tab__button" [disabled]="!chatId() || uploading()" (click)="pickFiles()">
+        {{ uploading() ? 'Uploading…' : 'Upload' }}
+      </button>
+      <button type="button" class="files-tab__button" [disabled]="!chatId()" (click)="fromGallery()">From gallery</button>
+      <input #picker type="file" class="files-tab__picker" aria-label="Choose a file to add" (change)="onPicked($event)" />
+    </div>
+  </div>
+
+  @if (uploadError(); as message) {
+    <p class="files-tab__error" role="alert">{{ message }}</p>
+  }
+
+  @if (container(); as status) {
+    <p class="files-tab__container" role="status">Container: {{ status.state }}</p>
+  }
+
+  @if (pending().length) {
+    <p class="files-tab__section" id="files-tab-pending">With your next message</p>
+    <ul class="files-tab__list" aria-labelledby="files-tab-pending" data-testid="context-files-pending">
+      @for (file of pending(); track file.id) {
+        <li class="files-tab__row files-tab__row--pending">
+          <button type="button" class="files-tab__open" [attr.aria-label]="'Open ' + file.name" (click)="openFile(file)">
+            <span class="files-tab__badge" aria-hidden="true">{{ badge(file) }}</span>
+            <span class="files-tab__name">{{ file.name }}</span>
+          </button>
+          <span class="files-tab__meta"><span class="files-tab__reason">Not sent yet</span></span>
+        </li>
+      }
+    </ul>
+  }
+
+  @if (!chatId()) {
+    <p class="files-tab__state">Open a thread to see its files.</p>
+  } @else if (loading() && !response()) {
+    <p class="files-tab__state" role="status">Loading files…</p>
+  } @else if (error(); as message) {
+    <div class="files-tab__state" role="alert">
+      <p>{{ message }}</p>
+      <button type="button" class="files-tab__button" (click)="reload()">Try again</button>
+    </div>
+  } @else if (rows().length === 0) {
+    <p class="files-tab__state">No files yet. Attach one to a message, or upload one here, and the agent will see it.</p>
+  } @else {
+    @if (pending().length) {
+      <p class="files-tab__section">In the thread</p>
+    }
+    <ul class="files-tab__list" data-testid="context-files">
+      @for (row of mounted(); track row.file.id) {
+        <li class="files-tab__row" [class.files-tab__row--open]="openId() === row.file.id">
+          <button type="button" class="files-tab__open" [attr.aria-label]="'Open ' + row.file.name" (click)="open(row)">
+            <span class="files-tab__badge" aria-hidden="true">{{ badge(row.file) }}</span>
+            <span class="files-tab__name">{{ row.file.name }}</span>
+          </button>
+          <span class="files-tab__meta">
+            <span class="files-tab__type">{{ typeLabel(row.file) }}</span>
+            @for (label of reasonLabels(row); track label) {
+              <span class="files-tab__reason">{{ label }}</span>
+            }
+            @if (containerState(row); as state) {
+              <span class="files-tab__reason" [class.files-tab__reason--stale]="state === 'stale'">{{ state }}</span>
+            }
+          </span>
+        </li>
+      }
+      @for (row of shadowed(); track row.file.id) {
+        <li class="files-tab__row files-tab__row--shadowed">
+          <button
+            type="button"
+            class="files-tab__open"
+            [attr.aria-label]="'Open ' + row.file.name"
+            [uiTooltip]="'Not in the workspace: replaced by ' + shadowedByName(row)"
+            (click)="open(row)"
+          >
+            <span class="files-tab__badge" aria-hidden="true">{{ badge(row.file) }}</span>
+            <span class="files-tab__name">{{ row.file.name }}</span>
+          </button>
+          <span class="files-tab__meta">
+            <span class="files-tab__reason">Replaced by a newer file</span>
+          </span>
+        </li>
+      }
+    </ul>
+  }
+</section>

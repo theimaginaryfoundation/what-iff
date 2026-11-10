@@ -283,12 +283,13 @@ func (t *AgentFileTool) newFile(ctx context.Context, chat *models.Chat, p, conte
 		Folder:   folder,
 		Origin:   models.FileOriginAgent,
 	}
+	// The conversation is always recorded (ADR 0x043 §4 lists a chat's agent files by it); the
+	// personality, when there is one, is what decides who may change the file (ownsAgentFile).
+	cid := chat.ID
+	att.CreatedByChatID = &cid
 	if chat.PersonalityID != uuid.Nil {
 		pid := chat.PersonalityID
 		att.CreatedByPersonalityID = &pid
-	} else {
-		cid := chat.ID
-		att.CreatedByChatID = &cid
 	}
 	created, err := t.store.CreateFileAttachment(ctx, chat.UserID, att)
 	if err != nil {

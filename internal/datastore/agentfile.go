@@ -57,3 +57,31 @@ func (d *Datastore) CountAgentFiles(ctx context.Context, userID uuid.UUID) (int,
 	}
 	return n, err
 }
+
+// ListAgentFilesCreatedInChat returns the agent-authored files written in chatID (by its
+// personality or, with none, by the conversation itself), oldest first. They are part of the
+// conversation's files (ADR 0x043 §4) even though no message carries them.
+//
+// Agent files written before created_by_chat_id existed have it NULL and are not returned: which
+// conversation wrote them is not recorded anywhere to backfill from. They still reach a thread
+// when a message attaches them or find_context recalls them.
+func (d *Datastore) ListAgentFilesCreatedInChat(ctx context.Context, userID, chatID uuid.UUID) ([]*models.FileAttachment, error) {
+	rows, err := d.dbClient.FileAttachment.Query().
+		Where(
+			entfileattachment.HasOwnerWith(user.ID(userID)),
+			entfileattachment.OriginEQ(entfileattachment.OriginAgent),
+			entfileattachment.CreatedByChatID(chatID),
+		).
+		WithOwner().
+		Order(ent.Asc(entfileattachment.FieldCreatedAt), ent.Asc(entfileattachment.FieldID)).
+		All(ctx)
+	if err != nil {
+		d.logger.Error("failed to list a chat's agent files", zap.Error(err))
+		return nil, err
+	}
+	out := make([]*models.FileAttachment, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, toFileAttachmentModel(row))
+	}
+	return out, nil
+}

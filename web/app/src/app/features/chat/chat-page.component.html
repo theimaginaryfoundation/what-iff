@@ -163,6 +163,17 @@
             </button>
             <button
               type="button"
+              uiTooltip="Files: what the personality can see and work on in this thread"
+              placement="right"
+              aria-label="Open files"
+              [class.chat-page__context-rail-button--active]="contextPanel.visible() && contextPanel.activeTab() === 'files'"
+              [attr.aria-current]="(contextPanel.visible() && contextPanel.activeTab() === 'files') ? 'true' : null"
+              (click)="openContextPanel('files')"
+            >
+              <ui-file-icon [size]="14" />
+            </button>
+            <button
+              type="button"
               uiTooltip="Context: what was sent to the model for a reply"
               placement="right"
               aria-label="Open context breakdown"
