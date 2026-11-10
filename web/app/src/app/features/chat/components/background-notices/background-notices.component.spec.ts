@@ -102,12 +102,12 @@ describe('BackgroundNoticesComponent', () => {
     const [error, fallback] = texts(el);
     expect(error).toContain("This chat's summary wasn't updated.");
     expect(error).toContain('OpenAI returned an error (gpt-5.6-luna). It runs again as the chat goes on, and this goes away once it works.');
-    expect(fallback).toContain("The model chosen for Memory and summaries wasn't available, so another was used.");
+    expect(fallback).toContain("The model chosen for Memory and summaries wasn't available.");
   });
 
   it("names a role this app doesn't know in general terms, not by its raw name", async () => {
     const el = await render([notice({ step: 'fallback_portraits', code: 'model_unavailable' })]);
-    expect(texts(el)[0]).toContain("A model chosen for background work wasn't available, so another was used.");
+    expect(texts(el)[0]).toContain("A model chosen for background work wasn't available.");
     expect(texts(el)[0]).not.toContain('portraits');
   });
 
@@ -187,5 +187,41 @@ describe('BackgroundNoticesComponent', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     expect(texts(el)[0]).toContain("The scratchpad wasn't updated from this chat.");
+  });
+
+  it('says no model is chosen, with the way to choose one, and only informs where the server chooses', async () => {
+    const el = await render([notice({ code: 'model_not_set', role: 'memory' })]);
+    expect(texts(el)[0]).toContain("Memories from this chat weren't saved.");
+    expect(texts(el)[0]).toContain('No model is chosen for Memory and summaries.');
+    const fix = el.querySelector('[data-testid="background-notice-fix"]') as HTMLButtonElement;
+    expect(fix.textContent?.trim()).toBe('Choose background models');
+    fix.click();
+    expect(settings.open).toHaveBeenCalledWith('profile');
+
+    accountsSupplyKeys.set(false);
+    fixture.detectChanges();
+    expect(texts(el)[0]).toContain("This server hasn't chosen a model for it.");
+    expect(el.querySelector('[data-testid="background-notice-fix"]')).toBeNull();
+  });
+
+  it("shows a role's notices with one cause as one, and dismisses them together", async () => {
+    const cause = { code: 'provider_error' as const, role: 'simple' as const, provider: 'Mistral', model: 'mistral-small-latest' };
+    const el = await render([
+      notice({ id: 'a', step: 'chat_name', ...cause }),
+      notice({ id: 'b', step: 'expression_pick', ...cause, count: 2 }),
+      notice({ id: 'c', step: 'memory_query', role: 'simple', code: 'model_not_set' }),
+    ]);
+    expect(texts(el).length).toBe(2);
+    expect(texts(el)[0]).toContain("Simple tasks didn't run on this chat: naming the chat and picking expressions.");
+    expect(texts(el)[0]).toContain('Mistral returned an error (mistral-small-latest).');
+    expect(texts(el)[0]).toContain('This has happened 2 times.');
+    expect(texts(el)[1]).toContain("Replies in this chat aren't drawing on memories.");
+
+    (el.querySelector('[data-testid="background-notice-dismiss"]') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(service.dismiss).toHaveBeenCalledWith('chat-1', 'a');
+    expect(service.dismiss).toHaveBeenCalledWith('chat-1', 'b');
+    expect(texts(el).length).toBe(1);
   });
 });

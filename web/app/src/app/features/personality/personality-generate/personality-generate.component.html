@@ -33,6 +33,9 @@
             @if (errorNeedsKey()) {
               <button type="button" class="ml-1 font-semibold underline" (click)="addProviderKey()">Add key</button>
             }
+            @if (errorNeedsBackgroundModel()) {
+              <button type="button" class="ml-1 font-semibold underline" (click)="chooseBackgroundModel()">Background models</button>
+            }
           </div>
         </div>
       </div>

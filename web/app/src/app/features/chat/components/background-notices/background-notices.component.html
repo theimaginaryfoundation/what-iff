@@ -1,4 +1,4 @@
-@for (notice of notices(); track notice.id) {
+@for (notice of notices(); track notice.key) {
   <div class="background-notice" role="status" data-testid="background-notice">
     <span class="background-notice__icon" aria-hidden="true">!</span>
     <div class="background-notice__text">
@@ -16,7 +16,7 @@
         class="background-notice__dismiss"
         data-testid="background-notice-dismiss"
         aria-label="Dismiss"
-        (click)="dismiss(notice.id)"
+        (click)="dismiss(notice.ids)"
       >
         ×
       </button>

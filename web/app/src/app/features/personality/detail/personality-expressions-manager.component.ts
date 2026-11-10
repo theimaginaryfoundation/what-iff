@@ -40,6 +40,8 @@ import { ExpressionGenerateModalComponent } from './expression-generate-modal.co
 import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import { ExpandIconComponent } from '../../../shared/ui/icons';
+import { ProviderKeysService } from '../../../core/services/provider-keys.service';
+import { utilityRoleUnavailableMessage } from '../../../core/utils/utility-role-copy';
 
 /**
  * Renders persisted expression slots only (no client-side default placeholders).
@@ -430,6 +432,7 @@ export class PersonalityExpressionsManagerComponent implements OnInit {
   readonly expressionsEnabledChanged = output<boolean>();
 
   private readonly assignment = inject(ExpressionAssignmentService);
+  private readonly providerKeys = inject(ProviderKeysService);
   private readonly imageGallery = inject(ImageGalleryService);
   private readonly personalityApi = inject(PersonalityService);
   private readonly mediaJobs = inject(PersonalityMediaJobService);
@@ -614,7 +617,11 @@ export class PersonalityExpressionsManagerComponent implements OnInit {
       next: job => {
         if (job.status === 'failed') {
           this.defaultGridRunning.set(false);
-          this.flashError(job.error ?? 'Expression grid generation failed.');
+          this.flashError(
+            utilityRoleUnavailableMessage(job.error_code, 'simple', this.providerKeys.accountsSupplyKeys()) ??
+              job.error ??
+              'Expression grid generation failed.',
+          );
           return;
         }
         if (job.status !== 'complete') {

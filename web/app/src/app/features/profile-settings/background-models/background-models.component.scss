@@ -51,6 +51,34 @@ select {
   }
 }
 
+.background-models__role {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.background-models__note {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  margin: 0;
+}
+
+.background-models__note--warn {
+  color: var(--warning);
+}
+
+.background-models__options {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+}
+
+.background-models__option {
+  color: var(--text-secondary);
+  display: grid;
+  font-size: 0.74rem;
+  gap: 0.25rem;
+}
+
 .background-models__error {
   color: var(--danger);
   margin: 0;
