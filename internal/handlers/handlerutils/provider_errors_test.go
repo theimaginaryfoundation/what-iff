@@ -43,3 +43,27 @@ func TestRespondIfProviderNotConfigured_OtherErrors(t *testing.T) {
 	require.False(t, RespondIfProviderNotConfigured(rec, zap.NewNop(), errors.New("db down")))
 	require.Zero(t, rec.Body.Len())
 }
+
+// Background work its role's choice keeps from running answers 409 with a code per cause and the
+// role in details; anything else is left for the caller.
+func TestRespondIfUtilityRoleUnavailable(t *testing.T) {
+	for err, want := range map[error]string{
+		fmt.Errorf("parse: %w", &models.UtilityRoleUnavailableError{Role: models.UtilityRoleSimple, Err: models.ErrUtilityRoleNotSet}): models.ErrCodeUtilityModelNotSet,
+		&models.UtilityRoleUnavailableError{Role: models.UtilityRoleSimple, Err: models.ErrUtilityRoleOff}:                             models.ErrCodeUtilityRoleOff,
+	} {
+		rec := httptest.NewRecorder()
+		require.True(t, RespondIfUtilityRoleUnavailable(rec, zap.NewNop(), err))
+		require.Equal(t, http.StatusConflict, rec.Code)
+		var body struct {
+			models.ErrorResponse
+			Details map[string]string `json:"details"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		require.Equal(t, want, body.Code)
+		require.Equal(t, map[string]string{"role": "simple"}, body.Details)
+	}
+
+	rec := httptest.NewRecorder()
+	require.False(t, RespondIfUtilityRoleUnavailable(rec, zap.NewNop(), errors.New("db down")))
+	require.Zero(t, rec.Body.Len())
+}
