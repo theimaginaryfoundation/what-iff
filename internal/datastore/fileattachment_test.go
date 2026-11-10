@@ -44,6 +44,8 @@ func createFileAttachmentTestSchema(t *testing.T, db *sql.DB) {
 			created_by_chat_id uuid,
 			updated_at datetime,
 			size_bytes integer,
+			content_version integer NOT NULL DEFAULT 1,
+			content_sha256 text,
 			chat_message_file_attachments uuid,
 			mood_images uuid,
 			personality_file_attachments uuid,
@@ -866,12 +868,9 @@ func TestUpdateFileAttachmentName_EmptyName(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// UpdateFileAttachmentName itself does not validate the name, but the ent schema's
-	// "name" field has a minimum-length validator, so an empty name still surfaces as a
-	// generic ent validation error rather than the datastore's own ErrInvalidRequestBody.
+	// The name goes through models.NormalizeFileName, which refuses an empty one.
 	_, err = ds.UpdateFileAttachmentName(ctx, userID, created.ID, "")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "less than the required length")
+	require.ErrorIs(t, err, models.ErrInvalidFileName)
 }
 
 func TestCreateFileAttachmentReference_HappyPath(t *testing.T) {

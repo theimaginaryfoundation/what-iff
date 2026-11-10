@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -20,10 +21,19 @@ import (
 )
 
 type stubStore struct {
+	chatFn           func(context.Context, uuid.UUID, uuid.UUID) (*models.Chat, error)
 	listFn           func(context.Context, uuid.UUID, int, int, models.FileAttachmentFilters) (*models.PaginatedResponse, error)
 	getFn            func(context.Context, uuid.UUID, uuid.UUID) (*models.FileAttachment, error)
 	deleteFn         func(context.Context, uuid.UUID, uuid.UUID) error
 	referencedKeysFn func(context.Context, []string) (map[string]bool, error)
+	swapFn           func(context.Context, uuid.UUID, uuid.UUID, string, string, datastore.SwapFileObjectOptions) (bool, error)
+}
+
+func (s stubStore) GetChat(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error) {
+	if s.chatFn != nil {
+		return s.chatFn(ctx, userID, id)
+	}
+	return &models.Chat{}, nil
 }
 
 func (s stubStore) ReferencedFileAttachmentKeys(ctx context.Context, keys []string) (map[string]bool, error) {
@@ -49,11 +59,21 @@ func (s stubStore) ExistingFileAttachmentIDs(context.Context, []uuid.UUID) (map[
 	return map[uuid.UUID]bool{}, nil
 }
 
+func (s stubStore) SwapFileObject(ctx context.Context, userID, id uuid.UUID, oldKey, newKey string, opts datastore.SwapFileObjectOptions) (bool, error) {
+	if s.swapFn != nil {
+		return s.swapFn(ctx, userID, id, oldKey, newKey, opts)
+	}
+	return false, errors.New("swap not stubbed")
+}
+
+func (s stubStore) ClearFileChunks(context.Context, uuid.UUID) error { return nil }
+
 type stubAgent struct {
 	store storage.FileStore
 }
 
-func (a *stubAgent) FileStore() storage.FileStore { return a.store }
+func (a *stubAgent) FileStore() storage.FileStore                  { return a.store }
+func (a *stubAgent) ChunkPipeline() *filechunker.FileChunkPipeline { return nil }
 
 type stubFileStore struct {
 	contentByKey map[string][]byte
@@ -281,6 +301,48 @@ func TestGetFileAttachmentContent_DownloadsFallbackKey(t *testing.T) {
 	require.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
 	require.Equal(t, []string{"legacy/key", expectedFallback}, fs.seenKeys)
 	require.Equal(t, "hello world", rec.Body.String())
+}
+
+func TestGetFileAttachmentContent_RevalidatesByContentVersion(t *testing.T) {
+	attachmentID := uuid.New()
+	userID := uuid.New()
+	attachment := &models.FileAttachment{ID: attachmentID, Name: "notes.txt", FileType: "text/plain", S3Key: "k", ContentVersion: 3}
+	fs := &stubFileStore{contentByKey: map[string][]byte{"k": []byte("v3")}, errByKey: map[string]error{}}
+	h := &Handler{
+		logger: zap.NewNop(),
+		ds: stubStore{
+			getFn: func(context.Context, uuid.UUID, uuid.UUID) (*models.FileAttachment, error) {
+				return attachment, nil
+			},
+		},
+		agent: &stubAgent{store: fs},
+	}
+	get := func(ifNoneMatch string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/file-attachment/"+attachmentID.String(), nil)
+		if ifNoneMatch != "" {
+			req.Header.Set("If-None-Match", ifNoneMatch)
+		}
+		req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, userID))
+		req = mux.SetURLVars(req, map[string]string{"id": attachmentID.String()})
+		rec := httptest.NewRecorder()
+		h.GetFileAttachmentContent(rec, req)
+		return rec
+	}
+
+	first := get("")
+	require.Equal(t, http.StatusOK, first.Code)
+	require.Equal(t, `"3"`, first.Header().Get("ETag"))
+	require.Equal(t, "private, no-cache", first.Header().Get("Cache-Control"))
+
+	current := get(`"3"`)
+	require.Equal(t, http.StatusNotModified, current.Code)
+	require.Empty(t, current.Body.String())
+	require.Len(t, fs.seenKeys, 1, "a current copy needs no read from the store")
+
+	// A save moved the version on: the old copy gets the new bytes.
+	stale := get(`"2"`)
+	require.Equal(t, http.StatusOK, stale.Code)
+	require.Equal(t, "v3", stale.Body.String())
 }
 
 func TestGetFileAttachmentContent_DownloadError(t *testing.T) {

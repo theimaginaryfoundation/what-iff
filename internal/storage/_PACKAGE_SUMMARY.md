@@ -34,7 +34,8 @@
 - **The object store is the only copy of an uploaded file.**
   Uploads are not mirrored to any provider (OpenAI's Files API was dropped), so every vision provider gets its image bytes from here at inference time, as well as the image gallery.
   Image uploads only need to write to `FileKeyForImage`; a chat-scoped `FileKeyForChat` copy is not required.
-- **Key layout:** `users/{id}/images/…` for gallery/Claude; `users/{id}/images/thumbs/…` for thumbnails; `users/{id}/chats/{chatId}/…` for non-image file-search assets; `users/{id}/personalities/…` for personality attachments.
+- **Key layout:** `users/{id}/images/…` for gallery/Claude; `users/{id}/images/thumbs/…` for thumbnails; `users/{id}/chats/{chatId}/…` for non-image file-search assets; `users/{id}/personalities/…` for personality attachments; `users/{id}/agent/…` for agent-authored files; `users/{id}/files/…` (`FileKeyForUserFile`) for gallery imports of non-images and for every new version a file workspace save writes (ADR 0x043 §3).
+  Version keys carry a fresh object id, never the attachment id, so a row's `s3_key` moves between objects and a reference row keeps the version it was made from.
 - **Instrumented store keeps the optional interfaces:** `Instrument` returns a type that implements `ObjectLister`/`Presigner` exactly when the wrapped store does, so the account export's type assertions still work.
   It always implements `StreamUploader` (timed as `put_object`), streaming through when the wrapped store can.
   Presigning is local signing with no network call, so it is not timed; a missing object is still `(nil, nil)` and counts as a successful `get_object`.

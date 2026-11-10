@@ -158,6 +158,31 @@ var fileTypes = map[string]FileTypeInfo{
 		Extension:     ".webp",
 		VectorSupport: false,
 	},
+	".ipynb": {
+		ContentType:   "application/x-ipynb+json",
+		Extension:     ".ipynb",
+		VectorSupport: false,
+	},
+	".jsonl": {
+		ContentType:   "application/x-ndjson",
+		Extension:     ".jsonl",
+		VectorSupport: true,
+	},
+	".tsv": {
+		ContentType:   "text/tab-separated-values",
+		Extension:     ".tsv",
+		VectorSupport: true,
+	},
+	".yaml": {
+		ContentType:   "application/yaml",
+		Extension:     ".yaml",
+		VectorSupport: true,
+	},
+	".yml": {
+		ContentType:   "application/yaml",
+		Extension:     ".yml",
+		VectorSupport: true,
+	},
 	".xlsx": {
 		ContentType:   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 		Extension:     ".xlsx",

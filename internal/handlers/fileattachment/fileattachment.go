@@ -153,6 +153,16 @@ func (h *Handler) GetFileAttachmentContent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// A save replaces a file's bytes under the same URL, so a cached copy must be revalidated
+	// (ADR 0x043 §3); content_version says whether it still holds.
+	etag := strconv.Quote(strconv.Itoa(attachment.ContentVersion))
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	fileStore := h.agent.FileStore()
 	if fileStore == nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "File storage not configured", nil)
@@ -209,7 +219,6 @@ func (h *Handler) GetFileAttachmentContent(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
-	w.Header().Set("Cache-Control", "private, max-age=3600")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)

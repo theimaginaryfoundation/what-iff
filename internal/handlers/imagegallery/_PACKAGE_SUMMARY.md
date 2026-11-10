@@ -20,7 +20,7 @@ The web app's gallery doubles as a read-only file view; other files' bytes come 
 ## Dependencies
 
 - **Inbound:** `internal/server`.
-- **Outbound:** `internal/datastore`, `internal/filedelete`, `internal/storage`, `internal/models`, `internal/agent` (import, and provider-file deletes in bulk delete), `handlerutils`, `mux`.
+- **Outbound:** `internal/datastore`, `internal/filedelete`, `internal/filechange`, `internal/storage`, `internal/models`, `internal/agent` (import, and provider-file deletes in bulk delete), `handlerutils`, `mux`.
 
 ## Non-obvious decisions
 
@@ -35,6 +35,9 @@ The web app's gallery doubles as a read-only file view; other files' bytes come 
 - **Thumbnails are per attachment id**, so `POST /{id}/reference` copies the source's thumbnail to the new copy (`imageutil.CopyThumbnail`, in the background).
   `GET /{id}` with a thumbnail wanted but only the full image found serves the full image and queues `imageutil.BackfillThumbnail` from those bytes, so images saved before every path wrote a thumbnail heal on first read.
 - **Import takes an optional `folder` form field**, so an image imported while viewing a folder lands in it.
+- **Import keys non-images under `users/{uid}/files/`** (`storage.FileKeyForUserFile`), the image store being for images only; a file workspace save writes later versions beside it (ADR 0x043 §3).
+- **Rename (`PATCH /{id}`) is hardened** for the file workspace: a clash in the folder is 409, a skill bundle file 403, an invalid name 400 (`models.ErrInvalidFileName`); the datastore follows a changed extension with the type and renames the chat copies with the file.
+- **Renames, imports and chat uploads announce themselves** through `internal/filechange`, so the private build can keep a conversation's container in step.
 
 ## Testing
 

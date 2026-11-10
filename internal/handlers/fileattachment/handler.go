@@ -5,8 +5,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/filedelete"
+	"github.com/theimaginaryfoundation/what-iff/internal/filesave"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 
@@ -18,10 +20,15 @@ type attachmentStore interface {
 	ListFileAttachments(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error)
 	// Get, delete and the reference checks a delete needs (filedelete.Service.DeleteFile).
 	filedelete.Store
+	// The swap and re-index a content save needs (filesave.Service.Replace).
+	filesave.Store
+	// Whether a save's chat is the caller's, and sandboxed.
+	GetChat(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error)
 }
 
 type attachmentAgent interface {
 	FileStore() storage.FileStore
+	ChunkPipeline() *filechunker.FileChunkPipeline
 }
 
 // Handler handles file attachment-related API requests
@@ -43,4 +50,5 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	fileAttachmentRouter.HandleFunc("", h.ListFileAttachments).Methods("GET")
 	fileAttachmentRouter.HandleFunc("/{id}", h.GetFileAttachmentContent).Methods("GET")
 	fileAttachmentRouter.HandleFunc("/{id}", h.DeleteFileAttachment).Methods("DELETE")
+	fileAttachmentRouter.HandleFunc("/{id}/content", h.ReplaceFileAttachmentContent).Methods("PUT")
 }

@@ -52,6 +52,8 @@ func toFileAttachmentModel(e *ent.FileAttachment) *models.FileAttachment {
 		CreatedByPersonalityID: e.CreatedByPersonalityID,
 		CreatedByChatID:        e.CreatedByChatID,
 		UpdatedAt:              e.UpdatedAt,
+		ContentVersion:         e.ContentVersion,
+		ContentSHA256:          e.ContentSha256,
 	}
 
 	if e.FileID != "" {
@@ -765,63 +767,6 @@ func (d *Datastore) SetFileAttachmentS3Key(ctx context.Context, userID, id uuid.
 		return ErrFileAttachmentNotFound
 	}
 	return nil
-}
-
-// UpdateFileAttachmentName renames the display name of a file attachment. The S3 key
-// is left unchanged so existing objects remain retrievable.
-func (d *Datastore) UpdateFileAttachmentName(ctx context.Context, userID, id uuid.UUID, name string) (*models.FileAttachment, error) {
-	tx, err := d.dbClient.Tx(ctx)
-	if err != nil {
-		d.logger.Error(i18n.T("tx.start_failed"), zap.Error(err))
-		return nil, err
-	}
-	defer func() {
-		if v := recover(); v != nil {
-			tx.Rollback()
-			panic(v)
-		}
-	}()
-
-	exists, err := tx.FileAttachment.Query().
-		Where(entfileattachment.ID(id), entfileattachment.HasOwnerWith(user.ID(userID))).
-		Exist(ctx)
-	if err != nil {
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-		}
-		return nil, err
-	}
-	if !exists {
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-		}
-		return nil, ErrFileAttachmentNotFound
-	}
-
-	updated, err := tx.FileAttachment.UpdateOneID(id).SetName(name).Save(ctx)
-	if err != nil {
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-		}
-		return nil, err
-	}
-
-	result, err := tx.FileAttachment.Query().
-		Where(entfileattachment.ID(updated.ID)).
-		WithOwner().
-		WithChatMessage(func(q *ent.ChatMessageQuery) { q.WithChat() }).
-		Only(ctx)
-	if err != nil {
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-		}
-		return nil, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return toFileAttachmentModel(result), nil
 }
 
 // CreateFileAttachmentReference creates a lightweight file_attachment row that
