@@ -7,9 +7,13 @@ import "github.com/google/uuid"
 type UtilityRole string
 
 const (
-	// UtilityRoleMemory covers memory extraction and merge, the scratchpad,
-	// checkpoint summaries, recall and thread rehydration.
+	// UtilityRoleMemory covers memory extraction, the scratchpad, checkpoint
+	// summaries, recall and thread rehydration.
 	UtilityRoleMemory UtilityRole = "memory"
+	// UtilityRoleMemoryMerge covers folding duplicate memories together: the
+	// largest memory call, which a deployment may want to run differently from
+	// the rest.
+	UtilityRoleMemoryMerge UtilityRole = "memory_merge"
 	// UtilityRoleSimple covers tasks straightforward and low-risk enough that any
 	// model can do them: chat naming, expression and mood selection, schedule
 	// parsing and memory queries.
@@ -20,7 +24,7 @@ const (
 
 // UtilityRoles lists the roles a model can be chosen for, in the order a
 // settings screen shows them.
-var UtilityRoles = []UtilityRole{UtilityRoleMemory, UtilityRoleSimple, UtilityRolePersonality}
+var UtilityRoles = []UtilityRole{UtilityRoleMemory, UtilityRoleMemoryMerge, UtilityRoleSimple, UtilityRolePersonality}
 
 // Valid reports whether r is a known role.
 func (r UtilityRole) Valid() bool {
@@ -40,23 +44,33 @@ const (
 	UtilityScopeAccount    UtilityScope = "account"
 )
 
-// UtilityModelSetting is the model chosen for a role at a scope.
+// UtilityModelSetting is what was chosen for a role at a scope: a model, or Off.
 type UtilityModelSetting struct {
-	Scope   UtilityScope `json:"scope"`
-	Role    UtilityRole  `json:"role"`
-	ModelID uuid.UUID    `json:"model_id"`
+	Scope UtilityScope `json:"scope"`
+	Role  UtilityRole  `json:"role"`
+	// ModelID is the chosen model, or nil when the role is switched off.
+	ModelID *uuid.UUID `json:"model_id"`
 }
 
-// UtilityRoleModel is what an account sees of one role: its own choice, the deployment's,
-// and the built-in model the role runs on when neither chose one.
+// Off reports whether the setting switches its role off.
+func (s UtilityModelSetting) Off() bool { return s.ModelID == nil }
+
+// UtilityChoice is one scope's choice for a role, as an account sees it.
+type UtilityChoice struct {
+	// Off is whether the role is switched off; ModelID is then nil.
+	Off bool `json:"off"`
+	// ModelID is the chosen model, or nil when the role is off.
+	ModelID *uuid.UUID `json:"model_id"`
+}
+
+// UtilityRoleModel is what an account sees of one role: its own choice and the deployment's.
+// A role neither chose is not set, and its work doesn't run.
 type UtilityRoleModel struct {
 	Role UtilityRole `json:"role"`
-	// AccountModelID is the account's choice, or nil when it made none.
-	AccountModelID *uuid.UUID `json:"account_model_id"`
-	// DeploymentModelID is the deployment's choice, or nil when it made none.
-	DeploymentModelID *uuid.UUID `json:"deployment_model_id"`
-	// BuiltInModel is the name of the model the role runs on when nothing is chosen.
-	BuiltInModel string `json:"built_in_model"`
+	// Account is the account's choice, or nil when it made none.
+	Account *UtilityChoice `json:"account"`
+	// Deployment is the deployment's choice, or nil when it made none.
+	Deployment *UtilityChoice `json:"deployment"`
 }
 
 // UtilityModels lists every role's models, in UtilityRoles order.
@@ -67,7 +81,9 @@ type UtilityModels struct {
 	Roles          []UtilityRoleModel `json:"roles"`
 }
 
-// SetUtilityModelRequest chooses a model for a role.
+// SetUtilityModelRequest chooses a model for a role, or switches it off: exactly one of
+// ModelID and Off.
 type SetUtilityModelRequest struct {
-	ModelID uuid.UUID `json:"model_id"`
+	ModelID *uuid.UUID `json:"model_id"`
+	Off     bool       `json:"off"`
 }

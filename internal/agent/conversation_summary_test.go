@@ -57,7 +57,7 @@ func TestBuildCheckpointSummaryRequest_ThreadedMode(t *testing.T) {
 		PreviousResponseID: &rid,
 	})
 	require.NoError(t, err)
-	require.Equal(t, archivalOpenAIModel, string(params.Model))
+	require.Equal(t, testUtilityModel, string(params.Model))
 	require.NotNil(t, params.PreviousResponseID)
 	require.Equal(t, rid, params.PreviousResponseID.Value)
 	require.NotNil(t, params.Instructions)
@@ -150,5 +150,5 @@ func checkpointSummaryParams(userID uuid.UUID, existing string, src checkpointSu
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
-	return provider.UtilityResponsesParams(archivalOpenAIModel, req), nil
+	return provider.UtilityResponsesParams(testUtilityModel, req), nil
 }

@@ -23,16 +23,13 @@ import (
 // Store is what the handler reads and writes.
 type Store interface {
 	ListUtilityModelSettings(ctx context.Context, userID uuid.UUID) ([]models.UtilityModelSetting, error)
-	SetUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID uuid.UUID) error
-	ClearUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole) error
+	SetUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID *uuid.UUID) error
 	GetModel(ctx context.Context, id uuid.UUID) (*models.Model, error)
 }
 
 // Handler serves the utility-model routes.
 type Handler struct {
 	store Store
-	// builtIn names the model a role runs on when nothing is chosen.
-	builtIn func(models.UtilityRole) string
 	// keys answers which providers the account holds a key for.
 	keys providerkeys.Resolver
 	// accountsChoose is whether accounts may choose: only where they bring their own keys, and so
@@ -42,15 +39,14 @@ type Handler struct {
 }
 
 // NewHandler builds the handler.
-func NewHandler(store Store, builtIn func(models.UtilityRole) string, keys providerkeys.Resolver, logger *zap.Logger) *Handler {
-	return &Handler{store: store, builtIn: builtIn, keys: keys, accountsChoose: keys.AccountsSupplyKeys(), logger: logger}
+func NewHandler(store Store, keys providerkeys.Resolver, logger *zap.Logger) *Handler {
+	return &Handler{store: store, keys: keys, accountsChoose: keys.AccountsSupplyKeys(), logger: logger}
 }
 
 // RegisterRoutes mounts the routes on an authenticated router.
 func (h *Handler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/utility-models", h.List).Methods(http.MethodGet)
 	router.HandleFunc("/utility-models/{role}", h.Set).Methods(http.MethodPut)
-	router.HandleFunc("/utility-models/{role}", h.Clear).Methods(http.MethodDelete)
 }
 
 // List reports each role's models for the requesting account.
@@ -68,7 +64,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, out)
 }
 
-// Set chooses the account's model for a role, from the models it can use.
+// Set chooses the account's model for a role, from the models it can use, or switches the role
+// off. There is no clearing: where accounts choose, nothing stands behind their choice, so a
+// cleared role would quietly stop running.
 func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 	userID, role, ok := h.target(w, r)
 	if !ok {
@@ -79,11 +77,11 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid request body", err)
 		return
 	}
-	if req.ModelID == uuid.Nil {
-		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "model_id is required", nil)
+	if req.Off == (req.ModelID != nil) || (req.ModelID != nil && *req.ModelID == uuid.Nil) {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Send either model_id or off", nil)
 		return
 	}
-	if !h.hasKeyFor(w, r, req.ModelID) {
+	if req.ModelID != nil && !h.hasKeyFor(w, r, *req.ModelID) {
 		return
 	}
 	err := h.store.SetUtilityModel(r.Context(), models.UtilityScopeAccount, userID, role, req.ModelID)
@@ -102,20 +100,6 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error saving the utility model", err)
-		return
-	}
-	h.respondWith(w, r, userID)
-}
-
-// Clear removes the account's choice for a role, so it runs on the deployment's
-// choice or its built-in model.
-func (h *Handler) Clear(w http.ResponseWriter, r *http.Request) {
-	userID, role, ok := h.target(w, r)
-	if !ok {
-		return
-	}
-	if err := h.store.ClearUtilityModel(r.Context(), models.UtilityScopeAccount, userID, role); err != nil {
-		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error clearing the utility model", err)
 		return
 	}
 	h.respondWith(w, r, userID)
@@ -158,20 +142,20 @@ func (h *Handler) utilityModels(ctx context.Context, userID uuid.UUID) (models.U
 	}
 	out := models.UtilityModels{AccountsChoose: h.accountsChoose, Roles: make([]models.UtilityRoleModel, 0, len(models.UtilityRoles))}
 	for _, role := range models.UtilityRoles {
-		entry := models.UtilityRoleModel{Role: role, BuiltInModel: h.builtIn(role)}
+		entry := models.UtilityRoleModel{Role: role}
 		for _, s := range settings {
 			if s.Role != role {
 				continue
 			}
-			id := s.ModelID
+			choice := &models.UtilityChoice{Off: s.Off(), ModelID: s.ModelID}
 			switch s.Scope {
 			case models.UtilityScopeAccount:
 				if !h.accountsChoose {
 					continue // stored before, but not this deployment's to honour
 				}
-				entry.AccountModelID = &id
+				entry.Account = choice
 			case models.UtilityScopeDeployment:
-				entry.DeploymentModelID = &id
+				entry.Deployment = choice
 			}
 		}
 		out.Roles = append(out.Roles, entry)

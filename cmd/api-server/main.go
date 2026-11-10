@@ -233,15 +233,15 @@ func init() {
 			zap.Error(err))
 	}
 
-	// Every utility call reads the utility model settings. A read that fails falls back to the
-	// built-in models, so a missing table would quietly ignore every choice and log a fallback
-	// on every call: stop here instead, with the remedy.
+	// Every utility call reads the utility model settings, and a read that fails skips that
+	// call's background work, so the app keeps working without them. A missing table would
+	// skip all of it on every call: say so once here, with the remedy.
 	settingsCtx, cancelSettings := context.WithTimeout(context.Background(), 30*time.Second)
 	_, err = client.UtilityModelSetting.Query().Exist(settingsCtx)
 	cancelSettings()
 	if err != nil {
-		logger.Fatal("Failed to read utility model settings within 30s. If the utility_model_settings table is missing, "+
-			"run the migrations (AUTO_MIGRATE=true); otherwise check the database is reachable",
+		logger.Error("Failed to read utility model settings within 30s; background work will be skipped. "+
+			"If the utility_model_settings table is missing, run the migrations (AUTO_MIGRATE=true); otherwise check the database is reachable",
 			zap.Error(err))
 	}
 
