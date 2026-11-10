@@ -13,6 +13,7 @@ interface FakeEditorInstance {
 
 function fakeFilerobot() {
   const instances: FakeEditorInstance[] = [];
+  const state = { failRender: false };
   class FakeFilerobot {
     TABS = { ADJUST: 'Adjust', FINETUNE: 'Finetune', FILTERS: 'Filters', ANNOTATE: 'Annotate', RESIZE: 'Resize' };
     TOOLS = { CROP: 'Crop' };
@@ -22,6 +23,7 @@ function fakeFilerobot() {
       instances.push(this.record);
     }
     render(additional?: Record<string, unknown>) {
+      if (state.failRender) throw new Error('cannot render');
       this.record.renderConfig = additional;
     }
     terminate() {
@@ -31,7 +33,7 @@ function fakeFilerobot() {
       return { imageData: { imageBase64: `data:image/${info.extension};base64,aGk=`, mimeType: `image/${info.extension}` }, designState: {}, hideLoadingSpinner: () => undefined };
     }
   }
-  return { ctor: FakeFilerobot, instances };
+  return { ctor: FakeFilerobot, instances, state };
 }
 
 function file(overrides: Partial<FileAttachment> = {}): FileAttachment {
@@ -121,5 +123,15 @@ describe('ImageEditorComponent', () => {
     fixture.componentInstance.markSaved(saved);
     expect(fake.instances.length).toBe(1);
     expect(fixture.componentInstance.dirty()).toBe(true);
+  });
+
+  it('shows an error, not a spinner, when the editor cannot start', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    fake.state.failRender = true;
+    fixture.componentRef.setInput('file', file());
+    fixture.componentRef.setInput('blob', new Blob(['png'], { type: 'image/png' }));
+    fixture.detectChanges();
+    await vi.waitFor(() => expect(fixture.componentInstance.state()).toBe('error'));
+    expect(URL.revokeObjectURL).toHaveBeenCalled();
   });
 });

@@ -174,8 +174,24 @@ export class ImageEditorComponent implements FileEditor {
     }
     this.objectUrl = URL.createObjectURL(blob);
     const view = this.document.defaultView;
+    let editor: Filerobot;
+    try {
+      editor = this.create(ctor, view);
+    } catch (error) {
+      console.error('The image editor could not start', error);
+      this.teardown();
+      this.state.set('error');
+      return;
+    }
+    this.editor = editor;
+    this.setDirty(false);
+    this.state.set('ready');
+  }
+
+  /** Makes and renders the editor; it can throw on an image or browser it cannot handle. */
+  private create(ctor: FilerobotCtor, view: Window | null): Filerobot {
     const editor = new ctor(this.host().nativeElement, {
-      source: this.objectUrl,
+      source: this.objectUrl!,
       onModify: () => {
         this.edits += 1;
         this.setDirty(true);
@@ -191,16 +207,14 @@ export class ImageEditorComponent implements FileEditor {
     // TABS and TOOLS are instance properties, so the tab set goes in with render().
     const { TABS, TOOLS } = editor;
     editor.render({
-      source: this.objectUrl,
+      source: this.objectUrl!,
       savingPixelRatio: 1,
       previewPixelRatio: view?.devicePixelRatio ?? 1,
       tabsIds: [TABS.ADJUST, TABS.FINETUNE, TABS.FILTERS, TABS.ANNOTATE, TABS.RESIZE],
       defaultTabId: TABS.ADJUST,
       defaultToolId: TOOLS.CROP,
     });
-    this.editor = editor;
-    this.setDirty(false);
-    this.state.set('ready');
+    return editor;
   }
 
   private setDirty(dirty: boolean): void {
