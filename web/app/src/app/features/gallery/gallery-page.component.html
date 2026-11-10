@@ -55,6 +55,9 @@
         (next)="stepFile(1)"
         (delete)="onDeleteFile($event)"
         (rename)="onRenameFile($event)"
+        (fileChanged)="onFileChanged($event)"
+        (saveAs)="onSaveAs($event)"
+        [canEdit]="workspace.canEdit()"
         (moveToFolder)="view.requestMove([$event])" />
     } @else {
       <div class="gallery-page__file-missing" [attr.role]="openFileError() ? 'alert' : 'status'">

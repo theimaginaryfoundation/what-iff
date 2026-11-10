@@ -21,7 +21,7 @@ describe('RightPanelHostComponent', () => {
         provideZonelessChangeDetection(),
         provideRouter([]),
         { provide: ImageGalleryService, useValue: { getFileInfo: () => of({ id: 'f-1', user_id: 'u', name: 'a.txt', file_type: 'text/plain', created_at: '' }) } },
-        { provide: FileAttachmentService, useValue: { downloadFileAttachment: () => of(new Blob(['x'])) } },
+        { provide: FileAttachmentService, useValue: { downloadFileAttachment: () => of(new Blob(['x'])), downloadFileContent: () => of({ blob: new Blob(['x']), version: null }) } },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(RightPanelHostComponent);

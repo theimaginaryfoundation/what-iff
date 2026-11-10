@@ -17,7 +17,9 @@ import {
   UsageStats,
   UsagePeriod
 } from '../models/user.model';
+import { ConfirmationService } from './confirmation.service';
 import { LoggerService } from './logger.service';
+import { UnsavedChangesService } from './unsaved-changes.service';
 import { ThemeService, THEME_STORAGE_KEY } from './theme.service';
 import { getPasswordPolicyDescription } from '../utils/password-policy';
 import { apiErrorMessage } from '../utils/api-error.helpers';
@@ -337,6 +339,10 @@ export class AuthService {
   }
 
   async logoutPreferred(provider?: AuthProvider): Promise<void> {
+    // Signing out with unsaved edits would strand them: nothing can be saved once signed out.
+    if (this.injector.get(UnsavedChangesService).hasPending()) {
+      if (!(await this.injector.get(ConfirmationService).confirmDiscardChanges())) return;
+    }
     const resolvedProvider = this.resolveAuthProvider(provider);
 
     if (resolvedProvider === 'cognito' && this.cognitoProviderAvailable) {

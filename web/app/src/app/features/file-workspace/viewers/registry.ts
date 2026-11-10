@@ -16,16 +16,21 @@ export interface ViewerEntry {
   readonly load: () => Promise<Type<unknown>>;
   /** Whether the viewer can show on a phone. Everything can be viewed; editing is what phones lack. */
   readonly phoneView: boolean;
+  /** Loads the editor for the kind, when there is one (a FileEditor, ADR 0x043 §2). */
+  readonly edit?: () => Promise<Type<unknown>>;
 }
 
 /**
  * The registry (ADR 0x043 §2): which component shows each kind of file. A kind with no entry has
  * no preview and gets the download placeholder. Editors are added per kind in later steps.
  */
+const loadTextViewer = () => import('./text-viewer.component').then(m => m.TextViewerComponent);
+const loadCodeEditor = () => import('../editors/code-editor.component').then(m => m.CodeEditorComponent);
+
 const VIEWERS: Partial<Record<FilePreviewKind, ViewerEntry>> = {
-  text: { load: () => import('./text-viewer.component').then(m => m.TextViewerComponent), phoneView: true },
-  markdown: { load: () => import('./text-viewer.component').then(m => m.TextViewerComponent), phoneView: true },
-  csv: { load: () => import('./text-viewer.component').then(m => m.TextViewerComponent), phoneView: true },
+  text: { load: loadTextViewer, phoneView: true, edit: loadCodeEditor },
+  markdown: { load: loadTextViewer, phoneView: true, edit: loadCodeEditor },
+  csv: { load: loadTextViewer, phoneView: true, edit: loadCodeEditor },
   image: { load: () => import('./image-viewer.component').then(m => m.ImageViewerComponent), phoneView: true },
   pdf: { load: () => import('./pdf-viewer.component').then(m => m.PdfViewerComponent), phoneView: true },
 };
@@ -53,10 +58,37 @@ export function loadViewer(kind: FilePreviewKind): Promise<Type<unknown>> | null
   return promise;
 }
 
-/** For tests: forget loaded viewers. */
+const loadedEditors = new Map<FilePreviewKind, Promise<Type<unknown>>>();
+
+/** Whether the kind has an editor. */
+export function hasEditor(kind: FilePreviewKind): boolean {
+  return !!VIEWERS[kind]?.edit;
+}
+
+/** Loads the editor for kind once; null when the kind has none. */
+export function loadEditor(kind: FilePreviewKind): Promise<Type<unknown>> | null {
+  const entry = VIEWERS[kind];
+  if (!entry?.edit) return null;
+  let promise = loadedEditors.get(kind);
+  if (!promise) {
+    const attempt = entry.edit();
+    loadedEditors.set(kind, attempt);
+    attempt.catch(() => {
+      if (loadedEditors.get(kind) === attempt) loadedEditors.delete(kind);
+    });
+    promise = attempt;
+  }
+  return promise;
+}
+
+/** For tests: forget loaded viewers and editors. */
 export function resetViewerRegistry(): void {
   loaded.clear();
+  loadedEditors.clear();
 }
+
+/** The editor loader as a token, so a host can be given fake editors in tests. */
+export const EDITOR_LOADER = new InjectionToken<typeof loadEditor>('EDITOR_LOADER', { providedIn: 'root', factory: () => loadEditor });
 
 /** The loader as a token, so a host can be given fake viewers in tests. */
 export const VIEWER_LOADER = new InjectionToken<typeof loadViewer>('VIEWER_LOADER', { providedIn: 'root', factory: () => loadViewer });

@@ -1,0 +1,24 @@
+<div class="code-editor" [class.code-editor--split]="isMarkdown() && showPreview()">
+  @if (isMarkdown()) {
+    <div class="code-editor__toolbar">
+      <button type="button" class="code-editor__toggle" [attr.aria-pressed]="showPreview()" (click)="togglePreview()">
+        {{ showPreview() ? 'Hide preview' : 'Show preview' }}
+      </button>
+    </div>
+  }
+  <div class="code-editor__panes">
+    <div class="code-editor__pane">
+      @if (state() === 'error') {
+        <p class="code-editor__placeholder" role="alert">The editor could not load. Download the file to edit it elsewhere.</p>
+      } @else if (state() === 'loading') {
+        <p class="code-editor__placeholder" role="status">Loading the editor…</p>
+      }
+      <div #editor class="code-editor__monaco" [attr.aria-label]="'Editor for ' + file().name" [hidden]="state() !== 'ready'"></div>
+    </div>
+    @if (isMarkdown() && showPreview()) {
+      <div class="code-editor__pane code-editor__preview" aria-label="Preview">
+        <markdown class="code-editor__markdown prose prose-sm max-w-none dark:prose-invert" [data]="previewText()" (ready)="onMarkdownReady()"></markdown>
+      </div>
+    }
+  </div>
+</div>

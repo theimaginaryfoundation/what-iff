@@ -616,7 +616,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 		// Keep in sync with handlePreflight (and any frontend usage).
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Type")
+		w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Type, ETag")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)

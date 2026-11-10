@@ -5,6 +5,7 @@ import { Subscription } from 'rxjs';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
+import { UnsavedChangesService } from '../../core/services/unsaved-changes.service';
 
 /** Which page hosts the workspace. The gallery shows it in place; the chat beside or over the thread. */
 export type WorkspaceHost = 'chat' | 'gallery';
@@ -51,6 +52,8 @@ export class FileWorkspaceService {
   private readonly _chatId = signal<string | null>(null);
   private readonly stored = signal<StoredState>(readStored());
   private readonly _band = signal<WorkspaceBand>(this.measureBand());
+  private readonly unsavedChanges = inject(UnsavedChangesService);
+  private readonly _unsaved = signal(false);
 
   readonly host = this._host.asReadonly();
   readonly fileId = this._fileId.asReadonly();
@@ -60,6 +63,8 @@ export class FileWorkspaceService {
   /** The conversation the workspace was opened from, for saves and change events. */
   readonly chatId = this._chatId.asReadonly();
   readonly band = this._band.asReadonly();
+  /** The open editor holds changes that are not saved. */
+  readonly unsaved = this._unsaved.asReadonly();
   readonly open = computed(() => this._fileId() !== null);
   readonly expanded = computed(() => this.stored().expanded ?? false);
   readonly dockedWidth = computed(() => this.clampDockedWidth(this.stored().dockedWidth));
@@ -76,7 +81,11 @@ export class FileWorkspaceService {
   readonly floatingOpen = computed(() => this.open() && (this.layout() === 'overlay' || this.layout() === 'full' || this.layout() === 'phone'));
 
   constructor() {
-    this.document.defaultView?.addEventListener('resize', () => this._band.set(this.measureBand()));
+    this.document.defaultView?.addEventListener('resize', () => {
+      // Crossing a breakpoint moves the workspace to another host, which would rebuild an editor
+      // and lose its edits, so the layout waits until they are saved.
+      if (!this._unsaved()) this._band.set(this.measureBand());
+    });
   }
 
   /**
@@ -128,6 +137,13 @@ export class FileWorkspaceService {
   /** Closes the workspace on the current page by clearing `?file=`. */
   requestClose(): void {
     void this.router.navigate([], { queryParams: { file: null }, queryParamsHandling: 'merge' });
+  }
+
+  setUnsaved(unsaved: boolean): void {
+    const released = this._unsaved() && !unsaved;
+    this._unsaved.set(unsaved);
+    this.unsavedChanges.set(unsaved);
+    if (released) this._band.set(this.measureBand());
   }
 
   toggleExpanded(): void {

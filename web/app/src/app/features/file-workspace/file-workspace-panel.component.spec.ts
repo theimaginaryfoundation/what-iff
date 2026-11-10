@@ -36,7 +36,7 @@ describe('FileWorkspacePanelComponent', () => {
         provideZonelessChangeDetection(),
         provideRouter([]),
         { provide: ImageGalleryService, useValue: { getFileInfo: () => of(row), renameImage: rename } },
-        { provide: FileAttachmentService, useValue: { downloadFileAttachment: () => of(new Blob(['x'])), deleteFileAttachment: remove } },
+        { provide: FileAttachmentService, useValue: { downloadFileAttachment: () => of(new Blob(['x'])), downloadFileContent: () => of({ blob: new Blob(['x']), version: null }), deleteFileAttachment: remove } },
         { provide: ConfirmationService, useValue: { confirm, alert: vi.fn() } },
       ],
     }).compileComponents();
@@ -57,9 +57,10 @@ describe('FileWorkspacePanelComponent', () => {
     expect(el.querySelector('ui-overlay [role="dialog"]')).toBeNull();
 
     (el.querySelector('button[aria-label="Expand file"]') as HTMLButtonElement).click();
-    fixture.detectChanges();
-    await fixture.whenStable();
-    expect(el.querySelector('.workspace-panel--docked')).toBeNull();
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(el.querySelector('.workspace-panel--docked')).toBeNull();
+    });
     expect(el.querySelector('ui-overlay [role="dialog"]')).not.toBeNull();
     expect(el.querySelector('.ui-overlay--inset')).not.toBeNull();
   });
@@ -83,7 +84,8 @@ describe('FileWorkspacePanelComponent', () => {
     const el = fixture.nativeElement as HTMLElement;
 
     (el.querySelector('button[aria-label="Close file"]') as HTMLButtonElement).click();
-    expect(navigate).toHaveBeenCalledWith([], { queryParams: { file: null }, queryParamsHandling: 'merge' });
+    // Closing checks for unsaved edits first, so the navigation follows a tick later.
+    await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith([], { queryParams: { file: null }, queryParamsHandling: 'merge' }));
 
     fixture.componentInstance.rename({ id: 'f-1', name: 'renamed.txt' });
     expect(rename).toHaveBeenCalledWith('f-1', 'renamed.txt');
