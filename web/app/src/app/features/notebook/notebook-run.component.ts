@@ -1,5 +1,8 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, inject, input, output, signal, viewChild } from '@angular/core';
+import { DOCUMENT } from '@angular/common';
 import { DomSanitizer } from '@angular/platform-browser';
+
+import { usableRunUrl } from './notebook-run.config';
 
 /** The site downloads a lot the first time, so this is generous. */
 const START_TIMEOUT_MS = 90_000;
@@ -14,7 +17,7 @@ const CLOSE_TIMEOUT_MS = 5_000;
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    @if (state() === 'failed') {
+    @if (state() === 'failed' || !trustedUrl()) {
       <p class="notebook-run__message" role="alert">The notebook runner could not be reached. Check your connection, or edit the cells without running them.</p>
     } @else {
       @if (state() === 'starting') {
@@ -23,6 +26,8 @@ const CLOSE_TIMEOUT_MS = 5_000;
       <!--
         allow-same-origin gives JupyterLite its own origin's storage, which it needs to start. It
         is safe only because usableRunUrl refuses this app's origin; change the two together.
+        The rest are JupyterLab's own UI: downloads (Download, export), forms and modals (its
+        dialogs), popups (help and documentation links).
       -->
       <iframe
         #frame
@@ -63,6 +68,7 @@ const CLOSE_TIMEOUT_MS = 5_000;
 })
 export class NotebookRunComponent {
   private readonly sanitizer = inject(DomSanitizer);
+  private readonly document = inject(DOCUMENT);
   private readonly frame = viewChild<ElementRef<HTMLIFrameElement>>('frame');
 
   readonly url = input.required<string>();
@@ -75,8 +81,16 @@ export class NotebookRunComponent {
   readonly closed = output<void>();
 
   readonly state = signal<'starting' | 'ready' | 'failed'>('starting');
-  readonly trustedUrl = computed(() => this.sanitizer.bypassSecurityTrustResourceUrl(this.url()));
-  private readonly origin = computed(() => new URL(this.url()).origin);
+  /**
+   * The URL is checked again here, not only where the token is made, so this component never
+   * frames a same-origin or plain-http runner, whoever hands it the URL.
+   */
+  private readonly checkedUrl = computed(() => usableRunUrl(this.url(), this.document.location.origin));
+  readonly trustedUrl = computed(() => {
+    const url = this.checkedUrl();
+    return url ? this.sanitizer.bypassSecurityTrustResourceUrl(url) : null;
+  });
+  private readonly origin = computed(() => new URL(this.checkedUrl() ?? 'about:blank').origin);
 
   private startTimer: ReturnType<typeof setTimeout> | null = null;
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
