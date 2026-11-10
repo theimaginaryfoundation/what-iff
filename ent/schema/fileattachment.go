@@ -68,16 +68,25 @@ func (FileAttachment) Fields() []ent.Field {
 		field.UUID("created_by_chat_id", uuid.UUID{}).
 			Optional().
 			Nillable().
-			Comment("Conversation the agent created the file in; the owner for agent edits when there is no personality."),
+			Comment("Conversation the agent created the file in (always set since ADR 0x043, so a conversation's files can be listed); the owner for agent edits when there is no personality."),
 		field.Time("updated_at").
 			Optional().
 			Nillable().
-			Comment("When an agent last changed the content. Null for files never changed after upload."),
+			Comment("When the content was last changed, by an agent's file tools or by the user saving in the file workspace (ADR 0x043). Null for files never changed after upload."),
 		field.Int64("size_bytes").
 			Optional().
 			Nillable().
 			NonNegative().
-			Comment("Bytes in the stored object. Set for skill bundle files, so the bundle's 30 MB limit is checked without reading objects (ADR 0x035 §3); null on other rows."),
+			Comment("Bytes in the stored object. Set for skill bundle files (ADR 0x035 §3) and by every content write (ADR 0x043); null on rows uploaded before that and never changed."),
+		// The file workspace's optimistic concurrency token (ADR 0x043 §3): every content write
+		// bumps it, a save sends the version it loaded as If-Match, and a mismatch is a 412.
+		field.Int("content_version").
+			Default(1).
+			Positive().
+			Comment("Bumped by every content write. A save sends the version it loaded back as If-Match; a mismatch is refused."),
+		field.String("content_sha256").
+			Optional().
+			Comment("Hex SHA-256 of the stored object, set by every content write (ADR 0x043); empty on rows uploaded before that and never changed. Lets a container compare its copy without reading the object."),
 	}
 }
 

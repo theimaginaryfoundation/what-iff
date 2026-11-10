@@ -6,6 +6,7 @@ import { ContextBreakdownTabComponent } from './tabs/context-breakdown-tab.compo
 import { ContextMemoriesTabComponent } from './tabs/context-memories-tab.component';
 import { ContextScratchpadTabComponent } from './tabs/context-scratchpad-tab.component';
 import { ContextToolsTabComponent } from './tabs/context-tools-tab.component';
+import { ContextFilesTabComponent } from './tabs/context-files-tab.component';
 import { ThreadSandboxComponent } from './thread-sandbox.component';
 import {
   BrainIconComponent,
@@ -13,6 +14,7 @@ import {
   NoteIconComponent,
   WrenchIconComponent,
   XIconComponent,
+  FileIconComponent,
 } from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
@@ -23,6 +25,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
     ContextScratchpadTabComponent,
     ContextMemoriesTabComponent,
     ContextToolsTabComponent,
+    ContextFilesTabComponent,
     ThreadSandboxComponent,
     ContextBreakdownTabComponent,
     XIconComponent,
@@ -30,6 +33,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
     BrainIconComponent,
     WrenchIconComponent,
     LayersIconComponent,
+    FileIconComponent,
     TooltipDirective,
   ],
   template: `
@@ -81,6 +85,16 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
         </button>
         <button
           type="button"
+          [class.context-panel__primary-tab--active]="context.activeTab() === 'files'"
+          [attr.aria-current]="context.activeTab() === 'files' ? 'page' : null"
+          uiTooltip="Files"
+          (click)="context.setActiveTab('files')"
+        >
+          <ui-file-icon class="context-panel__primary-tab-icon" [size]="20" />
+          <span class="context-panel__primary-tab-label">Files</span>
+        </button>
+        <button
+          type="button"
           [class.context-panel__primary-tab--active]="context.activeTab() === 'context'"
           [attr.aria-current]="context.activeTab() === 'context' ? 'page' : null"
           uiTooltip="Context"
@@ -111,6 +125,9 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
           }
           @case ('tools') {
             <app-context-tools-tab [chat]="context.activeChat()" [toolCalls]="context.toolCalls()" />
+          }
+          @case ('files') {
+            <app-context-files-tab [chatId]="context.activeChatId()" />
           }
           @case ('context') {
             <app-context-breakdown-tab [breakdown]="context.shownBreakdown()" [messageId]="context.shownBreakdownId()" />
@@ -247,6 +264,7 @@ export class ContextPanelComponent {
     const tab = this.context.activeTab();
     if (tab === 'scratchpad') return 'Scratchpad';
     if (tab === 'memories') return 'Memories';
+    if (tab === 'files') return 'Files';
     if (tab === 'context') return 'Context';
     return 'Tools';
   }

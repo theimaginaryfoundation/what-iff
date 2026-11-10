@@ -128,7 +128,10 @@ User: "Remind me in an hour to take a break from coding." →
 }
 
 Schedule times are interpreted using the user's saved timezone (no timezone argument needed).
-`
+
+
+Parameters
+Only when the user asks for a configurable job (one with inputs they want to change without rewriting the prompt, or one meant to be shared): write {{name}} placeholders in the prompt, define each in parameters, and fill them with parameter_values. A job with a parameter that has no value is saved with status "needs_values" and won't run until the user fills it in.`
 
 var UpdateScratchpadToolSpec = FunctionToolSpec{
 	Name:        "update_scratchpad",
@@ -199,6 +202,47 @@ var GenerateImageToolSpec = FunctionToolSpec{
 	Required: []string{"prompt"},
 }
 
+// jobParametersSchema / jobParameterValuesSchema describe job parameters (ADR 0x044) for the
+// create and update job tools.
+var jobParametersSchema = map[string]interface{}{
+	"type":        "array",
+	"description": "Definitions for the prompt's {{name}} placeholders. Every placeholder in the prompt needs one; a definition the prompt doesn't use is allowed.",
+	"items": map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"name":        map[string]interface{}{"type": "string", "description": "The placeholder name: a letter or underscore, then letters, digits or underscores."},
+			"label":       map[string]interface{}{"type": "string", "description": "What the job's form shows; defaults to the name."},
+			"description": map[string]interface{}{"type": "string", "description": "Optional help text for the field."},
+			"type": map[string]interface{}{
+				"type":        "string",
+				"enum":        []string{"single_select", "multi_select", "text", "list"},
+				"description": "single_select: one of options. multi_select: one or more of options. text: one free value. list: any number of free values.",
+			},
+			"options": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "The choices, for single_select and multi_select."},
+			"format": map[string]interface{}{
+				"type":        "string",
+				"enum":        []string{"comma", "bullets"},
+				"description": "multi_select and list only: comma joins the values on one line (default for multi_select); bullets makes a Markdown bullet list (default for list).",
+			},
+		},
+		"required": []string{"name", "type"},
+	},
+}
+
+var jobParameterValuesSchema = map[string]interface{}{
+	"type":        "array",
+	"description": "Values for the job's parameters, by name: value for text and single_select, items for multi_select and list. A job can't run until every parameter has a value.",
+	"items": map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"name":  map[string]interface{}{"type": "string"},
+			"value": map[string]interface{}{"type": "string", "description": "For text and single_select (one of the options)."},
+			"items": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "For multi_select (options) and list."},
+		},
+		"required": []string{"name"},
+	},
+}
+
 var CreateAgentJobToolSpec = FunctionToolSpec{
 	Name:        "create_agent_job",
 	Description: CreateAgentJobToolDescription,
@@ -234,6 +278,8 @@ var CreateAgentJobToolSpec = FunctionToolSpec{
 			"type":        "string",
 			"description": "Where the job runs: \"current\" for this conversation, the id of another conversation (from list kind=\"conversations\"; not a sandboxed one), or \"new\" (the default when omitted) for a dedicated thread made on its first run.",
 		},
+		"parameters":       jobParametersSchema,
+		"parameter_values": jobParameterValuesSchema,
 	},
 	Required: []string{"schedule_input", "prompt"},
 }
@@ -251,6 +297,8 @@ Notes:
 - model_override: a model name or id; "" goes back to the default model.
 - skill_ids replaces the job's skills with exactly this list; [] removes them all.
 - status: "paused" stops the job from running until it is set back to "active".
+- parameters replaces the job's parameter definitions. parameter_values sets the named values and keeps the others; an empty value clears one.
+- A job with a parameter that has no value has status "needs_values" and can't run or be set to "active" until it gets one.
 - The result shows the job as it now stands.`
 
 var UpdateAgentJobToolSpec = FunctionToolSpec{
@@ -291,6 +339,8 @@ var UpdateAgentJobToolSpec = FunctionToolSpec{
 			"enum":        []string{"active", "paused"},
 			"description": "\"paused\" to stop the job running, \"active\" to resume it.",
 		},
+		"parameters":       jobParametersSchema,
+		"parameter_values": jobParameterValuesSchema,
 	},
 	Required: []string{"job_id"},
 }

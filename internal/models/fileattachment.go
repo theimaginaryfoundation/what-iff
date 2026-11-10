@@ -24,6 +24,9 @@ const (
 	FileAttachmentSourceImported FileAttachmentSource = "imported"
 )
 
+// AgentFileMaxBytes caps one agent-authored file, whoever writes it.
+const AgentFileMaxBytes = 1 << 20
+
 // FileAttachment represents a file that has been uploaded and attached to the system
 type FileAttachment struct {
 	ID     uuid.UUID `json:"id"`
@@ -76,8 +79,15 @@ type FileAttachment struct {
 	SkillID *uuid.UUID `json:"skill_id,omitempty"`
 	// SizeBytes is the stored object's size, set for skill bundle files (ADR 0x035 §3).
 	SizeBytes *int64 `json:"size_bytes,omitempty"`
-	// UpdatedAt is when an agent last changed the content; nil for a file never changed.
+	// UpdatedAt is when the content was last changed, by an agent or by the user saving in the
+	// file workspace; nil for a file never changed.
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	// ContentVersion is the file workspace's concurrency token (ADR 0x043 §3): bumped by every
+	// content write. A save sends the version it loaded as If-Match and a mismatch is refused.
+	ContentVersion int `json:"content_version,omitempty"`
+	// ContentSHA256 is the hex SHA-256 of the stored object, set by every content write; empty for
+	// a row uploaded before that and never changed.
+	ContentSHA256 string `json:"content_sha256,omitempty"`
 	// ChunkStatus is the search-chunking state ("pending", "chunked", "failed"); "" for a file
 	// never chunked, such as an agent file.
 	ChunkStatus string `json:"-"`

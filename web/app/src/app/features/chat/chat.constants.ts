@@ -89,6 +89,7 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
   '.png',
   '.pptx',
   '.py',
+  '.ipynb',
   '.rb',
   '.sh',
   '.tar',

@@ -24,6 +24,14 @@ export interface FileAttachment {
   origin?: 'user' | 'agent' | 'skill';
   /** For origin "skill", the skill whose bundle the file belongs to. */
   skill_id?: string;
+  /** The file workspace's concurrency token (ADR 0x043): sent back as If-Match on a content save. */
+  content_version?: number;
+  /** Hex SHA-256 of the stored object, set by every content write. */
+  content_sha256?: string;
+  /** Bytes in the stored object; absent for older uploads never changed. */
+  size_bytes?: number;
+  /** When the content was last changed; absent for files never changed. */
+  updated_at?: string;
 }
 
 export interface FileAttachmentPersonalityRef {
@@ -102,4 +110,34 @@ export function isPendingImageAttachment(item: PendingFileAttachment): boolean {
     return isImageAttachment(item.attachment);
   }
   return item.file?.type.toLowerCase().startsWith('image/') ?? false;
+}
+
+/** Why a file is in a thread's context (`GET /chat/{id}/context-files`). Unknown values are shown as is. */
+export type ChatContextReason =
+  | 'attached_recent'
+  | 'attached_since_checkpoint'
+  | 'recalled'
+  | 'produced_this_turn'
+  | 'agent_written'
+  | 'skill_bundle'
+  | (string & {});
+
+/** One file in a thread's context (ADR 0x043 §4). */
+export interface ChatContextFile {
+  file: FileAttachment;
+  /** Where a container mounts it, relative to /workspace. */
+  workspace_path: string;
+  reasons: ChatContextReason[];
+  /** The newer file that takes the same workspace path, so this one is not mounted. */
+  shadowed_by?: string;
+}
+
+export interface ChatContainerStatus {
+  state: string;
+  files?: Record<string, string>;
+}
+
+export interface ChatContextFilesResponse {
+  files: ChatContextFile[];
+  container?: ChatContainerStatus;
 }

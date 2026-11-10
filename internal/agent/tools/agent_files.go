@@ -26,7 +26,7 @@ const (
 	agentFileReadToolName  = "agent_file_read"
 
 	// agentFileMaxBytes caps one file; agentFileMaxCallBytes caps the text one call sends.
-	agentFileMaxBytes     = 1 << 20
+	agentFileMaxBytes     = models.AgentFileMaxBytes
 	agentFileMaxCallBytes = 256 << 10
 	// agentFileMaxPerUser caps the agent-authored files an account holds.
 	agentFileMaxPerUser = 1000
@@ -54,7 +54,7 @@ var agentFileTypes = map[string]string{
 type agentFileStore interface {
 	UserFileLookup
 	CreateFileAttachment(ctx context.Context, userID uuid.UUID, att models.FileAttachment) (*models.FileAttachment, error)
-	SwapAgentFileObject(ctx context.Context, userID, id uuid.UUID, oldKey, newKey string) (bool, error)
+	SwapAgentFileObject(ctx context.Context, userID, id uuid.UUID, oldKey, newKey string, sizeBytes int64, sha256Hex string) (bool, error)
 	MoveFileAttachmentsToFolder(ctx context.Context, userID uuid.UUID, ids []uuid.UUID, folder string) (int, error)
 	RenameGalleryFile(ctx context.Context, userID, id uuid.UUID, name string) (string, error)
 	CountAgentFiles(ctx context.Context, userID uuid.UUID) (int, error)

@@ -194,6 +194,16 @@ func (h *Handler) GetImageContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A save replaces an image's bytes under the same URL, so a cached copy must be revalidated
+	// (ADR 0x043 §3); content_version says whether it still holds.
+	etag := strconv.Quote(strconv.Itoa(attachment.ContentVersion))
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	size := r.URL.Query().Get("size")
 	wantThumb := size != "full"
 
@@ -209,7 +219,6 @@ func (h *Handler) GetImageContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "private, max-age=3600")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)

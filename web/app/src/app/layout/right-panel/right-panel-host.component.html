@@ -1,4 +1,15 @@
-@if (visible()) {
+@if (workspace.dockedOpen()) {
+  <div class="app-right-panel app-right-panel--workspace">
+    @defer (on immediate) {
+      <app-file-workspace-panel />
+    }
+    @if (visible()) {
+      <aside class="app-right-panel__flyout" aria-label="Context panel">
+        <app-context-panel />
+      </aside>
+    }
+  </div>
+} @else if (visible()) {
   <aside class="app-right-panel" aria-label="Context panel">
     <app-context-panel />
   </aside>

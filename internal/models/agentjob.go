@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 )
 
 // AgentJobScheduleType represents how an AgentJob is scheduled.
@@ -22,6 +24,8 @@ const (
 	AgentJobStatusPaused   AgentJobStatus = "paused"
 	AgentJobStatusComplete AgentJobStatus = "complete"
 	AgentJobStatusFailed   AgentJobStatus = "failed"
+	// AgentJobStatusNeedsValues is a job that can't run until every parameter has a value (ADR 0x044).
+	AgentJobStatusNeedsValues AgentJobStatus = "needs_values"
 )
 
 // AgentJob represents a scheduled, semi-autonomous task owned by a user.
@@ -43,6 +47,12 @@ type AgentJob struct {
 	LastRunAt     *time.Time           `json:"last_run_at,omitempty"`
 	LastError     string               `json:"last_error,omitempty"`
 	RunCount      int                  `json:"run_count"`
+	// Parameters define the prompt's `{{name}}` placeholders (ADR 0x044); they travel with a shared job.
+	Parameters []modeltypes.JobParameter `json:"parameters"`
+	// ParameterValues are the owner's values; never published.
+	ParameterValues modeltypes.JobParameterValues `json:"parameter_values"`
+	// MissingParameters names the parameters without a usable value, in definition order. Derived.
+	MissingParameters []string `json:"missing_parameters"`
 	// Rituals is populated when the job is loaded with ritual edges. May be nil if edges not loaded.
 	Rituals []*Ritual `json:"rituals,omitempty"`
 	// TurnSettingValues override everything else for this job's runs (ADR 0x026); they are never
@@ -72,4 +82,17 @@ type SetAgentJobOverridesPatch struct {
 	UpdateReasoningEffort bool
 	UpdateAgentLoop       bool
 	TurnSettings          TurnSettingValues
+}
+
+// AgentJobParametersPatch changes a job's prompt, parameter definitions and values together
+// (ADR 0x044). A nil field keeps the stored value; ParameterValues replaces the whole map.
+type AgentJobParametersPatch struct {
+	Prompt          *string
+	Parameters      *[]modeltypes.JobParameter
+	ParameterValues *modeltypes.JobParameterValues
+}
+
+// IsZero reports whether the patch changes nothing.
+func (p AgentJobParametersPatch) IsZero() bool {
+	return p.Prompt == nil && p.Parameters == nil && p.ParameterValues == nil
 }

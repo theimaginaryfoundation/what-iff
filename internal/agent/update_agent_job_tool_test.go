@@ -11,8 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/agentjobs/params"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 	"go.uber.org/zap"
 )
 
@@ -75,7 +77,7 @@ func (f *fakeJobStore) UpdateAgentJobTitle(_ context.Context, userID, id uuid.UU
 	return j, nil
 }
 
-func (f *fakeJobStore) UpdateAgentJobPrompt(_ context.Context, userID, id uuid.UUID, prompt string) (*models.AgentJob, error) {
+func (f *fakeJobStore) UpdateAgentJobParameters(_ context.Context, userID, id uuid.UUID, patch models.AgentJobParametersPatch) (*models.AgentJob, error) {
 	j, err := f.job(userID, id)
 	if err != nil {
 		return nil, err
@@ -83,7 +85,23 @@ func (f *fakeJobStore) UpdateAgentJobPrompt(_ context.Context, userID, id uuid.U
 	if err := f.write("prompt"); err != nil {
 		return nil, err
 	}
-	j.Prompt = prompt
+	prompt, defs, values := j.Prompt, j.Parameters, j.ParameterValues
+	if patch.Prompt != nil {
+		prompt = *patch.Prompt
+	}
+	if patch.Parameters != nil {
+		defs = *patch.Parameters
+	}
+	if patch.ParameterValues != nil {
+		values = *patch.ParameterValues
+	}
+	defs, values, err = params.Prepare(prompt, defs, values)
+	if err != nil {
+		return nil, err
+	}
+	j.Prompt, j.Parameters, j.ParameterValues = prompt, defs, values
+	j.MissingParameters = params.Missing(defs, values)
+	j.Status = params.StatusAfterSave(j.Status, len(j.MissingParameters) > 0)
 	return j, nil
 }
 
@@ -132,6 +150,9 @@ func (f *fakeJobStore) UpdateAgentJobStatus(_ context.Context, userID, id uuid.U
 	j, err := f.job(userID, id)
 	if err != nil {
 		return nil, err
+	}
+	if missing := params.Missing(j.Parameters, j.ParameterValues); status == models.AgentJobStatusActive && len(missing) > 0 {
+		return nil, fmt.Errorf("%w: %w", datastore.ErrAgentJobNeedsValues, &params.MissingError{Names: missing})
 	}
 	if err := f.write("status"); err != nil {
 		return nil, err
@@ -410,3 +431,52 @@ type failingChats struct{}
 func (failingChats) GetChat(context.Context, uuid.UUID, uuid.UUID) (*models.Chat, error) {
 	return nil, errors.New("pq: connection refused")
 }
+
+func TestUpdateAgentJobParameters(t *testing.T) {
+	f := newJobUpdateFixture(t)
+
+	// Define a parameter in the same call as the prompt that uses it: the job waits for a value.
+	res := f.run(t, fmt.Sprintf(`{"job_id":%q,"prompt":"News on {{topics}} in {{region}}",
+		"parameters":[{"name":"topics","type":"list"},{"name":"region","type":"single_select","options":["US","EU"]}],
+		"parameter_values":[{"name":"region","value":"EU"}]}`, f.job.ID))
+	require.True(t, res.Success, res.Error)
+	assert.Equal(t, []string{"prompt", "parameters", "parameter_values"}, res.Updated)
+	assert.Equal(t, string(models.AgentJobStatusNeedsValues), res.Status)
+	assert.Equal(t, []string{"topics"}, res.MissingParameters)
+	assert.Contains(t, res.Note, "topics")
+
+	// Resuming is refused while a value is missing.
+	res = f.run(t, fmt.Sprintf(`{"job_id":%q,"status":"active"}`, f.job.ID))
+	assert.False(t, res.Success)
+	assert.Contains(t, res.Error, "missing: topics")
+
+	// Setting the last value merges with the others and makes the job active again.
+	res = f.run(t, fmt.Sprintf(`{"job_id":%q,"parameter_values":[{"name":"topics","items":["AI","climate"]}]}`, f.job.ID))
+	require.True(t, res.Success, res.Error)
+	assert.Equal(t, string(models.AgentJobStatusActive), res.Status)
+	assert.Empty(t, res.MissingParameters)
+	assert.Equal(t, "EU", res.ParameterValues["region"].Text)
+	assert.Equal(t, []string{"AI", "climate"}, res.ParameterValues["topics"].Items)
+
+	// An undefined placeholder is reported and changes nothing.
+	res = f.run(t, fmt.Sprintf(`{"job_id":%q,"prompt":"Now {{other}}"}`, f.job.ID))
+	assert.False(t, res.Success)
+	assert.Contains(t, res.Error, "other")
+	assert.Equal(t, "News on {{topics}} in {{region}}", f.job.Prompt)
+}
+
+func TestMergeJobParamValues(t *testing.T) {
+	base := modeltypes.JobParameterValues{"a": modeltypes.TextValue("x"), "b": modeltypes.ListValue("y")}
+	out, err := mergeJobParamValues(base, []jobParamValueArg{{Name: "a", Value: ptrTo("")}, {Name: "c", Items: &[]string{"z"}}})
+	require.NoError(t, err)
+	_, hasA := out["a"]
+	assert.False(t, hasA, "an empty value clears the parameter")
+	assert.Equal(t, []string{"y"}, out["b"].Items, "values not passed are kept")
+	assert.Equal(t, []string{"z"}, out["c"].Items)
+	assert.Equal(t, "x", base["a"].Text, "base is not modified")
+
+	_, err = mergeJobParamValues(nil, []jobParamValueArg{{Name: "a", Value: ptrTo("x"), Items: &[]string{"y"}}})
+	assert.Error(t, err)
+}
+
+func ptrTo[T any](v T) *T { return &v }

@@ -75,6 +75,11 @@
   width: 320px;
 }
 
+// With a file docked beside the thread the column takes the workspace's width (ADR 0x043 §1).
+.app-layout__right-panel--workspace {
+  width: auto;
+}
+
 .app-layout__mobile-menu,
 .app-layout__sidebar-backdrop {
   display: none;

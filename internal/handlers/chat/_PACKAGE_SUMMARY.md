@@ -10,6 +10,7 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 - **Follow-ups** (ADR 0x042): `CreateChatMessage` takes `steer: true` for a message sent while a turn runs, which that turn takes in at its next step.
 - **MCP Apps** (`mcp_apps.go`, ADR 0x042): `GET /chat/{chatId}/tool-calls/{toolCallId}/app` returns a tool call's view (HTML with its CSP, the tool's input and result, `Cache-Control: no-store`) and `POST .../app/tools/call` runs the view's tool calls on its own connector (403 for a tool not visible to apps), through `MCPAppAgent`.
 - **Loaded skills** (`skills.go`, ADR 0x035): `GET /chat/{chatId}/loaded-skills` lists the skills the agent loaded in the thread with `load_skill` (mode and message skills are not loaded state) and `DELETE /chat/{chatId}/loaded-skills/{ritualId}` unloads one, for the thread's Tools panel.
+- **Files in context** (`contextfiles.go`, ADR 0x043 §4): `GET /chat/{chatId}/context-files` returns `agent.ContextFilesForChat` for the thread's Files tab, plus the container status the private build reports; without an agent it returns an empty list.
 
 - **`Handler`:** `RegisterRoutes` mounts `/api/chat/...` (under parent `/api` from server).
   Key routes: list/create/get/update/patch/delete chat, chat messages CRUD, `welcome-message`, `mark-read`, `mark-all-read` (all of the caller's chats, one all-or-nothing update), export, **`import`**, `available-rituals`, file attachments on a chat, `context` for debugging.
@@ -30,6 +31,8 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
   Client-side zip extraction merges ChatGPT shards matching `conversations.json` / `conversations-NNN.json` (thread-complete chunks) before upload.
   Metrics (through `telemetry.Global()`): the staged payload size goes on `whatiff.file.size` (operation `chat_import`), the background run is tracked as a `chat_import` job (`TrackJob`, including a panic outcome), `parse` and `insert` are timed on `whatiff.file.operation.duration`, and conversation counts by outcome go on `whatiff.file.operation.items`.
 - **File attachments (`fileattachment.go`):** upload metrics are recorded inside the shared `handlerutils` upload helpers, so this handler does not count uploads itself.
+  An optional `folder` form field files the upload in a gallery folder (Save As from the chat-hosted file workspace, ADR 0x043 §3); an invalid or reserved folder is a 400 and the temp file is abandoned.
+  A stored upload is announced through `internal/filechange` with the chat id, so the private build can seed it into the conversation's container.
 - **Export (`export.go`):** the streamed ZIP's byte count is recorded on `whatiff.file.size` (operation `chat_export`); latency is left to the HTTP server metric.
 - **Lazy rehydration trigger (`GetChat`):** When an unarchived imported thread (`source` set, no checkpoint yet) is opened, the handler calls `agent.EnqueueThreadRehydration` to summarize it **and seed long-term memories** in the background (see `internal/agent`).
   Unarchiving alone does not start it, so a bulk restore costs nothing until a thread is opened; archived threads open read-only and never start it.

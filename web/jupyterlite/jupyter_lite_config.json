@@ -1,0 +1,7 @@
+{
+  "LiteBuildConfig": {
+    "apps": ["lab"],
+    "federated_extensions": ["extension/whatiff_bridge/labextension"],
+    "output_dir": "dist"
+  }
+}

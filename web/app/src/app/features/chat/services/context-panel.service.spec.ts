@@ -58,6 +58,20 @@ describe('ContextPanelService', () => {
         expect(saved).toContain('"chat-1":"tools"');
     });
 
+    it('queues and consumes a composer attachment, counts file refreshes and picker requests', () => {
+        const file = { id: 'f-1', user_id: 'u', name: 'a.txt', file_type: 'text/plain', created_at: '' };
+        service.requestComposerAttachment(file);
+        expect(service.composerAttachment()).toEqual(file);
+        expect(service.consumeComposerAttachment()).toEqual(file);
+        expect(service.consumeComposerAttachment()).toBeNull();
+
+        expect(service.filesVersion()).toBe(0);
+        service.refreshFiles();
+        expect(service.filesVersion()).toBe(1);
+        service.requestGalleryPicker();
+        expect(service.galleryPickerRequests()).toBe(1);
+    });
+
     it('queues and consumes composer insert payload', () => {
         service.requestComposerInsert('note');
 
@@ -238,6 +252,18 @@ describe('ContextPanelService', () => {
             service.setDesktopVisible(true);
             service.restoreDesktopVisible();
             expect(rightPanel.setVisible).toHaveBeenLastCalledWith(true);
+        });
+
+        it('makes way for an opening file on both layouts, keeping the remembered state', () => {
+            mockViewport(false);
+            service.setDesktopVisible(true);
+            service.openMobile();
+
+            service.hideForOpenFile();
+
+            expect(rightPanel.setVisible).toHaveBeenLastCalledWith(false);
+            expect(service.mobileOpen()).toBe(false);
+            expect(localStorage.getItem(DESKTOP_OPEN_STORAGE_KEY)).toBe('true');
         });
 
         it('keeps the remembered state when the chat page hides the panel on exit', () => {

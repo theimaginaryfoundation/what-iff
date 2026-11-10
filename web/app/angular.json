@@ -28,12 +28,96 @@
             ],
             "styles": [
               "src/styles.scss",
+              {
+                "input": "src/styles/office-fonts.scss",
+                "bundleName": "office-fonts",
+                "inject": false
+              },
               "node_modules/@ctrl/ngx-emoji-mart/picker.css",
-              "node_modules/katex/dist/katex.min.css"
+              "node_modules/katex/dist/katex.min.css",
+              {
+                "input": "node_modules/pdfjs-dist/web/pdf_viewer.css",
+                "bundleName": "pdfjs",
+                "inject": false
+              },
+              {
+                "input": "node_modules/monaco-editor/min/vs/editor/editor.main.css",
+                "bundleName": "monaco",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-core/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-data-validation/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-conditional-formatting/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-filter/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-hyper-link/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-drawing/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-sort/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-thread-comment/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-find-replace/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-note/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-docs-core/lib/index.css",
+                "bundleName": "univer-docs",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-docs-hyper-link/lib/index.css",
+                "bundleName": "univer-docs",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-docs-drawing/lib/index.css",
+                "bundleName": "univer-docs",
+                "inject": false
+              }
             ],
             "scripts": [
               "node_modules/clipboard/dist/clipboard.min.js"
-            ]
+            ],
+            "webWorkerTsConfig": "tsconfig.worker.json",
+            "loader": {
+              ".ttf": "file"
+            }
           },
           "configurations": {
             "production": {
@@ -92,9 +176,16 @@
           "options": {
             "runner": "vitest",
             "tsConfig": "tsconfig.spec.json",
-            "setupFiles": ["src/test-setup.ts"],
-            "coverageExclude": ["**/*.html"],
-            "coverageReporters": ["lcovonly", "text-summary"]
+            "setupFiles": [
+              "src/test-setup.ts"
+            ],
+            "coverageExclude": [
+              "**/*.html"
+            ],
+            "coverageReporters": [
+              "lcovonly",
+              "text-summary"
+            ]
           }
         }
       }

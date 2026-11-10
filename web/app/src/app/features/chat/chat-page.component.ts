@@ -56,12 +56,22 @@ import { SlackComposerToggleComponent } from '../slack/slack-composer-toggle.com
 import { ThreadListService } from '../../core/services/thread-list.service';
 import { ThreadListPanelComponent } from './components/thread-list-panel/thread-list-panel.component';
 import { ContextPanelService, ContextPanelTab } from './services/context-panel.service';
+import { FileWorkspaceService } from '../file-workspace/file-workspace.service';
 import { ScratchpadService } from './services/scratchpad.service';
 import { ContextPanelToggleComponent } from './components/context-panel/context-panel-toggle.component';
 import { ThreadSandboxedChipComponent } from './components/thread-sandboxed-chip/thread-sandboxed-chip.component';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
-import { BrainIconComponent, ChevDownIconComponent, EditIconComponent, FileIconComponent, LayersIconComponent, NoteIconComponent, WrenchIconComponent, XIconComponent } from '../../shared/ui/icons/icons';
+import {
+  BrainIconComponent,
+  ChevDownIconComponent,
+  EditIconComponent,
+  FileIconComponent,
+  LayersIconComponent,
+  NoteIconComponent,
+  WrenchIconComponent,
+  XIconComponent,
+} from '../../shared/ui/icons/icons';
 import { thumbnailCircleToCirclePreviewTransform } from '../../shared/ui/avatar/avatar-thumbnail.helpers';
 import { personalityAccent, personalityAccentSurface } from '../personality/helpers/personality-vm.helpers';
 import { JOB_RUN_COMPOSER_NOTICE, JOB_RUN_PENDING_LABEL, chatTurnWaitingLabel } from './assistant-turn';
@@ -101,6 +111,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
     EditIconComponent,
     FileIconComponent,
     LayersIconComponent,
+    FileIconComponent,
     NoteIconComponent,
     WrenchIconComponent,
     XIconComponent,
@@ -295,8 +306,30 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     // they've scrolled up to read history, the sync preserves their position and loaded pages.
     const nearBottom = this.messageList()?.isNearBottom() ?? true;
     this.session.syncActiveThread(nearBottom);
+    this.contextPanel.refreshFiles();
   };
   private readonly activeHotkeyListeners = new Map<string, (event: KeyboardEvent) => void>();
+  readonly workspace = inject(FileWorkspaceService);
+  private readonly composer = viewChild(ChatComposerComponent);
+  // The Files tab adds files to the message being composed and asks for the gallery picker (ADR 0x043 §4).
+  private readonly adoptContextPanelAttachment = effect(() => {
+    const attachment = this.contextPanel.composerAttachment();
+    if (attachment) untracked(() => this.onGalleryAttachment(this.contextPanel.consumeComposerAttachment()!));
+  });
+  private readonly publishPendingAttachments = effect(() => {
+    const files = this.pendingAttachments().flatMap(item => (item.attachment ? [item.attachment] : []));
+    untracked(() => this.contextPanel.setComposerPending(files));
+  });
+  private readonly openGalleryPickerOnRequest = effect(() => {
+    if (this.contextPanel.galleryPickerRequests() > 0) untracked(() => this.composer()?.openGalleryPicker());
+  });
+  // However a file opens (an attachment pill, a link, the thread's remembered file), the context
+  // panel makes way for it; the rail brings it back over the open file.
+  private readonly closeContextPanelForOpenFile = effect(() => {
+    if (this.workspace.fileId()) untracked(() => this.contextPanel.hideForOpenFile());
+  });
+  /** Threads whose remembered file was already restored this visit, so closing it is not undone. */
+  private readonly restoredWorkspaceFor = new Set<string>();
   private readonly hotkeySequenceState = new Map<string, { keys: string[]; currentIndex: number; timeout?: ReturnType<typeof setTimeout> }>();
 
   private readonly syncContextPanelChat = effect(() => {
@@ -547,6 +580,7 @@ ${text}` : text);
     this.subscriptions.add(
       this.route.queryParamMap.subscribe(params => {
         this.checkpointMessageId.set(params.get('checkpoint')?.trim() || null);
+        this.syncWorkspaceWithRoute(params.get('file')?.trim() || null);
         const galleryImageId = params.get('galleryImageId')?.trim();
         const welcomeFlag = params.get('welcome')?.trim().toLowerCase() === 'true';
         const routeChatId = this.route.snapshot.paramMap.get('id')?.trim();
@@ -578,6 +612,7 @@ ${text}` : text);
   }
 
   ngOnDestroy(): void {
+    if (this.workspace.host() === 'chat') this.workspace.hide();
     if (this.clearCopyFeedbackTimer) {
       clearTimeout(this.clearCopyFeedbackTimer);
       this.clearCopyFeedbackTimer = null;
@@ -657,6 +692,7 @@ ${text}` : text);
       return;
     }
     this.sendGate.sendSucceeded();
+    this.contextPanel.refreshFiles();
     // Only drop what went out: files attached while the POST was in flight belong to the next message.
     this.pendingAttachments.update(current => current.filter(attachment => !attachments.includes(attachment)));
     this.pendingRituals.set([]);
@@ -750,6 +786,27 @@ ${text}` : text);
     }
     this.threadList.setActiveThreadId(threadId);
     await this.router.navigate(['/chat', threadId]);
+  }
+
+  /**
+   * The file workspace follows `?file=` (ADR 0x043 §1): the URL is what is open, so a link opens it
+   * and Back closes it. Without the parameter, the file last open in this thread is restored.
+   */
+  private syncWorkspaceWithRoute(fileId: string | null): void {
+    const chatId = this.route.snapshot.paramMap.get('id')?.trim() || null;
+    if (fileId) {
+      this.workspace.show('chat', fileId, { chatId });
+      return;
+    }
+    if (this.workspace.host() === 'chat') {
+      // Closed in this thread: forget it. Moving to another thread keeps the old thread's memory.
+      this.workspace.hide({ forget: this.workspace.chatId() === chatId });
+    }
+    const remembered = chatId ? this.workspace.rememberedFileFor(chatId) : null;
+    if (remembered && !this.restoredWorkspaceFor.has(chatId!)) {
+      this.restoredWorkspaceFor.add(chatId!);
+      this.workspace.requestOpen(remembered, { replaceUrl: true });
+    }
   }
 
   openContextPanelMobile(): void {

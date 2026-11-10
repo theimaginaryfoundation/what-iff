@@ -87,6 +87,7 @@ Render it only while the count is above 0 (both adopters do).
 | Status pill | `ui-badge` (`intent`: neutral, info, success, warning, danger) |
 | Surface | `ui-card` (`variant`: flat, elevated) |
 | Dialog / bottom sheet | `ui-modal` (`open`, `labelledBy`, `size`, `(dismiss)` with a reason) / `ui-sheet` |
+| Full-viewport dialog (a workspace over the page) | `ui-overlay` (`open`, `labelledBy`, `variant` fill or inset, `(dismiss)` on Escape; the content renders its own header and close) |
 | Tabs | `ui-tabs` + `ui-tab` + `ui-tab-panel` (`size="sm"` on `ui-tabs` inside a card) |
 | Empty list | `ui-empty-state` (`heading`, `body`) |
 | Hover/focus hint / click-to-open explainer | `uiTooltip` directive / `ui-help-hint` (works on touch, can link a guide) |

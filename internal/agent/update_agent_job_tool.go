@@ -15,6 +15,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/featuregate"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 	"go.uber.org/zap"
 )
 
@@ -24,7 +25,7 @@ type agentJobUpdateStore interface {
 	jobThreadChats
 	GetAgentJob(ctx context.Context, userID, id uuid.UUID) (*models.AgentJob, error)
 	UpdateAgentJobTitle(ctx context.Context, userID, id uuid.UUID, title *string) (*models.AgentJob, error)
-	UpdateAgentJobPrompt(ctx context.Context, userID, id uuid.UUID, prompt string) (*models.AgentJob, error)
+	UpdateAgentJobParameters(ctx context.Context, userID, id uuid.UUID, patch models.AgentJobParametersPatch) (*models.AgentJob, error)
 	SetAgentJobChat(ctx context.Context, userID, id uuid.UUID, chatID *uuid.UUID) (*models.AgentJob, error)
 	SetAgentJobOverrides(ctx context.Context, userID, id uuid.UUID, patch models.SetAgentJobOverridesPatch) (*models.AgentJob, error)
 	UpdateAgentJobSchedule(ctx context.Context, userID, id uuid.UUID, scheduleInput string, scheduleType models.AgentJobScheduleType, schedule *string, runAt *time.Time, timezone string, nextRunAt *time.Time) (*models.AgentJob, error)
@@ -52,6 +53,10 @@ type updateAgentJobToolArgs struct {
 	ThreadID      *string   `json:"thread_id"`
 	SkillIDs      *[]string `json:"skill_ids"`
 	Status        *string   `json:"status"`
+	// Parameters replace the job's parameter definitions; ParameterValues set values by name and
+	// leave the others alone (ADR 0x044).
+	Parameters      *[]modeltypes.JobParameter `json:"parameters"`
+	ParameterValues *[]jobParamValueArg        `json:"parameter_values"`
 }
 
 type updateAgentJobToolResult struct {
@@ -68,8 +73,13 @@ type updateAgentJobToolResult struct {
 	ThreadID     string     `json:"thread_id,omitempty"`
 	ModelID      string     `json:"model_id,omitempty"`
 	SkillIDs     []string   `json:"skill_ids,omitempty"`
-	Note         string     `json:"note,omitempty"`
-	Error        string     `json:"error,omitempty"`
+
+	Parameters        []modeltypes.JobParameter     `json:"parameters,omitempty"`
+	ParameterValues   modeltypes.JobParameterValues `json:"parameter_values,omitempty"`
+	MissingParameters []string                      `json:"missing_parameters,omitempty"`
+
+	Note  string `json:"note,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 func (a *Agent) updateAgentJobTool(ctx context.Context, chat *models.Chat, args []byte) (string, error) {
@@ -116,7 +126,7 @@ func (u *agentJobUpdater) update(ctx context.Context, chat *models.Chat, args []
 		return fail("job_id must be a job id from list (kind=\"jobs\")")
 	}
 	if a.Title == nil && a.Prompt == nil && a.ScheduleInput == nil && a.ModelOverride == nil &&
-		a.ThreadID == nil && a.SkillIDs == nil && a.Status == nil {
+		a.ThreadID == nil && a.SkillIDs == nil && a.Status == nil && a.Parameters == nil && a.ParameterValues == nil {
 		return fail("nothing to update: pass at least one field to change (to read a job in full, use list with kind=\"jobs\" and the job's id as filter)")
 	}
 
@@ -143,6 +153,17 @@ func (u *agentJobUpdater) update(ctx context.Context, chat *models.Chat, args []
 		if status != models.AgentJobStatusActive && status != models.AgentJobStatusPaused {
 			return fail("status must be \"active\" or \"paused\"")
 		}
+	}
+	paramsPatch := models.AgentJobParametersPatch{Parameters: a.Parameters}
+	if a.Prompt != nil {
+		paramsPatch.Prompt = &prompt
+	}
+	if a.ParameterValues != nil {
+		values, err := mergeJobParamValues(current.ParameterValues, *a.ParameterValues)
+		if err != nil {
+			return fail(err.Error())
+		}
+		paramsPatch.ParameterValues = &values
 	}
 	var thread *uuid.UUID
 	if a.ThreadID != nil {
@@ -214,11 +235,24 @@ func (u *agentJobUpdater) update(ctx context.Context, chat *models.Chat, args []
 		}
 		done = append(done, "title")
 	}
-	if a.Prompt != nil {
-		if job, err = u.store.UpdateAgentJobPrompt(ctx, userID, jobID, prompt); err != nil {
-			return failWrite("prompt", err)
+	if !paramsPatch.IsZero() {
+		if job, err = u.store.UpdateAgentJobParameters(ctx, userID, jobID, paramsPatch); err != nil {
+			if msg := jobParamsToolError(err); msg != "" {
+				if len(done) > 0 {
+					msg = fmt.Sprintf("updated %s, but %s", strings.Join(done, ", "), msg)
+				}
+				return fail(msg)
+			}
+			return failWrite("prompt and parameters", err)
 		}
-		done = append(done, "prompt")
+		for _, field := range []struct {
+			set  bool
+			name string
+		}{{a.Prompt != nil, "prompt"}, {a.Parameters != nil, "parameters"}, {a.ParameterValues != nil, "parameter_values"}} {
+			if field.set {
+				done = append(done, field.name)
+			}
+		}
 	}
 	if a.ThreadID != nil {
 		if job, err = u.store.SetAgentJobChat(ctx, userID, jobID, thread); err != nil {
@@ -254,6 +288,12 @@ func (u *agentJobUpdater) update(ctx context.Context, chat *models.Chat, args []
 	// schedule reactivates a finished job).
 	if a.Status != nil {
 		if job, err = u.store.UpdateAgentJobStatus(ctx, userID, jobID, status, ""); err != nil {
+			if msg := jobParamsToolError(err); msg != "" {
+				if len(done) > 0 {
+					msg = fmt.Sprintf("updated %s, but %s", strings.Join(done, ", "), msg)
+				}
+				return fail(msg)
+			}
 			return failWrite("status", err)
 		}
 		done = append(done, "status")
@@ -269,9 +309,14 @@ func (u *agentJobUpdater) update(ctx context.Context, chat *models.Chat, args []
 	if preview != nil {
 		res.HumanSummary = preview.HumanSummary
 	}
+	var notes []string
 	if a.ThreadID != nil && thread == nil {
-		res.Note = "The job gets a thread of its own on its next run."
+		notes = append(notes, "The job gets a thread of its own on its next run.")
 	}
+	if note := missingParamsNote(job.MissingParameters); note != "" {
+		notes = append(notes, note)
+	}
+	res.Note = strings.Join(notes, " ")
 	return marshalUpdateAgentJobToolResult(res)
 }
 
@@ -317,6 +362,10 @@ func jobUpdateResult(job *models.AgentJob, updated []string) updateAgentJobToolR
 		Timezone:   job.Timezone,
 		Status:     string(job.Status),
 		NextRunAt:  job.NextRunAt,
+
+		Parameters:        job.Parameters,
+		ParameterValues:   job.ParameterValues,
+		MissingParameters: job.MissingParameters,
 	}
 	if job.Title != nil {
 		res.Title = *job.Title

@@ -30,7 +30,7 @@
             {{ runningNow() ? 'Running…' : 'Run now' }}
           </button>
         }
-        @if (current.status === 'active' || current.status === 'paused') {
+        @if (canPauseResume()) {
           <button
             type="button"
             class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary"
@@ -74,6 +74,14 @@
             <p class="mt-1 text-sm text-text-secondary">
               Status: <span tabindex="0" [uiTooltip]="statusDescription(currentJob)">{{ statusLabel(currentJob) }}</span>
             </p>
+            @if (hasMissingParameters(currentJob)) {
+              <p class="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300" role="status">
+                Needs setup: {{ missingParameterLabels(currentJob).join(', ') }}
+                {{ currentJob.missing_parameters!.length === 1 ? 'has' : 'have' }} no value. Fill
+                {{ currentJob.missing_parameters!.length === 1 ? 'it' : 'them' }} in under Parameters and save; this job
+                can't run until then.
+              </p>
+            }
             @if (scheduleFailureReason(currentJob); as reason) {
               <p class="mt-2 rounded-lg border border-danger/40 bg-danger/10 p-2 text-xs text-danger" role="alert">
                 Paused: couldn't schedule the next run. {{ reason }}

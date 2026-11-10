@@ -1,0 +1,26 @@
+@let c = cell();
+<div class="nb-cell__row">
+  <span class="nb-cell__prompt" aria-hidden="true">{{ c.type === 'code' ? prompt() : '' }}</span>
+  <div class="nb-cell__body">
+    @if (editing()) {
+      <div #editor class="nb-cell__editor" [attr.aria-label]="'Edit ' + c.type + ' cell'"></div>
+    } @else if (c.type === 'markdown') {
+      @if (c.source.trim()) {
+        <markdown class="nb-cell__markdown prose prose-sm max-w-none dark:prose-invert" [data]="markdown()" (ready)="onMarkdownReady()"></markdown>
+      } @else if (!readOnly()) {
+        <p class="nb-cell__empty">Empty Markdown cell. Double-click to edit.</p>
+      }
+    } @else if (c.type === 'code') {
+      @if (highlighted(); as html) {
+        <pre class="nb-cell__code" [innerHTML]="html"></pre>
+      } @else {
+        <pre class="nb-cell__code">{{ c.source }}</pre>
+      }
+    } @else {
+      <pre class="nb-cell__code nb-cell__code--raw">{{ c.source }}</pre>
+    }
+    @if (c.type === 'code' && c.outputs.length) {
+      <app-notebook-output class="nb-cell__outputs" [outputs]="c.outputs" [loaders]="loaders()" [interactive]="interactive()" (allowInteractive)="allowInteractive.emit()" />
+    }
+  </div>
+</div>

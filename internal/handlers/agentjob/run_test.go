@@ -39,7 +39,7 @@ func (f *fakeAgentJobRunProvider) GetAgentJob(ctx context.Context, userID, id uu
 func (f *fakeAgentJobRunProvider) UpdateAgentJobTitle(ctx context.Context, userID, id uuid.UUID, title *string) (*models.AgentJob, error) {
 	return nil, errors.New("not implemented")
 }
-func (f *fakeAgentJobRunProvider) UpdateAgentJobPrompt(ctx context.Context, userID, id uuid.UUID, prompt string) (*models.AgentJob, error) {
+func (f *fakeAgentJobRunProvider) UpdateAgentJobParameters(ctx context.Context, userID, id uuid.UUID, patch models.AgentJobParametersPatch) (*models.AgentJob, error) {
 	return nil, errors.New("not implemented")
 }
 func (f *fakeAgentJobRunProvider) UpdateAgentJobSchedule(ctx context.Context, userID, id uuid.UUID, scheduleInput string, scheduleType models.AgentJobScheduleType, schedule *string, runAt *time.Time, timezone string, nextRunAt *time.Time) (*models.AgentJob, error) {
@@ -226,5 +226,38 @@ func TestRunAgentJobNow_NotFoundReturnsNotFound(t *testing.T) {
 	}
 	if runner.called {
 		t.Fatalf("expected runner not to be called")
+	}
+}
+
+func TestRunAgentJobNow_MissingParametersReturnsConflict(t *testing.T) {
+	t.Parallel()
+
+	userID := uuid.New()
+	jobID := uuid.New()
+	provider := &fakeAgentJobRunProvider{
+		job: &models.AgentJob{ID: jobID, UserID: userID, Status: models.AgentJobStatusPaused, MissingParameters: []string{"topics"}},
+	}
+	runner := &fakeAgentJobRunner{}
+	h := NewHandler(provider, nil, runner, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodPost, "/agent-job/"+jobID.String()+"/run", nil)
+	req = mux.SetURLVars(req, map[string]string{"id": jobID.String()})
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, userID))
+	w := httptest.NewRecorder()
+
+	h.RunAgentJobNow(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusConflict, w.Code, w.Body.String())
+	}
+	if runner.called {
+		t.Fatalf("runner must not be called for a job missing parameter values")
+	}
+	var resp models.ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Code != models.ErrCodeJobNeedsValues {
+		t.Fatalf("expected code %q, got %q", models.ErrCodeJobNeedsValues, resp.Code)
 	}
 }

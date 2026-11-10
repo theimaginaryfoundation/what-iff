@@ -1,0 +1,78 @@
+:host {
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  display: block;
+  // Off-screen cells skip layout and paint, which keeps a long notebook responsive.
+  content-visibility: auto;
+  contain-intrinsic-size: auto 4rem;
+  padding: 0.25rem 0.5rem;
+}
+
+:host(.nb-cell--active) {
+  border-color: var(--accent);
+  // An editor's popups must not be clipped by the skipped-paint containment.
+  content-visibility: visible;
+}
+
+.nb-cell__row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.nb-cell__prompt {
+  color: var(--text-secondary);
+  flex: 0 0 2.75rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+  padding-top: 0.4rem;
+  text-align: right;
+}
+
+.nb-cell__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.nb-cell__code {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  color: var(--text-primary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  margin: 0;
+  min-height: 2rem;
+  overflow-x: auto;
+  padding: 0.35rem 0.5rem;
+  tab-size: 4;
+}
+
+.nb-cell__code--raw {
+  color: var(--text-secondary);
+}
+
+.nb-cell__editor {
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  min-height: 2.375rem;
+  overflow: hidden;
+}
+
+.nb-cell__markdown {
+  display: block;
+  overflow-x: auto;
+  padding: 0.15rem 0.5rem;
+}
+
+.nb-cell__empty {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-style: italic;
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+}
+
+.nb-cell__outputs {
+  margin-top: 0.25rem;
+}

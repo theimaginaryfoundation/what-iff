@@ -237,6 +237,23 @@ local-llm-up: ## Start the Ollama server (if not running) and pull LOCAL_LLM_MOD
 web: $(WEB_DIR)/node_modules/.stamp ## Run the Angular dev server (:4200)
 	@cd $(WEB_DIR) && npm start
 
+# The JupyterLite site that runs notebooks (ADR 0x043 §11). It must be served from an origin other
+# than the app's; JUPYTERLITE_HOST_ORIGINS lists the app origins allowed to talk to it.
+JUPYTERLITE_DIR := web/jupyterlite
+JUPYTERLITE_HOST_ORIGINS ?= http://localhost:4200,http://127.0.0.1:4200
+
+.PHONY: jupyterlite
+jupyterlite: ## Build the JupyterLite site that runs notebooks into web/jupyterlite/dist
+	@test -d $(JUPYTERLITE_DIR)/.venv || python3 -m venv $(JUPYTERLITE_DIR)/.venv
+	@cd $(JUPYTERLITE_DIR) && .venv/bin/pip install -q -r requirements.txt
+	@cd $(JUPYTERLITE_DIR)/extension && npm ci --no-audit --no-fund && PATH="$(CURDIR)/$(JUPYTERLITE_DIR)/.venv/bin:$$PATH" npm run -s build
+	@cd $(JUPYTERLITE_DIR) && .venv/bin/jupyter lite build
+	@python3 -c "import json,sys; p='$(JUPYTERLITE_DIR)/dist/jupyter-lite.json'; d=json.load(open(p)); d['jupyter-config-data']['whatiffHostOrigins']='$(JUPYTERLITE_HOST_ORIGINS)'; json.dump(d,open(p,'w'),indent=2)"
+
+.PHONY: jupyterlite-serve
+jupyterlite-serve: ## Serve the built JupyterLite site on :4203 for local development
+	@python3 -m http.server 4203 --bind 127.0.0.1 --directory $(JUPYTERLITE_DIR)/dist
+
 .PHONY: web-e2e
 web-e2e: $(WEB_DIR)/node_modules/.stamp ## Run Playwright frontend E2E tests (requires the API already running on :8080 — see web/app/e2e/README.md)
 	@cd $(WEB_DIR) && npm run e2e

@@ -29,6 +29,10 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     `memory_merge.go`'s `ListMemoryMergeEvents` takes a `models.MemoryMergeEventFilters` (query/survivor-memory/date-range/exclude-reverted) for both the merge-audit HTTP endpoint and `find_context`'s `mode=lifecycle_events`.
   - Files: `fileattachment.go`, `fileattachment_folders.go`, `filechunk.go` (chunk storage + search).
     `agentfile.go` backs the agent file tools (ADR 0x034): `FindFileAttachmentsAtPath` (folder + case-insensitive name, gallery rows only), `SwapAgentFileObject` (compare-and-swap of an agent-authored row's `s3_key`) and `CountAgentFiles`.
+    `fileattachment_content.go` backs the file workspace (ADR 0x043 §3): `SwapFileObject` (compare-and-swap of a row's `s3_key`, optionally guarded by `content_version` as If-Match, bumping the version and storing `size_bytes` and `content_sha256`; with `MoveSharedRows` every non-context-only row of the owner on the old key moves too, so a gallery file and its chat copies stay one file) and `ClearFileChunks` (drops a file's chunks and resets `chunk_status` so a save is re-indexed).
+    `SwapAgentFileObject` is `SwapFileObject` with `AgentOnly`.
+    `ListAgentFilesCreatedInChat` lists the agent files written in a conversation by `created_by_chat_id`, which the agent file tools now always set (ADR 0x043 §4).
+    `UpdateFileAttachmentName` normalizes the name (`models.NormalizeFileName`), refuses a clash in the folder (`ErrFileAttachmentPathTaken`) and skill bundle files (`ErrSkillFileImmutable`), follows a changed extension with `file_type` when the allowlist knows it and the file stays an image or stays a non-image, and renames the chat copies sharing the object; it never sets `updated_at`, which records content changes only.
     `file_attachments.origin` is a string enum (`user`, `agent`, `skill`); `FileAttachmentFilters.Origin` narrows listings to one origin, and `toFileAttachmentModel` carries `chunk_status` as `FileAttachment.ChunkStatus`.
   - Entity wiki: `agententity.go` (ADR 0x034) — `GetAgentEntity`, `CreateAgentEntity`, `UpdateAgentEntity` (compare-and-swap on the body, retried), `ListAgentEntities`, `SetAgentEntityBody`, `DeleteAgentEntity`.
     Visibility follows memories: global entities plus those pinned to the active personality, the pinned one winning; a new entity is pinned when the writing personality has `auto_pin_memories` on.
@@ -129,6 +133,12 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Chat list search/favorites/tags:** `chat.go` persists chat `tags` and `is_favorite`; tags are normalized/validated via shared model helpers.
   `ListChats` search matches chat **name**, **checkpoint_summary**, and individual **tags** (JSON array) with case-insensitive substring predicates.
   Favorite-count checks are a **best-effort UI guard** (non-locking count check, not a strict datastore invariant under races).
+- **Job parameters (ADR 0x044):** `agent_jobs.parameters` and `parameter_values` are JSON columns (`modeltypes.JobParameter`, `modeltypes.JobParameterValues`).
+  `CreateAgentJob` and `UpdateAgentJobParameters` (prompt, definitions and values together, in one transaction) run `params.Prepare` and return its `*params.ValidationError` unwrapped, then set the status with `params.StatusAfterSave`: active becomes `needs_values` when a value is missing, and `needs_values` becomes active when none is.
+  `UpdateAgentJobSchedule`'s reactivation of a finished job goes to `needs_values` instead of active when a value is missing.
+  `UpdateAgentJobStatus` refuses `active` while a value is missing (`ErrAgentJobNeedsValues` wrapping a `*params.MissingError`).
+  `toAgentJobModel` derives `missing_parameters`.
+  A backup import keeps parameters that still check out and applies the same status rule.
 - **Agent jobs:** `UpdateAgentJobSchedule` (`agentjob.go`) sets status back to **active** and clears **last_error** when the job was **complete** or **failed** and the new schedule still has a **next_run_at**, so the in-process scheduler (which only schedules **active** jobs) picks it up again.
 - **Live reasoning draft:** `Job.draft_reasoning` mirrors `draft_deltas` for model reasoning (`AppendJobDraftReasoning`).
   Unlike the text draft it can be emptied mid-turn (`ResetJobDraftReasoning`) when a truncated attempt is retried, so clients render it wholesale per poll.

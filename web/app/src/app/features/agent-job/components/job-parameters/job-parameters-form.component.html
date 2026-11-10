@@ -1,0 +1,80 @@
+<div class="space-y-4">
+  @for (field of fields(); track field.def.name) {
+    <div class="text-sm text-text-secondary">
+      <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <label [attr.for]="field.def.type === 'multi_select' ? null : field.id" [attr.id]="field.id + '-label'">
+          {{ field.label }}
+        </label>
+        @if (field.missing) {
+          <span class="text-xs text-amber-600 dark:text-amber-400" [attr.id]="field.id + '-missing'">Needs a value</span>
+        }
+      </div>
+      @if (field.def.description) {
+        <p class="mt-0.5 text-xs text-text-muted" [attr.id]="field.id + '-help'">{{ field.def.description }}</p>
+      }
+
+      @switch (field.def.type) {
+        @case ('text') {
+          <input
+            class="mt-1 w-full rounded-xl border bg-surface-base px-3 py-2 text-sm text-text-primary"
+            [class.border-border-base]="!field.missing"
+            [class.border-amber-500]="field.missing"
+            [id]="field.id"
+            [value]="field.text"
+            [disabled]="disabled()"
+            [attr.aria-invalid]="field.missing"
+            [attr.aria-describedby]="field.def.description ? field.id + '-help' : null"
+            (input)="set(field.def.name, $any($event.target).value)" />
+        }
+        @case ('single_select') {
+          <select
+            class="mt-1 w-full rounded-xl border bg-surface-base px-3 py-2 text-sm text-text-primary"
+            [class.border-border-base]="!field.missing"
+            [class.border-amber-500]="field.missing"
+            [id]="field.id"
+            [disabled]="disabled()"
+            [attr.aria-invalid]="field.missing"
+            [attr.aria-describedby]="field.def.description ? field.id + '-help' : null"
+            (change)="set(field.def.name, $any($event.target).value)">
+            <option value="" [selected]="!field.text">Choose…</option>
+            @for (option of field.def.options ?? []; track option) {
+              <option [value]="option" [selected]="option === field.text">{{ option }}</option>
+            }
+          </select>
+        }
+        @case ('multi_select') {
+          <div
+            class="mt-1 flex flex-wrap gap-x-4 gap-y-2 rounded-xl border bg-surface-base px-3 py-2"
+            [class.border-border-base]="!field.missing"
+            [class.border-amber-500]="field.missing"
+            role="group"
+            [attr.aria-labelledby]="field.id + '-label'"
+            [attr.aria-describedby]="field.def.description ? field.id + '-help' : null">
+            @for (option of field.def.options ?? []; track option) {
+              <label class="inline-flex items-center gap-2 text-sm text-text-primary">
+                <ui-checkbox
+                  [checked]="isChecked(field.items, option)"
+                  [disabled]="disabled()"
+                  (checkedChange)="toggleOption(field.def, option, $event)" />
+                {{ option }}
+              </label>
+            }
+          </div>
+        }
+        @case ('list') {
+          <div class="mt-1">
+            <app-chip-list-input
+              [items]="field.items"
+              [inputId]="field.id"
+              [invalid]="field.missing"
+              [disabled]="disabled()"
+              [max]="maxListItems"
+              [describedBy]="field.def.description ? field.id + '-help' : null"
+              placeholder="Type a value and press Enter"
+              (itemsChange)="set(field.def.name, $event)" />
+          </div>
+        }
+      }
+    </div>
+  }
+</div>

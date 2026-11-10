@@ -42,9 +42,12 @@
 
   @if (mode() === 'gallery' && viewerOpen()) {
     @if (openFile(); as file) {
-      <app-file-viewer
+      <app-file-workspace
         [file]="file"
         [personalityName]="file.personality_id ? personalityNames()[file.personality_id] ?? null : null"
+        backLabel="Gallery"
+        [showNavigation]="true"
+        [showMove]="true"
         [hasPrev]="hasPrevFile()"
         [hasNext]="hasNextFile()"
         (close)="closeFile()"
@@ -52,6 +55,9 @@
         (next)="stepFile(1)"
         (delete)="onDeleteFile($event)"
         (rename)="onRenameFile($event)"
+        (fileChanged)="onFileChanged($event)"
+        (saveAs)="onSaveAs($event)"
+        [canEdit]="workspace.canEdit()"
         (moveToFolder)="view.requestMove([$event])" />
     } @else {
       <div class="gallery-page__file-missing" [attr.role]="openFileError() ? 'alert' : 'status'">
@@ -229,7 +235,8 @@
   (rename)="onRename($event)"
   (moveToFolder)="onMoveToFolder($event)"
   (addToThread)="onAddToThread($event)"
-  (startNewChat)="onStartNewChat($event)" />
+  (startNewChat)="onStartNewChat($event)"
+  (edit)="onEditImage($event)" />
 
 <app-gallery-import-modal
   [open]="importOpen()"

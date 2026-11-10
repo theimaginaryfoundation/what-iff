@@ -178,6 +178,8 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			run_count integer NOT NULL DEFAULT 0,
 			personality_id uuid,
 			model_id uuid,
+			parameters json,
+			parameter_values json,
 			chat_agent_jobs uuid,
 			user_agent_jobs uuid NOT NULL,
 			reasoning_effort text,

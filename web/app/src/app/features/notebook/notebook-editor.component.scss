@@ -1,0 +1,83 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  outline: none;
+}
+
+.notebook {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.notebook__toolbar {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  padding: 0.35rem 0.75rem;
+}
+
+.notebook__group {
+  align-items: center;
+  display: flex;
+  gap: 0.2rem;
+}
+
+.notebook__tool {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  padding: 0.3rem 0.55rem;
+
+  &:hover:not(:disabled) {
+    border-color: var(--border-hover, var(--accent));
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+
+  &[aria-pressed='true'] {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  &--primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+}
+
+.notebook__hint {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.notebook__cells {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.25rem;
+  // A host that does not constrain the height (the gallery page) still gets a usable pane.
+  max-height: max(100%, 80vh);
+  min-height: 0;
+  overflow: auto;
+  padding: 0.5rem 0.75rem 2rem;
+}
+
+.notebook__placeholder {
+  color: var(--text-secondary);
+  padding: 2rem 1rem;
+  text-align: center;
+}

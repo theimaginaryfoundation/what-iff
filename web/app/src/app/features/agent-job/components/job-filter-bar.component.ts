@@ -27,6 +27,7 @@ export class JobFilterBarComponent {
     { value: 'active', label: 'Active' },
     { value: 'paused', label: 'Paused' },
     { value: 'complete', label: 'Complete' },
+    { value: 'needs_values', label: 'Needs setup' },
     { value: 'failed', label: 'Failed' },
   ];
 

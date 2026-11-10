@@ -1,0 +1,115 @@
+<div class="charts-panel">
+  <div class="charts-panel__head">
+    <button type="button" class="charts-panel__button charts-panel__button--primary" (click)="addChart()">New chart from selection</button>
+  </div>
+  @if (message(); as text) {
+    <p class="charts-panel__message" role="alert">{{ text }}</p>
+  }
+  @if (!charts().length) {
+    <p class="charts-panel__empty">This workbook has no charts yet. Select some cells and make one.</p>
+  }
+  <ul class="charts-panel__list">
+    @for (chart of charts(); track chart.id) {
+      <li>
+        <button type="button" class="charts-panel__item" [attr.aria-pressed]="selectedId() === chart.id" (click)="select(chart.id)">
+          <span class="charts-panel__item-name">{{ chart.title || chart.name }}</span>
+          <span class="charts-panel__item-meta">{{ chart.sheet }}</span>
+        </button>
+      </li>
+    }
+  </ul>
+  @if (selected(); as chart) {
+    @if (!chart.editable) {
+      <p class="charts-panel__note">{{ chart.limits[0] }} is kept in the file as it is, and can be moved here but not edited.</p>
+    } @else {
+      <form class="charts-panel__form" (submit)="$event.preventDefault()">
+        <label class="charts-panel__field">
+          <span>Title</span>
+          <input type="text" [value]="chart.title" (change)="update({ title: $any($event.target).value })" />
+        </label>
+        <label class="charts-panel__field">
+          <span>Type</span>
+          <select (change)="setKind($any($event.target).value)">
+            @for (kind of kinds; track kind.value) {
+              <option [value]="kind.value" [selected]="chart.kind === kind.value">{{ kind.label }}</option>
+            }
+          </select>
+        </label>
+        @if (stackable()) {
+          <label class="charts-panel__field">
+            <span>Grouping</span>
+            <select (change)="update({ grouping: $any($event.target).value })">
+              @for (grouping of groupings; track grouping.value) {
+                <option [value]="grouping.value" [selected]="chart.grouping === grouping.value">{{ grouping.label }}</option>
+              }
+            </select>
+          </label>
+        }
+        <label class="charts-panel__field">
+          <span>Legend</span>
+          <select (change)="update({ legend: $any($event.target).value })">
+            @for (legend of legends; track legend.value) {
+              <option [value]="legend.value" [selected]="chart.legend === legend.value">{{ legend.label }}</option>
+            }
+          </select>
+        </label>
+        @if (!round()) {
+          <label class="charts-panel__field">
+            <span>{{ chart.kind === "scatter" ? "X axis title" : "Category axis title" }}</span>
+            <input type="text" [value]="chart.categoryAxisTitle" (change)="update({ categoryAxisTitle: $any($event.target).value })" />
+          </label>
+          <label class="charts-panel__field">
+            <span>{{ chart.kind === "scatter" ? "Y axis title" : "Value axis title" }}</span>
+            <input type="text" [value]="chart.valueAxisTitle" (change)="update({ valueAxisTitle: $any($event.target).value })" />
+          </label>
+        }
+        @for (series of chart.series; track $index; let i = $index) {
+          <fieldset class="charts-panel__series">
+            <legend>Series {{ i + 1 }}</legend>
+            <label class="charts-panel__field">
+              <span>Name</span>
+              @if (series.nameRef) {
+                <div class="charts-panel__ref">
+                  <input type="text" [value]="refText(series.nameRef)" (change)="setSeriesRef(i, 'nameRef', $any($event.target).value)" />
+                  <button type="button" class="charts-panel__button" (click)="useSelection(i, 'nameRef')">Use selection</button>
+                </div>
+              } @else {
+                <div class="charts-panel__ref">
+                  <input type="text" [value]="series.nameLiteral ?? ''" (change)="setSeriesName(i, $any($event.target).value)" />
+                  <button type="button" class="charts-panel__button" (click)="useSelection(i, 'nameRef')">Use selection</button>
+                </div>
+              }
+            </label>
+            <label class="charts-panel__field">
+              <span>{{ chart.kind === "scatter" ? "X values" : "Categories" }}</span>
+              <div class="charts-panel__ref">
+                <input type="text" [value]="refText(series.categories)" (change)="setSeriesRef(i, 'categories', $any($event.target).value)" />
+                <button type="button" class="charts-panel__button" (click)="useSelection(i, 'categories')">Use selection</button>
+              </div>
+            </label>
+            <label class="charts-panel__field">
+              <span>Values</span>
+              <div class="charts-panel__ref">
+                <input type="text" [value]="refText(series.values)" (change)="setSeriesRef(i, 'values', $any($event.target).value)" />
+                <button type="button" class="charts-panel__button" (click)="useSelection(i, 'values')">Use selection</button>
+              </div>
+            </label>
+            @if (!round()) {
+              <label class="charts-panel__field charts-panel__field--inline">
+                <span>Colour</span>
+                <input type="color" [value]="colorOf(series)" (change)="setSeriesColor(i, $any($event.target).value)" />
+              </label>
+            }
+            @if (chart.series.length > 1) {
+              <button type="button" class="charts-panel__button" (click)="removeSeries(i)">Remove series</button>
+            }
+          </fieldset>
+        }
+        @if (!round()) {
+          <button type="button" class="charts-panel__button" (click)="addSeriesFromSelection()">Add series from selection</button>
+        }
+        <button type="button" class="charts-panel__button charts-panel__button--danger" (click)="deleteSelected()">Delete chart</button>
+      </form>
+    }
+  }
+</div>

@@ -11,9 +11,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/filechange"
 	"github.com/theimaginaryfoundation/what-iff/internal/filedelete"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
 
@@ -83,14 +85,27 @@ func (h *Handler) RenameImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The name before the rename, for the change event; a miss is reported by the rename itself.
+	before, _ := h.ds.GetFileAttachment(r.Context(), userID, id)
+
 	updated, err := h.ds.UpdateFileAttachmentName(r.Context(), userID, id, req.Name)
 	if err != nil {
-		if errors.Is(err, datastore.ErrFileAttachmentNotFound) {
-			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Image not found", nil)
-		} else {
-			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to rename image", err)
+		switch {
+		case errors.Is(err, datastore.ErrFileAttachmentNotFound):
+			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "File not found", nil)
+		case errors.Is(err, datastore.ErrFileAttachmentPathTaken):
+			handlerutils.RespondWithError(w, h.logger, http.StatusConflict, handlerutils.CodeNotSet, "A file with that name is already in this folder", nil)
+		case errors.Is(err, datastore.ErrSkillFileImmutable):
+			handlerutils.RespondWithError(w, h.logger, http.StatusForbidden, handlerutils.CodeNotSet, "Skill bundle files are renamed in the skill editor", nil)
+		case errors.Is(err, models.ErrInvalidFileName):
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+		default:
+			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to rename file", err)
 		}
 		return
+	}
+	if before != nil && before.Name != updated.Name {
+		filechange.Notify(r.Context(), filechange.Event{Kind: filechange.KindRename, UserID: userID, File: updated, OldName: before.Name})
 	}
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, updated)

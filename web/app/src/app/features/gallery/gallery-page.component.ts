@@ -38,7 +38,8 @@ import { GalleryGridComponent } from './components/gallery-grid.component';
 import { GalleryListComponent } from './components/gallery-list.component';
 import { GalleryLayout } from './helpers/gallery-list.helpers';
 import { ImageDetailModalComponent } from './components/image-detail-modal.component';
-import { FileViewerComponent } from './components/file-viewer.component';
+import { FileWorkspaceComponent } from '../file-workspace/file-workspace.component';
+import { FileWorkspaceService } from '../file-workspace/file-workspace.service';
 import { PersonalityExpressionsManagerComponent } from '../personality/detail/personality-expressions-manager.component';
 import { PersonalityMediaJobBannerComponent } from '../personality/components/personality-media-job-banner.component';
 import { mediaJobFinished$ } from './helpers/gallery-job-refresh.helpers';
@@ -63,7 +64,7 @@ type GallerySort = 'created';
     GalleryListComponent,
     GalleryFolderToolsComponent,
     ImageDetailModalComponent,
-    FileViewerComponent,
+    FileWorkspaceComponent,
     GalleryImportModalComponent,
     AssignAsExpressionFlowComponent,
     PersonalityExpressionsManagerComponent,
@@ -77,6 +78,7 @@ type GallerySort = 'created';
 })
 export class GalleryPageComponent implements OnInit {
   readonly view = inject(GalleryViewService);
+  readonly workspace = inject(FileWorkspaceService);
   private readonly galleryService = inject(ImageGalleryService);
   private readonly chatService = inject(ChatService);
   private readonly personalityService = inject(PersonalityService);
@@ -490,6 +492,35 @@ export class GalleryPageComponent implements OnInit {
         });
       },
     });
+  }
+
+  /** A save in the workspace: the row's new version replaces the loaded one. */
+  onFileChanged(file: FileAttachment): void {
+    if (this.view.images().some(row => row.id === file.id)) {
+      this.view.upsertImage(file);
+    }
+    this.openFile.update(current => (current?.id === file.id ? { ...current, ...file, chat_id: file.chat_id ?? current.chat_id } : current));
+  }
+
+  /** Save As from the gallery: an import into the chosen folder, then the new file opens. */
+  onSaveAs(payload: { name: string; folder: string; blob: Blob }): void {
+    const file = new File([payload.blob], payload.name, { type: payload.blob.type });
+    this.galleryService.importImage(file, { folder: payload.folder }).subscribe({
+      next: created => {
+        this.view.upsertImage(created);
+        this.view.loadFolders();
+        this.router.navigate([], { queryParams: { file: created.id }, queryParamsHandling: 'merge' });
+      },
+      error: async () => {
+        await this.confirmationService.alert({ title: 'Save failed', message: 'Could not save the new file. Please try again.', type: 'danger' });
+      },
+    });
+  }
+
+  /** Edit from the lightbox: the image opens in the workspace, which offers the image editor. */
+  onEditImage(imageId: string): void {
+    this.view.closeDetail();
+    this.router.navigate([], { queryParams: { image: null, file: imageId }, queryParamsHandling: 'merge' });
   }
 
   onRenameFile(payload: { id: string; name: string }): void {

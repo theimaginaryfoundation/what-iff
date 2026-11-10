@@ -154,3 +154,36 @@ func TestGetImageContent_SetsNosniffHeader(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
 }
+
+func TestGetImageContent_RevalidatesByContentVersion(t *testing.T) {
+	t.Parallel()
+
+	userID := uuid.New()
+	attachment := &models.FileAttachment{
+		ID:             uuid.New(),
+		UserID:         userID,
+		Name:           "a.png",
+		FileType:       "image/png",
+		S3Key:          "images/user/a.png",
+		ContentVersion: 3,
+	}
+	handler := NewHandler(fakeGalleryStore{attachment: attachment}, zap.NewNop(), fakeGalleryFileStore{content: []byte("fake-png-bytes")})
+	get := func(ifNoneMatch string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/image-gallery/"+attachment.ID.String()+"?size=full", nil)
+		if ifNoneMatch != "" {
+			req.Header.Set("If-None-Match", ifNoneMatch)
+		}
+		req = mux.SetURLVars(req, map[string]string{"id": attachment.ID.String()})
+		req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, userID))
+		rec := httptest.NewRecorder()
+		handler.GetImageContent(rec, req)
+		return rec
+	}
+
+	first := get("")
+	require.Equal(t, http.StatusOK, first.Code)
+	require.Equal(t, `"3"`, first.Header().Get("ETag"))
+	require.Equal(t, "private, no-cache", first.Header().Get("Cache-Control"))
+	require.Equal(t, http.StatusNotModified, get(`"3"`).Code)
+	require.Equal(t, http.StatusOK, get(`"2"`).Code)
+}

@@ -5021,7 +5021,61 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /**
+         * Create agent job
+         * @description Creates an AgentJob. The schedule input is read in natural language. Every `{{name}}` placeholder in the prompt needs a parameter definition (ADR 0x044); a job created with a parameter that has no value gets status `needs_values`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateAgentJobRequest"];
+                };
+            };
+            responses: {
+                /** @description AgentJob created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentJob"];
+                    };
+                };
+                /** @description Invalid request data, schedule or timezone. Parameter problems use code job_parameters_invalid with details (AgentJobParametersError). */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -5143,7 +5197,7 @@ export interface paths {
         };
         /**
          * Update agent job
-         * @description Updates an AgentJob title, prompt, and/or schedule input
+         * @description Updates an AgentJob. The prompt, parameter definitions and parameter values are saved together and checked against each other (ADR 0x044); the status becomes `needs_values` when an active job is saved with a parameter that has no value, and `active` again once a `needs_values` job's values are all set. Parameter problems answer 400 with code job_parameters_invalid and details (AgentJobParametersError).
          */
         put: {
             parameters: {
@@ -5258,7 +5312,7 @@ export interface paths {
         get?: never;
         /**
          * Update agent job status
-         * @description Pauses or resumes an AgentJob
+         * @description Pauses or resumes an AgentJob. A job with a parameter that has no value can't be resumed (409).
          */
         put: {
             parameters: {
@@ -5305,6 +5359,15 @@ export interface paths {
                 };
                 /** @description AgentJob not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The job has a parameter with no value (code job_needs_values; details.missing_parameters lists them) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -5378,6 +5441,15 @@ export interface paths {
                 };
                 /** @description AgentJob not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The job has a parameter with no value (code job_needs_values; details.missing_parameters lists them) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -13183,6 +13255,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/{chatId}/context-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The files in a thread's context
+         * @description Lists the files an agent working in the thread is expected to see (ADR 0x043 §4), newest first: the attachments on every message since the last checkpoint and the files `find_context` pulled in for them, the attachments on the last ten user messages, the agent's own files written in this thread, and the active skills' bundle files. The same rule hydrates the thread's container in builds that have one. Files that share a workspace path are all listed; the newest takes the path and the others say which one shadows them.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The thread's files */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChatContextFilesResponse"];
+                    };
+                };
+                /** @description Invalid chat ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/{chatId}/file-attachment": {
         parameters: {
             query?: never;
@@ -13197,7 +13346,7 @@ export interface paths {
          * @description Uploads a file attachment to a specific chat. The file is processed and stored,
          *     and can be referenced in subsequent chat messages.
          *
-         *     **Supported file types**: .c, .cpp, .cs, .css, .csv, .doc, .docx, .gif, .go, .html, .java, .jpeg, .jpg, .js, .json, .md, .pdf, .php, .png, .pptx, .py, .rb, .sh, .tar, .tex, .tgz, .ts, .txt, .xlsx, .xml, .zip
+         *     **Supported file types**: .c, .cpp, .cs, .css, .csv, .doc, .docx, .gif, .go, .html, .ipynb, .java, .jpeg, .jpg, .js, .json, .jsonl, .md, .pdf, .php, .png, .pptx, .py, .rb, .sh, .tar, .tex, .tgz, .ts, .tsv, .txt, .xlsx, .xml, .yaml, .yml, .zip
          *
          *     **Maximum file size**: 30 MB
          */
@@ -13219,6 +13368,8 @@ export interface paths {
                          * @description The file to upload
                          */
                         attachment: string;
+                        /** @description Optional gallery folder to file the upload in (a path such as `charts/oura`; omitted or empty is the top level). Used by Save As from the chat-hosted file workspace (ADR 0x043). The reserved `skills/` folder is refused. */
+                        folder?: string;
                     };
                 };
             };
@@ -13361,11 +13512,16 @@ export interface paths {
         /**
          * Download file attachment
          * @description Downloads the binary content for a single file attachment owned by the authenticated user.
+         *     The response carries the file's `content_version` as its ETag and must be revalidated before
+         *     reuse, because a save replaces the bytes under the same URL.
          */
         get: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description The ETag of a cached copy; a match returns 304 with no body. */
+                    "If-None-Match"?: string;
+                };
                 path: {
                     /** @description File attachment ID */
                     id: string;
@@ -13377,11 +13533,20 @@ export interface paths {
                 /** @description File attachment content */
                 200: {
                     headers: {
+                        /** @description The file's content_version, quoted. */
+                        ETag?: string;
                         [name: string]: unknown;
                     };
                     content: {
                         "application/octet-stream": string;
                     };
+                };
+                /** @description The cached copy is current */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
                 /** @description Invalid attachment ID */
                 400: {
@@ -13489,6 +13654,614 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/file-attachment/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace a file's content
+         * @description Saves a file from the file workspace (ADR 0x043 §3). The body is the whole new content and `Content-Type`, when sent, must be the file's own type (parameters such as charset are ignored): a save never changes a file's type or name. `If-Match` carries the `content_version` the client loaded, bare or quoted; a mismatch is a 412 whose `details.content_version` is the current version, and no `If-Match` (or `*`) overwrites unconditionally. A new object is stored and the file's chat copies move with it; what a reply already showed is kept. Images get a new thumbnail; files indexed for search are re-indexed in the background. Skill bundle files are changed in the skill editor, not here.
+         */
+        put: {
+            parameters: {
+                query?: {
+                    /** @description The conversation the save was made from, so the change can reach its container. */
+                    chat_id?: string;
+                };
+                header?: {
+                    /** @description The `content_version` the client loaded, bare or quoted. Omit (or send `*`) to overwrite unconditionally. */
+                    "If-Match"?: string;
+                };
+                path: {
+                    /** @description File attachment ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "*/*": string;
+                };
+            };
+            responses: {
+                /** @description The file as it is after the save; the `ETag` header is its new `content_version`. */
+                200: {
+                    headers: {
+                        /** @description The new `content_version`, quoted. */
+                        ETag?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FileAttachment"];
+                    };
+                };
+                /** @description Invalid attachment ID, an unreadable body, a malformed `If-Match`, or an image file whose body is not a valid image */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file belongs to a skill bundle */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description File attachment not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file changed since the client loaded it; `details.content_version` is the current version */
+                412: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The body is over the 30 MB limit */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The body's content type is not the file's */
+                415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error while saving */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No object store is configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/image-gallery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List gallery files
+         * @description Lists the user's gallery files, newest first: images by default, or every other kind of file, or both. Chat-reuse copies and the reference rows a reply shows for a file it looked at are left out, so each stored object is listed once through its original row. `folder` is a presence check: absent lists every file of the kind, empty is the top level.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description `images` (the default), `files` (everything that is not `image/*`) or `all`. */
+                    kind?: "images" | "files" | "all";
+                    /** @description Only files directly in this folder (a path such as `charts/oura`; empty is the top level). */
+                    folder?: string;
+                    /** @description Case-insensitive substring of the file name. */
+                    name?: string;
+                    /** @description Only files of this personality (its documents and expression images). */
+                    personality_id?: string;
+                    /** @description Only files that belong to no personality. */
+                    global_only?: boolean;
+                    page?: number;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description A page of files */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaginatedResponse"];
+                    };
+                };
+                /** @description Invalid kind, personality id or global_only */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/image-gallery/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a file into the gallery
+         * @description Uploads a file into the gallery without attaching it to a conversation or a personality. Any type the chat upload accepts, 30 MB at most. Images are normalized and get a thumbnail and land in the image store; other files are stored under the user's files. This is also Save As from the gallery-hosted file workspace (ADR 0x043 §3).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description The file to upload
+                         */
+                        attachment: string;
+                        /** @description Optional display name; without an extension it keeps the upload's. */
+                        title?: string;
+                        /** @description Optional caption stored on the file. */
+                        description?: string;
+                        /** @description Optional gallery folder to file it in. The reserved `skills/` folder is refused. */
+                        folder?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The new file */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FileAttachment"];
+                    };
+                };
+                /** @description Unsupported type, a file over 30 MB, an invalid image, or an invalid or reserved folder */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/image-gallery/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get an image's bytes
+         * @description Streams one of the user's images, full size or as its thumbnail (`size=thumbnail`, generated on demand when missing). Only images: other files are downloaded with `GET /file-attachment/{id}`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description `full` (the default) or `thumbnail`. */
+                    size?: "full" | "thumbnail";
+                };
+                header?: never;
+                path: {
+                    /** @description File attachment ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The image bytes */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "image/*": string;
+                    };
+                };
+                /** @description The cached copy is current (the ETag is the file's content_version; responses must be revalidated). */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid image ID, or the file is not an image */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such image for this user */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Delete an image
+         * @description Deletes one of the user's images: the stored object (unless a copy still references it), its thumbnail, then the row. Only images; other files go through `DELETE /file-attachment/{id}` or the bulk `POST /image-gallery/delete`.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description File attachment ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid image ID, or the file is not an image */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such image for this user */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Rename a gallery file
+         * @description Changes a file's display name (any kind of file). The name is normalized (a name without an extension keeps the current one) and must be free in the file's folder; when the extension changes to one the upload allowlist knows, and the file stays an image or stays a non-image, the type follows it. The chat copies sharing the stored object are renamed with it. The stored object and `content_version` are unchanged. Skill bundle files are renamed in the skill editor.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description File attachment ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The file after the rename */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FileAttachment"];
+                    };
+                };
+                /** @description Invalid file ID or an invalid name (empty, too long, control characters, or a path) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file belongs to a skill bundle */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such file for this user */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Another of the user's files already has that name in the folder */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/image-gallery/{id}/reference": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reference a gallery file in a chat
+         * @description Creates a lightweight copy of one of the user's files that shares its stored object, for attaching an existing gallery file to a new message without uploading it again. The copy is hidden from the gallery and moves, renames and saves with the original.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description File attachment ID of the source */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The reference copy, to send as an attachment id on a message */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FileAttachment"];
+                    };
+                };
+                /** @description Invalid file ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such file for this user */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -14450,10 +15223,11 @@ export interface components {
          */
         AgentJobScheduleType: "cron" | "at";
         /**
+         * @description `needs_values`: the job has a parameter with no value and can't run until it gets one (ADR 0x044). `paused` is always the user's choice.
          * @example active
          * @enum {string}
          */
-        AgentJobStatus: "active" | "paused" | "complete" | "failed";
+        AgentJobStatus: "active" | "paused" | "complete" | "failed" | "needs_values";
         /**
          * @example {
          *       "id": "123e4567-e89b-12d3-a456-426614174000",
@@ -14501,10 +15275,58 @@ export interface components {
             last_run_at?: string | null;
             last_error?: string | null;
             run_count?: number;
+            /** @description Definitions of the prompt's `{{name}}` placeholders, in form order (ADR 0x044). */
+            parameters?: components["schemas"]["AgentJobParameter"][];
+            parameter_values?: components["schemas"]["AgentJobParameterValues"];
+            /** @description Names of the parameters without a usable value, in definition order. Derived. */
+            missing_parameters?: string[];
             /** Format: date-time */
             created_at?: string;
             /** Format: date-time */
             updated_at?: string;
+        };
+        /** @description One `{{name}}` placeholder of a job prompt (ADR 0x044). All parameters are required. */
+        AgentJobParameter: {
+            name: string;
+            /** @description What the form shows; defaults to the name. */
+            label?: string;
+            description?: string;
+            /** @enum {string} */
+            type: "single_select" | "multi_select" | "text" | "list";
+            /** @description The choices, for single_select and multi_select (at least one, unique). */
+            options?: string[];
+            /**
+             * @description multi_select and list only. comma joins the values on one line (default for multi_select); bullets renders a Markdown bullet list (default for list).
+             * @enum {string}
+             */
+            format?: "comma" | "bullets";
+        };
+        /** @description The owner's parameter values by name: a string for text and single_select, an array of strings for multi_select and list. Never published with a shared job. */
+        AgentJobParameterValues: {
+            [key: string]: string | string[];
+        };
+        /** @description The details of a job_parameters_invalid error. */
+        AgentJobParametersError: {
+            undefined_placeholders?: string[];
+            problems?: string[];
+        };
+        CreateAgentJobRequest: {
+            title?: string;
+            prompt: string;
+            /** @description Natural-language schedule input */
+            schedule_input: string;
+            /** @description Optional IANA timezone */
+            timezone?: string;
+            /** Format: uuid */
+            chat_id?: string;
+            /** Format: uuid */
+            personality_id?: string;
+            /** Format: uuid */
+            model_id?: string;
+            reasoning_effort?: components["schemas"]["ReasoningEffort"];
+            agent_loop?: components["schemas"]["AgentLoop"];
+            parameters?: components["schemas"]["AgentJobParameter"][];
+            parameter_values?: components["schemas"]["AgentJobParameterValues"];
         };
         AgentJobScheduleParseRequest: {
             schedule_input: string;
@@ -14546,6 +15368,10 @@ export interface components {
             schedule_input?: string | null;
             /** @description Optional IANA timezone (used when schedule_input is provided) */
             timezone?: string | null;
+            /** @description Replaces the job's parameter definitions. Preserved when absent. */
+            parameters?: components["schemas"]["AgentJobParameter"][];
+            /** @description Replaces the job's parameter values. Preserved when absent. */
+            parameter_values?: components["schemas"]["AgentJobParameterValues"];
         };
         UpdateAgentJobStatusRequest: {
             /** @enum {string} */
@@ -15334,6 +16160,32 @@ export interface components {
             /** @description Number of files whose folder changed */
             moved: number;
         };
+        /** @description One file in a thread's context and why it is there. */
+        ChatContextFile: {
+            file: components["schemas"]["FileAttachment"];
+            /** @description Where a container mounts it, relative to `/workspace`: a message attachment or agent file by its name alone (gallery folders are labels), a bundle file under `skills/<slug>/`. */
+            workspace_path: string;
+            /** @description Why the file is in context. More values may be added; show an unknown one as is. */
+            reasons: ("attached_recent" | "attached_since_checkpoint" | "recalled" | "produced_this_turn" | "agent_written" | "skill_bundle")[];
+            /**
+             * Format: uuid
+             * @description The newer file that takes the same workspace path, so this one is not mounted. Absent for a file that holds its path.
+             */
+            shadowed_by?: string;
+        };
+        /** @description What the build knows about the thread's container, when it has one. */
+        ChatContainerStatus: {
+            /** @description `none`, `running` or `stopped`. */
+            state: string;
+            /** @description Per workspace path, whether the container's copy is `current` or `stale`. */
+            files?: {
+                [key: string]: string;
+            };
+        };
+        ChatContextFilesResponse: {
+            files: components["schemas"]["ChatContextFile"][];
+            container?: components["schemas"]["ChatContainerStatus"];
+        };
         /**
          * @example {
          *       "id": "123e4567-e89b-12d3-a456-426614174000",
@@ -15414,9 +16266,13 @@ export interface components {
             skill_id?: string;
             /**
              * Format: int64
-             * @description Bytes in the stored object, for origin "skill" (counted against the bundle's 30 MB limit).
+             * @description Bytes in the stored object. Set for origin "skill" (counted against the bundle's 30 MB limit) and by every content save in the file workspace; omitted for older uploads that were never changed.
              */
             size_bytes?: number;
+            /** @description The file workspace's concurrency token (ADR 0x043). Starts at 1 and is bumped by every content write (a save, or an agent's file tools). Send it back as `If-Match` on `PUT /file-attachment/{id}/content`; a mismatch is a 412. */
+            content_version?: number;
+            /** @description Hex SHA-256 of the stored object, set by every content write; omitted for older uploads that were never changed. */
+            content_sha256?: string;
             /**
              * Format: uuid
              * @description Personality whose agent created the file (agent-authored files only).
@@ -15429,7 +16285,7 @@ export interface components {
             created_by_chat_id?: string;
             /**
              * Format: date-time
-             * @description When an agent last changed the file's content. Omitted for files never changed.
+             * @description When the file's content was last changed, by an agent's file tools or by a save in the file workspace. A rename does not set it. Omitted for files never changed.
              */
             updated_at?: string;
         };

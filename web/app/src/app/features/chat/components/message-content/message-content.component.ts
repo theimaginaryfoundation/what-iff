@@ -1,11 +1,14 @@
 import { DOCUMENT } from '@angular/common';
-import { HttpClient } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, input } from '@angular/core';
 import { MarkdownModule } from 'ngx-markdown';
 
 import { FileAttachment, isImageAttachment } from '../../../../core/models/file-attachment.model';
+import { FileAttachmentService } from '../../../../core/services/file-attachment.service';
+import { saveBlobAsFile } from '../../../../core/utils/download.helpers';
 import { renderLatexMath } from '../../../../core/utils/latex-math.helpers';
-import { environment } from '../../../../../environments/environment';
+import { FileWorkspaceService } from '../../../file-workspace/file-workspace.service';
+import { DownloadIconComponent } from '../../../../shared/ui/icons/icons';
+import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 import { buildClipboardPayload } from '../../helpers/html-clipboard.helpers';
 import { extractImages } from '../../helpers/message-content.helpers';
 import { MessageImageAttachmentsComponent } from './message-image-attachments.component';
@@ -13,7 +16,7 @@ import { MessageImageAttachmentsComponent } from './message-image-attachments.co
 @Component({
   selector: 'app-message-content',
   standalone: true,
-  imports: [MarkdownModule, MessageImageAttachmentsComponent],
+  imports: [MarkdownModule, MessageImageAttachmentsComponent, DownloadIconComponent, TooltipDirective],
   template: `
     <markdown
       class="message-content__markdown prose prose-sm max-w-none dark:prose-invert"
@@ -38,13 +41,25 @@ import { MessageImageAttachmentsComponent } from './message-image-attachments.co
     @if (nonImageAttachments().length) {
       <div class="mt-3 flex flex-wrap gap-2">
         @for (attachment of nonImageAttachments(); track attachment.id) {
-          <button
-            type="button"
-            (click)="downloadAttachment(attachment)"
-            class="rounded-full border border-border-base bg-surface-muted px-3 py-1 text-xs text-text-secondary hover:text-text-primary"
-          >
-            {{ attachment.name }}
-          </button>
+          <span class="message-attachment" data-testid="message-attachment">
+            <button
+              type="button"
+              class="message-attachment__open"
+              [attr.aria-label]="'Open ' + attachment.name"
+              (click)="openAttachment(attachment)"
+            >
+              {{ attachment.name }}
+            </button>
+            <button
+              type="button"
+              class="message-attachment__download"
+              [attr.aria-label]="'Download ' + attachment.name"
+              uiTooltip="Download"
+              (click)="downloadAttachment(attachment)"
+            >
+              <ui-download-icon [size]="12" />
+            </button>
+          </span>
         }
       </div>
     }
@@ -54,6 +69,39 @@ import { MessageImageAttachmentsComponent } from './message-image-attachments.co
       display: block;
       min-width: 0;
       max-width: 100%;
+    }
+
+    .message-attachment {
+      align-items: stretch;
+      border: 1px solid var(--color-border-base);
+      border-radius: 9999px;
+      display: inline-flex;
+      overflow: hidden;
+    }
+
+    .message-attachment__open,
+    .message-attachment__download {
+      background: var(--color-surface-muted);
+      border: 0;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      font-size: 0.75rem;
+    }
+
+    .message-attachment__open {
+      padding: 0.25rem 0.5rem 0.25rem 0.75rem;
+    }
+
+    .message-attachment__download {
+      align-items: center;
+      border-left: 1px solid var(--color-border-base);
+      display: inline-flex;
+      padding: 0 0.5rem;
+    }
+
+    .message-attachment__open:hover,
+    .message-attachment__download:hover {
+      color: var(--color-text-primary);
     }
 
     :host ::ng-deep .message-content__markdown {
@@ -99,8 +147,8 @@ import { MessageImageAttachmentsComponent } from './message-image-attachments.co
 export class MessageContentComponent {
   private readonly document = inject(DOCUMENT);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
-  private readonly http = inject(HttpClient);
-  private readonly apiUrl = `${environment.apiUrl}/file-attachment`;
+  private readonly files = inject(FileAttachmentService);
+  private readonly workspace = inject(FileWorkspaceService);
 
   readonly content = input('');
   readonly attachments = input<readonly FileAttachment[]>([]);
@@ -135,14 +183,12 @@ export class MessageContentComponent {
     }
   }
 
+  /** Opens the file in the workspace beside the thread (ADR 0x043 §5), without leaving the message. */
+  openAttachment(attachment: FileAttachment): void {
+    this.workspace.requestOpen(attachment.id);
+  }
+
   downloadAttachment(attachment: FileAttachment): void {
-    this.http.get(`${this.apiUrl}/${attachment.id}`, { responseType: 'blob' }).subscribe(blob => {
-      const url = URL.createObjectURL(blob);
-      const anchor = this.document.createElement('a');
-      anchor.href = url;
-      anchor.download = attachment.name || `attachment-${attachment.id}`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-    });
+    this.files.downloadFileAttachment(attachment.id).subscribe(blob => saveBlobAsFile(blob, attachment.name || `attachment-${attachment.id}`));
   }
 }

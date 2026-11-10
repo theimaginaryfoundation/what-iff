@@ -2,9 +2,11 @@ import { inject } from '@angular/core';
 import { Router, Routes } from '@angular/router';
 import { authGuard, guestGuard } from './core/guards/auth.guard';
 import { personalitySetupGuard } from './core/guards/personality-setup.guard';
+import { confirmLeaveGuard } from './core/guards/confirm-leave.guard';
 import { AppLayoutComponent } from './layout/app-layout.component';
 import { privateChildRoutes } from './extensions/private-routes';
 import { authChildRoutes } from './extensions/auth-routes';
+import { unsavedWorkspaceGuard } from './features/file-workspace/unsaved-workspace.guard';
 
 export const routes: Routes = [
   {
@@ -35,12 +37,16 @@ export const routes: Routes = [
           {
             path: '',
             loadComponent: () => import('./features/chat/chat-page.component')
-              .then(m => m.ChatPageComponent)
+              .then(m => m.ChatPageComponent),
+            runGuardsAndResolvers: 'pathParamsOrQueryParamsChange',
+            canDeactivate: [unsavedWorkspaceGuard]
           },
           {
             path: ':id',
             loadComponent: () => import('./features/chat/chat-page.component')
-              .then(m => m.ChatPageComponent)
+              .then(m => m.ChatPageComponent),
+            runGuardsAndResolvers: 'pathParamsOrQueryParamsChange',
+            canDeactivate: [unsavedWorkspaceGuard]
           }
         ]
       },
@@ -171,7 +177,8 @@ export const routes: Routes = [
           {
             path: ':id',
             loadComponent: () => import('./features/agent-job/job-detail-page.component')
-              .then(m => m.JobDetailPageComponent)
+              .then(m => m.JobDetailPageComponent),
+            canDeactivate: [confirmLeaveGuard]
           }
         ]
       },
@@ -191,7 +198,9 @@ export const routes: Routes = [
       {
         path: 'gallery',
         loadComponent: () => import('./features/gallery/gallery-page.component')
-          .then(m => m.GalleryPageComponent)
+          .then(m => m.GalleryPageComponent),
+        runGuardsAndResolvers: 'pathParamsOrQueryParamsChange',
+        canDeactivate: [unsavedWorkspaceGuard]
       },
       {
         // Unified Import & Export ("your data") screen: account export + restore,

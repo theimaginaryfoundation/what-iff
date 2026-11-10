@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, effect, ChangeDetectionStrategy } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject, effect, ChangeDetectionStrategy } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { initFlowbite } from 'flowbite';
 import { take } from 'rxjs/operators';
@@ -15,6 +15,7 @@ import { UserPreferencesService } from './core/services/user-preferences.service
 })
 export class App implements OnInit {
   protected title = 'WhatIff';
+  private destroyRef = inject(DestroyRef);
   private authService = inject(AuthService);
   private userPreferencesService = inject(UserPreferencesService);
 
@@ -31,8 +32,9 @@ export class App implements OnInit {
   ngOnInit(): void {
     initFlowbite();
     // Initialize auth state after app is fully loaded to avoid circular dependency
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       this.authService.checkAuthState();
     }, 100);
+    this.destroyRef.onDestroy(() => clearTimeout(timer));
   }
 }

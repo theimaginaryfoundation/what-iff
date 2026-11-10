@@ -2,12 +2,15 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/filechange"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
@@ -280,18 +283,21 @@ func (t *AgentFileTool) newFile(ctx context.Context, chat *models.Chat, p, conte
 		Folder:   folder,
 		Origin:   models.FileOriginAgent,
 	}
+	// The conversation is always recorded (ADR 0x043 §4 lists a chat's agent files by it); the
+	// personality, when there is one, is what decides who may change the file (ownsAgentFile).
+	cid := chat.ID
+	att.CreatedByChatID = &cid
 	if chat.PersonalityID != uuid.Nil {
 		pid := chat.PersonalityID
 		att.CreatedByPersonalityID = &pid
-	} else {
-		cid := chat.ID
-		att.CreatedByChatID = &cid
 	}
 	created, err := t.store.CreateFileAttachment(ctx, chat.UserID, att)
 	if err != nil {
 		t.dropObject(ctx, key)
 		return nil, err
 	}
+	chatID := chat.ID
+	filechange.Notify(ctx, filechange.Event{Kind: filechange.KindCreate, UserID: chat.UserID, File: created, ChatID: &chatID})
 	return created, nil
 }
 
@@ -333,7 +339,8 @@ func (t *AgentFileTool) rewrite(ctx context.Context, chat *models.Chat, file str
 		if err != nil {
 			return agentFileWriteResult{}, err
 		}
-		swapped, err := t.store.SwapAgentFileObject(ctx, chat.UserID, att.ID, att.S3Key, key)
+		sum := sha256.Sum256([]byte(next))
+		swapped, err := t.store.SwapAgentFileObject(ctx, chat.UserID, att.ID, att.S3Key, key, int64(len(next)), hex.EncodeToString(sum[:]))
 		if err != nil {
 			// The swap may have committed before the error surfaced, leaving the row on key, so
 			// key is not dropped: an orphaned object beats a row pointing at a deleted one.
@@ -345,7 +352,15 @@ func (t *AgentFileTool) rewrite(ctx context.Context, chat *models.Chat, file str
 			continue
 		}
 		storage.ReleaseReplacedObject(context.WithoutCancel(ctx), t.logger, t.files, t.store, att.S3Key)
+		oldKey := att.S3Key
+		// The event and the reply describe the file as it is now, not as it was read.
 		att.S3Key = key
+		att.ContentVersion++
+		size := int64(len(next))
+		att.SizeBytes = &size
+		att.ContentSHA256 = hex.EncodeToString(sum[:])
+		chatID := chat.ID
+		filechange.Notify(ctx, filechange.Event{Kind: filechange.KindContent, UserID: chat.UserID, File: att, OldKey: oldKey, ChatID: &chatID})
 		ref := t.ref(chat, att, next)
 		return agentFileWriteResult{File: &ref}, nil
 	}

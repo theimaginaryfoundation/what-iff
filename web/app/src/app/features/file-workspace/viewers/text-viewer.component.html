@@ -1,0 +1,73 @@
+@if (decoded(); as data) {
+  @if (data.binary) {
+    <p class="text-viewer__placeholder">This file does not look like text, so there is no preview. Download it instead.</p>
+  } @else {
+    <div class="text-viewer__toolbar">
+      @if (canRender()) {
+        <div class="text-viewer__segmented" role="group" aria-label="View as">
+          <button type="button" [attr.aria-pressed]="rendered()" (click)="rendered.set(true)">
+            {{ kind() === 'csv' ? 'Table' : 'Formatted' }}
+          </button>
+          <button type="button" [attr.aria-pressed]="!rendered()" (click)="rendered.set(false)">Raw</button>
+        </div>
+      }
+      @if (!showRendered()) {
+        <label class="text-viewer__toggle">
+          <ui-checkbox [checked]="wrapLines()" (checkedChange)="wrapLines.set($event)" />
+          Wrap lines
+        </label>
+      }
+      @if (data.truncated) {
+        <span class="text-viewer__notice" role="status">Showing the first 1 MB. Download the file to see all of it.</span>
+      } @else if (kind() === 'markdown' && markdownTooBig()) {
+        <span class="text-viewer__notice" role="status">Too long to format, so it is shown as raw text.</span>
+      } @else if (showRendered() && csv()?.truncated) {
+        <span class="text-viewer__notice" role="status">
+          Showing the first {{ csv()!.rows.length }} rows; the rest are in the raw view and the download.
+        </span>
+      }
+    </div>
+
+    <div class="text-viewer__body">
+      @if (showRendered() && kind() === 'markdown') {
+        <markdown
+          class="text-viewer__markdown prose prose-sm max-w-none dark:prose-invert"
+          [data]="text()"
+          (ready)="onMarkdownReady()"
+        ></markdown>
+      } @else if (showRendered() && csv()) {
+        @let table = csv()!;
+        <div class="text-viewer__table-wrap">
+          <table class="text-viewer__table">
+            <thead>
+              <tr>
+                @for (cell of table.header; track $index) {
+                  <th scope="col">{{ cell }}</th>
+                }
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of table.rows; track $index) {
+                <tr>
+                  @for (cell of row; track $index) {
+                    <td>{{ cell }}</td>
+                  }
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else if (text() === '') {
+        <p class="text-viewer__placeholder">This file is empty.</p>
+      } @else if (highlighted(); as html) {
+        <pre class="text-viewer__text text-viewer__text--highlighted" [class.text-viewer__text--wrap]="wrapLines()" tabindex="0" [innerHTML]="html"></pre>
+      } @else {
+        <pre class="text-viewer__text" [class.text-viewer__text--wrap]="wrapLines()" tabindex="0">{{ text() }}</pre>
+      }
+    </div>
+  }
+} @else if (failed()) {
+  <p class="text-viewer__placeholder" role="alert">Could not read this file as text.</p>
+} @else {
+  <p class="text-viewer__placeholder" role="status">Decoding…</p>
+}

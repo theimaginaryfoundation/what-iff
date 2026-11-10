@@ -1,8 +1,8 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
+import { Observable, map } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { FileAttachment, FileAttachmentFilters } from '../models/file-attachment.model';
+import { FileAttachment, FileAttachmentFilters, ChatContextFilesResponse } from '../models/file-attachment.model';
 import { PaginatedResponse } from '../models/common.model';
 
 @Injectable({
@@ -18,11 +18,31 @@ export class FileAttachmentService {
    * @param file The file to upload
    * @returns Observable of the created file attachment
    */
-  uploadChatFileAttachment(chatId: string, file: File): Observable<FileAttachment> {
+  uploadChatFileAttachment(chatId: string, file: File, folder?: string): Observable<FileAttachment> {
     const formData = new FormData();
     formData.append('attachment', file);
+    if (folder?.trim()) {
+      formData.append('folder', folder.trim());
+    }
 
     return this.http.post<FileAttachment>(`${this.apiUrl}/chat/${chatId}/file-attachment`, formData);
+  }
+
+  /**
+   * Replaces a file's content from the workspace (ADR 0x043 §3). ifMatch is the content_version
+   * the editor loaded; null overwrites unconditionally. A stale version is a 412 whose
+   * `details.content_version` is the current one (see conflictVersionOf).
+   */
+  replaceContent(attachmentId: string, content: Blob, contentType: string, ifMatch: number | null, chatId?: string | null): Observable<FileAttachment> {
+    let headers = new HttpHeaders({ 'Content-Type': contentType || 'application/octet-stream' });
+    if (ifMatch !== null) {
+      headers = headers.set('If-Match', String(ifMatch));
+    }
+    let params = new HttpParams();
+    if (chatId) {
+      params = params.set('chat_id', chatId);
+    }
+    return this.http.put<FileAttachment>(`${this.apiUrl}/file-attachment/${attachmentId}/content`, content, { headers, params });
   }
 
   /**
@@ -86,5 +106,25 @@ export class FileAttachmentService {
   downloadFileAttachment(attachmentId: string): Observable<Blob> {
     return this.http.get(`${this.apiUrl}/file-attachment/${attachmentId}`, { responseType: 'blob' });
   }
+
+  /**
+   * The bytes with the content version they are (the response's ETag, ADR 0x043 §3), which is what
+   * a save must send as If-Match. Null when the response does not say.
+   */
+  downloadFileContent(attachmentId: string): Observable<{ blob: Blob; version: number | null }> {
+    return this.http
+      .get(`${this.apiUrl}/file-attachment/${attachmentId}`, { responseType: 'blob', observe: 'response' })
+      .pipe(map(response => ({ blob: response.body ?? new Blob(), version: versionFromETag(response.headers.get('ETag')) })));
+  }
+
+  /** The files in a thread's context (ADR 0x043 §4), newest first, with why each is there. */
+  listChatContextFiles(chatId: string): Observable<ChatContextFilesResponse> {
+    return this.http.get<ChatContextFilesResponse>(`${this.apiUrl}/chat/${chatId}/context-files`);
+  }
 }
 
+/** A content version ETag is the quoted version number, possibly weak (`W/"3"`). */
+export function versionFromETag(etag: string | null): number | null {
+  const m = /^(?:W\/)?"(\d+)"$/.exec(etag?.trim() ?? '');
+  return m ? Number(m[1]) : null;
+}

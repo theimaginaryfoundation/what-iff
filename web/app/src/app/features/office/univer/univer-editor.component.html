@@ -1,0 +1,24 @@
+<div class="univer-editor" [class.univer-editor--read-only]="readOnly()">
+  @if (!noticeDismissed()) {
+    <app-fidelity-notice [losses]="losses()" [warnings]="warnings()" (dismiss)="dismissNotice()" />
+  }
+  @if (!readOnly() && state() === "ready") {
+    <div class="univer-editor__bar" role="toolbar" aria-label="Page view">
+      <button type="button" class="univer-editor__tool" [attr.aria-pressed]="showGuides()" (click)="toggleGuides()">Show guides</button>
+    </div>
+  }
+  <div class="univer-editor__stage">
+    <!-- Univer measures its container when created, so the container stays visible while loading. -->
+    <div
+      #container
+      class="univer-editor__univer"
+      [attr.aria-label]="(readOnly() ? '' : 'Editor for ') + file().name"
+      [attr.aria-busy]="state() === 'loading'"
+    ></div>
+    @if (state() === "error") {
+      <p class="univer-editor__placeholder" role="alert">{{ error() }}</p>
+    } @else if (state() === "loading") {
+      <p class="univer-editor__placeholder" role="status">Loading the {{ noun }}…</p>
+    }
+  </div>
+</div>

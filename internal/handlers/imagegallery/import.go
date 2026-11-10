@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/filechange"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -59,7 +60,13 @@ func (h *Handler) ImportImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s3Key := storage.FileKeyForImage(userID, createdAttachment.ID, fileAttachment.Name)
+	// Images live in the image store the gallery serves from; any other file goes under files/
+	// (ADR 0x043 §3), where a save in the file workspace writes its later versions too.
+	isImage := strings.HasPrefix(fileAttachment.FileType, models.ImageMIMEPrefix)
+	s3Key := storage.FileKeyForUserFile(userID, createdAttachment.ID, fileAttachment.Name)
+	if isImage {
+		s3Key = storage.FileKeyForImage(userID, createdAttachment.ID, fileAttachment.Name)
+	}
 	if err := handlerutils.UploadToS3(r.Context(), h.fileStore, s3Key, tempFilePath, fileAttachment.FileType); err != nil {
 		h.logger.Error("image gallery import: S3 upload failed, rolling back record",
 			zap.Error(err),
@@ -76,7 +83,9 @@ func (h *Handler) ImportImage(w http.ResponseWriter, r *http.Request) {
 			zap.Error(err))
 	}
 
-	handlerutils.UploadThumbnailFromPath(r.Context(), h.fileStore, h.logger, userID, createdAttachment.ID, tempFilePath)
+	if isImage {
+		handlerutils.UploadThumbnailFromPath(r.Context(), h.fileStore, h.logger, userID, createdAttachment.ID, tempFilePath)
+	}
 	handlerutils.TriggerAsyncFileChunking(
 		h.logger,
 		userID,
@@ -85,6 +94,8 @@ func (h *Handler) ImportImage(w http.ResponseWriter, r *http.Request) {
 		tempFilePath,
 		fileAttachment.Name,
 	)
+
+	filechange.Notify(r.Context(), filechange.Event{Kind: filechange.KindCreate, UserID: userID, File: createdAttachment})
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusCreated, createdAttachment)
 }

@@ -68,18 +68,18 @@ func resolveAttachmentImage(ctx context.Context, logger *zap.Logger, store FileS
 		if data := tryDownload(FileKeyForImageThumbnail(userID, att.ID)); len(data) > 0 {
 			return data, "image/jpeg", telemetry.ImageSourceThumbnail
 		}
-	} else if data := tryDownload(canonicalKey); len(data) > 0 {
-		return data, att.FileType, telemetry.ImageSourceCanonical
 	}
 
-	// The row's key is usually the canonical key itself; a key that already missed isn't refetched.
-	if wantThumb || att.S3Key != canonicalKey {
-		if data := tryDownload(att.S3Key); len(data) > 0 {
-			return data, att.FileType, telemetry.ImageSourceS3Key
+	// The row's key comes first: a save moves it to a new object, and the canonical key can still
+	// hold the old bytes when something references them or their delete failed.
+	if data := tryDownload(att.S3Key); len(data) > 0 {
+		source := telemetry.ImageSourceS3Key
+		if !wantThumb && att.S3Key == canonicalKey {
+			source = telemetry.ImageSourceCanonical
 		}
+		return data, att.FileType, source
 	}
-
-	if wantThumb && canonicalKey != att.S3Key {
+	if canonicalKey != att.S3Key {
 		if data := tryDownload(canonicalKey); len(data) > 0 {
 			return data, att.FileType, telemetry.ImageSourceCanonical
 		}
