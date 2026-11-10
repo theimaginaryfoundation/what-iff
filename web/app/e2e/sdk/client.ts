@@ -206,6 +206,34 @@ export async function listModels(client: ApiClient): Promise<Model[]> {
   return data;
 }
 
+// --- Background models -----------------------------------------------------
+
+/** The account's default chat model, or the nil UUID when it has none. */
+export async function getDefaultModelId(client: ApiClient): Promise<string> {
+  const { data, error, response } = await client.GET('/user/preferences', {});
+  if (error || !data) {
+    fail('get preferences', response.status, error);
+  }
+  return data.default_model_id;
+}
+
+/** Every background role's choices: the account's and the deployment's. */
+export async function getUtilityModels(client: ApiClient): Promise<components['schemas']['UtilityModels']> {
+  const { data, error, response } = await client.GET('/utility-models', {});
+  if (error || !data) {
+    fail('get utility models', response.status, error);
+  }
+  return data;
+}
+
+/** Chooses the account's model for a background role. */
+export async function chooseUtilityModel(client: ApiClient, role: components['schemas']['UtilityRole'], modelId: string): Promise<void> {
+  const { error, response } = await client.PUT('/utility-models/{role}', { params: { path: { role } }, body: { model_id: modelId } });
+  if (error) {
+    fail('choose utility model', response.status, error);
+  }
+}
+
 // --- Personalities ---------------------------------------------------------
 
 export interface CreatePersonalityInput {
