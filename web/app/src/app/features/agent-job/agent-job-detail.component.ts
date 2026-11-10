@@ -15,6 +15,9 @@ import { Chat } from '../../core/models/chat.model';
 import { Model } from '../../core/models/model.model';
 import { Personality } from '../../core/models/personality.model';
 import { Ritual } from '../../core/models/ritual.model';
+import { ProviderKeysService } from '../../core/services/provider-keys.service';
+import { apiErrorEnvelope, apiErrorMessage } from '../../core/utils/api-error.helpers';
+import { utilityRoleUnavailableMessage } from '../../core/utils/utility-role-copy';
 
 @Component({
   selector: 'app-agent-job-detail',
@@ -28,6 +31,7 @@ export class AgentJobDetailComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private agentJobService = inject(AgentJobService);
+  private providerKeys = inject(ProviderKeysService);
   private chatService = inject(ChatService);
   private modelService = inject(ModelService);
   private personalityService = inject(PersonalityService);
@@ -387,7 +391,10 @@ export class AgentJobDetailComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Failed to preview schedule:', error);
-        this.errorMessage.set(error.message || 'Failed to preview schedule');
+        this.errorMessage.set(
+          utilityRoleUnavailableMessage(apiErrorEnvelope(error)?.code, 'simple', this.providerKeys.accountsSupplyKeys()) ??
+            apiErrorMessage(error, 'Failed to preview schedule'),
+        );
         this.isPreviewing.set(false);
       }
     });
