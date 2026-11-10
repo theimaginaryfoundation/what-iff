@@ -364,7 +364,17 @@ export interface PivotWriteInput {
 }
 
 export function updatePivotTableXml(xml: string, input: PivotWriteInput): string {
-  const { config, result, columns, ref } = input;
+  const { result, columns, ref } = input;
+  // The configuration names fields of this cache. One the cache no longer has (the file was edited
+  // elsewhere) is left out rather than written as an invalid index.
+  const known = new Set(columns.map(c => c.name));
+  const config: PivotConfig = {
+    ...input.config,
+    rows: input.config.rows.filter(f => known.has(f)),
+    columns: input.config.columns.filter(f => known.has(f)),
+    filters: input.config.filters.filter(f => known.has(f)),
+    values: input.config.values.filter(v => known.has(v.field)),
+  };
   const doc = parseXml(xml);
   const root = doc.documentElement;
   const kept = elementChildren(root).filter(el => KEPT_AFTER_LAYOUT.has(el.localName));
@@ -421,7 +431,7 @@ export function updatePivotTableXml(xml: string, input: PivotWriteInput): string
   if (config.filters.length) {
     const pages = config.filters.map(f => {
       const chosen = singlePage(f);
-      return `<pageField fld="${names.indexOf(f)}"${chosen ? ` item="${positions[f].get(chosen)}"` : ''} hier="-1"/>`;
+      return `<pageField fld="${names.indexOf(f)}"${chosen && positions[f]?.has(chosen) ? ` item="${positions[f].get(chosen)}"` : ''} hier="-1"/>`;
     });
     parts.push(`<pageFields count="${pages.length}">${pages.join('')}</pageFields>`);
   }

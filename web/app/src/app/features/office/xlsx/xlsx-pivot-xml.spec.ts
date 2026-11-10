@@ -174,6 +174,19 @@ describe('pivot XML', () => {
     expect(records).not.toContain('undefined');
   });
 
+  it('leaves out a filter field the cache no longer has, instead of writing an invalid index', () => {
+    const columns = cacheColumns(SOURCE, [], new Set(['Region']));
+    const cfg = { ...config, columns: [] };
+    const xml = updatePivotTableXml(newPivotTableXml('PivotTable1', '5'), {
+      config: { ...cfg, filters: ['Gone'], hidden: { Gone: ['x'] } },
+      columns,
+      result: computePivot(cfg, SOURCE),
+      ref: 'E1:F5',
+    });
+    expect(xml).not.toContain('fld="-1"');
+    expect(xml).not.toContain('<pageFields');
+  });
+
   it('builds a new pivot and its cache that read back as written', () => {
     const cacheXml = newPivotCacheXml('Data', 'A1:C4');
     const columns = cacheColumns(SOURCE, [], new Set(['Region']));
