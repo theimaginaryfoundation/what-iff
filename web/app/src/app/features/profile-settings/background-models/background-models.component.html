@@ -30,6 +30,8 @@
 
         @if (row.chosen === offValue) {
           <p class="background-models__note" data-testid="background-role-off">Off. {{ row.stops }}</p>
+        } @else if (!row.chosen && row.deploymentOff) {
+          <p class="background-models__note" data-testid="background-role-deployment-off">Off on this server. {{ row.stops }}</p>
         } @else if (!row.chosen && row.deploymentChooses) {
           <p class="background-models__note" data-testid="background-role-deployment">This server's choice is used until you choose one.</p>
         } @else if (!row.chosen) {
@@ -38,7 +40,7 @@
           </p>
         } @else if (row.chosenUnlisted) {
           <p class="background-models__note background-models__note--warn" role="status" data-testid="background-role-unavailable">
-            Its model was turned off or its provider removed, so this doesn't run. Choose another model.
+            Its model was turned off or its provider removed. Choose another model.
           </p>
         }
 

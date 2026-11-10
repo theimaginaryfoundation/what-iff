@@ -6,6 +6,7 @@ describe('utilityRoleUnavailableMessage', () => {
       'No model is chosen for Personality generation. Choose one in Settings, under Background models.',
     );
     expect(utilityRoleUnavailableMessage('utility_role_off', 'simple', true)).toContain('Simple tasks is switched off.');
+    expect(utilityRoleUnavailableMessage('utility_model_unavailable', 'simple', true)).toContain("The model chosen for Simple tasks can't be used any more.");
   });
 
   it('only informs where the server chooses', () => {

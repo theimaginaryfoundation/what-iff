@@ -107,9 +107,10 @@ describe('BackgroundModelsComponent', () => {
     expect(note(el, 'simple', 'off')).toContain("Threads aren't named");
   });
 
-  it("says when the deployment's choice stands in", async () => {
-    const el = await render(utility({}, { simple: model('luna') }));
+  it("says when the deployment's choice stands in, or the deployment switched the role off", async () => {
+    const el = await render(utility({}, { simple: model('luna'), personality: OFF }));
     expect(note(el, 'simple', 'deployment')).toContain("This server's choice is used");
+    expect(note(el, 'personality', 'deployment-off')).toContain('Off on this server.');
   });
 
   it('saves a model, and switches a role off', async () => {
@@ -126,7 +127,12 @@ describe('BackgroundModelsComponent', () => {
   });
 
   it("offers thinking for a model that takes it, and speed only on OpenAI's own API", async () => {
-    const el = await render(utility({ memory: model('luna'), simple: model('haiku'), personality: model('qwen') }));
+    // Qwen is a connection model: its effort can't be set from here, whatever its support says.
+    const el = await render(
+      utility({ memory: model('luna'), simple: model('haiku'), personality: model('qwen') }),
+    );
+    models$.next(MODELS.map(m => (m.id === 'qwen' ? { ...m, reasoning_support: 'optional' } : m)));
+    fixture.detectChanges();
     expect(select(el, 'effort', 'memory')).not.toBeNull();
     expect(select(el, 'tier', 'memory')).not.toBeNull();
     expect(select(el, 'effort', 'simple')).not.toBeNull();
@@ -183,7 +189,7 @@ describe('BackgroundModelsComponent', () => {
   it("says when a chosen model can't be used any more", async () => {
     const el = await render(utility({ memory: model('turned-off') }));
     expect(select(el, 'model', 'memory')!.selectedOptions[0].textContent?.trim()).toBe('Chosen model is unavailable');
-    expect(note(el, 'memory', 'unavailable')).toContain("this doesn't run");
+    expect(note(el, 'memory', 'unavailable')).toContain('Choose another model.');
   });
 
   it('shows nothing where the deployment chooses the models', async () => {

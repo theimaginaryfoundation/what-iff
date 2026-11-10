@@ -201,6 +201,14 @@ export class BackgroundNoticesComponent {
         actionLabel: 'Choose background models',
       };
     }
+    if (n.code === 'model_unavailable') {
+      return {
+        what,
+        why: `The model chosen for ${label ?? 'this background work'} can't be used any more: it may have been turned off, or its provider removed.${times}`,
+        action: 'background-models',
+        actionLabel: 'Choose background models',
+      };
+    }
     const provider = n.provider || 'The provider';
     if (n.code === 'provider_not_configured') {
       if (!this.keys.accountsSupplyKeys()) {

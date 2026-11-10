@@ -12,8 +12,8 @@ export const UTILITY_ROLE_COPY: Record<UtilityRole, { label: string; covers: str
   },
   memory_merge: {
     label: 'Memory tidying',
-    covers: 'Folds duplicate memories together',
-    stops: 'Only memories that match exactly are folded together.',
+    covers: "Combines duplicate memories, so the same fact isn't saved and recalled several times",
+    stops: 'Duplicates pile up: only memories that match word for word are combined.',
   },
   simple: {
     label: 'Simple tasks',
@@ -29,7 +29,8 @@ export const UTILITY_ROLE_COPY: Record<UtilityRole, { label: string; covers: str
 
 /**
  * What to tell a person whose action needed background work that its role keeps from running
- * (codes `utility_model_not_set` and `utility_role_off`), or null for any other code. Where the
+ * (codes `utility_model_not_set`, `utility_role_off` and `utility_model_unavailable`), or null
+ * for any other code. Where the
  * account chooses, the fix is in Settings; elsewhere the server chose, and there is nothing to fix.
  */
 export function utilityRoleUnavailableMessage(code: string | null | undefined, role: UtilityRole, accountsChoose: boolean): string | null {
@@ -41,6 +42,11 @@ export function utilityRoleUnavailableMessage(code: string | null | undefined, r
   }
   if (code === 'utility_role_off') {
     return accountsChoose ? `${label} is switched off. Choose a model for it in Settings, under Background models.` : `${label} is switched off on this server.`;
+  }
+  if (code === 'utility_model_unavailable') {
+    return accountsChoose
+      ? `The model chosen for ${label} can't be used any more. Choose another in Settings, under Background models.`
+      : `The model this server chose for ${label} can't be used right now.`;
   }
   return null;
 }

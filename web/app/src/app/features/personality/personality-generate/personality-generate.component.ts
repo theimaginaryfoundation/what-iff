@@ -114,7 +114,11 @@ export class PersonalityGenerateComponent implements OnInit {
     this.generateModal.hide();
     this.settings.open('providers');
   }
+
   chooseBackgroundModel(): void {
+    this.errorNeedsKey.set(false);
+    this.errorNeedsBackgroundModel.set(false);
+    this.generateModal.hide();
     this.settings.open('profile');
   }
 
@@ -662,7 +666,7 @@ export class PersonalityGenerateComponent implements OnInit {
             );
             this.errorNeedsKey.set(job.error_code === 'provider_not_configured' && accountsChoose);
             this.errorNeedsBackgroundModel.set(
-              accountsChoose && (job.error_code === 'utility_model_not_set' || job.error_code === 'utility_role_off'),
+              accountsChoose && utilityRoleUnavailableMessage(job.error_code, 'personality', true) !== null,
             );
           }
         },

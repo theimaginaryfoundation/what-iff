@@ -47,6 +47,8 @@ interface RoleRow {
   offersTier: boolean;
   /** The account chose nothing, and the deployment's choice stands in. */
   deploymentChooses: boolean;
+  /** The deployment switched the role off, so with no choice of the account's it doesn't run. */
+  deploymentOff: boolean;
 }
 
 /**
@@ -133,7 +135,8 @@ export class BackgroundModelsComponent implements OnInit {
       return this.save(row, select, this.service.switchOff(row.role));
     }
     const model = this.models().find(m => m.id === select.value) ?? null;
-    const effort = row.effort && reasoningEffortOptions(model?.reasoning_support).some(o => o.value === row.effort) ? row.effort : null;
+    const effortOptions = model?.connection_id ? [] : reasoningEffortOptions(model?.reasoning_support);
+    const effort = row.effort && effortOptions.some(o => o.value === row.effort) ? row.effort : null;
     return this.save(
       row,
       select,
@@ -200,9 +203,11 @@ export class BackgroundModelsComponent implements OnInit {
       model,
       effort: choice?.reasoning_effort ?? null,
       tier: choice?.service_tier ?? null,
-      effortOptions: reasoningEffortOptions(model?.reasoning_support),
+      // A connection's Chat Completions models take no effort from here, so none is offered.
+      effortOptions: model?.connection_id ? [] : reasoningEffortOptions(model?.reasoning_support),
       offersTier: offersServiceTier(model),
-      deploymentChooses: !choice && !!r.deployment,
+      deploymentChooses: !choice && !!r.deployment && !r.deployment.off,
+      deploymentOff: !choice && !!r.deployment?.off,
     };
   }
 }
