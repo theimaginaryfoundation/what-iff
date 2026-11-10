@@ -177,6 +177,8 @@ function outputPurifier(): ReturnType<typeof DOMPurify> {
 
 /** Tables and text survive; scripts, handlers, forms, frames and stylesheets do not. */
 export function sanitizeOutputHtml(html: string): string {
+  // Without a DOM (server rendering, a worker) nothing can be sanitized, so the HTML shows as text.
+  if (typeof window === 'undefined' || !window.document) return escapeHtml(html);
   return outputPurifier().sanitize(html, {
     FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'iframe', 'object', 'embed', 'base', 'meta', 'link', 'video', 'audio', 'source'],
     FORBID_ATTR: ['formaction', 'background'],
