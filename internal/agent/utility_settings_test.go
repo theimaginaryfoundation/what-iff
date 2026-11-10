@@ -18,13 +18,13 @@ import (
 
 func (f *connectionFixture) choose(t *testing.T, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID uuid.UUID) {
 	t.Helper()
-	require.NoError(t, f.a.ds.SetUtilityModel(context.Background(), scope, userID, role, &modelID))
+	require.NoError(t, f.a.ds.SetUtilityModel(context.Background(), userID, models.UtilityModelSetting{Scope: scope, Role: role, ModelID: &modelID}))
 }
 
 // switchOff switches role off at scope.
 func (f *connectionFixture) switchOff(t *testing.T, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole) {
 	t.Helper()
-	require.NoError(t, f.a.ds.SetUtilityModel(context.Background(), scope, userID, role, nil))
+	require.NoError(t, f.a.ds.SetUtilityModel(context.Background(), userID, models.UtilityModelSetting{Scope: scope, Role: role}))
 }
 
 // target is the model role resolves to under ctx, which must resolve.
@@ -239,4 +239,21 @@ func TestInferMemoryMergeGroups_RunsOnTheMergeRole(t *testing.T) {
 	require.Equal(t, fallbackExactMergeGroups(candidates), f.a.inferMemoryMergeGroups(alice, f.alice, "", candidates))
 	require.Empty(t, reqs())
 	require.Equal(t, "gpt-5.1", f.target(t, alice, provider.UtilityRoleMemory).name)
+}
+
+// A choice's effort and tier travel with its model, and the model row's reasoning support with
+// them, so the call can limit the effort to what the model takes.
+func TestUtilityTargetFor_CarriesTheChoicesEffortAndTier(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	alice := apicontext.WithUserID(context.Background(), f.alice)
+	id := f.catalog.ID
+	require.NoError(t, f.a.ds.SetUtilityModel(context.Background(), uuid.Nil, models.UtilityModelSetting{
+		Scope: models.UtilityScopeDeployment, Role: models.UtilityRoleMemoryMerge, ModelID: &id,
+		ReasoningEffort: models.ReasoningEffortLow, ServiceTier: models.UtilityServiceTierFlex}))
+
+	got := f.target(t, alice, provider.UtilityRoleMemoryMerge)
+	require.Equal(t, models.ReasoningEffortLow, got.reasoningEffort)
+	require.Equal(t, models.UtilityServiceTierFlex, got.serviceTier)
+	require.Equal(t, models.ReasoningEffortLow, got.chatContext().reasoningEffort, "gpt-5.1 takes an optional effort")
 }

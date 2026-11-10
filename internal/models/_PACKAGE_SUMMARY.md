@@ -37,7 +37,8 @@
 - **Superseded messages:** `ChatMessage.SupersededAt` / `SupersededBy` (`json:"-"`) mark a message taken back and the reply that replaced it (agent `SupersedeTurn` / `RegenerateTurn`).
   `ChatMessageFilters.IncludeSuperseded` (`json:"-"`) lists them too; off by default, so they are hidden wherever messages are listed.
 - **Utility roles (`utility.go`):** `UtilityRole` (`memory`, `memory_merge`, `simple`, `personality`) groups background work that runs on the same model (ADR 0x027 section 6).
-  A `UtilityModelSetting` chooses a model or switches its role off (`Off`, no `ModelID`); `UtilityChoice` is how the API reports one scope's.
+  A `UtilityModelSetting` chooses a model, with an optional reasoning effort and `UtilityServiceTier`, or switches its role off (`Off`, no `ModelID`); `UtilityChoice` is how the API reports one scope's.
+  `UsesOpenAIResponsesAPI` (`model_defaults.go`) reports a catalog model on OpenAI's own Responses API, the only one that takes a service tier or continues a stored conversation.
   `UtilityRoles` lists them in display order and `Valid` checks one.
   They live here, not in `agent/provider`, so code that can't import the agent, such as the datastore, can name a role.
 - **Error envelope (`error.go`):** `ErrorResponse` plus the error-code registry — `ErrCode*` constants and `GenericErrorCode(status)`.

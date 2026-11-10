@@ -34,21 +34,28 @@ type utilityTarget struct {
 	// connection reaches a model from an OpenRouter, local or Custom connection; nil for a
 	// model on a built-in provider's own path.
 	connection *ConnectionEndpoint
+	// reasoningSupport is the model row's reasoning support, the admin's override included;
+	// empty derives it from the provider and name.
+	reasoningSupport models.ReasoningSupport
+	// reasoningEffort and serviceTier are what the role's choice asks for; empty leaves the
+	// model's and the API's defaults.
+	reasoningEffort models.ReasoningEffort
+	serviceTier     models.UtilityServiceTier
 }
 
 // chatContext is the part of a chat context the provider helpers route on, for a call that
-// has no chat of its own.
+// has no chat of its own. Its reasoning effort is the role's, limited to what the model
+// supports, as a chat turn's is.
 func (t utilityTarget) chatContext() *chatContext {
-	return &chatContext{model: t.name, modelProvider: t.provider, connection: t.connection}
+	c := &chatContext{model: t.name, modelProvider: t.provider, connection: t.connection, modelReasoningSupport: t.reasoningSupport}
+	c.reasoningEffort = models.EffectiveReasoningEffort(c.reasoningSupport(), t.reasoningEffort)
+	return c
 }
 
 // usesResponsesAPI reports whether the target is on OpenAI's own Responses API, the only one
 // that can continue a stored conversation.
 func (t utilityTarget) usesResponsesAPI() bool {
-	return t.connection == nil &&
-		!models.UsesAnthropicMessagesAPI(t.provider, t.name) &&
-		!models.UsesOpenAIChatCompletionsAPI(t.provider, t.name) &&
-		models.ProviderForModel(t.provider, t.name) == models.ModelProviderOpenAI
+	return t.connection == nil && models.UsesOpenAIResponsesAPI(t.provider, t.name)
 }
 
 // resolveUtilityTarget is the model chosen for role by the account the context is for, or else
@@ -120,7 +127,8 @@ func (a *Agent) settingTarget(ctx context.Context, userID uuid.UUID, s models.Ut
 			return utilityTarget{}, err
 		}
 	}
-	t := utilityTarget{name: m.Name, provider: m.Provider, connection: conn}
+	t := utilityTarget{name: m.Name, provider: m.Provider, connection: conn, reasoningSupport: m.ReasoningSupport,
+		reasoningEffort: s.ReasoningEffort, serviceTier: s.ServiceTier}
 	if conn != nil {
 		t.provider = conn.Preset
 	}
