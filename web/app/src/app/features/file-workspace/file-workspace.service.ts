@@ -1,6 +1,7 @@
 import { DOCUMENT } from '@angular/common';
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
+import { Subscription } from 'rxjs';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
@@ -44,6 +45,7 @@ export class FileWorkspaceService {
 
   private readonly _host = signal<WorkspaceHost | null>(null);
   private readonly _fileId = signal<string | null>(null);
+  private infoRequest: Subscription | null = null;
   private readonly _file = signal<FileAttachment | null>(null);
   private readonly _error = signal<string | null>(null);
   private readonly _chatId = signal<string | null>(null);
@@ -90,7 +92,9 @@ export class FileWorkspaceService {
     this._error.set(null);
     this._file.set(opts.known ?? null);
     if (host === 'chat' && chatId) this.remember(chatId, fileId);
-    this.gallery.getFileInfo(fileId).subscribe({
+    // Only the shown file's details matter; a request for one shown before is dropped.
+    this.infoRequest?.unsubscribe();
+    this.infoRequest = this.gallery.getFileInfo(fileId).subscribe({
       next: info => {
         if (this._fileId() === fileId) this._file.set(info);
       },

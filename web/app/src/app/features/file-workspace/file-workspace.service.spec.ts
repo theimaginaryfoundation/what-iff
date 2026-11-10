@@ -51,6 +51,16 @@ describe('FileWorkspaceService', () => {
     expect(service.rememberedFileFor('c-1')).toBe('f-1');
   });
 
+  it('drops the request for a file shown before when another one is shown', () => {
+    const first = new Subject<FileAttachment>();
+    const service = setup();
+    getFileInfo.mockReturnValueOnce(first);
+    service.show('gallery', 'f-1');
+    expect(first.observed).toBe(true);
+    service.show('gallery', 'f-2');
+    expect(first.observed).toBe(false);
+  });
+
   it('reports a file that cannot be found, unless it already has a row', () => {
     const service = setup();
     getFileInfo.mockReturnValue(throwError(() => new Error('404')));
