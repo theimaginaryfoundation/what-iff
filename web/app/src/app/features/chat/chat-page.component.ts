@@ -319,6 +319,11 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   private readonly openGalleryPickerOnRequest = effect(() => {
     if (this.contextPanel.galleryPickerRequests() > 0) untracked(() => this.composer()?.openGalleryPicker());
   });
+  // However a file opens (an attachment pill, a link, the thread's remembered file), the context
+  // panel makes way for it; the rail brings it back over the open file.
+  private readonly closeContextPanelForOpenFile = effect(() => {
+    if (this.workspace.fileId()) untracked(() => this.contextPanel.hideForOpenFile());
+  });
   /** Threads whose remembered file was already restored this visit, so closing it is not undone. */
   private readonly restoredWorkspaceFor = new Set<string>();
   private readonly hotkeySequenceState = new Map<string, { keys: string[]; currentIndex: number; timeout?: ReturnType<typeof setTimeout> }>();

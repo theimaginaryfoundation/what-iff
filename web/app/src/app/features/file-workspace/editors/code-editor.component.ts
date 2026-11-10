@@ -21,6 +21,7 @@ import { renderLatexMath } from '../../../core/utils/latex-math.helpers';
 import { previewKindFor } from '../../gallery/helpers/file-preview.helpers';
 import { FileEditor } from './file-editor';
 import { MONACO_LOADER, type Monaco, monacoLanguageFor, vfsUriFor } from './monaco/monaco-loader';
+import { appTheme, followAppTheme, monacoThemeFor } from './monaco/monaco-themes';
 
 const PREVIEW_DEBOUNCE_MS = 250;
 
@@ -82,6 +83,8 @@ export class CodeEditorComponent implements FileEditor {
       if (blob === this.lastContent) return;
       untracked(() => void this.loadText(blob));
     });
+    const stopTheme = followAppTheme(this.document, theme => this.monaco?.editor.setTheme(theme));
+    inject(DestroyRef).onDestroy(stopTheme);
     effect(() => {
       const readOnly = this.readOnly();
       untracked(() => this.editor?.updateOptions({ readOnly }));
@@ -146,6 +149,7 @@ export class CodeEditorComponent implements FileEditor {
       if (!this.editor) {
         this.editor = monaco.editor.create(this.editorHost().nativeElement, {
           model: this.model,
+          theme: monacoThemeFor(appTheme(this.document)),
           automaticLayout: true,
           readOnly: this.readOnly(),
           minimap: { enabled: false },

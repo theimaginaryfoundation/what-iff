@@ -1,5 +1,7 @@
 import { InjectionToken } from '@angular/core';
 
+import { defineMonacoThemes } from './monaco-themes';
+
 export type Monaco = typeof import('monaco-editor');
 
 /** Monaco's stylesheet, built as a lazy global style (angular.json `styles`, `inject: false`). */
@@ -46,7 +48,9 @@ export function loadMonaco(document: Document): Promise<Monaco> {
         }
       },
     };
-    return import('monaco-editor');
+    const monaco = await import('monaco-editor');
+    defineMonacoThemes(monaco);
+    return monaco;
   })();
   // A failed load is not kept, so the next editor retries instead of failing until a reload.
   const attempt = monacoPromise;

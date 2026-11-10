@@ -254,6 +254,18 @@ describe('ContextPanelService', () => {
             expect(rightPanel.setVisible).toHaveBeenLastCalledWith(true);
         });
 
+        it('makes way for an opening file on both layouts, keeping the remembered state', () => {
+            mockViewport(false);
+            service.setDesktopVisible(true);
+            service.openMobile();
+
+            service.hideForOpenFile();
+
+            expect(rightPanel.setVisible).toHaveBeenLastCalledWith(false);
+            expect(service.mobileOpen()).toBe(false);
+            expect(localStorage.getItem(DESKTOP_OPEN_STORAGE_KEY)).toBe('true');
+        });
+
         it('keeps the remembered state when the chat page hides the panel on exit', () => {
             service.setDesktopVisible(true);
 

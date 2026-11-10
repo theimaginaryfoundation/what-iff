@@ -1,0 +1,52 @@
+// Office documents name fonts this machine rarely has (Aptos, Calibri, Cambria, Segoe UI…).
+// Without an alias the browser falls back to its default serif, which is what Excel, Word and
+// PowerPoint files looked like before. These @font-face rules map each Office name to the
+// closest fonts commonly installed (metric-compatible ones first), so canvas and DOM text in the
+// office editors keep the look of the original. Only local fonts are referenced: nothing is fetched.
+// These names are also in the app's own font stacks, so this is a lazy style that only the office
+// editors link (shared/office-fonts.ts). Injecting it globally changes text across the app.
+@mixin office-alias($name, $locals...) {
+  @font-face {
+    font-family: $name;
+    src: $locals;
+  }
+}
+
+@include office-alias("Aptos", local("Aptos"), local("Segoe UI"), local("Helvetica Neue"), local("Arial"), local("Liberation Sans"));
+@include office-alias(
+  "Aptos Display",
+  local("Aptos Display"),
+  local("Segoe UI"),
+  local("Helvetica Neue"),
+  local("Arial"),
+  local("Liberation Sans")
+);
+@include office-alias(
+  "Aptos Narrow",
+  local("Aptos Narrow"),
+  local("Arial Narrow"),
+  local("Liberation Sans Narrow"),
+  local("Helvetica Neue"),
+  local("Arial")
+);
+@include office-alias("Calibri", local("Calibri"), local("Carlito"), local("Helvetica Neue"), local("Arial"), local("Liberation Sans"));
+@include office-alias("Calibri Light", local("Calibri Light"), local("Carlito"), local("Helvetica Neue"), local("Arial"));
+@include office-alias("Cambria", local("Cambria"), local("Caladea"), local("Georgia"), local("Liberation Serif"), local("Times New Roman"));
+@include office-alias("Segoe UI", local("Segoe UI"), local("Helvetica Neue"), local("Arial"), local("Liberation Sans"));
+@include office-alias("Arial Narrow", local("Arial Narrow"), local("Liberation Sans Narrow"), local("Arial"));
+@include office-alias("Times New Roman", local("Times New Roman"), local("Liberation Serif"), local("Tinos"), local("Times"));
+@include office-alias("Courier New", local("Courier New"), local("Liberation Mono"), local("Cousine"), local("Courier"));
+@include office-alias("Georgia", local("Georgia"), local("Gelasio"), local("Liberation Serif"));
+@include office-alias("Verdana", local("Verdana"), local("DejaVu Sans"), local("Arial"));
+@include office-alias("Tahoma", local("Tahoma"), local("DejaVu Sans"), local("Arial"));
+@include office-alias("Garamond", local("Garamond"), local("EB Garamond"), local("Georgia"), local("Liberation Serif"));
+@include office-alias("Century Gothic", local("Century Gothic"), local("URW Gothic"), local("Avant Garde"), local("Arial"));
+@include office-alias("Franklin Gothic", local("Franklin Gothic"), local("Libre Franklin"), local("Arial"));
+@include office-alias("Poppins", local("Poppins"), local("Segoe UI"), local("Helvetica Neue"), local("Arial"));
+@include office-alias("Montserrat", local("Montserrat"), local("Segoe UI"), local("Helvetica Neue"), local("Arial"));
+@include office-alias("Open Sans", local("Open Sans"), local("Segoe UI"), local("Helvetica Neue"), local("Arial"));
+@include office-alias("Roboto", local("Roboto"), local("Segoe UI"), local("Helvetica Neue"), local("Arial"));
+@include office-alias("Lato", local("Lato"), local("Segoe UI"), local("Helvetica Neue"), local("Arial"));
+@include office-alias("Consolas", local("Consolas"), local("Liberation Mono"), local("Menlo"), local("Courier New"));
+@include office-alias("Wingdings", local("Wingdings"), local("Symbola"), local("DejaVu Sans"));
+@include office-alias("Symbol", local("Symbol"), local("Symbola"), local("DejaVu Sans"));

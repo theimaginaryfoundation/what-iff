@@ -6,9 +6,10 @@ import { FileAttachment, isImageAttachment } from '../../../core/models/file-att
  * - text: plain text or source code, never interpreted (HTML and SVG source included).
  * - pdf: the browser's own PDF viewer, where it has one.
  * - image: the bytes as an image (only reached by a direct ?file= link; the grid opens images in the image popup).
- * - none: no preview (office documents, archives, unknown binaries); download only.
+ * - spreadsheet / document / slides: the office suite (ADR 0x043): Univer Sheets, Univer Docs, our Slides editor.
+ * - none: no preview (archives, unknown binaries); download only.
  */
-export type FilePreviewKind = 'markdown' | 'csv' | 'text' | 'pdf' | 'image' | 'none';
+export type FilePreviewKind = 'markdown' | 'csv' | 'text' | 'pdf' | 'image' | 'spreadsheet' | 'document' | 'slides' | 'none';
 
 /** Text bigger than this is cut off in the viewer (download for the rest). */
 export const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024;
@@ -18,6 +19,12 @@ export const MAX_MARKDOWN_RENDER_CHARS = 300_000;
 export const MAX_CSV_TABLE_ROWS = 2_000;
 
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown', '.mdx']);
+const SPREADSHEET_EXTENSIONS = new Set(['.xlsx', '.xlsm']);
+const DOCUMENT_EXTENSIONS = new Set(['.docx']);
+const SLIDES_EXTENSIONS = new Set(['.pptx']);
+const SPREADSHEET_MIME_TYPES = new Set(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel.sheet.macroenabled.12']);
+const DOCUMENT_MIME_TYPES = new Set(['application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
+const SLIDES_MIME_TYPES = new Set(['application/vnd.openxmlformats-officedocument.presentationml.presentation']);
 const CSV_EXTENSIONS = new Set(['.csv', '.tsv']);
 /** Extensions read as text whatever MIME type the upload claimed (browsers often send none for code). */
 const TEXT_EXTENSIONS = new Set([
@@ -52,6 +59,9 @@ export function previewKindFor(file: Pick<FileAttachment, 'name' | 'file_type'>)
   if (MARKDOWN_EXTENSIONS.has(ext) || mime === 'text/markdown' || mime === 'text/x-markdown') return 'markdown';
   if (CSV_EXTENSIONS.has(ext) || mime === 'text/csv' || mime === 'text/tab-separated-values') return 'csv';
   if (mime === 'application/pdf' || ext === '.pdf') return 'pdf';
+  if (SPREADSHEET_EXTENSIONS.has(ext) || SPREADSHEET_MIME_TYPES.has(mime)) return 'spreadsheet';
+  if (DOCUMENT_EXTENSIONS.has(ext) || DOCUMENT_MIME_TYPES.has(mime)) return 'document';
+  if (SLIDES_EXTENSIONS.has(ext) || SLIDES_MIME_TYPES.has(mime)) return 'slides';
   // SVG is an image type but is markup that can carry script: show its source, never render it.
   if (mime === 'image/svg+xml' || ext === '.svg') return 'text';
   if (isImageAttachment(file)) return 'image';
@@ -82,6 +92,12 @@ export function fileTypeLabel(file: Pick<FileAttachment, 'name' | 'file_type'>):
       return csvDelimiterFor(file) === '\t' ? 'TSV table' : 'CSV table';
     case 'pdf':
       return 'PDF';
+    case 'spreadsheet':
+      return 'Spreadsheet';
+    case 'document':
+      return 'Document';
+    case 'slides':
+      return 'Presentation';
     case 'image':
       return 'Image';
     case 'text':
