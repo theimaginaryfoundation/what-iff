@@ -14,7 +14,7 @@ const DIRTY_CHECK_MS = 300;
 const HISTORY_LIMIT = 100;
 
 /**
- * The notebook viewer and editor (ADR 0x043 §8): our own cells over nbformat. The same component is
+ * The notebook viewer and editor (ADR 0x043 §11): our own cells over nbformat. The same component is
  * both: `readOnly` defaults to true and the host sets false for the editor role. Edits are to cells
  * and their order; nothing executes here.
  */

@@ -57,7 +57,7 @@ export class ImageDetailModalComponent {
   readonly next = output<void>();
   readonly previous = output<void>();
   readonly delete = output<string>();
-  /** Opens the image in the file workspace, where it can be edited (ADR 0x043 §6). */
+  /** Opens the image in the file workspace, where it can be edited (ADR 0x043 §5). */
   readonly edit = output<string>();
   readonly assign = output<string>();
   readonly rename = output<{ id: string; name: string }>();

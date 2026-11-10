@@ -12,6 +12,7 @@ import {
   pxToEmu,
   pxToTwips,
 } from '../shared/ooxml';
+import { paragraphSegments, sdtTags, withRunExtras } from './docx-revisions';
 import { H_ALIGN, H_RELATIVE, V_ALIGN, V_RELATIVE } from './docx-body';
 import { notesPartXml, wordNoteIds } from './docx-notes';
 import { PartRels, PatchSource, SourceNumbering, readSourceNumbering } from './docx-patch';
@@ -31,6 +32,7 @@ import {
 import {
   CUSTOM_RANGE,
   DocBody,
+  DocCustomRange,
   DocDocument,
   DocDrawing,
   DocHeaderFooter,
@@ -44,6 +46,7 @@ import {
   DocTextStyle,
   LAYOUT,
   TOKEN,
+  isNoBorder,
 } from './univer-doc-types';
 
 export interface DocxExportResult {
@@ -323,6 +326,13 @@ class DocxWriter {
       noteAt: new Map(),
       before: new Map(),
       after: new Map(),
+      outerOpen: new Map(),
+      outerClose: new Map(),
+      breakAt: new Map(),
+      rPrChanges: [],
+      blockSdts: [],
+      rowSdts: [],
+      cellSdts: [],
     };
     for (const p of body.paragraphs ?? []) ctx.paragraphAt.set(p.startIndex, p);
     for (const t of body.tables ?? []) ctx.tableAt.set(t.startIndex, t);
@@ -356,6 +366,23 @@ class DocxWriter {
       const raw = ctx.rawAt.get(at);
       if (raw) out.push(...raw);
     };
+    // Controls around whole blocks open with the first block that holds their start, and close after
+    // the block that holds their end, so an edit that moves either end still leaves them balanced.
+    const pending = ctx.blockSdts.filter(r => r.startIndex >= from && r.startIndex <= to).sort((a, b) => a.startIndex - b.startIndex || b.endIndex - a.endIndex);
+    const open: { end: number; close: string }[] = [];
+    const openFor = (first: number, last: number) => {
+      // Those before this block lie inside a table already written, whose cells opened their own.
+      while (pending.length && pending[0].startIndex < first) pending.shift();
+      while (pending.length && pending[0].startIndex >= first && pending[0].startIndex <= last) {
+        const range = pending.shift()!;
+        const tags = sdtTags(stream, range);
+        out.push(tags.open);
+        open.push({ end: range.endIndex, close: tags.close });
+      }
+    };
+    const closeThrough = (last: number) => {
+      while (open.length && open[open.length - 1].end <= last) out.push(open.pop()!.close);
+    };
     while (i < to) {
       emitRaw(i);
       const ch = stream[i];
@@ -365,7 +392,9 @@ class DocxWriter {
           i++;
           continue;
         }
+        openFor(i, i);
         out.push(this.tableXml(ctx, table.startIndex, table.endIndex, table.tableId));
+        closeThrough(table.endIndex - 1);
         i = table.endIndex;
         paragraphStart = i;
         continue;
@@ -377,7 +406,9 @@ class DocxWriter {
         const section = next === TOKEN.SECTION_BREAK ? sections.find(s => s.startIndex === i + 1) : undefined;
         const isFinal = section && i + 2 >= to && hasFinalSectPr;
         const sectXml = section && !isFinal && i + 2 < to ? this.sectPrXml(section, () => null) : '';
+        openFor(paragraphStart, i);
         out.push(this.paragraphXml(ctx, paragraphStart, i, paragraph, sectXml));
+        closeThrough(i);
         i += section ? 2 : 1;
         paragraphStart = i;
         continue;
@@ -390,11 +421,12 @@ class DocxWriter {
       i++;
     }
     emitRaw(to);
+    while (open.length) out.push(open.pop()!.close);
   }
 
   private paragraphXml(ctx: WriteContext, from: number, to: number, paragraph: DocParagraph | undefined, sectPrXml: string): string {
     const style = paragraph?.paragraphStyle ? { ...paragraph.paragraphStyle } : undefined;
-    const styleId = paragraph?.styleId && this.styles[paragraph.styleId] ? paragraph.styleId : undefined;
+    const styleId = this.namedStyleOf(paragraph) ?? (paragraph?.styleId && this.styles[paragraph.styleId] ? paragraph.styleId : undefined);
     const namedBase = resolveTextStyle(this.styles, styleId);
     // The baked named-style text formatting comes back out of the paragraph; what remains is direct.
     const paragraphDirectTs = diffTextStyle(style?.textStyle, namedBase);
@@ -412,9 +444,22 @@ class DocxWriter {
       markTextStyle: paragraph?.paragraphStyle?.paragraphMarkTextStyle,
       sectPrXml,
       extras: paragraph?.docxPPr,
+      markExtras: paragraph?.docxMarkRPr,
     });
     const runs = this.runsXml(ctx, from, to, { ...namedBase, ...(paragraphDirectTs ?? {}) }, paragraphDirectTs);
     return `<w:p>${pPr}${runs}</w:p>`;
+  }
+
+  /**
+   * The style for a heading applied in the editor, which sets `namedStyleType` and leaves `styleId`
+   * alone. In patch mode only styles the document has count: its styles.xml is kept as it was.
+   */
+  private namedStyleOf(paragraph: DocParagraph | undefined): string | undefined {
+    const named = paragraph?.paragraphStyle?.namedStyleType;
+    if (named === undefined) return undefined;
+    if (paragraph?.styleId && this.styles[paragraph.styleId]?.paragraphStyle?.namedStyleType === named) return undefined;
+    const known = this.source ? (this.doc.styles ?? {}) : this.styles;
+    return Object.entries(known).find(([, s]) => s.type === 1 && s.paragraphStyle?.namedStyleType === named)?.[0];
   }
 
   /** The runs of one paragraph: text split by run style, hyperlinks, fields and special characters. */
@@ -441,7 +486,9 @@ class DocxWriter {
       for (const k of ctx.after.keys()) if (k + 1 > p && k + 1 < q) q = k + 1;
       return q;
     };
-    const emitText = (start: number, end: number, open: (ts: string, text: string) => string) => {
+    const rPrChangeAt = (pos: number): string =>
+      String(ctx.rPrChanges.find(r => r.startIndex <= pos && pos <= r.endIndex)?.properties?.['docxRPrChange'] ?? '');
+    const emitText = (start: number, end: number, open: (ts: string, text: string, at: number) => string) => {
       let p = start;
       while (p < end) {
         flush(ctx.before, p);
@@ -449,19 +496,22 @@ class DocxWriter {
         const runEnd = Math.min(end, run ? run.ed : (runs.find(r => r.st > p)?.st ?? end), nextMark(p, end));
         const text = stream.slice(p, runEnd);
         const direct = this.directTs(run, baseTs, paragraphDirectTs);
-        out.push(open(rPrXml(direct, run?.sId && this.styles[run.sId] ? run.sId : undefined), text));
+        const rPr = rPrXml(direct, run?.sId && this.styles[run.sId] ? run.sId : undefined);
+        out.push(open(withRunExtras(rPr, '', rPrChangeAt(p)), text, p));
         flush(ctx.after, runEnd - 1);
         p = runEnd;
       }
     };
-    const runXml = (rPr: string, text: string): string => {
+    const runXml = (rPr: string, text: string, at: number): string => {
       const pieces: string[] = [];
       let buf = '';
       const flush = () => {
         if (buf) pieces.push(`<w:t xml:space="preserve">${escapeXml(buf)}</w:t>`);
         buf = '';
       };
+      let pos = at - 1;
       for (const ch of text) {
+        pos += ch.length;
         if (ch === TOKEN.TAB) {
           flush();
           pieces.push('<w:tab/>');
@@ -470,7 +520,8 @@ class DocxWriter {
           pieces.push('<w:br w:type="page"/>');
         } else if (ch === TOKEN.COLUMN_BREAK) {
           flush();
-          pieces.push('<w:br w:type="column"/>');
+          // A bare \\v is a soft line break; see BodyBuilder.lineOrColumnBreak.
+          pieces.push(ctx.breakAt.get(pos) ?? '<w:br/>');
         } else if (
           ch === TOKEN.CUSTOM_RANGE_START ||
           ch === TOKEN.CUSTOM_RANGE_END ||
@@ -507,9 +558,10 @@ class DocxWriter {
         i++;
         continue;
       }
-      const range = ranges.find(r => r.startIndex === i);
-      if (range && (range.rangeType === CUSTOM_RANGE.HYPERLINK || range.rangeType === CUSTOM_RANGE.FIELD)) {
+      const range = ranges.find(r => r.startIndex === i && (r.rangeType === CUSTOM_RANGE.HYPERLINK || r.rangeType === CUSTOM_RANGE.FIELD));
+      if (range) {
         const rangeEnd = Math.min(to, range.endIndex + 1);
+        flush(ctx.outerOpen, i);
         const inner: string[] = [];
         const saved = out.length;
         emitText(i, rangeEnd, runXml);
@@ -528,6 +580,7 @@ class DocxWriter {
             `<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> ${escapeXml(instruction)} </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>${inner.join('')}<w:r><w:fldChar w:fldCharType="end"/></w:r>`,
           );
         }
+        flush(ctx.outerClose, rangeEnd - 1);
         i = rangeEnd;
         continue;
       }
@@ -558,10 +611,47 @@ class DocxWriter {
    */
   private planMarkers(ctx: WriteContext, body: DocBody, isMain: boolean): void {
     const push = (map: Map<number, string[]>, at: number, xml: string) => map.set(at, [...(map.get(at) ?? []), xml]);
+    const pushFirst = (map: Map<number, string[]>, at: number, xml: string) => map.set(at, [xml, ...(map.get(at) ?? [])]);
+    const isFlowRange = (r: DocCustomRange) => r.rangeType === CUSTOM_RANGE.HYPERLINK || r.rangeType === CUSTOM_RANGE.FIELD;
+    /** Wraps run-level content, staying outside a hyperlink or field it holds whole so the XML nests. */
+    const wrap = (start: number, end: number, open: string, close: string) => {
+      const flows = (body.customRanges ?? []).filter(isFlowRange);
+      if (flows.some(h => h.startIndex === start && h.endIndex <= end)) push(ctx.outerOpen, start, open);
+      else push(ctx.before, start, open);
+      if (flows.some(h => h.endIndex === end && h.startIndex >= start)) pushFirst(ctx.outerClose, end, close);
+      else pushFirst(ctx.after, end, close);
+    };
     const sorted = (body.customRanges ?? []).slice().sort((a, b) => a.startIndex - b.startIndex || b.endIndex - a.endIndex);
     for (const range of sorted) {
       const collapsed = !!range.properties?.['collapsed'];
       switch (range.rangeType) {
+        case CUSTOM_RANGE.SDT: {
+          const placement = range.properties?.['placement'];
+          if (placement === 'block') ctx.blockSdts.push(range);
+          else if (placement === 'row') ctx.rowSdts.push(range);
+          else if (placement === 'cell') ctx.cellSdts.push(range);
+          else {
+            paragraphSegments(body.dataStream, range.startIndex, range.endIndex).forEach((segment, n) => {
+              const tags = sdtTags(body.dataStream, range, n === 0);
+              wrap(segment.start, segment.end, tags.open, tags.close);
+            });
+          }
+          break;
+        }
+        case CUSTOM_RANGE.CUSTOM: {
+          const props = range.properties ?? {};
+          if (props['docxRevisionOpen']) {
+            for (const segment of paragraphSegments(body.dataStream, range.startIndex, range.endIndex))
+              wrap(segment.start, segment.end, String(props['docxRevisionOpen']), String(props['docxRevisionClose']));
+          } else if (props['docxRPrChange']) {
+            ctx.rPrChanges.push(range);
+            // A run is cut where the change's formatting starts and stops.
+            push(ctx.before, range.startIndex, '');
+            push(ctx.after, range.endIndex, '');
+          } else if (props['breakType'] === 'column') ctx.breakAt.set(range.startIndex, '<w:br w:type="column"/>');
+          else if (props['docxBreakXml']) ctx.breakAt.set(range.startIndex, String(props['docxBreakXml']));
+          break;
+        }
         case CUSTOM_RANGE.BOOKMARK: {
           const id = this.bookmarkCount++;
           const name = escapeXml(String(range.properties?.['name'] ?? `bm${id}`));
@@ -714,7 +804,7 @@ class DocxWriter {
     const tblPr = table.docxTblPr ?? `<w:tblPr>${tblW}${jc}${ind}${layout}${mar}${caption}</w:tblPr>`;
     const grid = `<w:tblGrid>${widths.map(w => `<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`;
     // Walk the stream row by row, cell by cell, in step with tableRows/tableCells.
-    const rows: string[] = [];
+    const rows: { xml: string; start: number; end: number }[] = [];
     let i = from + 1; // past TABLE_START
     let rowIndex = 0;
     // Vertical merges: a cell with rowSpan > 1 marks the covered cells below as continuations.
@@ -722,7 +812,8 @@ class DocxWriter {
     while (i < to && stream[i] === TOKEN.TABLE_ROW_START) {
       const row = table.tableRows[rowIndex];
       i++;
-      const cells: string[] = [];
+      const rowStart = i - 1;
+      const cells: { xml: string; start: number; end: number }[] = [];
       let cellIndex = 0;
       let gridCol = 0;
       while (i < to && stream[i] === TOKEN.TABLE_CELL_START) {
@@ -743,8 +834,10 @@ class DocxWriter {
           const span = cell?.columnSpan ?? 1;
           const continues = vMergeContinue.has(`${rowIndex}:${gridCol}`);
           if (cell?.rowSpan && cell.rowSpan > 1) for (let r = 1; r < cell.rowSpan; r++) vMergeContinue.add(`${rowIndex + r}:${gridCol}`);
-          cells.push(
-            this.cellXml(
+          cells.push({
+            start: cellStart - 1,
+            end: j,
+            xml: this.cellXml(
               ctx,
               cellStart,
               j - 1,
@@ -752,11 +845,11 @@ class DocxWriter {
               widths.slice(gridCol, gridCol + span).reduce((a, b) => a + b, 0),
               continues ? 'continue' : cell?.rowSpan && cell.rowSpan > 1 ? 'restart' : null,
             ),
-          );
+          });
           gridCol += span;
         } else if (vMergeContinue.has(`${rowIndex}:${gridCol}`)) {
           // The covered cell under a vertical merge is written as a continuation cell.
-          cells.push(this.cellXml(ctx, cellStart, cellStart, cell, widths[gridCol] ?? 0, 'continue'));
+          cells.push({ start: cellStart - 1, end: j, xml: this.cellXml(ctx, cellStart, cellStart, cell, widths[gridCol] ?? 0, 'continue') });
           gridCol += 1;
         } else {
           gridCol += 1;
@@ -764,6 +857,7 @@ class DocxWriter {
         cellIndex++;
         i = j + 1;
       }
+      const rowEnd = i;
       if (stream[i] === TOKEN.TABLE_ROW_END) i++;
       const trPr: { name: string; xml: string }[] = [];
       if (row?.trHeight && row.trHeight.hRule !== 0)
@@ -774,10 +868,12 @@ class DocxWriter {
       if (row?.cantSplit) trPr.push({ name: 'cantSplit', xml: '<w:cantSplit/>' });
       if (row?.repeatHeaderRow) trPr.push({ name: 'tblHeader', xml: '<w:tblHeader/>' });
       const trPrXml = orderedProperties(trPr, row?.docxTrPr, TRPR_ORDER);
-      rows.push(`<w:tr>${trPrXml ? `<w:trPr>${trPrXml}</w:trPr>` : ''}${cells.join('')}</w:tr>`);
+      wrapControls(stream, cells, ctx.cellSdts);
+      rows.push({ start: rowStart, end: rowEnd, xml: `<w:tr>${trPrXml ? `<w:trPr>${trPrXml}</w:trPr>` : ''}${cells.map(c => c.xml).join('')}</w:tr>` });
       rowIndex++;
     }
-    return `<w:tbl>${tblPr}${grid}${rows.join('')}</w:tbl>`;
+    wrapControls(stream, rows, ctx.rowSdts);
+    return `<w:tbl>${tblPr}${grid}${rows.map(r => r.xml).join('')}</w:tbl>`;
   }
 
   private cellXml(
@@ -870,6 +966,23 @@ class DocxWriter {
   }
 }
 
+/**
+ * Wraps the rows or cells a content control spans. One whose ends no longer fall on a row or cell
+ * (an edit took them away) is left out: the content stays, the control goes.
+ */
+function wrapControls(stream: string, items: { xml: string; start: number; end: number }[], controls: DocCustomRange[]): void {
+  const here = controls
+    .filter(r => items.some(it => it.start === r.startIndex) && items.some(it => it.end === r.endIndex))
+    .sort((a, b) => a.endIndex - a.startIndex - (b.endIndex - b.startIndex));
+  for (const range of here) {
+    const first = items.find(it => it.start === range.startIndex)!;
+    const last = items.find(it => it.end === range.endIndex)!;
+    const tags = sdtTags(stream, range);
+    first.xml = tags.open + first.xml;
+    last.xml += tags.close;
+  }
+}
+
 interface WriteContext {
   body: DocBody;
   scope: DocDocument;
@@ -888,6 +1001,15 @@ interface WriteContext {
   /** Marks (bookmarks, comment ranges) emitted before the character at a position, and after it. */
   before: Map<number, string[]>;
   after: Map<number, string[]>;
+  /** Tags that go outside a hyperlink or field starting or ending here. */
+  outerOpen: Map<number, string[]>;
+  outerClose: Map<number, string[]>;
+  /** The XML of a line or column break that is not a plain `<w:br/>`. */
+  breakAt: Map<number, string>;
+  rPrChanges: DocCustomRange[];
+  blockSdts: DocCustomRange[];
+  rowSdts: DocCustomRange[];
+  cellSdts: DocCustomRange[];
 }
 
 function dirOf(path: string): string {
@@ -945,7 +1067,10 @@ export function rootNamespaces(originalXml: string | null | undefined): string {
 }
 
 function cellBorderXml(name: string, b: DocTableCellBorder | undefined): string {
-  if (!b) return '';
+  // Unset is a table made in the editor, which Univer draws with its default line: say so, so the
+  // saved file looks the same in Word, where an unset side has none.
+  if (!b) return `<w:${name} w:val="single" w:sz="4" w:space="0" w:color="C7C9CC"/>`;
+  if (isNoBorder(b)) return `<w:${name} w:val="nil"/>`;
   const val = b.dashStyle === 2 ? 'dotted' : b.dashStyle === 3 ? 'dashed' : 'single';
   return `<w:${name} w:val="${val}" w:sz="${pxToEighths(b.width?.v ?? 0.5)}" w:space="0" w:color="${colorHex(b.color.rgb) ?? 'auto'}"/>`;
 }

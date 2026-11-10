@@ -2,7 +2,7 @@
 
 ## Role
 
-A process-wide seam that announces changes to a user's files (ADR 0x043 §9): a content write, a rename, or a file created from the file workspace.
+A process-wide seam that announces changes to a user's files (ADR 0x043 §3): a content write, a rename, or a file created from the file workspace.
 
 ## Responsibilities
 

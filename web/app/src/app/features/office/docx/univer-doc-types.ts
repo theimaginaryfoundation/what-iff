@@ -75,6 +75,8 @@ export interface DocParagraph {
   bullet?: DocBullet;
   /** Paragraph properties the model does not carry (tabs, frames, grid settings), as XML, written back as they were. */
   docxPPr?: string;
+  /** Revision marks on the paragraph mark: `w:ins` and the like first in its rPr, `w:rPrChange` last. */
+  docxMarkRPr?: { first?: string; last?: string };
 }
 
 export interface DocTextRun {
@@ -92,6 +94,8 @@ export interface DocCustomRange {
   /** CustomRangeType: 0 hyperlink, 1 field, 2 content control, 3 bookmark, 4 comment, 8 footnote, 9 endnote. */
   rangeType: number;
   wholeEntity?: boolean;
+  /** False keeps Univer from drawing a CUSTOM range underlined. */
+  active?: boolean;
   properties?: Record<string, unknown>;
 }
 
@@ -376,3 +380,13 @@ export const GLYPH = {
   lowerRoman: 7,
 } as const;
 export const LAYOUT = { inline: 0, none: 1, polygon: 2, square: 3, through: 4, tight: 5, topAndBottom: 6 } as const;
+
+/**
+ * A side with no line. Univer draws a default gray line where a cell has no border data at all, and
+ * draws nothing for a side that is explicitly invisible; in Word an unset side has no line.
+ */
+export const NO_BORDER: DocTableCellBorder = { color: { rgb: 'transparent' }, width: { v: 0 } };
+
+export function isNoBorder(border: DocTableCellBorder | undefined): boolean {
+  return !!border && (border.color?.rgb === 'transparent' || (border.width?.v ?? 1) <= 0);
+}

@@ -81,6 +81,11 @@
                 "inject": false
               },
               {
+                "input": "node_modules/@univerjs/preset-sheets-thread-comment/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
                 "input": "node_modules/@univerjs/preset-sheets-find-replace/lib/index.css",
                 "bundleName": "univer-sheets",
                 "inject": false

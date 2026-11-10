@@ -18,6 +18,10 @@ export interface ChartData {
   holeSize?: number;
   title?: string;
   grouping?: string;
+  /** False hides the legend; otherwise it shows when it says something. */
+  legend?: boolean;
+  categoryAxisTitle?: string;
+  valueAxisTitle?: string;
 }
 
 export interface ChartSvgOptions {
@@ -46,9 +50,19 @@ export function chartSvg(chart: ChartData, opts: ChartSvgOptions): string {
     parts.push(
       `<text x="${f(width / 2)}" y="16" text-anchor="middle" font-size="13" font-weight="600" fill="${text}">${esc(chart.title)}</text>`,
     );
-  const showLegend = chart.series.length > 1 || chart.type === 'pie' || chart.type === 'doughnut';
+  const showLegend = chart.legend !== false && (chart.series.length > 1 || chart.type === 'pie' || chart.type === 'doughnut');
   const legendH = showLegend ? 18 : 0;
-  const plot = { x: 36, y: titleH + 8, w: width - 44, h: height - titleH - legendH - 30 };
+  const axisBelow = chart.categoryAxisTitle ? 14 : 0;
+  const axisBeside = chart.valueAxisTitle ? 14 : 0;
+  const plot = { x: 36 + axisBeside, y: titleH + 8, w: width - 44 - axisBeside, h: height - titleH - legendH - 30 - axisBelow };
+  if (chart.categoryAxisTitle)
+    parts.push(
+      `<text x="${f(plot.x + plot.w / 2)}" y="${f(plot.y + plot.h + 26)}" text-anchor="middle" font-size="10" fill="${text}">${esc(chart.categoryAxisTitle)}</text>`,
+    );
+  if (chart.valueAxisTitle)
+    parts.push(
+      `<text transform="translate(10 ${f(plot.y + plot.h / 2)}) rotate(-90)" text-anchor="middle" font-size="10" fill="${text}">${esc(chart.valueAxisTitle)}</text>`,
+    );
   if (chart.type === 'pie' || chart.type === 'doughnut') parts.push(...pie(chart, plot, color, text));
   else if (chart.type === 'radar') parts.push(...radar(chart, plot, color, text));
   else parts.push(...cartesian(chart, plot, color, text));

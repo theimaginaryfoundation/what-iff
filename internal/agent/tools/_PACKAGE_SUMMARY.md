@@ -70,7 +70,7 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   It also renames: an optional `name` with exactly one id sets that file's display name (`Datastore.RenameGalleryFile`, via `models.NormalizeFileName`, which keeps the current extension when the new name has none; a chat-reuse copy's id renames its original).
   `folder` is optional too, but a call needs one of the two; a bad name is refused before anything moves.
 - **Agent file edits swap objects:** append and patch upload a new object and move the row's `s3_key` with `Datastore.SwapAgentFileObject` (a compare-and-swap on the old key), retrying on the fresh text when another writer won, then release the replaced object unless a reference row still uses it (`storage.ReleaseReplacedObject`).
-  A create or a successful swap announces itself through `internal/filechange` (ADR 0x043 §9), so the private build can push the file into the conversation's container.
+  A create or a successful swap announces itself through `internal/filechange` (ADR 0x043 §3), so the private build can push the file into the conversation's container.
   A created file always records `created_by_chat_id` (and the personality when there is one), so a conversation's agent files can be listed (ADR 0x043 §4); ownership still follows the personality first.
   Patches are unified diffs located by their text, nearest the header's line number; counts are ignored, and all hunks apply or none do.
 - **`list` files by origin and as a tree:** `origin` (`agent`/`user`) filters on `FileAttachmentFilters.Origin`, agent rows carry `origin: "agent"`, and `view="tree"` replaces `items` with a `tree` drawing of the page's paths (`list_tree.go`).

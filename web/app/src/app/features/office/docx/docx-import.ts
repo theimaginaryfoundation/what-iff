@@ -14,6 +14,7 @@ import {
 } from '../shared/ooxml';
 import { BodyBuilder, BodyContext, extrasXml } from './docx-body';
 import { noteIdFor, parseNotes } from './docx-notes';
+import { parseTableStyles } from './docx-table-styles';
 import { ParsedStyles, parseNumbering, parseStyles, paragraphPropsFromPPr } from './docx-styles';
 import {
   DocDocument,
@@ -68,6 +69,7 @@ export async function packageToDocument(pkg: OoxmlPackage, opts: DocxImportOptio
   const numbering = parseNumbering(numberingPart ? await pkg.xml(numberingPart) : null);
   const knownLists = new Set(Object.keys(numbering.lists));
   const styleNumbering = styleNumberingMap(stylesPart ? await pkg.xml(stylesPart) : null);
+  const tableStyles = parseTableStyles(stylesPart ? await pkg.xml(stylesPart) : null);
   const ids = new Map<string, number>();
   const nextId = (prefix: string) => {
     const n = (ids.get(prefix) ?? 0) + 1;
@@ -103,6 +105,7 @@ export async function packageToDocument(pkg: OoxmlPackage, opts: DocxImportOptio
     media: mediaFor(partPath, partRels),
     styles: parsedStyles.styles,
     styleNumbering,
+    tableStyles,
     knownLists,
     fidelity,
     where,
@@ -348,7 +351,6 @@ const MODELLED_SECTPR = new Set([
   'pgNumType',
   'cols',
   'titlePg',
-  'sectPrChange',
 ]);
 
 /** After inserting one character at `at`, every recorded offset at or past it moves by one. */

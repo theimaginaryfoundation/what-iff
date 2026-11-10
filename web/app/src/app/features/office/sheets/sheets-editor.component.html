@@ -1,0 +1,49 @@
+<div class="univer-editor sheets-editor" [class.univer-editor--read-only]="readOnly()">
+  @if (!noticeDismissed()) {
+    <app-fidelity-notice [losses]="losses()" [warnings]="warnings()" (dismiss)="dismissNotice()" />
+  }
+  @if (showObjectsBar()) {
+    <div class="sheets-editor__bar" role="toolbar" aria-label="Charts, pivot tables and slicers">
+      @for (entry of panels; track entry.id) {
+        <button type="button" class="sheets-editor__tool" [attr.aria-pressed]="panel() === entry.id" (click)="togglePanel(entry.id)">{{ entry.label }}</button>
+      }
+    </div>
+  }
+  <div class="sheets-editor__main">
+    <div class="univer-editor__stage sheets-editor__stage">
+      <!-- Univer measures its container when created, so the container stays visible while loading. -->
+      <div
+        #container
+        class="univer-editor__univer"
+        [attr.aria-label]="(readOnly() ? '' : 'Editor for ') + file().name"
+        [attr.aria-busy]="state() === 'loading'"
+      ></div>
+      @if (state() === "error") {
+        <p class="univer-editor__placeholder" role="alert">{{ error() }}</p>
+      } @else if (state() === "loading") {
+        <p class="univer-editor__placeholder" role="status">Loading the {{ noun }}…</p>
+      }
+    </div>
+    @if (panel() && !readOnly()) {
+      <aside class="sheets-editor__panel" [attr.aria-label]="panelLabel()">
+        @switch (panel()) {
+          @case ("charts") {
+            @if (charts(); as session) {
+              <app-sheet-charts-panel [session]="session" [grid]="grid()!" />
+            }
+          }
+          @case ("pivots") {
+            @if (pivots(); as workspace) {
+              <app-sheet-pivots-panel [workspace]="workspace" [grid]="grid()!" (changed)="markObjectsChanged()" />
+            }
+          }
+          @case ("slicers") {
+            @if (slicers(); as workspace) {
+              <app-sheet-slicers-panel [workspace]="workspace" (changed)="markObjectsChanged()" />
+            }
+          }
+        }
+      </aside>
+    }
+  </div>
+</div>

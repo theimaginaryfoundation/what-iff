@@ -178,8 +178,8 @@ describe('xlsx import', () => {
     });
   });
 
-  it('carries validation, conditional formatting, notes, images and the filter as plugin resources', () => {
-    const { workbook } = excelToWorkbook(sampleWorkbook(), { id: 'wb', name: 'sample.xlsx' });
+  it('carries validation, conditional formatting, notes, images and the filter as plugin resources', async () => {
+    const { workbook } = await xlsxToWorkbook(await sampleWorkbook().xlsx.writeBuffer() as ArrayBuffer, { id: 'wb', name: 'sample.xlsx' });
     const sheetId = workbook.sheetOrder[0];
     const dv = readResource<Record<string, UniverDataValidationRule[]>>(workbook, RESOURCE_DATA_VALIDATION)!;
     expect(dv[sheetId]).toHaveLength(2);

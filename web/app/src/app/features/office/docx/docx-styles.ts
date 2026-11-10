@@ -259,6 +259,8 @@ export function paragraphPropsFromPPr(pPr: Element | null | undefined): Paragrap
 }
 
 export interface PPrXmlOptions {
+  /** Revision marks kept for the paragraph mark's rPr. */
+  markExtras?: { first?: string; last?: string };
   styleId?: string;
   numbering?: { numId: string; level: number };
   markTextStyle?: DocTextStyle;
@@ -413,6 +415,11 @@ export function orderedProperties(built: { name: string; xml: string }[], extras
     .join('');
 }
 
+function withMarkExtras(rPr: string, extras: PPrXmlOptions['markExtras']): string {
+  if (!extras?.first && !extras?.last) return rPr;
+  return `<w:rPr>${extras.first ?? ''}${rPr.replace(/^<w:rPr>/, '').replace(/<\/w:rPr>$/, '')}${extras.last ?? ''}</w:rPr>`;
+}
+
 export function pPrXml(style: DocParagraphStyle | undefined, opts: PPrXmlOptions = {}): string {
   const parts: { name: string; xml: string }[] = [];
   const add = (name: string, xml: string) => parts.push({ name, xml });
@@ -454,7 +461,7 @@ export function pPrXml(style: DocParagraphStyle | undefined, opts: PPrXmlOptions
   const jc = s.horizontalAlign !== undefined ? JC_FROM_UNIVER[s.horizontalAlign] : undefined;
   if (jc) add('jc', `<w:jc w:val="${jc}"/>`);
   if (s.outlineLevel !== undefined) add('outlineLvl', `<w:outlineLvl w:val="${s.outlineLevel}"/>`);
-  const mark = rPrXml(opts.markTextStyle);
+  const mark = withMarkExtras(rPrXml(opts.markTextStyle), opts.markExtras);
   if (mark) add('rPr', mark);
   if (opts.sectPrXml) add('sectPr', opts.sectPrXml);
   if (!parts.length && !opts.extras) return '';

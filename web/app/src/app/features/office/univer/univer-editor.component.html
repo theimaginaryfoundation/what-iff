@@ -2,6 +2,11 @@
   @if (!noticeDismissed()) {
     <app-fidelity-notice [losses]="losses()" [warnings]="warnings()" (dismiss)="dismissNotice()" />
   }
+  @if (!readOnly() && state() === "ready") {
+    <div class="univer-editor__bar" role="toolbar" aria-label="Page view">
+      <button type="button" class="univer-editor__tool" [attr.aria-pressed]="showGuides()" (click)="toggleGuides()">Show guides</button>
+    </div>
+  }
   <div class="univer-editor__stage">
     <!-- Univer measures its container when created, so the container stays visible while loading. -->
     <div

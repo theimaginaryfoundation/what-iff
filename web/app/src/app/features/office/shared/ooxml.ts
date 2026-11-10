@@ -96,7 +96,8 @@ export class OoxmlPackage {
   }
 
   put(path: string, content: string | Uint8Array): void {
-    this.zip.file(normalizePath(path), content);
+    // No directory entries: Office's own packages have none.
+    this.zip.file(normalizePath(path), content, { createFolders: false });
   }
 
   async save(mimeType: string): Promise<Uint8Array> {

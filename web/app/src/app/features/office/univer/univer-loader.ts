@@ -19,12 +19,22 @@ export interface UniverSheetsKit {
   options(container: HTMLElement, opts?: { readOnly?: boolean; formulaWorker?: Worker | null }): Parameters<UniverPresets['createUniver']>[0];
   /** A formula worker for one instance (null where workers are unavailable); the caller terminates it. */
   createFormulaWorker(): Worker | null;
+  /**
+   * Paints a picture's new source now. Univer stores a changed source but its image shape only reads
+   * it when the sheet is next rendered from scratch, so a redrawn chart would look stale until then.
+   */
+  repaintDrawing(univer: Univer, drawing: { unitId: string; subUnitId: string; drawingId: string }, source: string): void;
 }
 
 export interface UniverDocsKit {
   createUniver: UniverPresets['createUniver'];
   options(container: HTMLElement, opts?: { readOnly?: boolean }): Parameters<UniverPresets['createUniver']>[0];
   UniverInstanceType: UniverPresets['UniverInstanceType'];
+  /**
+   * Shows or hides the editing guides: margin corners and lines for table sides that have no border.
+   * Paint only, so the document and its layout do not change. False when the page is not rendered yet.
+   */
+  setDocGuides(univer: Univer, unitId: string, show: boolean): boolean;
 }
 
 export const UNIVER_SHEETS_STYLESHEET = 'univer-sheets.css';
@@ -54,6 +64,19 @@ export function createFormulaWorker(): Worker | null {
   }
 }
 
+const DOC_MAIN_COMPONENT = '__Document_Render_Main__';
+const DOC_BACKGROUND_COMPONENT = '__Document_Render_Background__';
+/** A table side with no border, while guides are showing: dashed and light, as Word's gridlines are. */
+const DOC_GUIDE_LINE = { color: { rgb: '#B8C0CC' }, width: { v: 0.75 }, dashStyle: 3 };
+
+interface DocRenderComponent {
+  makeDirty(dirty: boolean): void;
+  _marginStrokeColor?: string;
+  _resolveTableCellBorder?(primary: unknown, secondary: unknown): unknown;
+  /** Univer's own method, kept while it is wrapped. */
+  __resolveTableCellBorder?(primary: unknown, secondary: unknown): unknown;
+}
+
 let sheetsKit: Promise<UniverSheetsKit> | null = null;
 let docsKit: Promise<UniverDocsKit> | null = null;
 
@@ -70,6 +93,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       sort,
       find,
       note,
+      threadComment,
       enUS,
       dvUS,
       cfUS,
@@ -79,6 +103,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       sortUS,
       findUS,
       noteUS,
+      threadCommentUS,
     ] = await Promise.all([
       import('@univerjs/presets'),
       import('@univerjs/preset-sheets-core'),
@@ -90,6 +115,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       import('@univerjs/preset-sheets-sort'),
       import('@univerjs/preset-sheets-find-replace'),
       import('@univerjs/preset-sheets-note'),
+      import('@univerjs/preset-sheets-thread-comment'),
       import('@univerjs/preset-sheets-core/locales/en-US'),
       import('@univerjs/preset-sheets-data-validation/locales/en-US'),
       import('@univerjs/preset-sheets-conditional-formatting/locales/en-US'),
@@ -99,6 +125,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       import('@univerjs/preset-sheets-sort/locales/en-US'),
       import('@univerjs/preset-sheets-find-replace/locales/en-US'),
       import('@univerjs/preset-sheets-note/locales/en-US'),
+      import('@univerjs/preset-sheets-thread-comment/locales/en-US'),
       linkStylesheet(document, UNIVER_SHEETS_STYLESHEET, 'univerSheets'),
     ]);
     const strings = presets.merge(
@@ -112,10 +139,16 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       sortUS.default,
       findUS.default,
       noteUS.default,
+      threadCommentUS.default,
     );
     return {
       createUniver: presets.createUniver,
       createFormulaWorker,
+      repaintDrawing: (univer, { unitId, subUnitId, drawingId }, source) => {
+        const scene = univer.__getInjector().get(core.IRenderManagerService).getRenderUnitById(unitId)?.scene;
+        const shape = scene?.getObjectIncludeInGroup(`${unitId}#-#${subUnitId}#-#${drawingId}`) as { changeSource?(url: string): void } | undefined;
+        shape?.changeSource?.(source);
+      },
       options: (container, opts) => ({
         locale: presets.LocaleType.EN_US,
         locales: { [presets.LocaleType.EN_US]: strings },
@@ -141,6 +174,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
           sort.UniverSheetsSortPreset(),
           find.UniverSheetsFindReplacePreset(),
           note.UniverSheetsNotePreset(),
+          threadComment.UniverSheetsThreadCommentPreset(),
         ],
       }),
     };
@@ -164,6 +198,21 @@ export function loadUniverDocs(document: Document): Promise<UniverDocsKit> {
     return {
       createUniver: presets.createUniver,
       UniverInstanceType: presets.UniverInstanceType,
+      setDocGuides: (univer, unitId, show) => {
+        const injector = univer.__getInjector();
+        const components = injector.get(core.IRenderManagerService).getRenderUnitById(unitId)?.components as Map<string, DocRenderComponent> | undefined;
+        const main = components?.get(DOC_MAIN_COMPONENT);
+        const background = components?.get(DOC_BACKGROUND_COMPONENT);
+        if (!main || !background) return false;
+        // Univer has no option for either, so this reaches two fields of the pinned version.
+        const resolve = main.__resolveTableCellBorder ?? main._resolveTableCellBorder!;
+        main.__resolveTableCellBorder = resolve;
+        main._resolveTableCellBorder = show ? (primary, secondary) => resolve.call(main, primary, secondary) ?? DOC_GUIDE_LINE : resolve;
+        background._marginStrokeColor = show ? undefined : 'transparent';
+        main.makeDirty(true);
+        background.makeDirty(true);
+        return true;
+      },
       options: (container, opts) => ({
         locale: presets.LocaleType.EN_US,
         locales: { [presets.LocaleType.EN_US]: strings },

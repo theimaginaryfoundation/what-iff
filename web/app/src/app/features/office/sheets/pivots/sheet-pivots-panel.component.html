@@ -1,0 +1,121 @@
+<div class="objects-panel">
+  <div class="objects-panel__row">
+    <button type="button" class="objects-panel__tool" (click)="startCreate()">New from selection</button>
+    @if (workspace().sourceChanged()) {
+      <button type="button" class="objects-panel__tool objects-panel__tool--primary" (click)="refreshAll()">Refresh, the source changed</button>
+    }
+  </div>
+
+  @if (message(); as text) {
+    <p class="objects-panel__message" role="alert">{{ text }}</p>
+  }
+
+  @if (creating()) {
+    <div class="objects-panel__section" aria-label="New pivot table">
+      <label class="objects-panel__label">
+        Goes on
+        <select class="objects-panel__select" [value]="newSheet()" (change)="newSheet.set($any($event.target).value)">
+          @for (name of sheets(); track name) {
+            <option [value]="name" [selected]="name === newSheet()">{{ name }}</option>
+          }
+          <option value="__new__">A new sheet</option>
+        </select>
+      </label>
+      @if (newSheet() !== "__new__") {
+        <label class="objects-panel__label">
+          At cell
+          <input class="objects-panel__input" [value]="newCell()" (input)="newCell.set($any($event.target).value)" />
+        </label>
+      }
+      <div class="objects-panel__row">
+        <button type="button" class="objects-panel__tool objects-panel__tool--primary" (click)="create()">Create</button>
+        <button type="button" class="objects-panel__tool" (click)="creating.set(false)">Cancel</button>
+      </div>
+    </div>
+  }
+
+  @if (pending(); as ask) {
+    <div class="objects-panel__section" role="alertdialog" aria-label="Overwrite cells">
+      <p class="objects-panel__message">This layout would overwrite cells starting at {{ ask.where }}.</p>
+      <div class="objects-panel__row">
+        <button type="button" class="objects-panel__tool objects-panel__tool--primary" (click)="confirmOverwrite()">Overwrite</button>
+        <button type="button" class="objects-panel__tool" (click)="cancelOverwrite()">Cancel</button>
+      </div>
+    </div>
+  }
+
+  @if (workspace().entries().length > 1) {
+    <label class="objects-panel__label">
+      Pivot table
+      <select class="objects-panel__select" (change)="selectedId.set($any($event.target).value); filterField.set(null)">
+        <option value="">Choose…</option>
+        @for (entry of workspace().entries(); track entry.id) {
+          <option [value]="entry.id" [selected]="entry.id === selected()?.id">{{ entry.name }} ({{ entry.sheet }})</option>
+        }
+      </select>
+    </label>
+  } @else if (!workspace().entries().length && !creating()) {
+    <p class="objects-panel__empty">No pivot tables yet. Select cells with a header row, then choose New from selection.</p>
+  }
+
+  @if (selected(); as entry) {
+    <h3 class="objects-panel__title">{{ entry.name }}</h3>
+    @if (entry.limits.length) {
+      <p class="objects-panel__message">This pivot table is kept in the file and Excel refreshes it, but it can't be changed here because {{ entry.limits.join(" and ") }}.</p>
+    } @else {
+      <div class="objects-panel__section" aria-label="Fields">
+        @for (field of fields(); track field) {
+          <div class="objects-panel__field">
+            <span class="objects-panel__field-name" [title]="field">{{ field }}</span>
+            <select class="objects-panel__select" [attr.aria-label]="'Area for ' + field" (change)="setArea(entry, field, $any($event.target).value)">
+              @for (area of areas; track area.id) {
+                <option [value]="area.id" [selected]="area.id === areaOf(entry, field)">{{ area.label }}</option>
+              }
+            </select>
+            <button type="button" class="objects-panel__tool" [attr.aria-pressed]="filterField() === field" [attr.aria-label]="'Filter ' + field" (click)="filterField.set(filterField() === field ? null : field)">
+              Filter{{ entry.config.hidden[field]?.length ? " •" : "" }}
+            </button>
+          </div>
+          @if (filterField() === field) {
+            <div class="objects-panel__items">
+              @for (item of filterItems(); track item.label) {
+                <label class="objects-panel__item">
+                  <ui-checkbox [checked]="item.shown" (checkedChange)="toggleItem(entry, field, item.label, $event)" />
+                  {{ item.label }}
+                </label>
+              }
+            </div>
+          }
+        }
+      </div>
+      @if (entry.config.values.length) {
+        <div class="objects-panel__section" aria-label="Values">
+          @for (value of entry.config.values; track $index; let i = $index) {
+            <label class="objects-panel__label">
+              {{ value.field }}
+              <select class="objects-panel__select" (change)="setAggregate(entry, i, $any($event.target).value)">
+                @for (a of aggregates; track a.id) {
+                  <option [value]="a.id" [selected]="a.id === value.aggregate">{{ a.label }}</option>
+                }
+              </select>
+            </label>
+          }
+        </div>
+      }
+      <div class="objects-panel__section">
+        <label class="objects-panel__item">
+          <ui-checkbox [checked]="entry.config.rowGrandTotals" (checkedChange)="setGrand(entry, 'rowGrandTotals', $event)" />
+          Grand total row
+        </label>
+        <label class="objects-panel__item">
+          <ui-checkbox [checked]="entry.config.colGrandTotals" (checkedChange)="setGrand(entry, 'colGrandTotals', $event)" />
+          Grand total column
+        </label>
+      </div>
+      <div class="objects-panel__row">
+        <button type="button" class="objects-panel__tool" (click)="refresh(entry)">Refresh</button>
+        <button type="button" class="objects-panel__tool" (click)="remove(entry)">Delete</button>
+      </div>
+    }
+  }
+</div>

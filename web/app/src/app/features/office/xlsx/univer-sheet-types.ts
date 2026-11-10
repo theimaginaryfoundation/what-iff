@@ -118,6 +118,7 @@ export interface UniverDataValidationRule {
   error?: string;
   errorTitle?: string;
   errorStyle?: number;
+  showDropDown?: boolean;
   showInputMessage?: boolean;
   prompt?: string;
   promptTitle?: string;

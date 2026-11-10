@@ -209,7 +209,7 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
     }
   }
 
-  private setDirty(value: boolean): void {
+  protected setDirty(value: boolean): void {
     if (this.dirty() === value) return;
     this.dirty.set(value);
     this.dirtyChange.emit(value);

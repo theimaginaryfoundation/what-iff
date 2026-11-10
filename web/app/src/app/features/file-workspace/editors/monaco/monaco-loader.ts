@@ -10,7 +10,7 @@ export const MONACO_STYLESHEET = 'monaco.css';
 let monacoPromise: Promise<Monaco> | undefined;
 
 /**
- * Loads Monaco once (ADR 0x043 step 0 recipe): links its stylesheet, points each language service
+ * Loads Monaco once (ADR 0x043 recipe): links its stylesheet, points each language service
  * at its own worker bundle, then imports the editor. Language tokenizers register lazily inside
  * Monaco, so this costs nothing per language. Mirrors loadKatex().
  */

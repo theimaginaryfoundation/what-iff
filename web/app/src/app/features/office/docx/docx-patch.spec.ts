@@ -225,7 +225,7 @@ describe('docx patch mode', () => {
     expect(xml).toMatch(/<w:pStyle w:val="Heading1"\/><w:tabs>/);
     expect(xml).toContain('<w:tblStyle w:val="TableGrid"/>');
     expect(xml).toMatch(/<w:trPr><w:cnfStyle[^>]*\/><\/w:trPr>/);
-    expect(xml).toMatch(/<w:tcW[^>]*\/><w:noWrap\/>/);
+    expect(xml).toMatch(/<w:tcW[^>]*\/>(?:<w:tcBorders>.*?<\/w:tcBorders>)?<w:noWrap\/>/);
     expect(xml).toMatch(/<w:docGrid w:linePitch="360"\/><\/w:sectPr>/);
     // Relationships the raw XML and the section depend on are the original ones, plus nothing broken.
     const rels = await pkg.rels('word/document.xml');
@@ -331,5 +331,95 @@ describe('docx patch mode', () => {
     expect(await pkg.text('word/footnotes.xml')).toContain('A footnote.');
     expect(xml).toContain('<wps:wsp');
     expect(xml).toContain('<w:bookmarkStart');
+  });
+});
+
+describe('table borders', () => {
+  const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const cell = (extra = '') => `<w:tc><w:tcPr><w:tcW w:w="1000" w:type="dxa"/>${extra}</w:tcPr><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc>`;
+  const table = (tblPr: string, rows = 2, cells = [cell(), cell()]) =>
+    `<w:tbl><w:tblPr>${tblPr}</w:tblPr><w:tblGrid><w:gridCol w:w="1000"/><w:gridCol w:w="1000"/></w:tblGrid>${Array.from({ length: rows }, () => `<w:tr>${cells.join('')}</w:tr>`).join('')}</w:tbl>`;
+  const line = (side: string, val = 'single', sz = 8) => `<w:${side} w:val="${val}" w:sz="${sz}" w:space="0" w:color="FF0000"/>`;
+  const styleXml = `<w:styles ${W}>
+    <w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/></w:style>
+    <w:style w:type="table" w:styleId="Base"><w:tblPr><w:tblBorders>${line('top')}${line('left')}${line('bottom')}${line('right')}${line('insideH')}${line('insideV')}</w:tblBorders></w:tblPr></w:style>
+    <w:style w:type="table" w:styleId="Derived"><w:basedOn w:val="Base"/><w:tblPr><w:tblBorders>${line('insideV', 'none', 0)}</w:tblBorders></w:tblPr></w:style>
+    <w:style w:type="table" w:styleId="Header"><w:tblStylePr w:type="firstRow"><w:tcPr><w:tcBorders>${line('bottom', 'double', 16)}</w:tcBorders></w:tcPr></w:tblStylePr></w:style>
+  </w:styles>`;
+  async function open(body: string) {
+    const pkg = OoxmlPackage.empty();
+    pkg.put('_rels/.rels', `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+    pkg.put('word/_rels/document.xml.rels', `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
+    pkg.put('word/styles.xml', styleXml);
+    pkg.put('[Content_Types].xml', `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+    pkg.put('word/document.xml', `<w:document ${W}><w:body>${body}<w:sectPr/></w:body></w:document>`);
+    const bytes = await pkg.save('application/octet-stream');
+    const { document } = await docxToDocument(bytes, { id: 'd', name: 'd.docx' });
+    return { document, bytes, first: Object.values(document.tableSource ?? {})[0] };
+  }
+  const visible = (b: { color: { rgb?: string | null }; width?: { v: number } } | undefined) => !!b && b.color.rgb !== 'transparent' && (b.width?.v ?? 1) > 0;
+
+  it('states every side, invisible where Word draws nothing, so Univer does not add its default line', async () => {
+    const { first } = await open(table(''));
+    const c = first.tableRows[0].tableCells[0];
+    for (const side of [c.borderTop, c.borderBottom, c.borderLeft, c.borderRight]) {
+      expect(side).toBeDefined();
+      expect(visible(side)).toBe(false);
+    }
+  });
+
+  it('takes only the sides the table sets', async () => {
+    const { first } = await open(table(`<w:tblBorders>${line('bottom')}${line('insideH')}</w:tblBorders>`));
+    const [top, bottom] = first.tableRows.map(r => r.tableCells[0]);
+    expect(visible(top.borderTop)).toBe(false);
+    expect(visible(top.borderBottom)).toBe(true);
+    expect(visible(bottom.borderBottom)).toBe(true);
+    expect(visible(top.borderLeft)).toBe(false);
+    expect(visible(top.borderRight)).toBe(false);
+  });
+
+  it('follows the table style and its basedOn, and lets the table and the cell override', async () => {
+    const styled = await open(table('<w:tblStyle w:val="Derived"/>'));
+    const row = styled.first.tableRows[0].tableCells;
+    expect(visible(row[0].borderTop)).toBe(true);
+    expect(visible(row[0].borderLeft)).toBe(true);
+    expect(visible(row[0].borderRight)).toBe(false); // insideV is off in the derived style
+
+    const off = await open(table(`<w:tblStyle w:val="Base"/><w:tblBorders>${line('top', 'none', 0)}</w:tblBorders>`));
+    expect(visible(off.first.tableRows[0].tableCells[0].borderTop)).toBe(false);
+
+    const own = await open(table('<w:tblStyle w:val="Base"/>', 1, [cell(`<w:tcBorders>${line('left', 'nil', 0)}</w:tcBorders>`), cell()]));
+    expect(visible(own.first.tableRows[0].tableCells[0].borderLeft)).toBe(false);
+  });
+
+  it('applies a first-row border only where tblLook turns it on', async () => {
+    const on = await open(table('<w:tblStyle w:val="Header"/><w:tblLook w:firstRow="1"/>'));
+    expect(visible(on.first.tableRows[0].tableCells[0].borderBottom)).toBe(true);
+    expect(visible(on.first.tableRows[1].tableCells[0].borderBottom)).toBe(false);
+    const hex = await open(table('<w:tblStyle w:val="Header"/><w:tblLook w:val="0020"/>'));
+    expect(visible(hex.first.tableRows[0].tableCells[0].borderBottom)).toBe(true);
+    const off = await open(table('<w:tblStyle w:val="Header"/><w:tblLook w:firstRow="0"/>'));
+    expect(visible(off.first.tableRows[0].tableCells[0].borderBottom)).toBe(false);
+  });
+
+  it('saves an invisible side as nil, a real one as itself, and reads the same back', async () => {
+    const { document, bytes } = await open(table(`<w:tblBorders>${line('bottom')}</w:tblBorders>`, 1));
+    const saved = await documentToDocx(document, bytes);
+    const xml = (await (await OoxmlPackage.open(saved.bytes)).text('word/document.xml')) ?? '';
+    expect(xml).toContain('<w:top w:val="nil"/>');
+    expect(xml).not.toContain('transparent');
+    expect(xml).toMatch(/<w:bottom w:val="single" w:sz="8"/);
+    const again = await docxToDocument(saved.bytes, { id: 'd', name: 'd.docx' });
+    const c = Object.values(again.document.tableSource ?? {})[0].tableRows[0].tableCells[0];
+    expect(visible(c.borderTop)).toBe(false);
+    expect(visible(c.borderBottom)).toBe(true);
+  });
+
+  it('writes the line Univer draws for a table made in the editor, so Word shows it too', async () => {
+    const { document, first } = await open(table(''));
+    const made = first.tableRows[0].tableCells[0];
+    delete made.borderTop;
+    const xml = (await (await OoxmlPackage.open((await documentToDocx(document)).bytes)).text('word/document.xml')) ?? '';
+    expect(xml).toMatch(/<w:top w:val="single" w:sz="4" w:space="0" w:color="C7C9CC"\/>/);
   });
 });
