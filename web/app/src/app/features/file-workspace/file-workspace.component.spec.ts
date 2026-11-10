@@ -68,6 +68,13 @@ describe('FileWorkspaceComponent', () => {
   const button = (el: HTMLElement, label: string) =>
     [...el.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 
+  it('shows an error, instead of loading forever, when the viewer cannot be loaded', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    loadViewer.mockReturnValueOnce(Promise.reject(new Error('stale chunk')));
+    await show(file());
+    expect(fixture.componentInstance.state()).toBe('error');
+  });
+
   it('fetches the bytes once and hands them with the file to the viewer for its kind', async () => {
     const el = await show(file());
     expect(download).toHaveBeenCalledWith('f-1');

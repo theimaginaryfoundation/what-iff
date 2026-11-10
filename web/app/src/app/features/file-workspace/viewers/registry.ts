@@ -42,8 +42,13 @@ export function loadViewer(kind: FilePreviewKind): Promise<Type<unknown>> | null
   if (!entry) return null;
   let promise = loaded.get(kind);
   if (!promise) {
-    promise = entry.load();
-    loaded.set(kind, promise);
+    const attempt = entry.load();
+    loaded.set(kind, attempt);
+    // A failed import is not kept, so opening the file again retries instead of waiting forever.
+    attempt.catch(() => {
+      if (loaded.get(kind) === attempt) loaded.delete(kind);
+    });
+    promise = attempt;
   }
   return promise;
 }

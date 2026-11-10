@@ -24,7 +24,12 @@ export function loadPdfJs(document: Document): Promise<PdfJs> {
     pdfjs.GlobalWorkerOptions.workerPort = new Worker(new URL('./pdf.worker', import.meta.url), { type: 'module' });
     return pdfjs;
   })();
-  return pdfjsPromise;
+  // A failed load (a stale chunk after a deploy, a dropped connection) is not kept: the next PDF tries again.
+  const attempt = pdfjsPromise;
+  attempt.catch(() => {
+    if (pdfjsPromise === attempt) pdfjsPromise = undefined;
+  });
+  return attempt;
 }
 
 /** The loader, as a token so tests can hand the viewer a fake PDF.js. */

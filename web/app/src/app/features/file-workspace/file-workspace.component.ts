@@ -134,15 +134,22 @@ export class FileWorkspaceComponent {
       if (!load) return;
       this.state.set('loading');
       const generation = this.generation;
-      void load.then(type => {
-        if (generation === this.generation) this.viewer.set(type);
-      });
+      load.then(
+        type => {
+          if (generation === this.generation) this.viewer.set(type);
+        },
+        error => {
+          console.error('The viewer could not be loaded', error);
+          if (generation === this.generation) this.state.set('error');
+        },
+      );
       const subscription = untracked(() =>
         this.files.downloadFileAttachment(file.id).subscribe({
           next: blob => {
             if (generation !== this.generation) return;
             this.blob.set(blob);
-            this.state.set('ready');
+            // A viewer that failed to load stays an error even when the bytes arrive after it.
+            if (this.state() !== 'error') this.state.set('ready');
           },
           error: () => {
             if (generation === this.generation) this.state.set('error');
