@@ -29,6 +29,7 @@ import {
   ModalComponent,
 } from '../../../../shared/ui';
 import { McpAppBridge, JsonRpcMessage } from './mcp-app-bridge';
+import { McpAppLinkPrompt } from './mcp-app-link-prompt';
 import { mcpHostStyleVariables, toolDisplayName } from './mcp-app-host-styles';
 
 /** The frame's height before the view reports its own, and the most it may grow to. */
@@ -37,12 +38,6 @@ const MAX_HEIGHT_PX = 800;
 const MIN_HEIGHT_PX = 60;
 /** A view that never finishes its handshake is shown anyway this long after its document loads. */
 const REVEAL_FALLBACK_MS = 1500;
-
-interface PendingLink {
-  url: string;
-  host: string;
-  resolve(opened: boolean): void;
-}
 
 /**
  * An MCP App's view (ADR 0x042), rendered under the reply whose tool call produced it.
@@ -184,8 +179,10 @@ export class McpAppFrameComponent {
   readonly collapsed = signal(false);
   /** The view has its data (or had its chance): the placeholder gives way to it. */
   readonly revealed = signal(false);
+  /** The "Open this link?" dialog: one link at a time, so the view can't swap it while it's up. */
+  private readonly linkPrompt = new McpAppLinkPrompt();
   /** A link the view asked to open, waiting on the person. */
-  readonly pendingLink = signal<PendingLink | null>(null);
+  readonly pendingLink = this.linkPrompt.pending;
   readonly title = computed(() => toolDisplayName(this.view()?.tool_name || this.toolCall().app?.tool_name || ''));
   readonly ariaLabel = computed(() => {
     const server = this.view()?.server_name;
@@ -221,7 +218,7 @@ export class McpAppFrameComponent {
     });
     this.destroyRef.onDestroy(() => {
       this.clearRevealTimer();
-      this.pendingLink()?.resolve(false);
+      this.linkPrompt.cancel();
       this.bridge?.teardown('closed');
       win?.removeEventListener('message', this.onMessage);
       this.observer?.disconnect();
@@ -256,7 +253,7 @@ export class McpAppFrameComponent {
       this.bridge = new McpAppBridge(
         {
           callTool: (name, args) => firstValueFrom(this.apps.callTool(this.chatId(), this.toolCall().id, name, args)),
-          openLink: url => this.askToOpen(url),
+          openLink: url => this.linkPrompt.ask(url),
           proposeMessage: text => this.apps.proposeMessage(text),
           resize: h => this.height.set(Math.min(MAX_HEIGHT_PX, Math.max(MIN_HEIGHT_PX, Math.ceil(h)))),
           post: msg => this.post(msg),
@@ -289,16 +286,7 @@ export class McpAppFrameComponent {
 
   /** The person's answer to the link dialog; the page opens from their click, so it isn't blocked. */
   answerLink(open: boolean): void {
-    const link = this.pendingLink();
-    if (!link) return;
-    this.pendingLink.set(null);
-    if (open) this.document.defaultView?.open(link.url, '_blank', 'noopener,noreferrer');
-    link.resolve(open);
-  }
-
-  private askToOpen(url: string): Promise<boolean> {
-    this.pendingLink()?.resolve(false);
-    return new Promise(resolve => this.pendingLink.set({ url, host: new URL(url).host, resolve }));
+    this.linkPrompt.answer(open, url => this.document.defaultView?.open(url, '_blank', 'noopener,noreferrer'));
   }
 
   private reveal(): void {

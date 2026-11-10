@@ -71,10 +71,11 @@ const AUTO_ADVANCE_MS = 180;
       @let q = current();
       @let d = draft();
       <fieldset class="steps__panel" (keydown.enter)="onEnter($event)">
+        <!-- The legend must be the fieldset's first child to name the group for assistive tech. -->
+        <legend class="sr-only">{{ q.question }}</legend>
         @if (many()) {
           <p class="steps__count">Question {{ step() + 1 }} of {{ questions().length }}@if (q.optional) { · optional }</p>
         }
-        <legend class="sr-only">{{ q.question }}</legend>
         <p class="steps__question" aria-hidden="true">{{ q.question }}</p>
 
         @if (q.options?.length) {

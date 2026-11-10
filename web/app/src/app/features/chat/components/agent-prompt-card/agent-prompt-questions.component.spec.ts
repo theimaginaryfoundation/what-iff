@@ -60,6 +60,12 @@ describe('AgentPromptQuestionsComponent', () => {
     expect(host.textContent).toContain('Question 3 of 4');
   });
 
+  it("names each question's group with a legend that is the fieldset's first child", () => {
+    const fieldset = q('fieldset') as HTMLFieldSetElement;
+    expect(fieldset.firstElementChild?.tagName).toBe('LEGEND');
+    expect(fieldset.firstElementChild?.textContent?.trim()).toBe('Which format?');
+  });
+
   it('keeps the own-answer box closed until "Other" is picked', () => {
     expect(q('textarea')).toBeNull();
     choose('Other…');
