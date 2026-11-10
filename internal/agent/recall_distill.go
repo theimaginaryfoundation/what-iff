@@ -34,8 +34,8 @@ func newRecallDistiller(a *Agent) *recallDistiller {
 }
 
 func (d *recallDistiller) Distill(ctx context.Context, question, material string) (string, error) {
-	if d == nil || d.a == nil || d.a.OpenAIProvider == nil {
-		return "", fmt.Errorf("recall distiller: OpenAIProvider unavailable")
+	if d == nil || d.a == nil {
+		return "", fmt.Errorf("recall distiller: no agent")
 	}
 
 	userContent := fmt.Sprintf("Question:\n%s\n\nMaterial:\n%s", strings.TrimSpace(question), strings.TrimSpace(material))
