@@ -37,9 +37,19 @@ export function toJobCardVm(job: AgentJob): JobCardVm {
     nextRunLabel: formatDate(job.next_run_at),
     lastRunLabel: formatDate(job.last_run_at),
     runCount: job.run_count,
-    canRunNow: job.status === 'active' || job.status === 'paused',
-    canPauseResume: job.status === 'active' || job.status === 'paused',
+    canRunNow: canRunJobNow(job),
+    canPauseResume: job.status === 'active' || (job.status === 'paused' && !hasMissingParameters(job)),
   };
+}
+
+/** A job with a parameter that has no value can't run, be resumed or be run by hand (ADR 0x044). */
+export function hasMissingParameters(job: Pick<AgentJob, 'missing_parameters'>): boolean {
+  return (job.missing_parameters?.length ?? 0) > 0;
+}
+
+/** Run now is offered for active and paused jobs whose parameters all have values. */
+export function canRunJobNow(job: Pick<AgentJob, 'status' | 'missing_parameters'>): boolean {
+  return (job.status === 'active' || job.status === 'paused') && !hasMissingParameters(job);
 }
 
 export function formatDate(raw?: string | null): string {

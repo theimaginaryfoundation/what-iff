@@ -2,6 +2,7 @@ import { inject } from '@angular/core';
 import { Router, Routes } from '@angular/router';
 import { authGuard, guestGuard } from './core/guards/auth.guard';
 import { personalitySetupGuard } from './core/guards/personality-setup.guard';
+import { confirmLeaveGuard } from './core/guards/confirm-leave.guard';
 import { AppLayoutComponent } from './layout/app-layout.component';
 import { privateChildRoutes } from './extensions/private-routes';
 import { authChildRoutes } from './extensions/auth-routes';
@@ -176,7 +177,8 @@ export const routes: Routes = [
           {
             path: ':id',
             loadComponent: () => import('./features/agent-job/job-detail-page.component')
-              .then(m => m.JobDetailPageComponent)
+              .then(m => m.JobDetailPageComponent),
+            canDeactivate: [confirmLeaveGuard]
           }
         ]
       },

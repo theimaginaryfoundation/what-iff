@@ -12,6 +12,8 @@ export function statusLabel(status: AgentJobStatus): string {
       return 'Failed';
     case 'complete':
       return 'Complete';
+    case 'needs_values':
+      return 'Needs setup';
     default:
       return status;
   }
@@ -28,6 +30,8 @@ export function statusDescription(status: AgentJobStatus): string {
       return 'This one-off job ran but hit an error';
     case 'complete':
       return 'This one-off job has run and won\'t run again';
+    case 'needs_values':
+      return 'Some parameters have no value; it won\'t run until they do';
     default:
       return '';
   }
@@ -38,6 +42,7 @@ export function statusTone(status: AgentJobStatus): JobStatusTone {
     case 'active':
       return 'success';
     case 'paused':
+    case 'needs_values':
       return 'warning';
     case 'failed':
       return 'danger';
@@ -58,7 +63,8 @@ export function isTerminalStatus(status: AgentJobStatus): boolean {
  */
 const SCHEDULE_ERROR_MARKER = 'failed to compute next_run_at:';
 
-export type JobStatusFields = Pick<AgentJob, 'status' | 'schedule_type' | 'last_error'>;
+export type JobStatusFields = Pick<AgentJob, 'status' | 'schedule_type' | 'last_error'> &
+  Partial<Pick<AgentJob, 'missing_parameters' | 'parameters'>>;
 
 /**
  * Why the scheduler paused a recurring job, or null when the job isn't in that state (including
@@ -78,6 +84,9 @@ export function jobStatusLabel(job: JobStatusFields): string {
 
 /** Tooltip for the status badge, including the reason when the scheduler paused the job. */
 export function jobStatusDescription(job: JobStatusFields): string {
+  if (job.status === 'needs_values' && job.missing_parameters?.length) {
+    return `Waiting for values: ${missingParameterLabels(job).join(', ')}`;
+  }
   const reason = scheduleFailureReason(job);
   return reason === null
     ? statusDescription(job.status)
@@ -86,4 +95,10 @@ export function jobStatusDescription(job: JobStatusFields): string {
 
 export function jobStatusTone(job: JobStatusFields): JobStatusTone {
   return scheduleFailureReason(job) === null ? statusTone(job.status) : 'danger';
+}
+
+/** Labels of the job's parameters that have no value, for messages (falls back to the name). */
+export function missingParameterLabels(job: Partial<Pick<AgentJob, 'missing_parameters' | 'parameters'>>): string[] {
+  const byName = new Map((job.parameters ?? []).map(p => [p.name, p.label?.trim() || p.name]));
+  return (job.missing_parameters ?? []).map(name => byName.get(name) ?? name);
 }

@@ -39,14 +39,15 @@ export interface ThreadJobsSources {
 }
 
 /**
- * Failed jobs need attention, so they lead; then jobs that will still run, then paused ones,
- * then finished one-offs.
+ * Jobs that need attention lead (failed, then waiting for parameter values); then jobs that will
+ * still run, then paused ones, then finished one-offs.
  */
 const STATUS_PRIORITY: Record<AgentJobStatus, number> = {
   failed: 0,
-  active: 1,
-  paused: 2,
-  complete: 3,
+  needs_values: 1,
+  active: 2,
+  paused: 3,
+  complete: 4,
 };
 
 function timeOrNull(value?: string | null): number | null {

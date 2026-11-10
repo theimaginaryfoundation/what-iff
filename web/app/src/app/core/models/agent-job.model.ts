@@ -1,7 +1,32 @@
 import { AgentLoop, AgentLoopUpdate, ReasoningEffort, ReasoningEffortUpdate } from './turn-settings.model';
 
 export type AgentJobScheduleType = 'cron' | 'at';
-export type AgentJobStatus = 'active' | 'paused' | 'complete' | 'failed';
+/** `needs_values`: a parameter has no value, so the job can't run until it gets one (ADR 0x044). */
+export type AgentJobStatus = 'active' | 'paused' | 'complete' | 'failed' | 'needs_values';
+
+/** The kind of input a job parameter takes (ADR 0x044). */
+export type AgentJobParameterType = 'single_select' | 'multi_select' | 'text' | 'list';
+
+/** How a multi_select or list value renders into the prompt. */
+export type AgentJobParameterFormat = 'comma' | 'bullets';
+
+/** One `{{name}}` placeholder of a job prompt. Every defined parameter is required. */
+export interface AgentJobParameter {
+  name: string;
+  label?: string;
+  description?: string;
+  type: AgentJobParameterType;
+  /** The choices, for single_select and multi_select. */
+  options?: string[];
+  /** multi_select and list only. */
+  format?: AgentJobParameterFormat;
+}
+
+/** A string for text and single_select, a list for multi_select and list. */
+export type AgentJobParameterValue = string | string[];
+
+/** The owner's values by parameter name. Never published with a shared job. */
+export type AgentJobParameterValues = Record<string, AgentJobParameterValue>;
 
 export interface AgentJob {
   id: string;
@@ -26,6 +51,11 @@ export interface AgentJob {
   /** Agent loop for this job's runs; overrides the thread and mode. Null when not set. */
   agent_loop?: AgentLoop | null;
   rituals?: import('./ritual.model').Ritual[];
+  /** Definitions of the prompt's `{{name}}` placeholders, in form order. */
+  parameters?: AgentJobParameter[];
+  parameter_values?: AgentJobParameterValues;
+  /** Parameters with no usable value, in definition order (derived by the server). */
+  missing_parameters?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -46,6 +76,8 @@ export interface CreateAgentJobRequest {
   model_id?: string | null;
   reasoning_effort?: ReasoningEffort | null;
   agent_loop?: AgentLoop | null;
+  parameters?: AgentJobParameter[];
+  parameter_values?: AgentJobParameterValues;
 }
 
 export interface UpdateAgentJobRequest {
@@ -60,6 +92,10 @@ export interface UpdateAgentJobRequest {
   reasoning_effort?: ReasoningEffortUpdate;
   /** Omit to keep; `''` clears. */
   agent_loop?: AgentLoopUpdate;
+  /** Replace the definitions; omit to keep. Saved together with the prompt. */
+  parameters?: AgentJobParameter[];
+  /** Replace the values; omit to keep. */
+  parameter_values?: AgentJobParameterValues;
 }
 
 export interface UpdateAgentJobStatusRequest {

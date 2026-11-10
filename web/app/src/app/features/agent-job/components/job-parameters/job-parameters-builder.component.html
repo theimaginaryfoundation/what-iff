@@ -1,0 +1,123 @@
+<div class="space-y-3">
+  @if (analysis().undefinedPlaceholders.length > 0) {
+    <div class="rounded-xl border border-danger/40 bg-danger/10 p-3 text-xs text-danger" role="alert">
+      <p class="font-medium">The prompt uses placeholders with no definition:</p>
+      <ul class="mt-2 flex flex-wrap gap-2">
+        @for (name of analysis().undefinedPlaceholders; track name) {
+          <li class="inline-flex items-center gap-2 rounded-lg border border-danger/40 px-2 py-1">
+            <code>{{ '{{' + name + '}}' }}</code>
+            <button
+              type="button"
+              class="underline disabled:opacity-50"
+              [disabled]="disabled() || !canAdd()"
+              (click)="add(name)">
+              Add definition
+            </button>
+          </li>
+        }
+      </ul>
+    </div>
+  }
+  @for (problem of listProblems(); track problem.message) {
+    <p class="text-xs text-danger" role="alert">{{ problem.message }}</p>
+  }
+
+  @for (def of current(); track $index; let i = $index, first = $first, last = $last) {
+    <fieldset class="rounded-xl border border-border-base p-3" [attr.aria-label]="'Parameter ' + (def.name || i + 1)">
+      <div class="grid gap-3 md:grid-cols-3">
+        <label class="text-xs text-text-secondary">
+          Name
+          <input
+            class="mt-1 w-full rounded-lg border border-border-base bg-surface-base px-2 py-1.5 font-mono text-sm text-text-primary"
+            [value]="def.name"
+            [disabled]="disabled()"
+            placeholder="topics"
+            spellcheck="false"
+            autocomplete="off"
+            (focus)="onNameFocus(i)"
+            (blur)="onNameBlur(i)"
+            (input)="update(i, { name: $any($event.target).value })" />
+        </label>
+        <label class="text-xs text-text-secondary">
+          Label
+          <input
+            class="mt-1 w-full rounded-lg border border-border-base bg-surface-base px-2 py-1.5 text-sm text-text-primary"
+            [value]="def.label ?? ''"
+            [disabled]="disabled()"
+            [placeholder]="def.name || 'Shown on the form'"
+            (input)="update(i, { label: $any($event.target).value })" />
+        </label>
+        <label class="text-xs text-text-secondary">
+          Type
+          <select
+            class="mt-1 w-full rounded-lg border border-border-base bg-surface-base px-2 py-1.5 text-sm text-text-primary"
+            [disabled]="disabled()"
+            (change)="setType(i, $any($event.target).value)">
+            @for (option of typeOptions; track option.value) {
+              <option [value]="option.value" [selected]="option.value === def.type">{{ option.label }}</option>
+            }
+          </select>
+        </label>
+      </div>
+
+      <label class="mt-3 block text-xs text-text-secondary">
+        Description <span class="text-text-muted">(optional)</span>
+        <input
+          class="mt-1 w-full rounded-lg border border-border-base bg-surface-base px-2 py-1.5 text-sm text-text-primary"
+          [value]="def.description ?? ''"
+          [disabled]="disabled()"
+          placeholder="Help text shown under the field"
+          (input)="update(i, { description: $any($event.target).value })" />
+      </label>
+
+      @if (isSelectType(def.type)) {
+        <div class="mt-3 text-xs text-text-secondary">
+          <span [id]="'job-param-options-' + i">Options</span>
+          <div class="mt-1">
+            <app-chip-list-input
+              [items]="def.options ?? []"
+              [max]="maxOptions"
+              [disabled]="disabled()"
+              [invalid]="(def.options ?? []).length === 0"
+              [describedBy]="'job-param-options-' + i"
+              ariaLabel="Add an option"
+              placeholder="Type an option and press Enter"
+              (itemsChange)="update(i, { options: $event })" />
+          </div>
+        </div>
+      }
+
+      @if (isMultiType(def.type)) {
+        <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-text-secondary" role="group" [attr.aria-label]="'How ' + (def.name || 'this parameter') + ' goes into the prompt'">
+          <span>In the prompt:</span>
+          <ui-tag [selected]="formatOf(def) === 'comma'" [disabled]="disabled()" (toggle)="setFormat(i, 'comma')">Comma separated</ui-tag>
+          <ui-tag [selected]="formatOf(def) === 'bullets'" [disabled]="disabled()" (toggle)="setFormat(i, 'bullets')">Bullet list</ui-tag>
+        </div>
+      }
+
+      @for (message of rowProblems(i); track message) {
+        <p class="mt-2 text-xs text-danger" role="alert">{{ message }}</p>
+      }
+      @if (def.name && isUnused(def.name) && rowProblems(i).length === 0) {
+        <p class="mt-2 text-xs text-text-muted">Not used in the prompt yet; add <code>{{ '{{' + def.name.trim() + '}}' }}</code> where it should go.</p>
+      }
+
+      <div class="mt-3 flex flex-wrap justify-end gap-2">
+        <button type="button" class="rounded-lg border border-border-base px-2 py-1 text-xs text-text-secondary disabled:opacity-50"
+          [disabled]="disabled() || first" [attr.aria-label]="'Move ' + (def.name || 'parameter') + ' up'" (click)="move(i, -1)">↑</button>
+        <button type="button" class="rounded-lg border border-border-base px-2 py-1 text-xs text-text-secondary disabled:opacity-50"
+          [disabled]="disabled() || last" [attr.aria-label]="'Move ' + (def.name || 'parameter') + ' down'" (click)="move(i, 1)">↓</button>
+        <button type="button" class="rounded-lg border border-danger/40 px-2 py-1 text-xs text-danger disabled:opacity-50"
+          [disabled]="disabled()" (click)="remove(i)">Remove</button>
+      </div>
+    </fieldset>
+  }
+
+  <button
+    type="button"
+    class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary disabled:opacity-50"
+    [disabled]="disabled() || !canAdd()"
+    (click)="add()">
+    + Add parameter
+  </button>
+</div>

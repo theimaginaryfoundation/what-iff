@@ -13,6 +13,8 @@ import { ConfirmationService } from '../../core/services/confirmation.service';
 import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { RitualService } from '../../core/services/ritual.service';
+import { By } from '@angular/platform-browser';
+import { JobFormComponent } from './components/job-form.component';
 import { JobDetailPageComponent } from './job-detail-page.component';
 
 describe('JobDetailPageComponent', () => {
@@ -24,6 +26,7 @@ describe('JobDetailPageComponent', () => {
     let ritualService: Pick<MockedObject<RitualService>, 'listRituals'>;
     let authService: { getUserProfile: ReturnType<typeof vi.fn> };
     let router: { navigate: ReturnType<typeof vi.fn> };
+    let confirmation: { confirm: Mock };
     let route: {
         snapshot: {
             paramMap: {
@@ -86,7 +89,7 @@ describe('JobDetailPageComponent', () => {
         ritualService = {
             listRituals: vi.fn().mockName("RitualService.listRituals")
         } as unknown as Pick<MockedObject<RitualService>, 'listRituals' | never>;
-        const confirmation = {
+        confirmation = {
             confirm: vi.fn().mockName("ConfirmationService.confirm")
         };
         authService = {
@@ -287,6 +290,94 @@ describe('JobDetailPageComponent', () => {
 
             expect(fixture.componentInstance.job()?.timezone).toBe('UTC');
             expect(formTimezone()).toBe('UTC');
+        });
+    });
+
+    describe('job parameters (ADR 0x044)', () => {
+        const paramJob: AgentJob = {
+            ...job,
+            prompt: 'News on {{topics}}',
+            status: 'needs_values',
+            parameters: [{ name: 'topics', label: 'Topics', type: 'list', format: 'bullets' }],
+            parameter_values: {},
+            missing_parameters: ['topics'],
+        };
+
+        beforeEach(() => {
+            agentJobService.getAgentJob.mockReturnValue(of(paramJob));
+        });
+
+        it('shows the needs-setup notice and hides Run now and Resume', () => {
+            fixture.detectChanges();
+            const host = fixture.nativeElement as HTMLElement;
+            expect(host.textContent).toContain('Needs setup: Topics has no value');
+            expect(host.textContent).not.toContain('Run now');
+            expect(host.textContent).not.toContain('Resume');
+            expect(host.querySelector('app-job-parameters')).not.toBeNull();
+        });
+
+        it('warns before saving with missing values and saves only when confirmed', async () => {
+            agentJobService.updateAgentJob.mockReturnValue(of(paramJob));
+            fixture.detectChanges();
+            const payload = {
+                prompt: paramJob.prompt,
+                schedule_input: paramJob.schedule_input,
+                parameters: paramJob.parameters,
+                parameter_values: {},
+            };
+
+            confirmation.confirm.mockResolvedValue(false);
+            await fixture.componentInstance.save(payload);
+            expect(confirmation.confirm).toHaveBeenLastCalledWith(expect.objectContaining({
+                title: 'Some parameters have no value',
+                confirmText: 'Save anyway',
+                cancelText: 'Back to editing',
+            }));
+            expect(agentJobService.updateAgentJob).not.toHaveBeenCalled();
+
+            confirmation.confirm.mockResolvedValue(true);
+            await fixture.componentInstance.save(payload);
+            expect(agentJobService.updateAgentJob).toHaveBeenCalledWith('job-1', expect.objectContaining({ parameters: paramJob.parameters }));
+        });
+
+        it('saves without asking when every parameter has a value', async () => {
+            agentJobService.updateAgentJob.mockReturnValue(of(paramJob));
+            fixture.detectChanges();
+            await fixture.componentInstance.save({
+                prompt: paramJob.prompt,
+                parameters: paramJob.parameters,
+                parameter_values: { topics: ['AI'] },
+            });
+            expect(confirmation.confirm).not.toHaveBeenCalled();
+            expect(agentJobService.updateAgentJob).toHaveBeenCalled();
+        });
+
+        it('asks before leaving a job that needs values', async () => {
+            fixture.detectChanges();
+            confirmation.confirm.mockResolvedValue(false);
+            await expect(fixture.componentInstance.confirmLeave()).resolves.toBe(false);
+            expect(confirmation.confirm).toHaveBeenCalledWith(expect.objectContaining({
+                title: 'This job needs setup',
+                cancelText: 'Stay and fill them in',
+            }));
+        });
+
+        it('lets the user leave a complete job with no edits without asking', async () => {
+            agentJobService.getAgentJob.mockReturnValue(of(job));
+            fixture.detectChanges();
+            await expect(fixture.componentInstance.confirmLeave()).resolves.toBe(true);
+            expect(confirmation.confirm).not.toHaveBeenCalled();
+        });
+
+        it('asks before discarding unsaved edits', async () => {
+            agentJobService.getAgentJob.mockReturnValue(of(job));
+            fixture.detectChanges();
+            const form = fixture.debugElement.query(By.directive(JobFormComponent)).componentInstance as JobFormComponent;
+            form.prompt.set('Something else');
+            fixture.detectChanges();
+            confirmation.confirm.mockResolvedValue(true);
+            await expect(fixture.componentInstance.confirmLeave()).resolves.toBe(true);
+            expect(confirmation.confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Discard unsaved changes?' }));
         });
     });
 });
