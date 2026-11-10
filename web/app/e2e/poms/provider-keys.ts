@@ -1,4 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
+import type { components } from '../sdk/schema.d.ts';
+
+type UtilityRole = components['schemas']['UtilityRole'];
 
 /**
  * The first-run "add your OpenAI key" prompt (provider-key-prompt.component).
@@ -28,7 +31,7 @@ export class BackgroundModelsStep {
     this.saveButton = this.root.getByTestId('background-models-step-save');
   }
 
-  select(role: 'memory' | 'memory_merge' | 'simple' | 'personality'): Locator {
+  select(role: UtilityRole): Locator {
     return this.root.getByTestId(`onboarding-background-model-${role}`);
   }
 }
