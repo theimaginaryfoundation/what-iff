@@ -162,6 +162,18 @@ describe('pivots and slicers, opened and saved', () => {
     expect(ctx.grid.sheets['Pivot'][3][0]).toBe('East');
   });
 
+  it('leaves the pivot and the slicer as they were when the pivot would grow over other cells', async () => {
+    const ctx = await open();
+    ctx.slicers.click('Region', 'North', false);
+    const before = ctx.grid.sheets['Pivot'].map(r => [...r]);
+    ctx.grid.sheets['Pivot'][5] = ['keep me'];
+    ctx.slicers.click('Region', 'South', true);
+    expect(ctx.slicers.notice()).toContain('A6');
+    expect(ctx.grid.sheets['Pivot'][5]).toEqual(['keep me']);
+    expect(ctx.grid.sheets['Pivot'].slice(2, 5)).toEqual(before.slice(2, 5));
+    expect(ctx.slicers.entries().find(e => e.name === 'Region')!.excluded).toEqual(['East', 'South']);
+  });
+
   it('filters a table from its slicer, hiding rows and writing the filter', async () => {
     const ctx = await open();
     ctx.slicers.click('Year', '2025', false);

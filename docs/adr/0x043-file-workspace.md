@@ -48,7 +48,7 @@ Editors implement `FileEditor`: `dirty`, `content()`, `markSaved()`, and an opti
 |---|---|---|---|
 | text | code and text files | Monaco editor; `colorize` to static HTML in the viewer | `monaco-editor` (MIT) |
 | markdown | `.md .markdown .mdx` | Rendered with a raw toggle; Monaco with a live preview | `monaco-editor`, `ngx-markdown` |
-| image | png, jpeg, gif, webp | Crop, rotate, resize, annotate, filters | `filerobot-image-editor` (MIT) |
+| image | png, jpeg, webp (gif, svg and heic are viewed only) | Crop, rotate, resize, annotate, filters | `filerobot-image-editor` (MIT) |
 | pdf | `.pdf` | Pages, text, search, zoom; annotations written into the file | `pdfjs-dist` (Apache-2.0) |
 | spreadsheet, csv | `.xlsx .xlsm .csv .tsv` | One component, section 8 | Univer Sheets (Apache-2.0), ExcelJS (MIT) |
 | document | `.docx` | One component, section 9 | Univer Docs (Apache-2.0) |
@@ -84,8 +84,9 @@ Saving an image regenerates its thumbnail.
 
 Downloads revalidate: `GET /file-attachment/{id}` and `GET /image-gallery/{id}` send `Cache-Control: private, no-cache` with `content_version` as the ETag, and answer a matching `If-None-Match` with 304 before touching the store.
 A save replaces bytes under the same URL, so a time-based cache would show the old version after a reload.
+Every writer bumps `content_version`, the skill editor included, and the editor sends the version from the download's ETag as `If-Match`, so a stale file row cannot cause a false conflict.
 
-`internal/filechange` raises an event after every content write, rename and create, for anything that needs to follow a file.
+`internal/filechange` raises an event after every content write, rename and create, for anything that needs to follow a file; the event carries the row as it is after the change.
 The user owns everything and may edit any of their files, including agent-authored ones; agents still edit only what they created ([ADR 0x034](0x034-agent-files-and-entity-wiki.md) §3).
 There is no version history: Save overwrites, and Save As keeps a copy.
 
@@ -101,7 +102,7 @@ The response has an optional `container` field for deployments that run agents i
 The **Files** tab is a context-panel tab.
 A row shows the name, type badge and why the file is there, and opens the workspace.
 Upload and From gallery add a file to the next message, and pending files are listed under "With your next message".
-It refreshes when a turn completes, when the app regains focus and after a save.
+It refreshes when a message is sent, when the app regains focus and after a save.
 
 ### 5. Chat and gallery
 
@@ -158,6 +159,8 @@ Univer's image update does not repaint a changed source, so the editor calls the
 **Pivot tables.** `sheets/pivots/pivot-engine.ts` groups and aggregates from the source range in the compact layout.
 The panel assigns fields to Rows, Columns, Values and Filters, with 11 aggregations, item filters, totals, refresh and new from selection.
 An untouched pivot stays byte-identical. An edited one regenerates its layout XML and sets `refreshOnLoad`, so Excel rebuilds it on open.
+Pivots on one cache are rewritten together, so if one of them is view-only (calculations, filters, formatting tied to items) the rest are too.
+A layout that would grow over other cells asks first, whether it comes from an edit, a refresh or a slicer; a slicer that cannot apply leaves everything as it was and says why.
 
 **Slicers.** Pivot-backed and table-backed slicers are read, kept and written back, and filter from the panel.
 A pivot slicer recomputes every pivot it drives; a table slicer hides rows and writes the table's `filterColumn`.
@@ -206,7 +209,8 @@ At rest a cell is rendered Markdown or colourized code. Only the cell being edit
 Structural edits are pure commands with undo, and Jupyter's command-mode keys work.
 
 **Outputs are untrusted.**
-HTML goes through a dedicated DOMPurify instance that removes scripts, handlers, forms, frames and stylesheets, and only embedded pictures load.
+HTML goes through a dedicated DOMPurify instance that removes scripts, handlers, forms, frames and stylesheets.
+Nothing loads from elsewhere when a notebook opens: only embedded pictures show, CSS `url()` and SVG image and filter references are removed, and remote images in Markdown become links.
 Output is `contain`ed, so a `position: fixed` element cannot cover the app, and SVG shows through an `<img>`, where it cannot script.
 
 **Script-driven output** (Plotly, Vega, Bokeh, maps) runs only after the reader asks, per notebook, until another file opens.
@@ -218,10 +222,11 @@ After the click, output can load from CDNs and could send its own saved data to 
 Widgets need a kernel, so outside Run they show a note pointing there.
 
 **Run** executes in the browser with JupyterLite and Pyodide; nothing runs on our servers.
-It is in the notebook toolbar in edit mode, so phones do not get it, and JupyterLite takes the cells' place until Back to cells, which asks it to save first.
+It is in the notebook toolbar in edit mode, so phones do not get it, and JupyterLite takes the cells' place until Back to cells, which asks it to save first and waits for that save.
+While Run is open the editor counts as holding work, so closing the file or leaving edit mode asks before dropping the kernel and its outputs.
 
 - **Its own origin.** A same-origin iframe shares `sessionStorage` with its parent, so a notebook's code or output could read the session token. `usableRunUrl` refuses a same-origin URL and Run stays off. `environment.jupyterliteUrl` (`JUPYTERLITE_URL` at image build) points at it; empty leaves Run off.
-- **A bridge.** A small labextension in `web/jupyterlite/extension` writes the host's notebook to JupyterLite's default drive, kept in memory so nothing carries over to the next notebook or account, and opens it, so a kernel reads it with plain `open()`. Saves come back over `postMessage` and go through the usual `PUT …/content`, and undo can step over them.
+- **A bridge.** A small labextension in `web/jupyterlite/extension` writes the host's notebook to JupyterLite's default drive, kept in memory so nothing carries over to the next notebook or account (the bridge also clears the origin's local storage and databases on start and before each notebook), and opens it, so a kernel reads it with plain `open()`. Saves come back over `postMessage` and go through the usual `PUT …/content`, and undo can step over them.
 - **Trust at the boundary.** The host accepts messages only from its own frame on the configured origin, and the extension only from its parent on an origin in `whatiffHostOrigins`.
 - **Packages.** `jupyterlab_widgets` is in the site, so `ipywidgets` work live. Plain imports of common packages install themselves, because Pyodide works from `import` statements in the source; `importlib.import_module` does not trigger that.
 

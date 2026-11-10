@@ -11,7 +11,7 @@ import { ChartSpec, DRAWN_NOTICE, KEPT_FEATURES_NOTICE, NOT_EDITABLE_NOTICE, cac
 import { chartSpecsFromPreserved } from './xlsx-chart-save';
 import { XlsxDefinedName, definedNamesToWorkbook, parseDefinedNames } from './xlsx-defined-names';
 import { collectExtras } from './xlsx-extras';
-import { PreservedParts, collectPreservedParts } from './xlsx-preserve';
+import { PreservedParts, XLSX_MIME, collectPreservedParts } from './xlsx-preserve';
 import {
   DEFAULT_COLUMN_WIDTH_PX,
   DEFAULT_ROW_HEIGHT_PX,
@@ -64,7 +64,7 @@ const MS_PER_DAY = 86_400_000;
  */
 export async function xlsxToWorkbook(bytes: ArrayBuffer | Uint8Array, opts: XlsxImportOptions): Promise<XlsxImportResult> {
   const excel = new ExcelJS.Workbook();
-  await excel.xlsx.load(bytes as never);
+  await excel.xlsx.load((await withoutDataValidations(bytes)) as never);
   const result = excelToWorkbook(excel, opts);
   // Charts, pivot tables, tables, macros and the rest: ExcelJS reads none of them, so they come
   // from the package itself; what ExcelJS reads but Univer has no model for rides along as extras.
@@ -654,4 +654,30 @@ export function parseDelimited(text: string, delimiter: string): string[][] {
     rows.push(row);
   }
   return rows;
+}
+
+/**
+ * The package with each sheet's <dataValidations> removed, for ExcelJS only. ExcelJS expands every
+ * validation range into one entry per cell, so a rule on whole columns takes minutes and gigabytes
+ * to load; validation is read from the package itself (xlsx-dv.ts), so ExcelJS never needs it.
+ */
+export async function withoutDataValidations(bytes: ArrayBuffer | Uint8Array): Promise<ArrayBuffer | Uint8Array> {
+  let pkg: OoxmlPackage;
+  try {
+    pkg = await OoxmlPackage.open(bytes);
+  } catch {
+    return bytes; // Not a package we can read; ExcelJS reports it.
+  }
+  let changed = false;
+  for (const path of pkg.paths()) {
+    if (!/^xl\/worksheets\/[^/]+\.xml$/.test(path)) continue;
+    const xml = await pkg.text(path);
+    if (!xml || !xml.includes('dataValidations')) continue;
+    const stripped = xml.replace(/<dataValidations\b[^>]*?(?:\/>|>[\s\S]*?<\/dataValidations>)/, '');
+    if (stripped !== xml) {
+      pkg.put(path, stripped);
+      changed = true;
+    }
+  }
+  return changed ? pkg.save(XLSX_MIME) : bytes;
 }

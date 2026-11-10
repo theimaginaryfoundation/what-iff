@@ -50,6 +50,13 @@ describe('pivot XML', () => {
     expect(cache.pivotCacheId).toBe('7');
   });
 
+  it('holds back a pivot whose formatting points at particular items', () => {
+    const withRefs = TABLE.replace('<pivotArea/>', '<pivotArea><references count="1"><reference field="0"><x v="1"/></reference></references></pivotArea>');
+    expect(parsePivotTable(withRefs, 'p.xml', parsePivotCache(CACHE, 'c.xml')).limits).toEqual([
+      'its formatting points at particular items, which a rewrite would move',
+    ]);
+  });
+
   it('reads the table into a configuration by field name', () => {
     const model = parsePivotTable(TABLE, 'p.xml', parsePivotCache(CACHE, 'c.xml'));
     expect(model.name).toBe('Sales');
@@ -94,7 +101,8 @@ describe('pivot XML', () => {
     expect(root.getAttribute('rowGrandTotals')).toBeNull();
     expect(children(root, SS, 'pivotTableStyleInfo')).toHaveLength(1);
     expect(children(root, SS, 'extLst')).toHaveLength(1);
-    expect(children(root, SS, 'formats')).toHaveLength(0);
+    // Whole-table formatting points at no items, so it survives the rewrite.
+    expect(children(root, SS, 'formats')).toHaveLength(1);
     const fields = children(children(root, SS, 'pivotFields')[0], SS, 'pivotField');
     expect(fields.map(f => f.getAttribute('axis'))).toEqual(['axisRow', 'axisCol', null]);
     expect(fields[2].getAttribute('dataField')).toBe('1');

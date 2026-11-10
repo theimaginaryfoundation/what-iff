@@ -102,7 +102,16 @@ export class PivotWorkspace {
         });
       }
     }
-    this.entries.set(entries);
+    // Pivots on one cache are rewritten together when any of them changes, since the cache's item
+    // order changes under all of them. One that cannot be rewritten holds the others back too.
+    const heldCaches = new Set(entries.filter(e => e.limits.length).map(e => e.cachePath));
+    this.entries.set(
+      entries.map(e =>
+        !e.limits.length && heldCaches.has(e.cachePath)
+          ? { ...e, limits: ['it shares its data with a pivot table that cannot be changed here'] }
+          : e,
+      ),
+    );
   }
 
   /** Called once the sheet is open. */
@@ -252,14 +261,21 @@ export class PivotWorkspace {
     return null;
   }
 
+  /** Lays the pivot out again from its source. A larger result asks before covering other cells. */
   refresh(id: string): ApplyOutcome {
     const entry = this.entries().find(e => e.id === id);
-    return entry ? this.apply(id, entry.config, { force: true }) : { kind: 'error', message: 'No such pivot table.' };
+    return entry ? this.apply(id, entry.config) : { kind: 'error', message: 'No such pivot table.' };
   }
 
-  refreshAll(): void {
-    for (const entry of this.editable()) this.refresh(entry.id);
-    this.sourceChanged.set(false);
+  /** Refreshes every pivot that can be; the ones that did not fit are returned with their outcome. */
+  refreshAll(): { id: string; config: PivotConfig; outcome: ApplyOutcome }[] {
+    const notApplied = [];
+    for (const entry of this.editable()) {
+      const outcome = this.refresh(entry.id);
+      if (outcome.kind !== 'ok') notApplied.push({ id: entry.id, config: entry.config, outcome });
+    }
+    if (!notApplied.length) this.sourceChanged.set(false);
+    return notApplied;
   }
 
   /** A new pivot over a range with a header row, at a cell. It shows nothing until fields are chosen. */

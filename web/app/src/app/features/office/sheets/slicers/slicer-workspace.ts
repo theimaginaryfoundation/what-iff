@@ -20,7 +20,7 @@ import {
   updateTableFiltersXml,
 } from '../../xlsx/xlsx-slicers';
 import { PreservedParts, contentTypeFor } from '../../xlsx/xlsx-preserve';
-import { BLANK_LABEL, compareLabels, itemLabel } from '../pivots/pivot-engine';
+import { BLANK_LABEL, PivotConfig, compareLabels, itemLabel } from '../pivots/pivot-engine';
 import { PivotWorkspace } from '../pivots/pivot-workspace';
 import { SheetGrid } from '../sheet-grid';
 
@@ -70,6 +70,8 @@ export function pictureId(entry: Pick<SlicerEntry, 'name'>): string {
  */
 export class SlicerWorkspace {
   readonly entries = signal<readonly SlicerEntry[]>([]);
+  /** Why the last slicer click was not applied, until the next one is. */
+  readonly notice = signal<string | null>(null);
   readonly tables: TableModel[] = [];
   private grid: SheetGrid | null = null;
   private pictures: SlicerPictures | null = null;
@@ -223,23 +225,41 @@ export class SlicerWorkspace {
   }
 
   private setExcluded(name: string, excluded: string[]): void {
+    const before = this.entries().find(e => e.name === name);
+    if (!before) return;
+    this.notice.set(null);
     this.entries.update(list => list.map(e => (e.name === name ? { ...e, excluded, dirty: true } : e)));
-    const entry = this.entries().find(e => e.name === name);
-    if (!entry) return;
-    if (entry.kind === 'pivot') this.applyToPivots(entry);
-    else this.applyToTable(entry);
+    const entry = this.entries().find(e => e.name === name)!;
+    if (entry.kind === 'pivot') {
+      const blocked = this.applyToPivots(entry);
+      if (blocked) {
+        // A pivot that would grow over the user's cells stays as it was, and so does the slicer.
+        this.entries.update(list => list.map(e => (e.name === name ? before : e)));
+        this.notice.set(`Showing that would write over ${blocked}. Make room beside the pivot table and try again.`);
+        return;
+      }
+    } else this.applyToTable(entry);
     this.pictures?.update(entry, this.itemsFor(entry));
   }
 
-  private applyToPivots(entry: SlicerEntry): void {
+  /** Filters the slicer's pivots; returns the first cell one would overwrite, having undone the rest. */
+  private applyToPivots(entry: SlicerEntry): string | null {
+    const applied: { id: string; config: PivotConfig }[] = [];
     for (const id of entry.pivotIds) {
       const pivot = this.pivots.entries().find(e => e.id === id);
       if (!pivot) continue;
       const hidden = { ...pivot.config.hidden };
       if (entry.excluded.length) hidden[entry.field] = entry.excluded;
       else delete hidden[entry.field];
-      this.pivots.apply(id, { ...pivot.config, hidden }, { force: true });
+      const outcome = this.pivots.apply(id, { ...pivot.config, hidden });
+      if (outcome.kind === 'conflict') {
+        // Back to the layouts they had, which were theirs a moment ago.
+        for (const done of applied) this.pivots.apply(done.id, done.config, { force: true });
+        return outcome.where;
+      }
+      if (outcome.kind === 'ok') applied.push({ id, config: pivot.config });
     }
+    return null;
   }
 
   /** Rows hide when any of the table's slicers leaves them out, or a filter no slicer owns does. */

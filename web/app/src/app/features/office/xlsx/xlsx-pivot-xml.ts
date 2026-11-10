@@ -108,6 +108,14 @@ export function parsePivotTable(xml: string, path: string, cache: PivotCacheMode
   if (cache.fields.some(f => f.grouped)) limits.push('it uses grouped items');
   if (cache.fields.some(f => f.calculated)) limits.push('it uses calculated fields');
   if (children(root, SS, 'filters').length) limits.push('it uses label or value filters');
+  // Formatting kept through a rewrite must not point at fields or items, whose positions change.
+  const formats = children(root, SS, 'formats')[0];
+  if (
+    children(root, SS, 'conditionalFormats').length ||
+    children(root, SS, 'chartFormats').length ||
+    (formats && formats.getElementsByTagNameNS(SS, 'references').length)
+  )
+    limits.push('its formatting points at particular items, which a rewrite would move');
   const nameOf = (index: number | undefined) => (index === undefined ? undefined : cache.fields[index]?.name);
   const pivotFields = children(children(root, SS, 'pivotFields')[0], SS, 'pivotField');
   const hidden: Record<string, string[]> = {};
@@ -306,7 +314,7 @@ export function newPivotTableXml(name: string, cacheId: string): string {
 }
 
 /** The elements after the layout's, which stay, in schema order. */
-const KEPT_AFTER_LAYOUT = new Set(['pivotHierarchies', 'pivotTableStyleInfo', 'rowHierarchiesUsage', 'colHierarchiesUsage', 'extLst']);
+const KEPT_AFTER_LAYOUT = new Set(['formats', 'pivotHierarchies', 'pivotTableStyleInfo', 'rowHierarchiesUsage', 'colHierarchiesUsage', 'extLst']);
 
 /** `<x v>` with the default left out, as Excel writes it. */
 function xEl(position: number): string {

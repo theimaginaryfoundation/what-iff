@@ -278,7 +278,7 @@ describe('data validation', () => {
     expect(dvOf(second.workbook)[0]).toMatchObject({ formula1: rule.formula1, ranges: rule.ranges, errorStyle: 2 });
   });
 
-  it('writes a huge range as one element', { timeout: 30_000 }, async () => {
+  it('writes a huge range as one element', async () => {
     const rules = '<dataValidations count="1"><dataValidation type="list" sqref="A1:Z100000"><formula1>"a,b"</formula1></dataValidation></dataValidations>';
     const started = Date.now();
     const { first, saved } = await roundTrip(await fixture({ rules }));
@@ -287,7 +287,19 @@ describe('data validation', () => {
     expect(xml.match(/<dataValidation /g)).toHaveLength(1);
     expect(xml).toContain('sqref="A1:Z100000"');
     expect(xml).toContain('<formula1>&quot;a,b&quot;</formula1>');
-    expect(Date.now() - started).toBeLessThan(20_000);
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it('opens validation on whole columns quickly, where ExcelJS alone would expand every cell', async () => {
+    const rules = '<dataValidations count="1"><dataValidation type="list" sqref="A2:J1048576"><formula1>"a,b"</formula1></dataValidation></dataValidations>';
+    const started = Date.now();
+    // Not roundTrip: its check loads the saved file with ExcelJS alone, which is the slow path.
+    const first = await open(await fixture({ rules }));
+    const saved = await workbookToXlsx(first.workbook, first.preserved);
+    const second = await open(saved.bytes);
+    expect(dvOf(first.workbook)[0].formula1).toBe('a,b');
+    expect(dvOf(second.workbook)[0].formula1).toBe('a,b');
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 
   it('tells a same-sheet reference from a literal list, and keeps a hidden arrow and a stop style', async () => {

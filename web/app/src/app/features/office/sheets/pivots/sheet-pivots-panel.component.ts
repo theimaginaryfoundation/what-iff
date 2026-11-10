@@ -137,7 +137,9 @@ export class SheetPivotsPanelComponent {
   }
 
   refreshAll(): void {
-    this.workspace().refreshAll();
+    const [first] = this.workspace().refreshAll();
+    // One at a time: the first that would cover other cells asks, as a single refresh does.
+    if (first) this.report(first.id, first.config, first.outcome);
     this.changed.emit();
   }
 

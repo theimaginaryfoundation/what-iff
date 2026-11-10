@@ -1,4 +1,7 @@
 <div class="objects-panel">
+  @if (workspace().notice(); as notice) {
+    <p class="objects-panel__notice" role="alert">{{ notice }}</p>
+  }
   @for (entry of workspace().entries(); track entry.name) {
     <div class="objects-panel__section" [attr.aria-label]="'Slicer ' + entry.caption">
       <h3 class="objects-panel__title">{{ entry.caption }}</h3>
