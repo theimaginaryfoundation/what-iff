@@ -131,9 +131,9 @@ func TestCallUtilityOn_ErrorNamesProvider(t *testing.T) {
 		OpenAIProvider:  newHTTPTestOpenAIProvider(srv.URL),
 	}
 	for _, tt := range []struct{ model, modelProvider, name string }{
-		{"claude-haiku-4-5", "", "Anthropic:"},
-		{"mistral-small-latest", string(models.ModelProviderMistral), "Mistral:"},
-		{models.UtilityModelName, "", "OpenAI:"},
+		{"claude-haiku-4-5", "", "Anthropic (claude-haiku-4-5):"},
+		{"mistral-small-latest", string(models.ModelProviderMistral), "Mistral (mistral-small-latest):"},
+		{models.UtilityModelName, "", "OpenAI (" + models.UtilityModelName + "):"},
 	} {
 		_, err := a.callUtilityOn(context.Background(), utilityTarget{name: tt.model, provider: tt.modelProvider}, utilityTestRequest)
 		require.Error(t, err, tt.model)

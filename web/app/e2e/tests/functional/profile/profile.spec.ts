@@ -230,3 +230,34 @@ test(
     await expect(page).not.toHaveURL(/\/auth\/login/);
   },
 );
+
+/**
+ * @mutates-account — changes which model the account's background work runs on, then puts it
+ * back. A fresh account in mock/local; on a deployed account it ends where it started.
+ */
+test(
+  'choosing a background model persists, and Default clears it',
+  { tag: '@mutates-account' },
+  async ({ page, profileSettingsModal, testUser }) => {
+    await signInAs(page, testUser);
+    let modal = await openProfileSettings(profileSettingsModal);
+    const simple = modal.backgroundModelSelect('simple');
+    await expect(modal.backgroundModels).toBeVisible();
+    await expect(simple).toHaveValue('');
+    await expect(simple.locator('option').first()).toHaveText(/^Default \(.+\)$/);
+
+    const chosen = (await simple.locator('option').nth(1).getAttribute('value')) ?? '';
+    await modal.chooseBackgroundModel('simple', 1);
+    await expect(simple).not.toHaveValue('');
+    await expect(simple).toHaveValue(chosen);
+
+    await page.reload();
+    modal = await openProfileSettings(profileSettingsModal);
+    await expect(modal.backgroundModelSelect('simple')).toHaveValue(chosen);
+
+    await modal.chooseBackgroundModel('simple', 0);
+    await page.reload();
+    modal = await openProfileSettings(profileSettingsModal);
+    await expect(modal.backgroundModelSelect('simple')).toHaveValue('');
+  },
+);
