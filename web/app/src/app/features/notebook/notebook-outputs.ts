@@ -147,8 +147,7 @@ export function notebookLoaders(cells: readonly { outputs: readonly NotebookOutp
   let out = '';
   for (const cell of cells) {
     for (const output of cell.outputs) {
-      if (output.output_type !== 'display_data' && output.output_type !== 'execute_result') continue;
-      out += loaderHtml((output['data'] ?? {}) as Record<string, unknown>) ?? '';
+      if (isDataOutput(output)) out += loaderHtml(recordField(output.data)) ?? '';
     }
   }
   return out;
@@ -187,6 +186,14 @@ function interactiveBody(data: Record<string, unknown>): string | null {
  * Plotly and Vega compile functions at run time, so they need 'unsafe-inline' and 'unsafe-eval'.
  * Notebooks load libraries from whichever CDN their author used, so a host list would break output
  * without protecting anything: the boundary is the opaque origin, and this only runs on request.
+ *
+ * connect-src https: is the accepted trade-off of ADR 0x043 §11: a library can fetch its own data
+ * and tiles, and so a hostile notebook's script can send what it was given (its own output data)
+ * to an https host. It cannot read anything else: the frame has no cookies, no storage of ours and
+ * no access to the page. Narrow this to a list of hosts if notebook output ever carries more.
+ *
+ * The height message goes to '*' because the frame's own origin is opaque and it cannot name the
+ * parent's; it carries only a number, and the host accepts it only from this frame's window.
  */
 function frameDocument(body: string, loaders: string): string {
   const policy = [
