@@ -1374,14 +1374,14 @@ func (a *Agent) finishGeneration(ctx context.Context, userID uuid.UUID, chatMess
 // mock mode exercises the code real chat runs (streamed-text reconciliation,
 // tool-call recording, personality/mood, save).
 func (a *Agent) generateAssistantForMessageMock(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
-	// The mock adapter offers no tools to a model, but record the same agent-tool set the real
-	// paths do (no MCP discovery: mock mode is hermetic), so a scripted tool call is gated exactly
-	// like a real model's.
+	// The mock adapter offers no tools to a model, but record the same tool set the real paths do,
+	// so a scripted tool call is gated exactly like a real model's. That set includes the
+	// turn-only tools and the chat's MCP connectors (see below); a chat with none attached
+	// discovers nothing, so mock e2e stays hermetic.
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
 	offered := policy.offeredAgentToolNames()
-	// Turn-only tools (update_plan, ask_user) and the chat's MCP connectors are offered too, so
-	// the mock's echo directives can drive them (provider/mock_directives.go). A chat with no
-	// connectors attached discovers nothing, which keeps mock e2e hermetic.
+	// Turn-only tools (update_plan, ask_user) and MCP tools are offered too, so the mock's echo
+	// directives can drive them locally (provider/mock_directives.go).
 	for _, spec := range turnOnlyToolSpecs(chatCtx) {
 		offered[spec.Name] = struct{}{}
 	}

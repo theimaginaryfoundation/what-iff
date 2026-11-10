@@ -86,6 +86,8 @@ If the what of the reminder is unclear (e.g., "remind me later about this" with 
 
 If the user is only describing plans and not asking you to act later (e.g., "I should do this in an hour", "Tomorrow I'll work on Y"), do NOT schedule unless they confirm they want a reminder.
 
+If you think a scheduled job would help but the user didn't ask for one, or you're unsure of the time, wording or how often it should run, ask before creating it: with ask_user when you have it (an approval saying what you'd schedule and when, or a question with the likely times as options), otherwise in your reply.
+
 Do NOT use this tool for general planning/scheduling advice (e.g., "Help me plan my week", "What's a good schedule for X?") unless the user then asks for a specific reminder.
 
 Do NOT use this tool for reminders that are only for you or other agents; it is only for reminders sent to the user.
