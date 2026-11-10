@@ -37,6 +37,10 @@ export class NotebookEditorComponent implements FileEditor {
   readonly readOnly = input(true);
 
   readonly dirtyChange = output<boolean>();
+
+  /** Run is open: its edits, outputs and kernel state live in the runner until it saves. */
+
+  readonly busyChange = output<boolean>();
   readonly saveRequested = output<void>();
 
   readonly dirty = signal(false);
@@ -82,6 +86,10 @@ export class NotebookEditorComponent implements FileEditor {
   private pendingDelete = false;
 
   constructor() {
+    effect(() => {
+      const running = this.running();
+      untracked(() => this.busyChange.emit(running));
+    });
     effect(() => {
       const blob = this.blob();
       this.file();

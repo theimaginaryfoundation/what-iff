@@ -23,6 +23,7 @@ class FakeEditorComponent implements FileEditor {
   readonly blob = input.required<Blob>();
   readonly readOnly = input(true);
   readonly dirtyChange = output<boolean>();
+  readonly busyChange = output<boolean>();
   readonly saveRequested = output<void>();
   readonly dirty = signal(false);
   readonly losses = signal<readonly string[]>([]);
@@ -233,6 +234,18 @@ describe('FileWorkspaceComponent', () => {
     const editor = fixture.componentInstance['editorRef']!.instance as FakeEditorComponent;
     return { el, editor };
   }
+
+  it('asks before leaving an editor that is busy, such as a notebook running, even when it is clean', async () => {
+    const { editor } = await startEditing();
+    editor.busyChange.emit(true);
+    confirmDiscard.mockResolvedValueOnce(false);
+    expect(await fixture.componentInstance.stopEdit()).toBe(false);
+    expect(confirmDiscard).toHaveBeenCalled();
+    editor.busyChange.emit(false);
+    confirmDiscard.mockClear();
+    expect(await fixture.componentInstance.stopEdit()).toBe(true);
+    expect(confirmDiscard).not.toHaveBeenCalled();
+  });
 
   it('offers Edit for kinds with an editor, not on a phone, and never for kinds without one', async () => {
     let el = await show(file());

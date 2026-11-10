@@ -29,9 +29,35 @@ const plugin: JupyterFrontEndPlugin<void> = {
     const contents = app.serviceManager.contents;
     let hostOrigin: string | null = null;
     let path: string | null = null;
+    /** The latest save being sent to the host; closing waits for it. */
+    let posting: Promise<void> = Promise.resolve();
+
+    const post = (origin: string, notebookPath: string): Promise<void> =>
+      contents.get(notebookPath, { content: true }).then(model => {
+        window.parent.postMessage({ type: 'whatiff:save', content: model.content }, origin);
+      });
+
+    // Notebook code can write this origin's storage on purpose, and the next account to use this
+    // browser would run on the same origin. Nothing of ours lives there (the drive is in memory),
+    // so it is cleared when the runner starts and before each notebook opens.
+    const clearStorage = async (): Promise<void> => {
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch {
+        // Storage can be unavailable; then there is nothing to clear.
+      }
+      const databases = (await indexedDB.databases?.().catch(() => [])) ?? [];
+      for (const db of databases) {
+        // JupyterLite's own store is open and in memory-only use; deleting it would only block.
+        if (db.name && !db.name.startsWith('JupyterLite Storage')) indexedDB.deleteDatabase(db.name);
+      }
+    };
+    void clearStorage();
 
     const open = async (name: string, content: unknown): Promise<void> => {
       await app.restored;
+      await clearStorage();
       const target = name.replace(/[/\\]/g, '_') || 'notebook.ipynb';
       // Set after the write, so writing the host's own copy is not reported back as a save.
       await contents.save(target, { type: 'notebook', format: 'json', content });
@@ -43,15 +69,17 @@ const plugin: JupyterFrontEndPlugin<void> = {
     const close = async (): Promise<void> => {
       const widget = path ? documents.findWidget(path) : undefined;
       const context = widget ? documents.contextForWidget(widget) : undefined;
-      if (context?.model.dirty) await context.save();
+      if (context?.model.dirty) {
+        await context.save();
+        // Sent here, not only from fileChanged, so it reaches the host before whatiff:closed.
+        if (path && hostOrigin) posting = post(hostOrigin, path);
+      }
+      await posting;
     };
 
     contents.fileChanged.connect((_, change) => {
       if (change.type !== 'save' || !path || change.newValue?.path !== path || !hostOrigin) return;
-      const origin = hostOrigin;
-      void contents.get(path, { content: true }).then(model => {
-        window.parent.postMessage({ type: 'whatiff:save', content: model.content }, origin);
-      });
+      posting = post(hostOrigin, path).catch(error => console.error('whatiff-bridge: could not send the save', error));
     });
 
     window.addEventListener('message', event => {

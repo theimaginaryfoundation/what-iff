@@ -143,6 +143,10 @@ export class FileWorkspaceComponent {
   readonly mode = signal<'view' | 'edit'>('view');
   readonly editable = computed(() => this.canEdit() && hasEditor(this.kind(), this.file().file_type) && this.state() === 'ready');
   readonly editorDirty = signal(false);
+  /** The editor holds work beyond its content (a running notebook) that closing it would discard. */
+  readonly editorBusy = signal(false);
+  /** Leaving edit mode would lose something: unsaved changes, or work in progress. */
+  readonly holdsWork = computed(() => this.editorDirty() || this.editorBusy());
   readonly saving = signal(false);
   readonly saveError = signal<string | null>(null);
   /** The current version the server reported on a 412; the conflict dialog is open while set. */
@@ -210,12 +214,12 @@ export class FileWorkspaceComponent {
     });
     // Route changes, resizes across a breakpoint and closing the tab all ask this.
     effect(() => {
-      const unsaved = this.mode() === 'edit' && this.editorDirty();
+      const unsaved = this.mode() === 'edit' && this.holdsWork();
       untracked(() => this.workspace.setUnsaved(unsaved));
     });
     const view = this.document.defaultView;
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (this.mode() === 'edit' && this.editorDirty()) event.preventDefault();
+      if (this.mode() === 'edit' && this.holdsWork()) event.preventDefault();
     };
     view?.addEventListener('beforeunload', warnBeforeUnload);
     inject(DestroyRef).onDestroy(() => {
@@ -244,9 +248,11 @@ export class FileWorkspaceComponent {
     if (viewerFor(this.kind())?.editInPlace) ref.setInput('readOnly', false);
     const instance = ref.instance as FileEditor & {
       dirtyChange?: { subscribe(fn: (dirty: boolean) => void): unknown };
+      busyChange?: { subscribe(fn: (busy: boolean) => void): unknown };
       saveRequested?: { subscribe(fn: () => void): unknown };
     };
     instance.dirtyChange?.subscribe(dirty => this.editorDirty.set(dirty));
+    instance.busyChange?.subscribe(busy => this.editorBusy.set(busy));
     instance.saveRequested?.subscribe(() => void this.save());
     this.editorRef = ref;
   }
@@ -254,7 +260,7 @@ export class FileWorkspaceComponent {
   /** Leaves edit mode, asking first when there are unsaved changes. */
   async stopEdit(): Promise<boolean> {
     if (this.mode() !== 'edit') return true;
-    if (this.editorDirty() && !(await this.confirmationService.confirmDiscardChanges())) return false;
+    if (this.holdsWork() && !(await this.confirmationService.confirmDiscardChanges())) return false;
     this.destroyEditor();
     this.mode.set('view');
     return true;
@@ -417,6 +423,7 @@ export class FileWorkspaceComponent {
     this.editorRef?.destroy();
     this.editorRef = null;
     this.editorDirty.set(false);
+    this.editorBusy.set(false);
   }
 
   download(): void {
