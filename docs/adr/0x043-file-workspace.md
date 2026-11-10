@@ -56,6 +56,8 @@ Editors implement `FileEditor`: `dirty`, `content()`, `markSaved()`, and an opti
 | notebook | `.ipynb` | One component, section 11 | our own cells, JupyterLite (BSD-3) to run |
 | none | archives, unknown binaries | Badge and download | |
 
+Filerobot is a React app and brings its own React 18; it runs as an island in its container, only in its lazy chunk.
+
 GPL, AGPL and commercially licensed dependencies are not allowed; SuperDoc, OnlyOffice, Handsontable and Pintura were ruled out on that basis.
 This rests on review: no automated licence check exists.
 
