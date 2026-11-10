@@ -35,11 +35,11 @@ func TestUtilityModelSettings_ScopesAndReplacement(t *testing.T) {
 	ds, alice, bob, modelA, modelB := newUtilityModelFixture(t)
 	ctx := context.Background()
 
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleMemory, modelA))
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleMemory, modelA))
+	require.NoError(t, ds.SetUtilityModel(ctx, uuid.Nil, models.UtilityModelSetting{Scope: models.UtilityScopeDeployment, Role: models.UtilityRoleMemory, ModelID: modelA}))
+	require.NoError(t, ds.SetUtilityModel(ctx, alice, models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleMemory, ModelID: modelA}))
 	// A second choice replaces the first rather than adding a row.
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleMemory, modelB))
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, bob, models.UtilityRoleSimple, modelA))
+	require.NoError(t, ds.SetUtilityModel(ctx, alice, models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleMemory, ModelID: modelB}))
+	require.NoError(t, ds.SetUtilityModel(ctx, bob, models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleSimple, ModelID: modelA}))
 
 	got, err := ds.ListUtilityModelSettings(ctx, alice)
 	require.NoError(t, err)
@@ -62,14 +62,14 @@ func TestUtilityModelSettings_ScopesAndReplacement(t *testing.T) {
 func TestUtilityModelSettings_Off(t *testing.T) {
 	ds, alice, _, modelA, _ := newUtilityModelFixture(t)
 	ctx := context.Background()
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleMemory, modelA))
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleMemory, nil))
+	require.NoError(t, ds.SetUtilityModel(ctx, alice, models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleMemory, ModelID: modelA}))
+	require.NoError(t, ds.SetUtilityModel(ctx, alice, models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleMemory}))
 	got, err := ds.ListUtilityModelSettings(ctx, alice)
 	require.NoError(t, err)
 	require.Equal(t, []models.UtilityModelSetting{{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleMemory}}, got)
 	require.True(t, got[0].Off())
 
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleMemory, modelA))
+	require.NoError(t, ds.SetUtilityModel(ctx, alice, models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleMemory, ModelID: modelA}))
 	got, err = ds.ListUtilityModelSettings(ctx, alice)
 	require.NoError(t, err)
 	require.Equal(t, []models.UtilityModelSetting{{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleMemory, ModelID: modelA}}, got)
@@ -80,8 +80,8 @@ func TestUtilityModelSettings_Off(t *testing.T) {
 func TestUtilityModelSettings_Cascade(t *testing.T) {
 	ds, alice, _, modelA, modelB := newUtilityModelFixture(t)
 	ctx := context.Background()
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleMemory, modelA))
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleSimple, modelB))
+	require.NoError(t, ds.SetUtilityModel(ctx, alice, models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleMemory, ModelID: modelA}))
+	require.NoError(t, ds.SetUtilityModel(ctx, uuid.Nil, models.UtilityModelSetting{Scope: models.UtilityScopeDeployment, Role: models.UtilityRoleSimple, ModelID: modelB}))
 
 	require.NoError(t, ds.dbClient.Model.DeleteOneID(*modelB).Exec(ctx))
 	deployment, err := ds.ListUtilityModelSettings(ctx, uuid.Nil)
@@ -108,12 +108,12 @@ func TestSetUtilityModel_OnlyModelsTheChooserCanUse(t *testing.T) {
 	require.NoError(t, err)
 
 	missing := uuid.New()
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, bob, models.UtilityRoleSimple, &bobs.ID))
-	require.ErrorIs(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleSimple, &bobs.ID), ErrModelNotFound)
-	require.ErrorIs(t, ds.SetUtilityModel(ctx, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleSimple, &bobs.ID), ErrModelNotFound)
-	require.ErrorIs(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleSimple, &off.ID), ErrModelNotFound)
-	require.ErrorIs(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleSimple, &missing), ErrModelNotFound)
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleSimple, modelA))
+	require.NoError(t, ds.SetUtilityModel(ctx, bob, models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleSimple, ModelID: &bobs.ID}))
+	require.ErrorIs(t, ds.SetUtilityModel(ctx, alice, models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleSimple, ModelID: &bobs.ID}), ErrModelNotFound)
+	require.ErrorIs(t, ds.SetUtilityModel(ctx, uuid.Nil, models.UtilityModelSetting{Scope: models.UtilityScopeDeployment, Role: models.UtilityRoleSimple, ModelID: &bobs.ID}), ErrModelNotFound)
+	require.ErrorIs(t, ds.SetUtilityModel(ctx, alice, models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleSimple, ModelID: &off.ID}), ErrModelNotFound)
+	require.ErrorIs(t, ds.SetUtilityModel(ctx, alice, models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleSimple, ModelID: &missing}), ErrModelNotFound)
+	require.NoError(t, ds.SetUtilityModel(ctx, uuid.Nil, models.UtilityModelSetting{Scope: models.UtilityScopeDeployment, Role: models.UtilityRoleSimple, ModelID: modelA}))
 
 	got, err := ds.ListUtilityModelSettings(ctx, alice)
 	require.NoError(t, err)
@@ -126,8 +126,8 @@ func TestUtilityModel_RefusesImpossibleSettings(t *testing.T) {
 	ds, alice, _, modelA, _ := newUtilityModelFixture(t)
 	ctx := context.Background()
 	// Each case has a setting to clear, so a clear that ignored its scope would show.
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleMemory, modelA))
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleMemory, modelA))
+	require.NoError(t, ds.SetUtilityModel(ctx, uuid.Nil, models.UtilityModelSetting{Scope: models.UtilityScopeDeployment, Role: models.UtilityRoleMemory, ModelID: modelA}))
+	require.NoError(t, ds.SetUtilityModel(ctx, alice, models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleMemory, ModelID: modelA}))
 	for name, c := range map[string]struct {
 		scope models.UtilityScope
 		user  uuid.UUID
@@ -138,7 +138,7 @@ func TestUtilityModel_RefusesImpossibleSettings(t *testing.T) {
 		"deployment with user": {models.UtilityScopeDeployment, alice, models.UtilityRoleMemory},
 		"account without user": {models.UtilityScopeAccount, uuid.Nil, models.UtilityRoleMemory},
 	} {
-		require.ErrorIs(t, ds.SetUtilityModel(ctx, c.scope, c.user, c.role, modelA), ErrInvalidUtilitySetting, "set: "+name)
+		require.ErrorIs(t, ds.SetUtilityModel(ctx, c.user, models.UtilityModelSetting{Scope: c.scope, Role: c.role, ModelID: modelA}), ErrInvalidUtilitySetting, "set: "+name)
 		require.ErrorIs(t, ds.ClearUtilityModel(ctx, c.scope, c.user, c.role), ErrInvalidUtilitySetting, "clear: "+name)
 	}
 	n, err := ds.dbClient.UtilityModelSetting.Query().Count(ctx)
@@ -158,4 +158,35 @@ func TestUtilityModelSetting_DatabaseRefusesWrongOwner(t *testing.T) {
 		SetScope(string(models.UtilityScopeAccount)).
 		SetRole(string(models.UtilityRoleMemory)).SetModelID(*modelA).Save(ctx)
 	require.Error(t, err, "an account setting without one")
+}
+
+// A choice keeps the effort and tier it asks for; an unknown one, or either on Off, is refused,
+// and the database refuses Off with either too.
+func TestUtilityModelSettings_EffortAndTier(t *testing.T) {
+	ds, alice, _, modelA, _ := newUtilityModelFixture(t)
+	ctx := context.Background()
+	want := models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleMemoryMerge, ModelID: modelA,
+		ReasoningEffort: models.ReasoningEffortLow, ServiceTier: models.UtilityServiceTierFlex}
+	require.NoError(t, ds.SetUtilityModel(ctx, alice, want))
+	got, err := ds.ListUtilityModelSettings(ctx, alice)
+	require.NoError(t, err)
+	require.Equal(t, []models.UtilityModelSetting{want}, got)
+
+	for name, s := range map[string]models.UtilityModelSetting{
+		"unknown effort":  {ModelID: modelA, ReasoningEffort: "extreme"},
+		"unknown tier":    {ModelID: modelA, ServiceTier: "scale"},
+		"off with effort": {ReasoningEffort: models.ReasoningEffortLow},
+		"off with tier":   {ServiceTier: models.UtilityServiceTierFlex},
+	} {
+		s.Scope, s.Role = models.UtilityScopeAccount, models.UtilityRoleMemoryMerge
+		require.ErrorIs(t, ds.SetUtilityModel(ctx, alice, s), ErrInvalidUtilitySetting, name)
+	}
+	got, err = ds.ListUtilityModelSettings(ctx, alice)
+	require.NoError(t, err)
+	require.Equal(t, []models.UtilityModelSetting{want}, got, "a refused choice changes nothing")
+
+	_, err = ds.dbClient.UtilityModelSetting.Create().
+		SetScope(string(models.UtilityScopeAccount)).SetUserID(alice).
+		SetRole(string(models.UtilityRoleSimple)).SetServiceTier("flex").Save(ctx)
+	require.Error(t, err, "Off with a tier, written past the datastore")
 }

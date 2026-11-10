@@ -38,6 +38,12 @@ func (UtilityModelSetting) Fields() []ent.Field {
 		field.String("role").NotEmpty().Immutable(),
 		// The chosen model; NULL switches the role off.
 		field.UUID("model_id", uuid.UUID{}).Optional().Nillable(),
+		// The reasoning effort the role's calls ask for (models.ReasoningEffort); NULL leaves
+		// the model's own default. A string, like role, validated by the datastore.
+		field.String("reasoning_effort").Optional().Nillable(),
+		// The service tier the role's calls ask for (models.UtilityServiceTier); NULL leaves the
+		// API's default.
+		field.String("service_tier").Optional().Nillable(),
 	}
 }
 
@@ -74,6 +80,8 @@ func (UtilityModelSetting) Annotations() []schema.Annotation {
 		// write path can leave a deployment setting with an owner or an account's without one.
 		entsql.Checks(map[string]string{
 			"utility_model_setting_scope_owner": "((scope = 'deployment' AND user_id IS NULL) OR (scope = 'account' AND user_id IS NOT NULL))",
+			// Off has no model, so nothing to ask it for.
+			"utility_model_setting_off_is_bare": "(model_id IS NOT NULL OR (reasoning_effort IS NULL AND service_tier IS NULL))",
 		}),
 	}
 }

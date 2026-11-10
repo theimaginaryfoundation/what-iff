@@ -23,7 +23,7 @@ import (
 // Store is what the handler reads and writes.
 type Store interface {
 	ListUtilityModelSettings(ctx context.Context, userID uuid.UUID) ([]models.UtilityModelSetting, error)
-	SetUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID *uuid.UUID) error
+	SetUtilityModel(ctx context.Context, userID uuid.UUID, s models.UtilityModelSetting) error
 	GetModel(ctx context.Context, id uuid.UUID) (*models.Model, error)
 }
 
@@ -81,10 +81,28 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Send either model_id or off", nil)
 		return
 	}
-	if req.ModelID != nil && !h.hasKeyFor(w, r, *req.ModelID) {
+	setting := models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: role, ModelID: req.ModelID}
+	if req.ReasoningEffort != nil {
+		setting.ReasoningEffort = *req.ReasoningEffort
+	}
+	if req.ServiceTier != nil {
+		setting.ServiceTier = *req.ServiceTier
+	}
+	switch {
+	case req.Off && (setting.ReasoningEffort != "" || setting.ServiceTier != ""):
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "A role that is off takes no reasoning effort or service tier", nil)
+		return
+	case setting.ReasoningEffort != "" && !setting.ReasoningEffort.Valid():
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Unknown reasoning effort", nil)
+		return
+	case !setting.ServiceTier.Valid():
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Unknown service tier", nil)
 		return
 	}
-	err := h.store.SetUtilityModel(r.Context(), models.UtilityScopeAccount, userID, role, req.ModelID)
+	if req.ModelID != nil && !h.checkModel(w, r, *req.ModelID, setting.ServiceTier) {
+		return
+	}
+	err := h.store.SetUtilityModel(r.Context(), userID, setting)
 	if errors.Is(err, datastore.ErrUserNotFound) {
 		// The account was deleted while the request ran.
 		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
@@ -148,6 +166,14 @@ func (h *Handler) utilityModels(ctx context.Context, userID uuid.UUID) (models.U
 				continue
 			}
 			choice := &models.UtilityChoice{Off: s.Off(), ModelID: s.ModelID}
+			if s.ReasoningEffort != "" {
+				effort := s.ReasoningEffort
+				choice.ReasoningEffort = &effort
+			}
+			if s.ServiceTier != "" {
+				tier := s.ServiceTier
+				choice.ServiceTier = &tier
+			}
 			switch s.Scope {
 			case models.UtilityScopeAccount:
 				if !h.accountsChoose {
@@ -163,17 +189,22 @@ func (h *Handler) utilityModels(ctx context.Context, userID uuid.UUID) (models.U
 	return out, nil
 }
 
-// hasKeyFor answers the request and reports false when the account holds no key for the
-// provider of the catalog model it chose, which would only fail at every call, or when the
-// model can't be read. A connection model carries its connection's key, and a model that
-// doesn't exist is the store's to refuse.
-func (h *Handler) hasKeyFor(w http.ResponseWriter, r *http.Request, modelID uuid.UUID) bool {
+// checkModel answers the request and reports false when the chosen model can't take the
+// choice: a service tier on a model whose API offers none (only OpenAI's Responses API does),
+// or a catalog model whose provider the account holds no key for, which would only fail at
+// every call; or when the model can't be read. A connection model carries its connection's
+// key, and a model that doesn't exist is the store's to refuse.
+func (h *Handler) checkModel(w http.ResponseWriter, r *http.Request, modelID uuid.UUID, tier models.UtilityServiceTier) bool {
 	m, err := h.store.GetModel(r.Context(), modelID)
 	if errors.Is(err, datastore.ErrModelNotFound) {
 		return true
 	}
 	if err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error saving the utility model", err)
+		return false
+	}
+	if tier != models.UtilityServiceTierDefault && !offersServiceTier(m) {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "This model's API offers no service tier", nil)
 		return false
 	}
 	if m.ConnectionID != nil {
@@ -185,4 +216,10 @@ func (h *Handler) hasKeyFor(w http.ResponseWriter, r *http.Request, modelID uuid
 	}
 	handlerutils.RespondIfProviderNotConfigured(w, h.logger, &providerkeys.NotConfiguredError{Provider: p})
 	return false
+}
+
+// offersServiceTier reports whether m is on OpenAI's own Responses API, the only API that takes a
+// service tier.
+func offersServiceTier(m *models.Model) bool {
+	return m.ConnectionID == nil && models.UsesOpenAIResponsesAPI(m.Provider, m.Name)
 }

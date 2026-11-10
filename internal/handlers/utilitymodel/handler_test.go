@@ -80,11 +80,12 @@ func (f *fakeStore) ListUtilityModelSettings(_ context.Context, userID uuid.UUID
 	return out, nil
 }
 
-func (f *fakeStore) SetUtilityModel(_ context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID *uuid.UUID) error {
+func (f *fakeStore) SetUtilityModel(_ context.Context, userID uuid.UUID, setting models.UtilityModelSetting) error {
 	if f.setErr != nil {
 		return f.setErr
 	}
-	if modelID != nil && !f.usable[*modelID] {
+	scope, role := setting.Scope, setting.Role
+	if setting.ModelID != nil && !f.usable[*setting.ModelID] {
 		return datastore.ErrModelNotFound
 	}
 	f.mu.Lock()
@@ -95,7 +96,7 @@ func (f *fakeStore) SetUtilityModel(_ context.Context, scope models.UtilityScope
 			kept = append(kept, s)
 		}
 	}
-	f.settings = append(kept, fakeSetting{models.UtilityModelSetting{Scope: scope, Role: role, ModelID: modelID}, userID})
+	f.settings = append(kept, fakeSetting{setting, userID})
 	return nil
 }
 
@@ -142,9 +143,9 @@ func TestList_EveryRoleInOrderWithBothScopes(t *testing.T) {
 	f := newFixture(t)
 	deployment, other := uuid.New(), uuid.New()
 	f.store.usable[deployment], f.store.usable[other] = true, true
-	require.NoError(t, f.store.SetUtilityModel(context.Background(), models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleSimple, &deployment))
-	require.NoError(t, f.store.SetUtilityModel(context.Background(), models.UtilityScopeAccount, uuid.New(), models.UtilityRoleSimple, &other))
-	require.NoError(t, f.store.SetUtilityModel(context.Background(), models.UtilityScopeDeployment, uuid.Nil, models.UtilityRolePersonality, nil))
+	require.NoError(t, f.store.SetUtilityModel(context.Background(), uuid.Nil, models.UtilityModelSetting{Scope: models.UtilityScopeDeployment, Role: models.UtilityRoleSimple, ModelID: &deployment}))
+	require.NoError(t, f.store.SetUtilityModel(context.Background(), uuid.New(), models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleSimple, ModelID: &other}))
+	require.NoError(t, f.store.SetUtilityModel(context.Background(), uuid.Nil, models.UtilityModelSetting{Scope: models.UtilityScopeDeployment, Role: models.UtilityRolePersonality}))
 
 	rec, got := f.do(t, http.MethodGet, "/utility-models", "", true)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -217,7 +218,7 @@ func TestDeploymentChooses(t *testing.T) {
 	store := &fakeStore{usable: map[uuid.UUID]bool{}}
 	account, model := uuid.New(), uuid.New()
 	store.usable[model] = true
-	require.NoError(t, store.SetUtilityModel(context.Background(), models.UtilityScopeAccount, account, models.UtilityRoleMemory, &model))
+	require.NoError(t, store.SetUtilityModel(context.Background(), account, models.UtilityModelSetting{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleMemory, ModelID: &model}))
 	router := mux.NewRouter()
 	NewHandler(store, fakeKeys{}, zap.NewNop()).RegisterRoutes(router)
 	do := func(method, path, body string) *httptest.ResponseRecorder {
@@ -282,4 +283,36 @@ func TestSet_UnreadableModelIsAServerError(t *testing.T) {
 	rec, _ := f.do(t, http.MethodPut, "/utility-models/memory", `{"model_id":"`+model.String()+`"}`, true)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	require.Empty(t, f.store.settings, "nothing is saved")
+}
+
+// A model choice keeps the effort and tier it asks for, reported back; a tier goes only on a
+// model whose API offers one, and Off takes neither.
+func TestSet_EffortAndTier(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	luna, claude := uuid.New(), uuid.New()
+	f.store.usable[luna], f.store.usable[claude] = true, true
+	f.store.catalog = map[uuid.UUID]*models.Model{
+		luna:   {ID: luna, Name: "gpt-5.6-luna", Provider: string(models.ModelProviderOpenAI)},
+		claude: {ID: claude, Name: "claude-haiku-4-5", Provider: string(models.ModelProviderAnthropic)},
+	}
+
+	rec, got := f.do(t, http.MethodPut, "/utility-models/memory_merge",
+		`{"model_id":"`+luna.String()+`","reasoning_effort":"low","service_tier":"flex"}`, true)
+	require.Equal(t, http.StatusOK, rec.Code)
+	low, flex := models.ReasoningEffortLow, models.UtilityServiceTierFlex
+	require.Equal(t, &models.UtilityChoice{ModelID: &luna, ReasoningEffort: &low, ServiceTier: &flex},
+		roleModel(got, models.UtilityRoleMemoryMerge).Account)
+
+	for name, c := range map[string]struct{ body, msg string }{
+		"unknown effort":    {`{"model_id":"` + luna.String() + `","reasoning_effort":"extreme"}`, "Unknown reasoning effort"},
+		"unknown tier":      {`{"model_id":"` + luna.String() + `","service_tier":"scale"}`, "Unknown service tier"},
+		"off with effort":   {`{"off":true,"reasoning_effort":"low"}`, "takes no reasoning effort or service tier"},
+		"tier on Anthropic": {`{"model_id":"` + claude.String() + `","service_tier":"flex"}`, "offers no service tier"},
+	} {
+		rec, _ := f.do(t, http.MethodPut, "/utility-models/simple", c.body, true)
+		require.Equal(t, http.StatusBadRequest, rec.Code, name)
+		require.Contains(t, rec.Body.String(), c.msg, name)
+	}
+	require.Len(t, f.store.settings, 1, "a refused write changes nothing")
 }

@@ -30,7 +30,8 @@
 - **Webhook surface (`webhook_token.go`, `webhook_message.go`):** `WebhookScope` (`messages:write`, `chat:read`) with `NormalizeWebhookScopes` (validates a request; empty means the write-only default) and `EffectiveWebhookScopes` (a token stored with no scopes, i.e. created before scopes existed, is write-only).
   `WebhookMessage` and `WebhookPersonality` are the allow-listed shapes the webhook read routes return, built by `NewWebhookMessage` and `NewWebhookPersonality`; they deliberately omit tool calls, model reasoning, thumbnails, storage keys and a persona's prompt and scratchpad.
 - **Utility roles (`utility.go`):** `UtilityRole` (`memory`, `memory_merge`, `simple`, `personality`) groups background work that runs on the same model (ADR 0x027 section 6).
-  A `UtilityModelSetting` chooses a model or switches its role off (`Off`, no `ModelID`); `UtilityChoice` is how the API reports one scope's.
+  A `UtilityModelSetting` chooses a model, with an optional reasoning effort and `UtilityServiceTier`, or switches its role off (`Off`, no `ModelID`); `UtilityChoice` is how the API reports one scope's.
+  `UsesOpenAIResponsesAPI` (`model_defaults.go`) reports a catalog model on OpenAI's own Responses API, the only one that takes a service tier or continues a stored conversation.
   `UtilityRoles` lists them in display order and `Valid` checks one.
   They live here, not in `agent/provider`, so code that can't import the agent, such as the datastore, can name a role.
 - **Error envelope (`error.go`):** `ErrorResponse` plus the error-code registry — `ErrCode*` constants and `GenericErrorCode(status)`.

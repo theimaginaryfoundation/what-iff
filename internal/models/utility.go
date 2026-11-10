@@ -44,12 +44,37 @@ const (
 	UtilityScopeAccount    UtilityScope = "account"
 )
 
-// UtilityModelSetting is what was chosen for a role at a scope: a model, or Off.
+// UtilityServiceTier is how fast, and at what price, a call asks to be processed, where an
+// API offers a choice. Only OpenAI's Responses API does; elsewhere it isn't sent.
+type UtilityServiceTier string
+
+const (
+	// UtilityServiceTierDefault leaves the API's default.
+	UtilityServiceTierDefault UtilityServiceTier = ""
+	// UtilityServiceTierPriority asks for faster, pricier processing.
+	UtilityServiceTierPriority UtilityServiceTier = "priority"
+	// UtilityServiceTierFlex asks for slower, cheaper processing.
+	UtilityServiceTierFlex UtilityServiceTier = "flex"
+)
+
+// Valid reports whether t is a known tier.
+func (t UtilityServiceTier) Valid() bool {
+	return t == UtilityServiceTierDefault || t == UtilityServiceTierPriority || t == UtilityServiceTierFlex
+}
+
+// UtilityModelSetting is what was chosen for a role at a scope: a model, with how it's asked to
+// work, or Off.
 type UtilityModelSetting struct {
 	Scope UtilityScope `json:"scope"`
 	Role  UtilityRole  `json:"role"`
 	// ModelID is the chosen model, or nil when the role is switched off.
 	ModelID *uuid.UUID `json:"model_id"`
+	// ReasoningEffort is the effort the role's calls ask for (ADR 0x026), limited to what the
+	// model supports; empty leaves the model's own default. Never set when off.
+	ReasoningEffort ReasoningEffort `json:"reasoning_effort,omitempty"`
+	// ServiceTier is the tier the role's calls ask for, where the model's API offers one; empty
+	// leaves the API's default. Never set when off.
+	ServiceTier UtilityServiceTier `json:"service_tier,omitempty"`
 }
 
 // Off reports whether the setting switches its role off.
@@ -57,10 +82,14 @@ func (s UtilityModelSetting) Off() bool { return s.ModelID == nil }
 
 // UtilityChoice is one scope's choice for a role, as an account sees it.
 type UtilityChoice struct {
-	// Off is whether the role is switched off; ModelID is then nil.
+	// Off is whether the role is switched off; the rest is then nil.
 	Off bool `json:"off"`
 	// ModelID is the chosen model, or nil when the role is off.
 	ModelID *uuid.UUID `json:"model_id"`
+	// ReasoningEffort is the effort asked for, or nil for the model's own default.
+	ReasoningEffort *ReasoningEffort `json:"reasoning_effort"`
+	// ServiceTier is the tier asked for, or nil for the API's default.
+	ServiceTier *UtilityServiceTier `json:"service_tier"`
 }
 
 // UtilityRoleModel is what an account sees of one role: its own choice and the deployment's.
@@ -82,8 +111,10 @@ type UtilityModels struct {
 }
 
 // SetUtilityModelRequest chooses a model for a role, or switches it off: exactly one of
-// ModelID and Off.
+// ModelID and Off. ReasoningEffort and ServiceTier go with a model only.
 type SetUtilityModelRequest struct {
-	ModelID *uuid.UUID `json:"model_id"`
-	Off     bool       `json:"off"`
+	ModelID         *uuid.UUID          `json:"model_id"`
+	Off             bool                `json:"off"`
+	ReasoningEffort *ReasoningEffort    `json:"reasoning_effort"`
+	ServiceTier     *UtilityServiceTier `json:"service_tier"`
 }
