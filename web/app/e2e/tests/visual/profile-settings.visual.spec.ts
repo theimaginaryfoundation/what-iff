@@ -4,8 +4,9 @@ import { commonMasks } from './visual.helpers';
 /**
  * @functional-coverage tests/functional/profile/profile.spec.ts
  *
- * Opening the modal, editing identity fields, saving, and the chat-defaults
- * fieldset are covered behaviourally by the functional profile spec.
+ * Opening the modal, editing identity fields, saving, the chat-defaults
+ * fieldset and the background-models fieldset are covered behaviourally by
+ * the functional profile spec.
  *
  * A baseline pins how this looks; it cannot tell you it still works. See
  * e2e/scripts/check-visual-coverage.mjs.
@@ -44,6 +45,7 @@ test(
       if (active instanceof HTMLElement) active.blur();
     });
     await chatDefaults.evaluate(element => { element.style.display = 'none'; });
+    await profileSettingsModal.backgroundModels.evaluate(element => { element.style.display = 'none'; });
 
     const modalBody = page.locator('.ui-modal__body');
     const profileBody = page.locator('.profile-settings__body');
@@ -65,5 +67,23 @@ test(
       // "Member since" date; the email form field mirrors the same email.
       mask: [...commonMasks(page), profileSettingsModal.identityCard, profileSettingsModal.emailInput],
     });
+  },
+);
+
+test(
+  'profile & settings modal, background models',
+  { tag: ['@visual', '@mock-only'] },
+  async ({ authenticatedPage: page, profileSettingsModal }) => {
+    await profileSettingsModal.open();
+    const section = profileSettingsModal.backgroundModels;
+    await expect(section).toBeVisible();
+    await expect(profileSettingsModal.backgroundModelSelect('personality')).toBeVisible();
+    await section.scrollIntoViewIfNeeded();
+    await page.evaluate(() => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.blur();
+    });
+
+    await expect(section).toHaveScreenshot('profile-settings-background-models.png', { animations: 'disabled' });
   },
 );
