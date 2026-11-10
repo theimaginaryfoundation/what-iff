@@ -266,7 +266,7 @@ func (a *Agent) inferMemoryMergeGroupsOpenAI(ctx context.Context, userID uuid.UU
 		history = []provider.UtilityMessage{{Role: provider.UtilityMessageDeveloper, Text: memoryMergeGroupingPrompt}}
 	}
 	text, err := a.CallUtility(ctx, provider.UtilityRequest{
-		Role:            provider.UtilityRoleMemory,
+		Role:            provider.UtilityRoleMemoryMerge,
 		CallPath:        telemetry.CallPathMemory,
 		Instructions:    instructions,
 		History:         history,

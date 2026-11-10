@@ -6,13 +6,14 @@ Serves an account's choice of model for each utility role: the background work, 
 
 ## Responsibilities
 
-- `GET /utility-models` returns `models.UtilityModels`: every role in `models.UtilityRoles` order, with the account's choice, the deployment's, and the built-in model the role runs on when neither chose one.
-- `PUT /utility-models/{role}` chooses the account's model for a role (`model_id`), and `DELETE /utility-models/{role}` clears it; both answer with every role after the change.
+- `GET /utility-models` returns `models.UtilityModels`: every role in `models.UtilityRoles` order, with the account's choice and the deployment's (`models.UtilityChoice`: a model, or off); with neither, the role is not set.
+- `PUT /utility-models/{role}` chooses the account's model for a role (`model_id`) or switches it off (`off`), exactly one of the two, and answers with every role after the change.
+  There is no clearing: where accounts choose, nothing stands behind their choice, so a cleared role would quietly stop running.
 
 ## Dependencies
 
-- **Inbound:** `internal/server` mounts it on the authenticated router, with the datastore, `agent.UtilityBuiltInModel` and the key resolver.
-- **Outbound:** `internal/datastore` (`ListUtilityModelSettings`, `SetUtilityModel`, `ClearUtilityModel`, `GetModel`, through the `Store` interface), `internal/providerkeys`, `internal/models`, `internal/handlers/handlerutils`.
+- **Inbound:** `internal/server` mounts it on the authenticated router, with the datastore and the key resolver.
+- **Outbound:** `internal/datastore` (`ListUtilityModelSettings`, `SetUtilityModel`, `GetModel`, through the `Store` interface), `internal/providerkeys`, `internal/models`, `internal/handlers/handlerutils`.
 
 ## Non-obvious decisions
 
@@ -23,11 +24,10 @@ Serves an account's choice of model for each utility role: the background work, 
 - A catalog model whose provider the account holds no key for is refused as a 409 `provider_not_configured` naming the provider, since it would fail at every call; a connection model carries its connection's key.
   An experimental model the account hasn't opted into is a 403, and an account deleted while the request ran is a 401.
 - An unset choice is `null`, not missing, so a client can tell "not chosen" from an older server.
-- `built_in_model` is a name, not a model ID: a built-in model need not be a catalog row on every install.
 
 ## Testing
 
-- `handler_test.go` — over a fake store: every role in order with both scopes, never another account's choice; setting and clearing; refusals (a model the account can't use, no model, an unknown role, no signed-in account) that change nothing; a deployment that supplies the keys refusing account writes; a catalog model without a key refused as `provider_not_configured`; a deleted account answered 401; and a model that can't be read answered 500 before anything is saved.
+- `handler_test.go` — over a fake store: every role in order with both scopes, Off and not set, never another account's choice; choosing a model, then Off, and no clearing route; refusals (a model the account can't use, neither or both of a model and off, an unknown role, no signed-in account) that change nothing; a deployment that supplies the keys refusing account writes; a catalog model without a key refused as `provider_not_configured`; a deleted account answered 401; and a model that can't be read answered 500 before anything is saved.
 
 ## Related documentation
 

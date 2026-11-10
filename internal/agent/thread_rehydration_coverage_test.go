@@ -446,7 +446,7 @@ func TestRunThreadRehydration_CaughtUpThreadFoldsTheBacklogIntoItsSummary(t *tes
 func TestSummarizeText_NoProviderConfiguredReturnsError(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
-	_, err := a.summarizeText(context.Background(), uuid.New(), "instructions", "input", 100)
+	_, err := a.summarizeText(withTestUtilityModels(context.Background()), uuid.New(), "instructions", "input", 100)
 	require.ErrorContains(t, err, "no OpenAI provider is configured")
 }
 
@@ -456,7 +456,7 @@ func TestSummarizeText_SuccessReturnsTrimmedOutput(t *testing.T) {
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	got, err := a.summarizeText(context.Background(), uuid.New(), "instructions", "input", 100)
+	got, err := a.summarizeText(withTestUtilityModels(context.Background()), uuid.New(), "instructions", "input", 100)
 	require.NoError(t, err)
 	require.Equal(t, "a tidy summary", got)
 }
@@ -467,7 +467,7 @@ func TestSummarizeText_EmptyOutputReturnsError(t *testing.T) {
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	_, err := a.summarizeText(context.Background(), uuid.New(), "instructions", "input", 100)
+	_, err := a.summarizeText(withTestUtilityModels(context.Background()), uuid.New(), "instructions", "input", 100)
 	require.ErrorContains(t, err, "empty summary")
 }
 
@@ -499,7 +499,7 @@ func TestSummarizeImportedThread_SinglePassUnderCharBudget(t *testing.T) {
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 	msgs := turnMsgs(2)
-	got, err := a.summarizeImportedThread(context.Background(), uuid.New(), "", msgs)
+	got, err := a.summarizeImportedThread(withTestUtilityModels(context.Background()), uuid.New(), "", msgs)
 	require.NoError(t, err)
 	require.Equal(t, "short thread summary", got)
 }
@@ -515,7 +515,7 @@ func TestSummarizeImportedThread_MapReduceForLongTranscript(t *testing.T) {
 	msgs := []models.ChatMessage{
 		{Message: strings.Repeat("x", rehydrationSinglePassChars+1), Origin: models.MessageOriginUser},
 	}
-	got, err := a.summarizeImportedThread(context.Background(), uuid.New(), "", msgs)
+	got, err := a.summarizeImportedThread(withTestUtilityModels(context.Background()), uuid.New(), "", msgs)
 	require.NoError(t, err)
 	require.Equal(t, "rolled-up summary", got)
 }
@@ -532,7 +532,7 @@ func TestSummarizeImportedThread_ACatchUpCarriesTheEarlierSummary(t *testing.T) 
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	got, err := a.summarizeImportedThread(context.Background(), uuid.New(), "They planned a trip to Lisbon.", turnMsgs(2))
+	got, err := a.summarizeImportedThread(withTestUtilityModels(context.Background()), uuid.New(), "They planned a trip to Lisbon.", turnMsgs(2))
 	require.NoError(t, err)
 	require.Equal(t, "caught up", got)
 	require.Contains(t, body, "They planned a trip to Lisbon.", "one summary covers the earlier one and what followed")
@@ -569,7 +569,7 @@ func TestExtractMemoriesFromTranscript_SuccessParsesMemories(t *testing.T) {
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	mems, err := a.extractMemoriesFromTranscript(context.Background(), uuid.New(), "User: I like Go.")
+	mems, err := a.extractMemoriesFromTranscript(withTestUtilityModels(context.Background()), uuid.New(), "User: I like Go.")
 	require.NoError(t, err)
 	require.Len(t, mems, 1)
 	require.Equal(t, "likes Go", mems[0].Content)

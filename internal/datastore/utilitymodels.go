@@ -62,12 +62,13 @@ func (ds *Datastore) ListUtilityModelSettings(ctx context.Context, userID uuid.U
 }
 
 // SetUtilityModel chooses modelID for role at scope, for the account userID, or
-// for the deployment when userID is uuid.Nil, replacing any earlier choice.
+// for the deployment when userID is uuid.Nil, replacing any earlier choice. A nil
+// modelID switches the role off.
 //
 // The model must be one the chooser can use, or ErrModelNotFound: an account
 // chooses from the catalog and its own connections' models, and the deployment,
 // whose choice applies to every account, from the catalog only.
-func (ds *Datastore) SetUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID uuid.UUID) error {
+func (ds *Datastore) SetUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID *uuid.UUID) error {
 	err := ds.setUtilityModel(ctx, scope, userID, role, modelID)
 	if ent.IsConstraintError(err) {
 		// Two writes for the same role raced: both cleared nothing, and the other one saved
@@ -77,7 +78,7 @@ func (ds *Datastore) SetUtilityModel(ctx context.Context, scope models.UtilitySc
 	return err
 }
 
-func (ds *Datastore) setUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID uuid.UUID) error {
+func (ds *Datastore) setUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID *uuid.UUID) error {
 	tx, err := ds.dbClient.Tx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin utility model setting: %w", err)
@@ -92,13 +93,16 @@ func (ds *Datastore) setUtilityModel(ctx context.Context, scope models.UtilitySc
 	return nil
 }
 
-func setUtilityModelTx(ctx context.Context, tx *ent.Tx, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID uuid.UUID) error {
+func setUtilityModelTx(ctx context.Context, tx *ent.Tx, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole, modelID *uuid.UUID) error {
 	if err := validateUtilitySetting(scope, userID, role); err != nil {
 		return err
 	}
-	if userID == uuid.Nil {
+	switch {
+	case modelID == nil:
+		// Off: no model to check.
+	case userID == uuid.Nil:
 		catalog, err := tx.Model.Query().
-			Where(entmodel.ID(modelID), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+			Where(entmodel.ID(*modelID), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 			Exist(ctx)
 		if err != nil {
 			return fmt.Errorf("check utility model: %w", err)
@@ -106,8 +110,10 @@ func setUtilityModelTx(ctx context.Context, tx *ent.Tx, scope models.UtilityScop
 		if !catalog {
 			return ErrModelNotFound
 		}
-	} else if err := assertUserCanUseModelTx(ctx, tx, userID, modelID); err != nil {
-		return err
+	default:
+		if err := assertUserCanUseModelTx(ctx, tx, userID, *modelID); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.UtilityModelSetting.Delete().
 		Where(utilityScopeOwner(scope, userID), utilitymodelsetting.Role(string(role))).
@@ -117,7 +123,7 @@ func setUtilityModelTx(ctx context.Context, tx *ent.Tx, scope models.UtilityScop
 	create := tx.UtilityModelSetting.Create().
 		SetScope(string(scope)).
 		SetRole(string(role)).
-		SetModelID(modelID)
+		SetNillableModelID(modelID)
 	if userID != uuid.Nil {
 		create.SetUserID(userID)
 	}
@@ -128,7 +134,7 @@ func setUtilityModelTx(ctx context.Context, tx *ent.Tx, scope models.UtilityScop
 }
 
 // ClearUtilityModel removes the choice for role at scope, so the role falls back
-// to the next scope's choice or its built-in default.
+// to the next scope's choice, or is not set.
 func (ds *Datastore) ClearUtilityModel(ctx context.Context, scope models.UtilityScope, userID uuid.UUID, role models.UtilityRole) error {
 	if err := validateUtilitySetting(scope, userID, role); err != nil {
 		return err

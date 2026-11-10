@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 
@@ -17,28 +18,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// utilityBuiltIn is the model a utility role runs on when neither the account nor the
-// deployment chose one, and its provider: the fixed model each role's call sites used before
-// roles existed. The provider is named rather than looked up from the catalog, so a call
-// routes even if the catalog drops the model.
-func utilityBuiltIn(role provider.UtilityRole) (model string, modelProvider models.ModelProvider) {
-	switch role {
-	case provider.UtilityRoleMemory:
-		return archivalOpenAIModel, models.ModelProviderOpenAI
-	case provider.UtilityRolePersonality:
-		return generatePersonalityModel, models.ModelProviderOpenAI
-	default:
-		return models.UtilityModelName, models.ModelProviderOpenAI
-	}
-}
+// ErrUtilityRoleOff is a utility call whose role is switched off: its work doesn't run.
+var ErrUtilityRoleOff = errors.New("this utility role is switched off")
 
-// UtilityBuiltInModel names the model a utility role runs on when neither the account nor the
-// deployment chose one. GET /utility-models reports it as built_in_model, and openapi.yaml
-// describes that field.
-func UtilityBuiltInModel(role models.UtilityRole) string {
-	name, _ := utilityBuiltIn(role)
-	return name
-}
+// ErrUtilityRoleNotSet is a utility call whose role has no model chosen at any scope: its work
+// doesn't run until one is.
+var ErrUtilityRoleNotSet = errors.New("no model is chosen for this utility role")
 
 // utilityTarget is the model a utility call runs on.
 type utilityTarget struct {
@@ -66,36 +51,45 @@ func (t utilityTarget) usesResponsesAPI() bool {
 		models.ProviderForModel(t.provider, t.name) == models.ModelProviderOpenAI
 }
 
-// chosenUtilityTarget is the model chosen for role by the account the context is for, or
-// else by the deployment (ADR 0x027 section 6), and whether either chose one that can be used.
+// resolveUtilityTarget is the model chosen for role by the account the context is for, or else
+// by the deployment (ADR 0x027 section 6).
 //
 // A choice that can't be used (turned off, deleted with its connection, its connection
-// unreachable) falls back to the next one, and past the last to the role's built-in model, so
-// background work keeps running; each fallback is logged and counted, so it shows. A failed
-// read of the settings falls back the same way.
-func (a *Agent) chosenUtilityTarget(ctx context.Context, role provider.UtilityRole) (utilityTarget, bool) {
+// unreachable, its key gone) falls back to the next scope's, logged and counted; past the last,
+// the call fails with why the last one couldn't be used. A role switched off at the first scope
+// that chose for it is ErrUtilityRoleOff, and one no scope chose is ErrUtilityRoleNotSet. A
+// failed read of the settings fails the call.
+func (a *Agent) resolveUtilityTarget(ctx context.Context, role provider.UtilityRole) (utilityTarget, error) {
 	if a.ds == nil {
-		return utilityTarget{}, false
+		return utilityTarget{}, ErrUtilityRoleNotSet
 	}
 	userID, _ := middleware.GetUserIDFromContext(ctx)
 	settings, err := a.ds.ListUtilityModelSettings(ctx, userID)
 	if err != nil {
 		a.recordUtilityFallback(ctx, role, "", uuid.Nil, err)
-		return utilityTarget{}, false
+		return utilityTarget{}, fmt.Errorf("read utility model settings: %w", err)
 	}
+	var unusable error
 	for _, scope := range a.utilityScopes() {
 		for _, s := range settings {
 			if s.Role != role || s.Scope != scope {
 				continue
 			}
+			if s.Off() {
+				return utilityTarget{}, ErrUtilityRoleOff
+			}
 			t, err := a.settingTarget(ctx, userID, s)
 			if err == nil {
-				return t, true
+				return t, nil
 			}
-			a.recordUtilityFallback(ctx, role, scope, s.ModelID, err)
+			a.recordUtilityFallback(ctx, role, scope, *s.ModelID, err)
+			unusable = err
 		}
 	}
-	return utilityTarget{}, false
+	if unusable != nil {
+		return utilityTarget{}, unusable
+	}
+	return utilityTarget{}, ErrUtilityRoleNotSet
 }
 
 // utilityScopes are the scopes whose choices count, first wins. An account chooses only where it
@@ -110,7 +104,7 @@ func (a *Agent) utilityScopes() []models.UtilityScope {
 
 // settingTarget is the model a setting chose, if it can still be used.
 func (a *Agent) settingTarget(ctx context.Context, userID uuid.UUID, s models.UtilityModelSetting) (utilityTarget, error) {
-	m, err := a.ds.GetModel(ctx, s.ModelID)
+	m, err := a.ds.GetModel(ctx, *s.ModelID)
 	if errors.Is(err, datastore.ErrModelNotFound) {
 		return utilityTarget{}, ErrModelDisabled
 	}
@@ -144,7 +138,7 @@ func (a *Agent) recordUtilityFallback(ctx context.Context, role provider.Utility
 	if modelID != uuid.Nil {
 		fields = append(fields, zap.String("model_id", modelID.String()))
 	}
-	a.logger.Warn("utility role is falling back past its chosen model", append(fields,
+	a.logger.Warn("utility role is passing over a choice it can't use", append(fields,
 		zap.String("reason", reason),
 		zap.Error(err))...)
 	a.metrics().Add(ctx, telemetry.UtilityModelFallbacks, 1,
@@ -153,16 +147,13 @@ func (a *Agent) recordUtilityFallback(ctx context.Context, role provider.Utility
 		telemetry.AttrReason.String(reason))
 }
 
-// utilityTargetFor is the model a role's calls run on: the chosen one, or its built-in model.
-func (a *Agent) utilityTargetFor(ctx context.Context, role provider.UtilityRole) utilityTarget {
+// utilityTargetFor is the model a role's calls run on: the one pinned on the context, or else
+// the chosen one (resolveUtilityTarget).
+func (a *Agent) utilityTargetFor(ctx context.Context, role provider.UtilityRole) (utilityTarget, error) {
 	if t, ok := pinnedUtilityTarget(ctx, role); ok {
-		return t
+		return t, nil
 	}
-	if t, chosen := a.chosenUtilityTarget(ctx, role); chosen {
-		return t
-	}
-	name, modelProvider := utilityBuiltIn(role)
-	return utilityTarget{name: name, provider: string(modelProvider)}
+	return a.resolveUtilityTarget(ctx, role)
 }
 
 // catalogChoiceUsable checks what a catalog model's choice was saved with and can lose since:

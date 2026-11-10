@@ -103,7 +103,7 @@ func TestGenerateExpressionGridCells_PromptOnlyUsesCustomKeysAndStyle(t *testing
 	api := &fakeImageAPI{likenessText: "A fox-eared bard in a green cloak.", genB64: gridPNGBase64(t, 96)}
 	a := newGridTestAgent(api.server(t))
 
-	cells, err := a.generateExpressionGridCells(context.Background(),
+	cells, err := a.generateExpressionGridCells(withTestUtilityModels(context.Background()),
 		&models.Personality{SystemPrompt: "You are a bard.", ImageStyle: "watercolor"}, customGridKeys, expressionGridReference{})
 	require.NoError(t, err)
 	require.Len(t, cells, 9)
@@ -127,7 +127,7 @@ func TestGenerateExpressionGridCells_AutoStyleOmitsArtStyleLine(t *testing.T) {
 	api := &fakeImageAPI{likenessText: "A robot.", genB64: gridPNGBase64(t, 60)}
 	a := newGridTestAgent(api.server(t))
 
-	_, err := a.generateExpressionGridCells(context.Background(),
+	_, err := a.generateExpressionGridCells(withTestUtilityModels(context.Background()),
 		&models.Personality{SystemPrompt: "You are a robot.", ImageStyle: "auto"}, ExpressionGridKeys, expressionGridReference{})
 	require.NoError(t, err)
 	require.NotContains(t, api.genBodies[0], "Art style:")
@@ -151,7 +151,7 @@ func TestGenerateExpressionGridCells_ReferenceGoesToEditEndpoint(t *testing.T) {
 	a := newGridTestAgent(api.server(t))
 
 	ref := expressionGridReference{bytes: []byte("\x89PNG-ref"), mime: "image/png", sendToImageModel: true}
-	cells, err := a.generateExpressionGridCells(context.Background(), &models.Personality{SystemPrompt: "You are a knight."}, customGridKeys, ref)
+	cells, err := a.generateExpressionGridCells(withTestUtilityModels(context.Background()), &models.Personality{SystemPrompt: "You are a knight."}, customGridKeys, ref)
 	require.NoError(t, err)
 	require.Len(t, cells, 9)
 
@@ -170,7 +170,7 @@ func TestCoverImageReference_GoesToEditEndpoint(t *testing.T) {
 	a := newGridTestAgent(api.server(t))
 
 	// The default grid (first expressions for a new personality) uses the cover image directly.
-	_, err := a.generateExpressionGridCells(context.Background(), &models.Personality{SystemPrompt: "x"},
+	_, err := a.generateExpressionGridCells(withTestUtilityModels(context.Background()), &models.Personality{SystemPrompt: "x"},
 		ExpressionGridKeys, coverImageReference([]byte("cover"), "image/jpeg"))
 	require.NoError(t, err)
 	require.Len(t, api.editBodies, 1)
@@ -190,7 +190,7 @@ func TestGenerateExpressionGridCells_LikenessOnlyReferenceSkipsEdit(t *testing.T
 
 	// A reference not marked for the image model grounds only the likeness pass.
 	ref := expressionGridReference{bytes: []byte("cover"), mime: "image/jpeg"}
-	_, err := a.generateExpressionGridCells(context.Background(), &models.Personality{SystemPrompt: "x"}, ExpressionGridKeys, ref)
+	_, err := a.generateExpressionGridCells(withTestUtilityModels(context.Background()), &models.Personality{SystemPrompt: "x"}, ExpressionGridKeys, ref)
 	require.NoError(t, err)
 	require.Empty(t, api.editBodies)
 	require.Len(t, api.genBodies, 1)
@@ -203,7 +203,7 @@ func TestGenerateExpressionGridCells_RejectedEditFallsBackToGeneration(t *testin
 	a := newGridTestAgent(api.server(t))
 
 	ref := expressionGridReference{bytes: []byte("ref"), mime: "image/webp", sendToImageModel: true}
-	cells, err := a.generateExpressionGridCells(context.Background(), &models.Personality{SystemPrompt: "x"}, ExpressionGridKeys, ref)
+	cells, err := a.generateExpressionGridCells(withTestUtilityModels(context.Background()), &models.Personality{SystemPrompt: "x"}, ExpressionGridKeys, ref)
 	require.NoError(t, err)
 	require.Len(t, cells, 9)
 	require.Len(t, api.editBodies, 1)
@@ -228,7 +228,7 @@ func TestGenerateExpressionGridCells_Failures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			a := newGridTestAgent(tc.api.server(t))
-			_, err := a.generateExpressionGridCells(context.Background(), &models.Personality{SystemPrompt: "x"}, ExpressionGridKeys, expressionGridReference{})
+			_, err := a.generateExpressionGridCells(withTestUtilityModels(context.Background()), &models.Personality{SystemPrompt: "x"}, ExpressionGridKeys, expressionGridReference{})
 			require.ErrorContains(t, err, tc.wantErr)
 		})
 	}
@@ -374,7 +374,6 @@ func TestGenerateExpressionCandidates_UploadsNineUnassignedCandidates(t *testing
 
 	expectPersonalityLookup(mock, pid, "auto")
 	expectFileAttachmentLookup(mock, refID, "image/png")
-	expectNoUtilitySettings(mock)
 	attIDs := make([]uuid.UUID, len(customGridKeys))
 	for i := range customGridKeys {
 		attIDs[i] = uuid.New()
@@ -382,7 +381,7 @@ func TestGenerateExpressionCandidates_UploadsNineUnassignedCandidates(t *testing
 		mock.ExpectExec("UPDATE `file_attachments`").WillReturnResult(sqlmock.NewResult(0, 1))
 	}
 
-	got, err := a.GenerateExpressionCandidates(context.Background(), uid, pid, customGridKeys, &refID)
+	got, err := a.GenerateExpressionCandidates(withTestUtilityModels(context.Background()), uid, pid, customGridKeys, &refID)
 	require.NoError(t, err)
 	require.Len(t, got, 9)
 	for i, c := range got {
@@ -404,7 +403,6 @@ func TestGenerateExpressionCandidates_MidRunFailureDeletesEarlierCandidates(t *t
 	uid, pid := uuid.New(), uuid.New()
 	first, second := uuid.New(), uuid.New()
 	expectPersonalityLookup(mock, pid, "auto")
-	expectNoUtilitySettings(mock)
 	// Cell 1 uploads cleanly.
 	expectCreatePersonalityAttachment(mock, uid, pid, first)
 	mock.ExpectExec("UPDATE `file_attachments`").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -422,7 +420,7 @@ func TestGenerateExpressionCandidates_MidRunFailureDeletesEarlierCandidates(t *t
 	mock.ExpectCommit()
 	expectDeleteFileAttachment(mock, first)
 
-	got, err := a.GenerateExpressionCandidates(context.Background(), uid, pid, ExpressionGridKeys, nil)
+	got, err := a.GenerateExpressionCandidates(withTestUtilityModels(context.Background()), uid, pid, ExpressionGridKeys, nil)
 	require.Nil(t, got)
 	require.ErrorContains(t, err, `expression "content"`)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -440,9 +438,8 @@ func TestGenerateExpressionCandidates_GridFailureUploadsNothing(t *testing.T) {
 
 	pid := uuid.New()
 	expectPersonalityLookup(mock, pid, "auto")
-	expectNoUtilitySettings(mock)
 
-	_, err := a.GenerateExpressionCandidates(context.Background(), uuid.New(), pid, ExpressionGridKeys, nil)
+	_, err := a.GenerateExpressionCandidates(withTestUtilityModels(context.Background()), uuid.New(), pid, ExpressionGridKeys, nil)
 	require.ErrorContains(t, err, "generate grid image")
 	require.Empty(t, store.objects)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -508,13 +505,12 @@ func TestRunExpressionCandidatesJob_RecordsCandidatesOnProgress(t *testing.T) {
 
 	uid, pid, jobID := uuid.New(), uuid.New(), uuid.New()
 	expectPersonalityLookup(mock, pid, "auto")
-	expectNoUtilitySettings(mock)
 	ids := expectNineCandidateUploads(mock, uid, pid, customGridKeys)
 	mock.ExpectExec("UPDATE `jobs` SET .*`progress`").
 		WithArgs(sqlmock.AnyArg(), progressWithCandidate(ids[0]), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	resultID, err := a.runExpressionCandidatesJob(context.Background(), uid, jobID, pid, customGridKeys, nil)
+	resultID, err := a.runExpressionCandidatesJob(withTestUtilityModels(context.Background()), uid, jobID, pid, customGridKeys, nil)
 	require.NoError(t, err)
 	require.Equal(t, pid, resultID)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -528,7 +524,6 @@ func TestRunExpressionCandidatesJob_UnrecordedCandidatesAreDeleted(t *testing.T)
 
 	uid, pid := uuid.New(), uuid.New()
 	expectPersonalityLookup(mock, pid, "auto")
-	expectNoUtilitySettings(mock)
 	ids := expectNineCandidateUploads(mock, uid, pid, ExpressionGridKeys)
 	mock.ExpectExec("UPDATE `jobs`").WillReturnError(errors.New("db gone"))
 	for _, id := range ids {
@@ -539,7 +534,7 @@ func TestRunExpressionCandidatesJob_UnrecordedCandidatesAreDeleted(t *testing.T)
 		expectDeleteFileAttachment(mock, id)
 	}
 
-	_, err := a.runExpressionCandidatesJob(context.Background(), uid, uuid.New(), pid, ExpressionGridKeys, nil)
+	_, err := a.runExpressionCandidatesJob(withTestUtilityModels(context.Background()), uid, uuid.New(), pid, ExpressionGridKeys, nil)
 	require.ErrorContains(t, err, "record expression candidates")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -566,9 +561,8 @@ func TestGenerateDefaultExpressionGrid_GridFailure(t *testing.T) {
 
 	pid := uuid.New()
 	expectPersonalityLookup(mock, pid, "auto")
-	expectNoUtilitySettings(mock)
 
-	_, err := a.GenerateDefaultExpressionGrid(context.Background(), uuid.New(), pid)
+	_, err := a.GenerateDefaultExpressionGrid(withTestUtilityModels(context.Background()), uuid.New(), pid)
 	require.ErrorContains(t, err, "generate grid image")
 	// The default grid never sends a reference to the image model.
 	require.Empty(t, api.editBodies)

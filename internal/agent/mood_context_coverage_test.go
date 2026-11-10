@@ -170,7 +170,7 @@ func TestAutoSelectMood_SuccessReturnsMatchingMood(t *testing.T) {
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 	moods := []*models.Mood{{ID: uuid.New()}, {ID: moodID, Name: "Match"}}
-	got := a.autoSelectMood(context.Background(), moods, "hi")
+	got := a.autoSelectMood(withTestUtilityModels(context.Background()), moods, "hi")
 	require.NotNil(t, got)
 	require.Equal(t, "Match", got.Name)
 }

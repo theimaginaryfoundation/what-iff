@@ -94,7 +94,6 @@ func TestExtractAndStoreImportedMemories_AppliesThreadPersonalityAutoPin(t *test
 			userID, chatID, personalityID := uuid.New(), uuid.New(), uuid.New()
 
 			// Extraction runs on the memory role's model: no setting chooses one.
-			expectNoUtilitySettings(mock)
 			// Rehydration-time personality lookup.
 			lookup := mock.ExpectQuery("SELECT .* FROM `personalities`")
 			switch {
@@ -129,7 +128,7 @@ func TestExtractAndStoreImportedMemories_AppliesThreadPersonalityAutoPin(t *test
 			mock.ExpectExec("INSERT INTO `embeddings`").WillReturnResult(sqlmock.NewResult(1, 1))
 			mock.ExpectCommit()
 
-			a.extractAndStoreImportedMemories(context.Background(), userID, chatID, turnMsgs(2))
+			a.extractAndStoreImportedMemories(withTestUtilityModels(context.Background()), userID, chatID, turnMsgs(2))
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}

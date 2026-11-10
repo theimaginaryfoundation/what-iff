@@ -426,7 +426,7 @@ func TestInferMemoryMergeGroupsOpenAI_TruncatedJSONIsSalvaged(t *testing.T) {
 		{Content: "Likes tea", Scope: "User"},
 		{Content: "Likes coffee", Scope: "User"},
 	}
-	groups, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "", candidates)
+	groups, err := a.inferMemoryMergeGroupsOpenAI(withTestUtilityModels(context.Background()), uuid.New(), "", candidates)
 	require.NoError(t, err)
 	require.Len(t, groups, 1, "only the complete group survives salvage")
 }
@@ -438,7 +438,7 @@ func TestInferMemoryMergeGroupsOpenAI_UnparsableNonJSONReturnsError(t *testing.T
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 	candidates := []memoryMergeCandidate{{Content: "Likes tea", Scope: "User"}, {Content: "Enjoys tea", Scope: "User"}}
-	_, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "persona", candidates)
+	_, err := a.inferMemoryMergeGroupsOpenAI(withTestUtilityModels(context.Background()), uuid.New(), "persona", candidates)
 	require.ErrorContains(t, err, "parse memory merge grouping")
 }
 
@@ -453,7 +453,7 @@ func TestInferMemoryMergeGroupsOpenAI_SuccessParsesGroups(t *testing.T) {
 		{Content: "Likes tea", Scope: "User"},
 		{Content: "Likes tea a lot", Scope: "User"},
 	}
-	groups, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "", candidates)
+	groups, err := a.inferMemoryMergeGroupsOpenAI(withTestUtilityModels(context.Background()), uuid.New(), "", candidates)
 	require.NoError(t, err)
 	require.Len(t, groups, 1)
 	require.Equal(t, []int{0, 1}, groups[0].MemberIndices)

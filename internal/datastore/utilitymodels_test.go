@@ -16,17 +16,17 @@ import (
 // These tests stay serial, like the remote-sync tests: they create tables from the generated
 // schema, whose shared definitions the migrator writes to, so creating them alongside parallel
 // tests that do the same is a data race.
-func newUtilityModelFixture(t *testing.T) (*Datastore, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID) {
+func newUtilityModelFixture(t *testing.T) (*Datastore, uuid.UUID, uuid.UUID, *uuid.UUID, *uuid.UUID) {
 	t.Helper()
 	ds, cleanup := newTestDatastore(t, createGeneratedTestSchema)
 	t.Cleanup(cleanup)
 	alice, bob := uuid.New(), uuid.New()
 	createTestUser(t, ds, alice)
 	createTestUser(t, ds, bob)
-	model := func(name string) uuid.UUID {
+	model := func(name string) *uuid.UUID {
 		m, err := ds.dbClient.Model.Create().SetName(name).SetDisplayName(name).SetDescription("").Save(context.Background())
 		require.NoError(t, err)
-		return m.ID
+		return &m.ID
 	}
 	return ds, alice, bob, model("model-a"), model("model-b")
 }
@@ -58,7 +58,24 @@ func TestUtilityModelSettings_ScopesAndReplacement(t *testing.T) {
 	require.Equal(t, []models.UtilityModelSetting{{Scope: models.UtilityScopeDeployment, Role: models.UtilityRoleMemory, ModelID: modelA}}, got)
 }
 
-// Deleting an account or a model deletes the settings that named it, so a role falls back
+// Off is a setting with no model: it replaces a choice like any other, and a model replaces it.
+func TestUtilityModelSettings_Off(t *testing.T) {
+	ds, alice, _, modelA, _ := newUtilityModelFixture(t)
+	ctx := context.Background()
+	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleMemory, modelA))
+	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleMemory, nil))
+	got, err := ds.ListUtilityModelSettings(ctx, alice)
+	require.NoError(t, err)
+	require.Equal(t, []models.UtilityModelSetting{{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleMemory}}, got)
+	require.True(t, got[0].Off())
+
+	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleMemory, modelA))
+	got, err = ds.ListUtilityModelSettings(ctx, alice)
+	require.NoError(t, err)
+	require.Equal(t, []models.UtilityModelSetting{{Scope: models.UtilityScopeAccount, Role: models.UtilityRoleMemory, ModelID: modelA}}, got)
+}
+
+// Deleting an account or a model deletes the settings that named it, so the role is not set
 // rather than pointing at nothing.
 func TestUtilityModelSettings_Cascade(t *testing.T) {
 	ds, alice, _, modelA, modelB := newUtilityModelFixture(t)
@@ -66,7 +83,7 @@ func TestUtilityModelSettings_Cascade(t *testing.T) {
 	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleMemory, modelA))
 	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleSimple, modelB))
 
-	require.NoError(t, ds.dbClient.Model.DeleteOneID(modelB).Exec(ctx))
+	require.NoError(t, ds.dbClient.Model.DeleteOneID(*modelB).Exec(ctx))
 	deployment, err := ds.ListUtilityModelSettings(ctx, uuid.Nil)
 	require.NoError(t, err)
 	require.Empty(t, deployment)
@@ -90,11 +107,12 @@ func TestSetUtilityModel_OnlyModelsTheChooserCanUse(t *testing.T) {
 	off, err := ds.dbClient.Model.Create().SetName("retired").SetDisplayName("retired").SetDescription("").SetDeleted(true).Save(ctx)
 	require.NoError(t, err)
 
-	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, bob, models.UtilityRoleSimple, bobs.ID))
-	require.ErrorIs(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleSimple, bobs.ID), ErrModelNotFound)
-	require.ErrorIs(t, ds.SetUtilityModel(ctx, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleSimple, bobs.ID), ErrModelNotFound)
-	require.ErrorIs(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleSimple, off.ID), ErrModelNotFound)
-	require.ErrorIs(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleSimple, uuid.New()), ErrModelNotFound)
+	missing := uuid.New()
+	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, bob, models.UtilityRoleSimple, &bobs.ID))
+	require.ErrorIs(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleSimple, &bobs.ID), ErrModelNotFound)
+	require.ErrorIs(t, ds.SetUtilityModel(ctx, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleSimple, &bobs.ID), ErrModelNotFound)
+	require.ErrorIs(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleSimple, &off.ID), ErrModelNotFound)
+	require.ErrorIs(t, ds.SetUtilityModel(ctx, models.UtilityScopeAccount, alice, models.UtilityRoleSimple, &missing), ErrModelNotFound)
 	require.NoError(t, ds.SetUtilityModel(ctx, models.UtilityScopeDeployment, uuid.Nil, models.UtilityRoleSimple, modelA))
 
 	got, err := ds.ListUtilityModelSettings(ctx, alice)
@@ -134,10 +152,10 @@ func TestUtilityModelSetting_DatabaseRefusesWrongOwner(t *testing.T) {
 	ctx := context.Background()
 	_, err := ds.dbClient.UtilityModelSetting.Create().
 		SetScope(string(models.UtilityScopeDeployment)).SetUserID(alice).
-		SetRole(string(models.UtilityRoleMemory)).SetModelID(modelA).Save(ctx)
+		SetRole(string(models.UtilityRoleMemory)).SetModelID(*modelA).Save(ctx)
 	require.Error(t, err, "a deployment setting with an owner")
 	_, err = ds.dbClient.UtilityModelSetting.Create().
 		SetScope(string(models.UtilityScopeAccount)).
-		SetRole(string(models.UtilityRoleMemory)).SetModelID(modelA).Save(ctx)
+		SetRole(string(models.UtilityRoleMemory)).SetModelID(*modelA).Save(ctx)
 	require.Error(t, err, "an account setting without one")
 }

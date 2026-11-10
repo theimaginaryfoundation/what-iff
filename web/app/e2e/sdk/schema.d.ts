@@ -3207,7 +3207,7 @@ export interface paths {
         };
         /**
          * The models the account's background work runs on
-         * @description For each utility role (background work that isn't the assistant talking: memory and summaries, simple tasks such as chat naming, personality generation), the model the account chose, the model the deployment chose, and the built-in model the role runs on when neither chose one. The account's choice wins, then the deployment's.
+         * @description For each utility role (background work that isn't the assistant talking: memory and summaries, memory merging, simple tasks such as chat naming, personality generation), the account's choice and the deployment's: a model, or off. The account's choice wins, then the deployment's. A role neither chose is not set, and its work doesn't run until one is.
          */
         get: {
             parameters: {
@@ -3257,8 +3257,8 @@ export interface paths {
         };
         get?: never;
         /**
-         * Choose the account's model for a utility role
-         * @description The model must be one the account can use: a catalog model whose provider it holds a key for, or one enabled on its own provider connections. A choice that can't be used later (turned off, its connection gone or unreachable, its provider's key removed, or an experimental model after the account turns experimental models off) is passed over: the role falls back to the deployment's choice or its built-in model, and the fallback is logged and counted.
+         * Choose the account's model for a utility role, or switch it off
+         * @description Send either a model or `off`. The model must be one the account can use: a catalog model whose provider it holds a key for, or one enabled on its own provider connections. A choice that can't be used later (turned off, its connection gone or unreachable, its provider's key removed, or an experimental model after the account turns experimental models off) is passed over for the deployment's choice, logged and counted; with none, the role's work doesn't run. A role switched off doesn't run either, by the account's choice. A choice can be replaced but not cleared: where accounts choose, nothing stands behind it.
          */
         put: {
             parameters: {
@@ -3284,7 +3284,7 @@ export interface paths {
                         "application/json": components["schemas"]["UtilityModels"];
                     };
                 };
-                /** @description No model, or one the account can't use */
+                /** @description Neither a model nor `off`, both, or a model the account can't use */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -3332,59 +3332,7 @@ export interface paths {
             };
         };
         post?: never;
-        /**
-         * Clear the account's model for a utility role
-         * @description The role runs on the deployment's choice, or its built-in model.
-         */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    role: components["schemas"]["UtilityRole"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Every role after the change */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["UtilityModels"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The deployment supplies the keys, so it chooses the models */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Not a utility role */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -16047,33 +15995,42 @@ export interface components {
             job_run?: components["schemas"]["JobRun"];
         };
         /**
-         * @description A group of background work that runs on one model. `memory`: memory extraction and merging, the scratchpad, checkpoint summaries, recall and thread rehydration. `simple`: tasks straightforward enough for any model, such as chat naming, expression and mood selection, schedule parsing and memory queries. `personality`: generating a personality.
+         * @description A group of background work that runs on one model. `memory`: memory extraction, the scratchpad, checkpoint summaries, recall and thread rehydration. `memory_merge`: folding duplicate memories together; off, only exact duplicates are folded. `simple`: tasks straightforward enough for any model, such as chat naming, expression and mood selection, schedule parsing and memory queries. `personality`: generating a personality.
          * @enum {string}
          */
-        UtilityRole: "memory" | "simple" | "personality";
+        UtilityRole: "memory" | "memory_merge" | "simple" | "personality";
+        /** @description One scope's choice for a role. */
+        UtilityChoice: {
+            /** @description Whether the role is switched off; `model_id` is then null. */
+            off: boolean;
+            /**
+             * Format: uuid
+             * @description The chosen model, or null when the role is off.
+             */
+            model_id: string | null;
+        };
+        /** @description A role's choices. With neither, the role is not set, and its work doesn't run. */
         UtilityRoleModel: {
             role: components["schemas"]["UtilityRole"];
-            /**
-             * Format: uuid
-             * @description The account's choice, or null.
-             */
-            account_model_id: string | null;
-            /**
-             * Format: uuid
-             * @description The deployment's choice, or null.
-             */
-            deployment_model_id: string | null;
-            /** @description The name of the model the role runs on when neither chose one, for every chat whatever model it is on. */
-            built_in_model: string;
+            /** @description The account's choice, or null. */
+            account: components["schemas"]["UtilityChoice"] | null;
+            /** @description The deployment's choice, or null. */
+            deployment: components["schemas"]["UtilityChoice"] | null;
         };
         UtilityModels: {
             /** @description Whether an account may choose its own models: only where accounts bring their own keys, and so pay for their background work. Where the deployment supplies the keys, it chooses; account choices are refused and not reported. */
             accounts_choose: boolean;
             roles: components["schemas"]["UtilityRoleModel"][];
         };
+        /** @description Exactly one of `model_id` and `off`. */
         SetUtilityModelRequest: {
-            /** Format: uuid */
-            model_id: string;
+            /**
+             * Format: uuid
+             * @description The model to choose.
+             */
+            model_id?: string;
+            /** @description True switches the role off. */
+            off?: boolean;
         };
         /**
          * @description A model provider.

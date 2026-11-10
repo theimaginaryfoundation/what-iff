@@ -10,16 +10,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// UtilityModelSetting chooses the model for one utility role (background work
-// such as memory extraction or chat naming) at one scope (ADR 0x027 section 6):
-// the deployment's choice, or an account's. A role with no setting at any scope
-// runs on its built-in default.
+// UtilityModelSetting is the choice for one utility role (background work such as
+// memory extraction or chat naming) at one scope (ADR 0x027 section 6): the
+// deployment's, or an account's. A setting chooses a model or switches the role
+// off; a role with no setting at any scope is not set, and its work doesn't run.
 //
 // The edges are one-way, with the foreign keys and cascades on this table:
 // deleting an account deletes its settings, and deleting a model row (with its
-// connection) deletes the settings that chose it. A model turned off or retired
-// keeps its row, and its setting; the agent passes over a choice it can't use,
-// falling back to the next one or the role's built-in model.
+// connection) deletes the settings that chose it, leaving the role not set
+// rather than off. A model turned off or retired keeps its row, and its setting;
+// the agent passes over a choice it can't use to the next scope's.
 type UtilityModelSetting struct {
 	ent.Schema
 }
@@ -36,7 +36,8 @@ func (UtilityModelSetting) Fields() []ent.Field {
 		// A utility role (models.UtilityRole). A string so that adding a role needs
 		// no migration.
 		field.String("role").NotEmpty().Immutable(),
-		field.UUID("model_id", uuid.UUID{}),
+		// The chosen model; NULL switches the role off.
+		field.UUID("model_id", uuid.UUID{}).Optional().Nillable(),
 	}
 }
 
@@ -50,7 +51,6 @@ func (UtilityModelSetting) Edges() []ent.Edge {
 		edge.To("model", Model.Type).
 			Field("model_id").
 			Unique().
-			Required().
 			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }
@@ -68,7 +68,7 @@ func (UtilityModelSetting) Indexes() []ent.Index {
 
 func (UtilityModelSetting) Annotations() []schema.Annotation {
 	return []schema.Annotation{
-		schema.Comment("The model each utility role runs on, per scope. A row with no user_id is the deployment's."),
+		schema.Comment("The model each utility role runs on, per scope; no model_id switches the role off. A row with no user_id is the deployment's."),
 		entsql.WithComments(true),
 		// The datastore checks this before writing; the database holds to it too, so no
 		// write path can leave a deployment setting with an owner or an account's without one.

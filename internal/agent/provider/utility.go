@@ -20,6 +20,7 @@ type UtilityRole = models.UtilityRole
 
 const (
 	UtilityRoleMemory      = models.UtilityRoleMemory
+	UtilityRoleMemoryMerge = models.UtilityRoleMemoryMerge
 	UtilityRoleSimple      = models.UtilityRoleSimple
 	UtilityRolePersonality = models.UtilityRolePersonality
 )

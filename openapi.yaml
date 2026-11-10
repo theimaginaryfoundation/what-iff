@@ -1706,10 +1706,11 @@ paths:
       summary: The models the account's background work runs on
       description: >-
         For each utility role (background work that isn't the assistant
-        talking: memory and summaries, simple tasks such as chat naming,
-        personality generation), the model the account chose, the model the
-        deployment chose, and the built-in model the role runs on when neither
-        chose one. The account's choice wins, then the deployment's.
+        talking: memory and summaries, memory merging, simple tasks such as
+        chat naming, personality generation), the account's choice and the
+        deployment's: a model, or off. The account's choice wins, then the
+        deployment's. A role neither chose is not set, and its work doesn't
+        run until one is.
       tags: [Model Management]
       security:
         - bearerAuth: []
@@ -1735,15 +1736,17 @@ paths:
         schema:
           $ref: '#/components/schemas/UtilityRole'
     put:
-      summary: Choose the account's model for a utility role
+      summary: Choose the account's model for a utility role, or switch it off
       description: >-
-        The model must be one the account can use: a catalog model whose
-        provider it holds a key for, or one enabled on its own provider
-        connections. A choice that can't be used later (turned off, its
-        connection gone or unreachable, its provider's key removed, or an
-        experimental model after the account turns experimental models off)
-        is passed over: the role falls back to the deployment's choice or its
-        built-in model, and the fallback is logged and counted.
+        Send either a model or `off`. The model must be one the account can
+        use: a catalog model whose provider it holds a key for, or one enabled
+        on its own provider connections. A choice that can't be used later
+        (turned off, its connection gone or unreachable, its provider's key
+        removed, or an experimental model after the account turns experimental
+        models off) is passed over for the deployment's choice, logged and
+        counted; with none, the role's work doesn't run. A role switched off
+        doesn't run either, by the account's choice. A choice can be replaced
+        but not cleared: where accounts choose, nothing stands behind it.
       tags: [Model Management]
       security:
         - bearerAuth: []
@@ -1761,7 +1764,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/UtilityModels'
         '400':
-          description: No model, or one the account can't use
+          description: Neither a model nor `off`, both, or a model the account can't use
           content:
             application/json:
               schema:
@@ -1795,38 +1798,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-    delete:
-      summary: Clear the account's model for a utility role
-      description: The role runs on the deployment's choice, or its built-in model.
-      tags: [Model Management]
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Every role after the change
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UtilityModels'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '403':
-          description: The deployment supplies the keys, so it chooses the models
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Not a utility role
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
   /provider-keys:
     get:
       summary: List the account's provider keys
@@ -12048,34 +12019,47 @@ components:
 
     UtilityRole:
       type: string
-      enum: [memory, simple, personality]
+      enum: [memory, memory_merge, simple, personality]
       description: >-
         A group of background work that runs on one model. `memory`: memory
-        extraction and merging, the scratchpad, checkpoint summaries, recall and
-        thread rehydration. `simple`: tasks straightforward enough for any
-        model, such as chat naming, expression and mood selection, schedule
-        parsing and memory queries. `personality`: generating a personality.
+        extraction, the scratchpad, checkpoint summaries, recall and thread
+        rehydration. `memory_merge`: folding duplicate memories together; off,
+        only exact duplicates are folded. `simple`: tasks straightforward
+        enough for any model, such as chat naming, expression and mood
+        selection, schedule parsing and memory queries. `personality`:
+        generating a personality.
+    UtilityChoice:
+      type: object
+      required: [off, model_id]
+      description: One scope's choice for a role.
+      properties:
+        off:
+          type: boolean
+          description: Whether the role is switched off; `model_id` is then null.
+        model_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The chosen model, or null when the role is off.
     UtilityRoleModel:
       type: object
-      required: [role, account_model_id, deployment_model_id, built_in_model]
+      required: [role, account, deployment]
+      description: >-
+        A role's choices. With neither, the role is not set, and its work
+        doesn't run.
       properties:
         role:
           $ref: '#/components/schemas/UtilityRole'
-        account_model_id:
-          type: string
-          format: uuid
+        account:
+          allOf:
+            - $ref: '#/components/schemas/UtilityChoice'
           nullable: true
           description: The account's choice, or null.
-        deployment_model_id:
-          type: string
-          format: uuid
+        deployment:
+          allOf:
+            - $ref: '#/components/schemas/UtilityChoice'
           nullable: true
           description: The deployment's choice, or null.
-        built_in_model:
-          type: string
-          description: >-
-            The name of the model the role runs on when neither chose one, for
-            every chat whatever model it is on.
     UtilityModels:
       type: object
       required: [accounts_choose, roles]
@@ -12093,11 +12077,15 @@ components:
             $ref: '#/components/schemas/UtilityRoleModel'
     SetUtilityModelRequest:
       type: object
-      required: [model_id]
+      description: Exactly one of `model_id` and `off`.
       properties:
         model_id:
           type: string
           format: uuid
+          description: The model to choose.
+        off:
+          type: boolean
+          description: True switches the role off.
     ModelProvider:
       type: string
       description: A model provider.
