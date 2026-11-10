@@ -201,6 +201,31 @@ func TestGetMemories_GetUserByIDErrorIsReturned(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+// With no model for the simple role, the memory query can't run: the turn keeps its own context
+// lines (the user's name on a first message) rather than failing the memory load.
+func TestGetMemories_NoQueryModelKeepsTheTurnsOwnLines(t *testing.T) {
+	t.Parallel()
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	// The user, with the edges GetUserByID loads, then whether the chat has user messages.
+	mock.ExpectQuery("FROM `users`").WillReturnRows(sqlmock.NewRows([]string{"id", "username"}).AddRow(uuid.New().String(), "sam"))
+	mock.ExpectQuery("FROM `roles`").WillReturnRows(sqlmock.NewRows([]string{"user_id", "id"}))
+	mock.ExpectQuery("FROM `user_preferences`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectBegin()
+	mock.ExpectQuery("FROM `chats`").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New().String()))
+	mock.ExpectQuery("FROM `chat_messages`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectCommit()
+	// The memory query's role has nothing chosen.
+	mock.ExpectQuery("FROM `utility_model_settings`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	a := newTestAgent(ds)
+	memories, live, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", false)
+	require.NoError(t, err, "not set is not a failed memory load")
+	require.Empty(t, live)
+	require.Equal(t, initialTurnContextLines("sam", false, false), memories)
+}
+
 // --- compactMemoriesFromCheckpoint ---
 
 func TestCompactMemoriesFromCheckpoint_NoCandidatesIsNoOp(t *testing.T) {
