@@ -5,6 +5,9 @@ import {
   loginUser as sdkLoginUser,
   registerUser as sdkRegisterUser,
   setProviderKey,
+  chooseUtilityModel,
+  getDefaultModelId,
+  getUtilityModels,
 } from '../sdk/client';
 import { uniqueId } from './unique';
 
@@ -80,4 +83,26 @@ export async function giveProviderKey(accessToken: string, password: string): Pr
     return;
   }
   await setProviderKey(client, 'openai', TEST_PROVIDER_KEY, password);
+}
+
+/** What the API sends for an unset id, such as an account with no default model yet. */
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
+
+/**
+ * Where accounts choose their background models, gives each role with nothing chosen the
+ * account's default model, so the account starts past the first-run background-models step,
+ * as an account that finished setup would. Does nothing where the deployment chooses, or for
+ * an account with no default model yet.
+ */
+export async function giveBackgroundModels(accessToken: string): Promise<void> {
+  const client = createApiClient(accessToken);
+  const [utility, defaultModel] = await Promise.all([getUtilityModels(client), getDefaultModelId(client)]);
+  if (!utility.accounts_choose || !defaultModel || defaultModel === NIL_UUID) {
+    return;
+  }
+  for (const r of utility.roles) {
+    if (!r.account && !r.deployment) {
+      await chooseUtilityModel(client, r.role, defaultModel);
+    }
+  }
 }

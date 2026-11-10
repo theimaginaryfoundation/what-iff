@@ -15,6 +15,24 @@ export class ProviderKeyPrompt {
   }
 }
 
+/**
+ * The first-run prompt's background-models step (background-models-step.component): one
+ * select per role with nothing chosen, and the button that saves them all.
+ */
+export class BackgroundModelsStep {
+  readonly root: Locator;
+  readonly saveButton: Locator;
+
+  constructor(private readonly page: Page) {
+    this.root = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Choose your background models' }) });
+    this.saveButton = this.root.getByTestId('background-models-step-save');
+  }
+
+  select(role: 'memory' | 'memory_merge' | 'simple' | 'personality'): Locator {
+    return this.root.getByTestId(`onboarding-background-model-${role}`);
+  }
+}
+
 /** What to fill in the provider form. Fields left out are left as the form has them. */
 export interface ProviderFormFields {
   /** A preset's name as the dropdown shows it, when adding. */
