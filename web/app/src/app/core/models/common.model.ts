@@ -45,6 +45,7 @@ export type SpecificErrorCode =
   | 'provider_not_configured'
   | 'utility_model_not_set'
   | 'utility_role_off'
+  | 'utility_model_unavailable'
   | 'reauthentication_required'
   | 'provider_unreachable'
   | 'provider_key_rejected'

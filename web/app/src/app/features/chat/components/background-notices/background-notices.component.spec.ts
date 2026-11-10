@@ -224,4 +224,11 @@ describe('BackgroundNoticesComponent', () => {
     expect(service.dismiss).toHaveBeenCalledWith('chat-1', 'b');
     expect(texts(el).length).toBe(1);
   });
+
+  it("says when a role's chosen model can't be used, not that a provider failed", async () => {
+    const el = await render([notice({ step: 'chat_name', role: 'simple', code: 'model_unavailable' })]);
+    expect(texts(el)[0]).toContain("This chat wasn't named.");
+    expect(texts(el)[0]).toContain("The model chosen for Simple tasks can't be used any more");
+    expect(texts(el)[0]).not.toContain('returned an error');
+  });
 });
