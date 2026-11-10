@@ -517,6 +517,12 @@ export class GalleryPageComponent implements OnInit {
     });
   }
 
+  /** Edit from the lightbox: the image opens in the workspace, which offers the image editor. */
+  onEditImage(imageId: string): void {
+    this.view.closeDetail();
+    this.router.navigate([], { queryParams: { image: null, file: imageId }, queryParamsHandling: 'merge' });
+  }
+
   onRenameFile(payload: { id: string; name: string }): void {
     this.galleryService.renameImage(payload.id, payload.name).subscribe({
       next: updated => {

@@ -18,6 +18,8 @@ export interface ViewerEntry {
   readonly phoneView: boolean;
   /** Loads the editor for the kind, when there is one (a FileEditor, ADR 0x043 §2). */
   readonly edit?: () => Promise<Type<unknown>>;
+  /** The file types the editor can write back, when it cannot write every type of its kind. */
+  readonly editTypes?: readonly string[];
 }
 
 /**
@@ -31,8 +33,18 @@ const VIEWERS: Partial<Record<FilePreviewKind, ViewerEntry>> = {
   text: { load: loadTextViewer, phoneView: true, edit: loadCodeEditor },
   markdown: { load: loadTextViewer, phoneView: true, edit: loadCodeEditor },
   csv: { load: loadTextViewer, phoneView: true, edit: loadCodeEditor },
-  image: { load: () => import('./image-viewer.component').then(m => m.ImageViewerComponent), phoneView: true },
-  pdf: { load: () => import('./pdf-viewer.component').then(m => m.PdfViewerComponent), phoneView: true },
+  image: {
+    load: () => import('./image-viewer.component').then(m => m.ImageViewerComponent),
+    phoneView: true,
+    edit: () => import('../editors/image-editor.component').then(m => m.ImageEditorComponent),
+    // What a canvas can encode. GIF, SVG and HEIC are viewed only.
+    editTypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'],
+  },
+  pdf: {
+    load: () => import('./pdf-viewer.component').then(m => m.PdfViewerComponent),
+    phoneView: true,
+    edit: () => import('../editors/pdf-editor.component').then(m => m.PdfEditorComponent),
+  },
 };
 
 const loaded = new Map<FilePreviewKind, Promise<Type<unknown>>>();
@@ -61,8 +73,10 @@ export function loadViewer(kind: FilePreviewKind): Promise<Type<unknown>> | null
 const loadedEditors = new Map<FilePreviewKind, Promise<Type<unknown>>>();
 
 /** Whether the kind has an editor. */
-export function hasEditor(kind: FilePreviewKind): boolean {
-  return !!VIEWERS[kind]?.edit;
+export function hasEditor(kind: FilePreviewKind, fileType?: string | null): boolean {
+  const entry = VIEWERS[kind];
+  if (!entry?.edit) return false;
+  return !entry.editTypes || entry.editTypes.includes((fileType ?? '').toLowerCase());
 }
 
 /** Loads the editor for kind once; null when the kind has none. */

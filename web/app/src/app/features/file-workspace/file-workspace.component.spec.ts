@@ -269,6 +269,16 @@ describe('FileWorkspaceComponent', () => {
     expect(replaceContent.mock.calls[0][3]).toBe(5);
   });
 
+  it('shows why the editor could not prepare the file, and sends nothing', async () => {
+    const { editor } = await startEditing();
+    editor.edit('new text');
+    vi.spyOn(editor, 'content').mockRejectedValueOnce(new Error('This browser cannot write WEBP images.'));
+    await fixture.componentInstance.save();
+    expect(replaceContent).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.saveError()).toBe('This browser cannot write WEBP images.');
+    expect(fixture.componentInstance.saving()).toBe(false);
+  });
+
   it('turns a stale version into the conflict dialog, with reload, overwrite and save-as', async () => {
     const { el, editor } = await startEditing();
     editor.edit('mine');

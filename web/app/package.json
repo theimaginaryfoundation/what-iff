@@ -64,6 +64,7 @@
     "aws-amplify": "^6.20.0",
     "clipboard": "^2.0.11",
     "dompurify": "^3.4.14",
+    "filerobot-image-editor": "^4.8.1",
     "flowbite": "^4.0.2",
     "jszip": "^3.10.1",
     "katex": "^0.16.47",

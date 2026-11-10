@@ -141,7 +141,7 @@ export class FileWorkspaceComponent {
 
   // Editing (ADR 0x043 §3).
   readonly mode = signal<'view' | 'edit'>('view');
-  readonly editable = computed(() => this.canEdit() && hasEditor(this.kind()) && this.state() === 'ready');
+  readonly editable = computed(() => this.canEdit() && hasEditor(this.kind(), this.file().file_type) && this.state() === 'ready');
   readonly editorDirty = signal(false);
   readonly saving = signal(false);
   readonly saveError = signal<string | null>(null);
@@ -283,8 +283,17 @@ export class FileWorkspaceComponent {
     if (!editor || this.saving()) return;
     this.saving.set(true);
     this.saveError.set(null);
+    let content: Blob;
     try {
-      const content = await editor.content();
+      content = await editor.content();
+    } catch (error) {
+      // The editor could not produce the file (a format this browser cannot encode): its reason
+      // is the useful message, and nothing was sent.
+      this.saveError.set(error instanceof Error && error.message ? error.message : 'This file could not be prepared for saving.');
+      this.saving.set(false);
+      return;
+    }
+    try {
       const ifMatch = opts.overwrite ? null : this.loadedVersion;
       const updated = await new Promise<FileAttachment>((resolve, reject) =>
         this.files.replaceContent(file.id, content, file.file_type, ifMatch, this.chatId()).pipe(take(1)).subscribe({ next: resolve, error: reject }),
@@ -355,7 +364,13 @@ export class FileWorkspaceComponent {
       }
       folder = normalizeFolderPath(rawFolder) ?? '';
     }
-    const content = this.editorRef ? await this.editorRef.instance.content() : this.blob();
+    let content: Blob | null;
+    try {
+      content = this.editorRef ? await this.editorRef.instance.content() : this.blob();
+    } catch (error) {
+      this.saveAsError.set(error instanceof Error ? error.message : 'This file could not be prepared for saving.');
+      return;
+    }
     if (!content) return;
     this.saveAsOpen.set(false);
     this.saveAs.emit({ name, folder, blob: content });

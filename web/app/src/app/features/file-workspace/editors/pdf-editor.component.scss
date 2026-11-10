@@ -1,0 +1,91 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.pdf-editor {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+.pdf-editor__toolbar {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.4rem 1rem;
+}
+
+.pdf-editor__tools {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  display: inline-flex;
+  overflow: hidden;
+
+  button {
+    background: transparent;
+    border: 0;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8125rem;
+    padding: 0.3rem 0.7rem;
+
+    &[aria-pressed='true'] {
+      background: var(--accent);
+      color: var(--text-on-accent, #fff);
+    }
+
+    + button {
+      border-left: 1px solid var(--border);
+    }
+  }
+}
+
+.pdf-editor__colors {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.pdf-editor__swatch {
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  cursor: pointer;
+  height: 1.25rem;
+  padding: 0;
+  width: 1.25rem;
+
+  &--active {
+    border-color: var(--text-primary);
+  }
+}
+
+.pdf-editor__pages {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  margin-left: auto;
+}
+
+.pdf-editor__placeholder {
+  color: var(--text-secondary);
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+// PDF.js's viewer needs an absolutely positioned, scrolling container around its .pdfViewer.
+.pdf-editor__container {
+  background: var(--bg-muted, var(--bg-base));
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+
+  &--hidden {
+    visibility: hidden;
+  }
+}
