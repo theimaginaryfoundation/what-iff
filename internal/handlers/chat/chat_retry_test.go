@@ -13,14 +13,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
 
 type retryAgentStub struct {
-	resp *models.ChatMessageResponse
-	err  error
+	resp       *models.ChatMessageResponse
+	err        error
+	turnSource string
 }
 
 func (r *retryAgentStub) HandleUserMessage(ctx context.Context, request models.ChatMessage) (*models.ChatMessageResponse, error) {
@@ -28,6 +30,7 @@ func (r *retryAgentStub) HandleUserMessage(ctx context.Context, request models.C
 }
 
 func (r *retryAgentStub) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid.UUID) (*models.ChatMessageResponse, error) {
+	r.turnSource = metering.TurnSourceFromContext(ctx)
 	return r.resp, r.err
 }
 
@@ -55,6 +58,7 @@ func TestRetryChatMessage_Returns202(t *testing.T) {
 	chatID := uuid.New()
 	msgID := uuid.New()
 	jobID := uuid.New()
+	retryAgent := &retryAgentStub{resp: &models.ChatMessageResponse{ID: msgID, JobID: jobID.String(), Type: agent.JobTypeChatMessage}}
 
 	h := &Handler{
 		ds: &retryStoreStub{
@@ -65,7 +69,7 @@ func TestRetryChatMessage_Returns202(t *testing.T) {
 			},
 		},
 		logger:       zap.NewNop(),
-		messageAgent: &retryAgentStub{resp: &models.ChatMessageResponse{ID: msgID, JobID: jobID.String(), Type: agent.JobTypeChatMessage}},
+		messageAgent: retryAgent,
 	}
 
 	router := mux.NewRouter()
@@ -82,6 +86,8 @@ func TestRetryChatMessage_Returns202(t *testing.T) {
 	var body models.ChatMessageResponse
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 	require.Equal(t, jobID.String(), body.JobID)
+	// A retry is sent from the app, so it is an app turn (ask_user in a relay thread, metering).
+	require.Equal(t, metering.TurnSourceApp, retryAgent.turnSource)
 }
 
 func TestGetActiveChatMessageJob_NoJob204(t *testing.T) {

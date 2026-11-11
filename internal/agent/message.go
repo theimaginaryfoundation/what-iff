@@ -793,11 +793,14 @@ func (a *Agent) recoverAsyncMessageJob(runCtx context.Context, userID, jobID, ch
 // When a non-terminal job already exists for that message, returns its job id without creating a duplicate.
 func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid.UUID) (*models.ChatMessageResponse, error) {
 	// Detach from request cancellation before enqueue + background execution. User id and timezone
-	// are copied into a fresh Background context (see middleware.CopyUserToIDContext).
+	// are copied into a fresh Background context (see middleware.CopyUserToIDContext), and so is
+	// the turn source, as in HandleUserMessage.
+	turnSource := metering.TurnSourceFromContext(ctx)
 	detachedCtx, ok := middleware.CopyUserToIDContext(ctx, context.Background())
 	if !ok {
 		return nil, errors.New("user ID not found in context")
 	}
+	detachedCtx = metering.WithTurnSource(detachedCtx, turnSource)
 	userID, _ := middleware.GetUserIDFromContext(detachedCtx)
 
 	msg, err := a.ds.GetChatMessage(detachedCtx, userID, messageID)
