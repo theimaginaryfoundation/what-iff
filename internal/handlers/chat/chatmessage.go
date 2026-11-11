@@ -122,7 +122,7 @@ func (h *Handler) RetryChatMessage(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Message agent not configured", nil)
 		return
 	}
-	resp, err := h.messageAgent.RetryUserChatMessage(r.Context(), chatID, messageID)
+	resp, err := h.messageAgent.RetryUserChatMessage(metering.WithTurnSource(r.Context(), metering.TurnSourceApp), chatID, messageID)
 	if err != nil {
 		if errors.Is(err, datastore.ErrChatMessageNotFound) {
 			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Chat message not found", err)
