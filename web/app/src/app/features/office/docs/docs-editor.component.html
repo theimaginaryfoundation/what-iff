@@ -1,0 +1,68 @@
+<div class="univer-editor" [class.univer-editor--read-only]="readOnly()">
+  @if (!noticeDismissed()) {
+    <app-fidelity-notice [losses]="losses()" [warnings]="warnings()" (dismiss)="dismissNotice()" />
+  }
+  @if (state() === "ready") {
+    <div class="univer-editor__bar" role="toolbar" aria-label="Document">
+      @if (!readOnly()) {
+        <button type="button" class="univer-editor__tool" [attr.aria-pressed]="showGuides()" (click)="toggleGuides()">Show guides</button>
+        <button
+          type="button"
+          class="univer-editor__tool"
+          [disabled]="!canComment()"
+          title="Comment on the selected text (Ctrl+Alt+M)"
+          (click)="startComment()"
+        >
+          Comment
+        </button>
+      }
+      <button
+        type="button"
+        class="univer-editor__tool docs-editor__comments-toggle"
+        [attr.aria-pressed]="commentsOpen()"
+        (click)="toggleComments()"
+      >
+        Comments
+        @if (openCount()) {
+          <span class="docs-editor__count">{{ openCount() }}</span>
+        }
+      </button>
+    </div>
+  }
+  <div class="docs-editor__body">
+    <div class="univer-editor__stage">
+      <!-- Univer measures its container when created, so the container stays visible while loading. -->
+      <div
+        #container
+        class="univer-editor__univer"
+        [attr.aria-label]="(readOnly() ? '' : 'Editor for ') + file().name"
+        [attr.aria-busy]="state() === 'loading'"
+      ></div>
+      @if (state() === "error") {
+        <p class="univer-editor__placeholder" role="alert">{{ error() }}</p>
+      } @else if (state() === "loading") {
+        <p class="univer-editor__placeholder" role="status">Loading the {{ noun }}…</p>
+      }
+    </div>
+    @if (commentsOpen() && state() === "ready") {
+      <app-comments-panel
+        class="docs-editor__comments"
+        [threads]="shownThreads()"
+        [activeId]="activeThreadId()"
+        [draftQuote]="draft() ? draft()!.quote : undefined"
+        [me]="me()"
+        [people]="people()"
+        [readOnly]="readOnly()"
+        emptyHint="Select text and choose Comment to start a thread."
+        (select)="selectThread($event)"
+        (create)="createThread($event)"
+        (cancelDraft)="cancelDraft()"
+        (reply)="reply($event)"
+        (edit)="edit($event)"
+        (remove)="remove($event)"
+        (resolve)="resolve($event)"
+        (closed)="closeComments()"
+      />
+    }
+  </div>
+</div>

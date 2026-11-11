@@ -1,0 +1,141 @@
+<aside class="comments" aria-label="Comments">
+  <header class="comments__head">
+    <h2 class="comments__title">Comments</h2>
+    @if (resolvedCount()) {
+      <button type="button" class="comments__filter" [attr.aria-pressed]="showResolved()" (click)="toggleResolved()">
+        {{ showResolved() ? "Hide" : "Show" }} resolved ({{ resolvedCount() }})
+      </button>
+    }
+    <ui-icon-button ariaLabel="Close comments" size="xs" (activate)="closed.emit()"><ui-x-icon [size]="14" /></ui-icon-button>
+  </header>
+
+  <div class="comments__list">
+    @if (drafting()) {
+      <section class="thread thread--active thread--draft" aria-label="New thread">
+        @if (draftQuote()) {
+          <blockquote class="thread__quote">{{ draftQuote() }}</blockquote>
+        }
+        <app-mention-input
+          label="New comment"
+          [people]="people()"
+          [autofocus]="true"
+          (submitted)="create.emit($event)"
+          (cancel)="cancelDraft.emit()"
+        />
+      </section>
+    }
+
+    @for (thread of shown(); track thread.id) {
+      <section
+        #card
+        class="thread"
+        [class.thread--active]="thread.id === activeId()"
+        [class.thread--resolved]="thread.resolved"
+        [attr.data-thread-id]="thread.id"
+        [attr.aria-label]="'Comment by ' + thread.comments[0].authorName"
+        (click)="onSelect(thread)"
+      >
+        @if (thread.quote) {
+          <blockquote class="thread__quote">{{ thread.quote }}</blockquote>
+        }
+        @for (comment of thread.comments; track comment.id; let first = $first) {
+          <article class="comment" [class.comment--reply]="!first">
+            <div class="comment__head">
+              <ui-avatar [name]="comment.authorName" size="xs" />
+              <div class="comment__who">
+                <span class="comment__author">{{ comment.authorName }}</span>
+                <time class="comment__time" [attr.datetime]="comment.createdAt">{{ comment.createdAt | date: "MMM d, h:mm a" }}</time>
+              </div>
+              @if (!readOnly()) {
+                <span class="comment__tools">
+                  @if (first && !thread.resolved) {
+                    <button
+                      type="button"
+                      class="comment__tool"
+                      aria-label="Resolve thread"
+                      uiTooltip="Resolve"
+                      (click)="$event.stopPropagation(); resolve.emit({ threadId: thread.id, resolved: true })"
+                    >
+                      <ui-check-icon [size]="14" />
+                    </button>
+                  }
+                  @if (isMine(comment)) {
+                    <button
+                      type="button"
+                      class="comment__tool"
+                      aria-label="Edit comment"
+                      uiTooltip="Edit"
+                      (click)="$event.stopPropagation(); editing.set(comment.id)"
+                    >
+                      <ui-edit-icon [size]="13" />
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    class="comment__tool comment__tool--danger"
+                    [attr.aria-label]="first ? 'Delete thread' : 'Delete reply'"
+                    [uiTooltip]="first ? 'Delete thread' : 'Delete reply'"
+                    (click)="$event.stopPropagation(); remove.emit({ threadId: thread.id, commentId: comment.id })"
+                  >
+                    <ui-trash-icon [size]="13" />
+                  </button>
+                </span>
+              }
+            </div>
+            @if (editing() === comment.id) {
+              <app-mention-input
+                label="Edit comment"
+                submitLabel="Save"
+                [people]="people()"
+                [initial]="draftOf(comment)"
+                [autofocus]="true"
+                (submitted)="saveEdit(thread.id, comment.id, $event)"
+                (cancel)="editing.set(null)"
+              />
+            } @else {
+              <!-- prettier-ignore -->
+              <p class="comment__text">@for (part of parts(comment); track $index) {<span [class.comment__mention]="part.mention">{{ part.text }}</span>}</p>
+            }
+          </article>
+        }
+        @if (!readOnly() && thread.resolved) {
+          <button
+            type="button"
+            class="thread__reply"
+            (click)="$event.stopPropagation(); resolve.emit({ threadId: thread.id, resolved: false })"
+          >
+            Reopen
+          </button>
+        }
+        @if (!readOnly() && !thread.resolved) {
+          @if (replying() === thread.id) {
+            <app-mention-input
+              label="Reply"
+              placeholder="Reply, or @mention someone"
+              submitLabel="Reply"
+              [people]="people()"
+              [autofocus]="true"
+              (submitted)="postReply(thread.id, $event)"
+              (cancel)="replying.set(null)"
+            />
+          } @else {
+            <button type="button" class="thread__reply" (click)="$event.stopPropagation(); startReply(thread.id)">Reply</button>
+          }
+        }
+      </section>
+    } @empty {
+      @if (!drafting()) {
+        <p class="comments__empty">
+          @if (resolvedCount()) {
+            Every comment is resolved.
+          } @else {
+            No comments yet.
+            @if (!readOnly()) {
+              {{ emptyHint() }}
+            }
+          }
+        </p>
+      }
+    }
+  </div>
+</aside>

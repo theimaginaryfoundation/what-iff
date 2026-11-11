@@ -16,7 +16,10 @@ export interface UniverSheetsKit {
    * createUniver options ready for a container element: locale, strings, theme and presets. With
    * a `formulaWorker`, formulas are calculated there instead of on the main thread.
    */
-  options(container: HTMLElement, opts?: { readOnly?: boolean; formulaWorker?: Worker | null }): Parameters<UniverPresets['createUniver']>[0];
+  options(
+    container: HTMLElement,
+    opts?: { readOnly?: boolean; formulaWorker?: Worker | null },
+  ): Parameters<UniverPresets['createUniver']>[0];
   /** A formula worker for one instance (null where workers are unavailable); the caller terminates it. */
   createFormulaWorker(): Worker | null;
   /**
@@ -35,6 +38,26 @@ export interface UniverDocsKit {
    * Paint only, so the document and its layout do not change. False when the page is not rendered yet.
    */
   setDocGuides(univer: Univer, unitId: string, show: boolean): boolean;
+  /** The comment marks of a document (ADR 0x045); null until its page is rendered. */
+  commentMarks(univer: Univer, unitId: string): DocCommentMarks | null;
+}
+
+/** Univer's comment decorations over a document's text, driven by the editor's own comment threads. */
+export interface DocCommentMarks {
+  /** Paints the active thread's text with a background and leaves hidden (resolved) threads unmarked. */
+  paint(state: { activeId: string | null; hidden: ReadonlySet<string> }): void;
+  /** Marks [start, end) of a story ('' is the body) as thread `id`'s text. */
+  add(id: string, segmentId: string, start: number, end: number): Promise<boolean>;
+  remove(id: string, segmentId: string): Promise<boolean>;
+  /** Scrolls the thread's text into view. */
+  reveal(id: string): void;
+  /** Where each thread still marked in the body starts; deleting a thread's text removes its mark. */
+  positions(): Map<string, number>;
+  /** The thread marked at a body offset, if any. */
+  at(offset: number): string | null;
+  /** A story's text over [start, end), for quoting. */
+  text(segmentId: string, start: number, end: number): string;
+  dispose(): void;
 }
 
 export const UNIVER_SHEETS_STYLESHEET = 'univer-sheets.css';
@@ -65,6 +88,8 @@ export function createFormulaWorker(): Worker | null {
 }
 
 const DOC_MAIN_COMPONENT = '__Document_Render_Main__';
+/** RichTextEditingMutation: the mutation every document change goes through. */
+const DOC_RICH_TEXT_MUTATION = 'doc.mutation.rich-text-editing';
 const DOC_BACKGROUND_COMPONENT = '__Document_Render_Background__';
 /** A table side with no border, while guides are showing: dashed and light, as Word's gridlines are. */
 const DOC_GUIDE_LINE = { color: { rgb: '#B8C0CC' }, width: { v: 0.75 }, dashStyle: 3 };
@@ -146,7 +171,8 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       createFormulaWorker,
       repaintDrawing: (univer, { unitId, subUnitId, drawingId }, source) => {
         const scene = univer.__getInjector().get(core.IRenderManagerService).getRenderUnitById(unitId)?.scene;
-        const shape = scene?.getObjectIncludeInGroup(`${unitId}#-#${subUnitId}#-#${drawingId}`) as { changeSource?(url: string): void } | undefined;
+        const shape = scene?.getObjectIncludeInGroup(`${unitId}#-#${subUnitId}#-#${drawingId}`) as
+          { changeSource?(url: string): void } | undefined;
         shape?.changeSource?.(source);
       },
       options: (container, opts) => ({
@@ -200,7 +226,8 @@ export function loadUniverDocs(document: Document): Promise<UniverDocsKit> {
       UniverInstanceType: presets.UniverInstanceType,
       setDocGuides: (univer, unitId, show) => {
         const injector = univer.__getInjector();
-        const components = injector.get(core.IRenderManagerService).getRenderUnitById(unitId)?.components as Map<string, DocRenderComponent> | undefined;
+        const components = injector.get(core.IRenderManagerService).getRenderUnitById(unitId)?.components as
+          Map<string, DocRenderComponent> | undefined;
         const main = components?.get(DOC_MAIN_COMPONENT);
         const background = components?.get(DOC_BACKGROUND_COMPONENT);
         if (!main || !background) return false;
@@ -212,6 +239,77 @@ export function loadUniverDocs(document: Document): Promise<UniverDocsKit> {
         main.makeDirty(true);
         background.makeDirty(true);
         return true;
+      },
+      commentMarks: (univer, unitId) => {
+        const injector = univer.__getInjector();
+        const unit = injector.get(core.IRenderManagerService).getRenderUnitById(unitId);
+        if (!unit?.mainComponent) return null;
+        const commands = injector.get(presets.ICommandService);
+        const document = () => injector.get(presets.IUniverInstanceService).getUnit<import('@univerjs/presets').DocumentDataModel>(unitId);
+        const COMMENT = presets.CustomDecorationType.COMMENT;
+        let state: { activeId: string | null; hidden: ReadonlySet<string> } = { activeId: null, hidden: new Set() };
+        const interceptor = unit.with(core.DocInterceptorService).intercept(core.DOC_INTERCEPTOR_POINT.CUSTOM_DECORATION, {
+          handler: (data, _pos, next) =>
+            data && data.type === COMMENT
+              ? next({ ...data, active: data.id === state.activeId, show: !state.hidden.has(data.id) })
+              : next(data),
+        });
+        const edit = (segmentId: string, textX: InstanceType<UniverPresets['TextX']>) =>
+          commands.executeCommand(DOC_RICH_TEXT_MUTATION, {
+            unitId,
+            segmentId,
+            actions: presets.JSONX.getInstance().editOp(textX.serialize()),
+            textRanges: null,
+            noNeedSetTextRange: true,
+          });
+        const decorations = () => document()?.getBody()?.customDecorations ?? [];
+        return {
+          paint: next => {
+            state = next;
+            // The comment style is applied as the page is laid out, so a change needs a new layout.
+            unit.with(core.DocSkeletonManagerService).recalculate();
+            unit.mainComponent?.makeDirty(true);
+          },
+          add: (id, segmentId, start, end) =>
+            edit(
+              segmentId,
+              presets.BuildTextUtils.customDecoration.add({
+                ranges: [{ startOffset: start, endOffset: end, collapsed: false }],
+                id,
+                type: COMMENT,
+              }),
+            ),
+          remove: async (id, segmentId) => {
+            const documentDataModel = document();
+            const textX = documentDataModel && presets.BuildTextUtils.customDecoration.delete({ id, segmentId, documentDataModel });
+            return textX ? edit(segmentId, textX) : false;
+          },
+          reveal: id => {
+            const mark = decorations().find(d => d.id === id);
+            if (mark)
+              unit
+                .with(core.DocBackScrollRenderController)
+                .scrollToRange({ startOffset: mark.startIndex, endOffset: mark.endIndex + 1, collapsed: false });
+          },
+          positions: () =>
+            new Map(
+              decorations()
+                .filter(d => d.type === COMMENT)
+                .map(d => [d.id, d.startIndex]),
+            ),
+          at: offset => {
+            // The innermost mark wins where comments overlap, as Univer's own comment UI picks.
+            const hits = decorations().filter(d => d.type === COMMENT && d.startIndex <= offset && offset <= d.endIndex);
+            hits.sort((a, b) => a.endIndex - a.startIndex - (b.endIndex - b.startIndex));
+            return hits[0]?.id ?? null;
+          },
+          text: (segmentId, start, end) => {
+            const model = document();
+            const body = segmentId ? model?.getSelfOrHeaderFooterModel(segmentId)?.getBody() : model?.getBody();
+            return body?.dataStream.slice(start, end) ?? '';
+          },
+          dispose: () => interceptor.dispose(),
+        };
       },
       options: (container, opts) => ({
         locale: presets.LocaleType.EN_US,

@@ -209,6 +209,12 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
     }
   }
 
+  /** A change the editor made outside Univer (a comment), which a save has to write. */
+  protected contentChanged(): void {
+    this.mutations += 1;
+    this.setDirty(true);
+  }
+
   protected setDirty(value: boolean): void {
     if (this.dirty() === value) return;
     this.dirty.set(value);
