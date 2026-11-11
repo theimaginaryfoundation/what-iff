@@ -248,7 +248,8 @@
           [draftQuote]="comments.draft()?.quote"
           [me]="me()"
           [people]="comments.people()"
-          [readOnly]="readOnly()"
+          [readOnly]="!commentable()"
+          [saveStatus]="saveStatus()"
           [replyRequest]="replyRequest()"
           emptyHint="Select a shape, or nothing for the whole slide, and choose Comment."
           (select)="comments.select($event)"
@@ -285,6 +286,11 @@
         </button>
       </div>
       <div class="slides__status-group">
+        @if (readOnly() && commentable()) {
+          <button type="button" class="slides__tool" (mousedown)="$event.preventDefault()" (click)="startComment()" title="Comment on the selected text or this slide (Ctrl+Alt+M)">
+            Comment
+          </button>
+        }
         <button type="button" class="slides__tool slides__comments-toggle" [attr.aria-pressed]="commentsOpen()" (click)="toggleComments()">
           Comments
           @if (comments.openCount()) {

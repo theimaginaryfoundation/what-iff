@@ -73,7 +73,15 @@ describe('FileWorkspaceComponent', () => {
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
-        { provide: FileAttachmentService, useValue: { downloadFileAttachment: download, downloadFileContent: (id: string) => (download as unknown as (id: string) => Observable<Blob>)(id).pipe(map((blob: Blob) => ({ blob, version: downloadVersion }))), replaceContent } },
+        {
+          provide: FileAttachmentService,
+          useValue: {
+            downloadFileAttachment: download,
+            downloadFileContent: (id: string) =>
+              (download as unknown as (id: string) => Observable<Blob>)(id).pipe(map((blob: Blob) => ({ blob, version: downloadVersion }))),
+            replaceContent,
+          },
+        },
         { provide: ConfirmationService, useValue: { alert, confirmDiscardChanges: confirmDiscard, confirm } },
         { provide: VIEWER_LOADER, useValue: (kind: string) => loadViewer(kind) },
         { provide: EDITOR_LOADER, useValue: (kind: string) => (kind === 'none' ? null : Promise.resolve(FakeEditorComponent)) },
@@ -299,7 +307,9 @@ describe('FileWorkspaceComponent', () => {
   it('turns a stale version into the conflict dialog, with reload, overwrite and save-as', async () => {
     const { el, editor } = await startEditing();
     editor.edit('mine');
-    replaceContent.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 412, error: { details: { content_version: 7 } } })));
+    replaceContent.mockReturnValueOnce(
+      throwError(() => new HttpErrorResponse({ status: 412, error: { details: { content_version: 7 } } })),
+    );
     await fixture.componentInstance.save();
     fixture.detectChanges();
     expect(fixture.componentInstance.conflictVersion()).toBe(7);
@@ -311,7 +321,9 @@ describe('FileWorkspaceComponent', () => {
     await vi.waitFor(() => expect(fixture.componentInstance.conflictVersion()).toBeNull());
 
     editor.edit('again');
-    replaceContent.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 412, error: { details: { content_version: 8 } } })));
+    replaceContent.mockReturnValueOnce(
+      throwError(() => new HttpErrorResponse({ status: 412, error: { details: { content_version: 8 } } })),
+    );
     await fixture.componentInstance.save();
     download.mockReturnValue(of(textBlob('theirs')));
     fixture.componentInstance.reloadAfterConflict();
@@ -324,6 +336,59 @@ describe('FileWorkspaceComponent', () => {
     (fixture.componentInstance['editorRef']!.instance as FakeEditorComponent).edit('x');
     await fixture.componentInstance.save();
     expect(fixture.componentInstance.saveError()).toContain('Could not save');
+  });
+
+  describe('comments made while viewing (ADR 0x045)', () => {
+    const viewer = (losses: string[] = []) => {
+      const markSaved = vi.fn();
+      return { editor: { content: () => Promise.resolve(textBlob('with comment')), markSaved, losses: signal(losses) }, markSaved };
+    };
+
+    it('writes them as the new version, with the loaded version as If-Match, only while viewing a file the user may change', async () => {
+      downloadVersion = 3;
+      await show(file());
+      const ws = fixture.componentInstance;
+      const changed = vi.fn();
+      ws.fileChanged.subscribe(changed);
+      expect(ws.canComment()).toBe(true);
+      const { editor, markSaved } = viewer();
+      expect(await ws.saveComments(editor)).toBe('saved');
+      expect(replaceContent).toHaveBeenCalledWith('f-1', expect.any(Blob), 'text/plain', 3, null);
+      expect(markSaved).toHaveBeenCalledTimes(1);
+      expect(changed).toHaveBeenCalledTimes(1);
+      // The next comment saves over the version just written.
+      replaceContent.mockReturnValueOnce(of(file({ content_version: 3 })));
+      await ws.saveComments(editor);
+      expect(replaceContent.mock.calls[1][3]).toBe(2);
+
+      fixture.componentRef.setInput('canEdit', false);
+      fixture.detectChanges();
+      expect(ws.canComment()).toBe(false);
+      expect(await ws.saveComments(editor)).toBe('failed');
+    });
+
+    it('reloads the file when it changed elsewhere, rather than overwrite it', async () => {
+      await show(file());
+      replaceContent.mockReturnValueOnce(
+        throwError(() => new HttpErrorResponse({ status: 412, error: { details: { content_version: 7 } } })),
+      );
+      download.mockClear();
+      expect(await fixture.componentInstance.saveComments(viewer().editor)).toBe('conflict');
+      expect(download).toHaveBeenCalledWith('f-1');
+    });
+
+    it('asks once per file before a save that would lose content, and reloads when declined', async () => {
+      await show(file());
+      const ws = fixture.componentInstance;
+      confirm.mockResolvedValueOnce(false);
+      download.mockClear();
+      expect(await ws.saveComments(viewer(['Charts']).editor)).toBe('cancelled');
+      expect(replaceContent).not.toHaveBeenCalled();
+      expect(download).toHaveBeenCalled();
+      expect(await ws.saveComments(viewer(['Charts']).editor)).toBe('saved');
+      expect(await ws.saveComments(viewer(['Charts']).editor)).toBe('saved');
+      expect(confirm).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('asks before leaving edit mode or closing with unsaved changes', async () => {
@@ -363,7 +428,9 @@ describe('FileWorkspaceComponent', () => {
     editor.edit('lossy');
     confirm.mockResolvedValueOnce(false);
     await fixture.componentInstance.save();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Save over the original?', message: expect.stringContaining('Charts (Sales)') }));
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Save over the original?', message: expect.stringContaining('Charts (Sales)') }),
+    );
     expect(replaceContent).not.toHaveBeenCalled();
     confirm.mockResolvedValueOnce(true);
     await fixture.componentInstance.save();

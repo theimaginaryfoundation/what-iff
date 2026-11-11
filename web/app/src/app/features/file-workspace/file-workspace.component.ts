@@ -8,6 +8,7 @@ import {
   ViewContainerRef,
   computed,
   effect,
+  forwardRef,
   inject,
   input,
   output,
@@ -33,7 +34,7 @@ import {
 } from '../../shared/ui/icons/icons';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
-import { FileEditor } from './editors/file-editor';
+import { COMMENT_SAVER, CommentSaveResult, CommentSaver, FileEditor } from './editors/file-editor';
 import { galleryDisplayBaseName, galleryFilenameFromBaseName } from '../gallery/helpers/gallery-filename.helpers';
 import { FilePreviewKind, fileTypeLabel, previewKindFor } from '../gallery/helpers/file-preview.helpers';
 import { folderLabel, folderPathError, normalizeFolderPath } from '../gallery/helpers/gallery-folder.helpers';
@@ -69,8 +70,10 @@ type LoadState = 'idle' | 'loading' | 'ready' | 'error';
   templateUrl: './file-workspace.component.html',
   styleUrl: './file-workspace.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // The viewer it hosts saves comments made while viewing through it (ADR 0x045).
+  providers: [{ provide: COMMENT_SAVER, useExisting: forwardRef(() => FileWorkspaceComponent) }],
 })
-export class FileWorkspaceComponent {
+export class FileWorkspaceComponent implements CommentSaver {
   private readonly files = inject(FileAttachmentService);
   private readonly confirmationService = inject(ConfirmationService);
   private readonly workspace = inject(FileWorkspaceService);
@@ -147,6 +150,10 @@ export class FileWorkspaceComponent {
   readonly editorBusy = signal(false);
   /** Leaving edit mode would lose something: unsaved changes, or work in progress. */
   readonly holdsWork = computed(() => this.editorDirty() || this.editorBusy());
+  /** Comments can be written while viewing a file the user may change (ADR 0x045). */
+  readonly canComment = computed(() => this.editable() && this.mode() === 'view');
+  /** The file whose lossy save the user accepted for comments, so they are asked once, not per comment. */
+  private lossyCommentsAccepted: string | null = null;
   readonly saving = signal(false);
   readonly saveError = signal<string | null>(null);
   /** The current version the server reported on a 412; the conflict dialog is open while set. */
@@ -309,9 +316,7 @@ export class FileWorkspaceComponent {
         this.saving.set(true);
       }
       const ifMatch = opts.overwrite ? null : this.loadedVersion;
-      const updated = await new Promise<FileAttachment>((resolve, reject) =>
-        this.files.replaceContent(file.id, content, file.file_type, ifMatch, this.chatId()).pipe(take(1)).subscribe({ next: resolve, error: reject }),
-      );
+      const updated = await this.writeContent(file, content, ifMatch);
       this.conflictVersion.set(null);
       this.loadedVersion = updated.content_version ?? this.loadedVersion + 1;
       this.blob.set(content);
@@ -328,6 +333,56 @@ export class FileWorkspaceComponent {
     } finally {
       this.saving.set(false);
     }
+  }
+
+  /**
+   * Writes the viewer's comments as the file's new version (CommentSaver). A save that would lose
+   * content asks first, once per file; declining, or a version written elsewhere meanwhile, reloads
+   * the file as it is, without the comment.
+   */
+  async saveComments(editor: Pick<FileEditor, 'content' | 'markSaved' | 'losses'>): Promise<CommentSaveResult> {
+    const file = this.file();
+    if (!this.canComment()) return 'failed';
+    let content: Blob;
+    try {
+      content = await editor.content();
+    } catch {
+      return 'failed';
+    }
+    const losses = editor.losses?.() ?? [];
+    if (losses.length && this.lossyCommentsAccepted !== file.id) {
+      if (!(await this.confirmLossySave(losses))) {
+        this.reloadContent();
+        return 'cancelled';
+      }
+      this.lossyCommentsAccepted = file.id;
+    }
+    try {
+      const updated = await this.writeContent(file, content, this.loadedVersion);
+      this.loadedVersion = updated.content_version ?? this.loadedVersion + 1;
+      this.blob.set(content);
+      editor.markSaved(content);
+      this.fileChanged.emit({ ...file, ...updated, chat_id: updated.chat_id ?? file.chat_id });
+      return 'saved';
+    } catch (error) {
+      if (conflictVersionOf(error) !== null) {
+        this.reloadContent();
+        return 'conflict';
+      }
+      return 'failed';
+    }
+  }
+
+  private writeContent(file: FileAttachment, content: Blob, ifMatch: number | null): Promise<FileAttachment> {
+    return new Promise<FileAttachment>((resolve, reject) =>
+      this.files.replaceContent(file.id, content, file.file_type, ifMatch, this.chatId()).pipe(take(1)).subscribe({ next: resolve, error: reject }),
+    );
+  }
+
+  /** Shows the file as stored now, dropping what the viewer holds. */
+  private reloadContent(): void {
+    this.generation += 1;
+    this.refetch();
   }
 
   /** The editor cannot keep everything the original had: saving over it loses that for good. */

@@ -6,6 +6,8 @@
     <div class="univer-editor__bar" role="toolbar" aria-label="Document">
       @if (!readOnly()) {
         <button type="button" class="univer-editor__tool" [attr.aria-pressed]="showGuides()" (click)="toggleGuides()">Show guides</button>
+      }
+      @if (commentable()) {
         <button
           type="button"
           class="univer-editor__tool"
@@ -52,7 +54,8 @@
         [draftQuote]="draft() ? draft()!.quote : undefined"
         [me]="me()"
         [people]="people()"
-        [readOnly]="readOnly()"
+        [readOnly]="!commentable()"
+        [saveStatus]="saveStatus()"
         [replyRequest]="replyRequest()"
         emptyHint="Select text, or put the cursor in a word, and choose Comment to start a thread."
         (select)="selectThread($event)"

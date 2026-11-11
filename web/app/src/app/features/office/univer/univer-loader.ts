@@ -276,14 +276,24 @@ export function loadUniverDocs(document: Document): Promise<UniverDocsKit> {
               ? next({ ...data, active: data.id === state.activeId, show: !state.hidden.has(data.id) })
               : next(data),
         });
-        const edit = (segmentId: string, textX: InstanceType<UniverPresets['TextX']>) =>
-          commands.executeCommand(DOC_RICH_TEXT_MUTATION, {
-            unitId,
-            segmentId,
-            actions: presets.JSONX.getInstance().editOp(textX.serialize()),
-            textRanges: null,
-            noNeedSetTextRange: true,
-          });
+        const edit = async (segmentId: string, textX: InstanceType<UniverPresets['TextX']>) => {
+          // A viewer's document is disabled, which makes every edit a no-op; a comment mark is the one
+          // change a viewer makes, so the document is enabled for just that.
+          const model = document();
+          const disabled = !!model?.getDisabled();
+          if (disabled) model!.setDisabled(false);
+          try {
+            return await commands.executeCommand(DOC_RICH_TEXT_MUTATION, {
+              unitId,
+              segmentId,
+              actions: presets.JSONX.getInstance().editOp(textX.serialize()),
+              textRanges: null,
+              noNeedSetTextRange: true,
+            });
+          } finally {
+            if (disabled) model!.setDisabled(true);
+          }
+        };
         const decorations = () => document()?.getBody()?.customDecorations ?? [];
         return {
           paint: next => {

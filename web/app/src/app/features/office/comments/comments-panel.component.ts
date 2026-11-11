@@ -22,6 +22,7 @@ import {
   TrashIconComponent,
   XIconComponent,
 } from '../../../shared/ui';
+import { CommentSaveStatus, saveStatusText } from './comment-autosave';
 import { CommentDraft, CommentPerson, CommentThread, DocComment } from './comment-threads';
 import { MentionInputComponent } from './mention-input.component';
 
@@ -76,6 +77,10 @@ export class CommentsPanelComponent {
   readonly readOnly = input(false);
   /** Opens a thread's reply box (a "Reply to comment" from the editor's menu); a new object each time. */
   readonly replyRequest = input<{ threadId: string } | null>(null);
+  /** How saving the comments is going, while viewing (comments save as they are made). */
+  readonly saveStatus = input<CommentSaveStatus>('idle');
+  protected readonly statusText = computed(() => saveStatusText(this.saveStatus()));
+  protected readonly statusIsError = computed(() => this.saveStatus() === 'failed' || this.saveStatus() === 'conflict');
   /** Said when there are no threads, about how to start one. */
   readonly emptyHint = input('Select something and choose Comment to start a thread.');
 

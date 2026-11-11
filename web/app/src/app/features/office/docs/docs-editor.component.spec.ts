@@ -10,6 +10,7 @@ import { DocDocument } from '../docx/univer-doc-types';
 import { MUTATION, UniverKit } from '../univer/univer-editor-base';
 import { UNIVER_DOCS_LOADER } from '../univer/univer-loader';
 import { CommentPeopleService } from '../comments/comment-people.service';
+import { COMMENT_SAVER, CommentSaver } from '../../file-workspace/editors/file-editor';
 import { CommentsPanelState } from '../comments/comments-panel-state.service';
 import { commentedDocx } from '../docx/docx-comments.spec-helper';
 import { CUSTOM_DECORATION_COMMENT } from '../docx/univer-doc-types';
@@ -100,11 +101,15 @@ function attachment(overrides: Partial<FileAttachment> = {}): FileAttachment {
   return { id: 'f-1', user_id: 'u-1', name: 'letter.docx', file_type: DOCX_MIME, created_at: '2026-05-01T00:00:00Z', ...overrides };
 }
 
+/** The comment saver the next editor gets, if any. */
+let testSaver: CommentSaver | null = null;
+
 describe('DocsEditorComponent', () => {
   let fixture: ComponentFixture<DocsEditorComponent>;
   let fake: ReturnType<typeof fakeUniverKit>;
 
   beforeEach(async () => {
+    testSaver = null;
     fake = fakeUniverKit();
     await TestBed.configureTestingModule({
       imports: [DocsEditorComponent],
@@ -112,6 +117,8 @@ describe('DocsEditorComponent', () => {
         provideZonelessChangeDetection(),
         { provide: UNIVER_DOCS_LOADER, useValue: () => Promise.resolve(fake.kit) },
         { provide: CommentPeopleService, useValue: { me: signal({ id: 'user:u-1', name: 'Pat Lee' }) } },
+        // The workspace's comment saver, when a test gives one (comments made while viewing).
+        { provide: COMMENT_SAVER, useFactory: () => testSaver },
       ],
     }).compileComponents();
   });
@@ -284,6 +291,34 @@ describe('DocsEditorComponent', () => {
         ['5D3E2F03', ['Finance signed this off.']],
       ]);
       expect(back.comments[1].comments[0].mentions).toEqual([{ id: 'author:Sam Okafor', name: 'Sam Okafor' }]);
+    });
+
+    it('while viewing, with a saver: comments can be written, and each is saved as it is made', async () => {
+      const saveComments = vi.fn().mockResolvedValue('saved');
+      testSaver = { canComment: signal(true), saveComments };
+      const el = await open(attachment(), await commentedBlob());
+      await vi.waitFor(() => expect(fake.state.painted.length).toBeGreaterThan(0));
+      fixture.detectChanges();
+      const editor = fixture.componentInstance;
+      expect(editor.commentable()).toBe(true);
+      expect(el.querySelector('app-comments-panel .thread__reply')).not.toBeNull();
+      click(fake.state.data!.body.dataStream.indexOf('Budget') + 1);
+      editor.startComment();
+      await editor.createThread({ text: 'From the viewer', mentions: [] });
+      await vi.waitFor(() => expect(saveComments).toHaveBeenCalledTimes(1));
+      editor.reply({ threadId: '5D3E2F01', draft: { text: 'Me too', mentions: [] } });
+      await vi.waitFor(() => expect(saveComments).toHaveBeenCalledTimes(2));
+      // What the saver writes is the document with the comments.
+      const back = await docxToDocument(await (await editor.content()).arrayBuffer(), { id: 'x', name: 'x.docx' });
+      expect(back.comments.map(t => t.comments.at(-1)!.text)).toEqual(['Me too', 'From the viewer', 'Finance signed this off.']);
+    });
+
+    it('while viewing, without a saver: comments are read-only', async () => {
+      const el = await open(attachment(), await commentedBlob());
+      await vi.waitFor(() => expect(fake.state.painted.length).toBeGreaterThan(0));
+      fixture.detectChanges();
+      expect(fixture.componentInstance.commentable()).toBe(false);
+      expect(el.querySelector('app-comments-panel .thread__reply')).toBeNull();
     });
 
     it('the right-click items: a comment on the word at the caret, and reply to or delete the thread there', async () => {

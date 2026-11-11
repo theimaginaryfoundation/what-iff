@@ -51,6 +51,8 @@ import { SHAPE_PRESETS } from './shape-paths';
 import { ElementGeometry, PX_PER_PT, SlideCanvasComponent } from './slide-canvas.component';
 import { SlideComments } from './slide-comments';
 import { textOffset } from './comment-text';
+import { COMMENT_SAVER } from '../../file-workspace/editors/file-editor';
+import { CommentAutosave } from '../comments/comment-autosave';
 import { CommentPeopleService } from '../comments/comment-people.service';
 import { CommentsPanelComponent } from '../comments/comments-panel.component';
 import { CommentsPanelState } from '../comments/comments-panel-state.service';
@@ -162,7 +164,11 @@ export class SlidesEditorComponent implements FileEditor {
 
   // --- comments (ADR 0x045) ------------------------------------------------------------------------
   readonly me = inject(CommentPeopleService).me;
-  readonly comments = new SlideComments(this.deck, this.slide, this.me, () => this.setDirty(true));
+  readonly comments = new SlideComments(this.deck, this.slide, this.me, () => this.commentsChanged());
+  /** Comments can be written: while editing, or while viewing a file the user may change (saved as they are made). */
+  private readonly autosave = new CommentAutosave(inject(COMMENT_SAVER, { optional: true }), this);
+  readonly commentable = computed(() => !this.readOnly() || this.autosave.available());
+  readonly saveStatus = this.autosave.status;
   private readonly panel = inject(CommentsPanelState);
   /** The panel opens by itself on a deck with open threads, until the user opens or closes it. */
   readonly commentsOpen = computed(() => this.panel.open() ?? this.comments.openCount() > 0);
@@ -343,7 +349,7 @@ export class SlidesEditorComponent implements FileEditor {
    * slide.
    */
   startComment(): void {
-    if (this.readOnly()) return;
+    if (!this.commentable()) return;
     const text = this.selectedText();
     const element = text ? (this.slide().elements.find(e => e.id === text.elementId) ?? null) : this.selected();
     this.comments.start(element, this.slideIndex() + 1, undefined, text ?? undefined);
@@ -385,7 +391,7 @@ export class SlidesEditorComponent implements FileEditor {
    * anywhere else, start a thread on the shape there, or on the slide at that spot.
    */
   onStageContextMenu(event: MouseEvent): void {
-    if (this.readOnly()) return;
+    if (!this.commentable()) return;
     const target = event.target as Element;
     const slideEl = target.closest('.slide');
     if (!slideEl) return;
@@ -430,7 +436,7 @@ export class SlidesEditorComponent implements FileEditor {
   menuNewComment(): void {
     const menu = this.contextMenu();
     this.closeContextMenu();
-    if (!menu || this.readOnly()) return;
+    if (!menu || !this.commentable()) return;
     const element = menu.elementId ? (this.slide().elements.find(e => e.id === menu.elementId) ?? null) : null;
     if (element && !menu.text) this.selectedId.set(element.id);
     this.comments.start(element, this.slideIndex() + 1, element ? undefined : menu.point, menu.text);
@@ -450,6 +456,12 @@ export class SlidesEditorComponent implements FileEditor {
     const threadId = this.contextMenu()?.threadId;
     this.closeContextMenu();
     if (threadId) this.comments.remove({ threadId, commentId: threadId });
+  }
+
+  /** A comment change: part of the edit while editing; saved straight away while viewing. */
+  private commentsChanged(): void {
+    this.setDirty(true);
+    if (this.readOnly()) this.autosave.request();
   }
 
   /** A pin on the slide was chosen: its thread becomes active, and the panel shows it. */

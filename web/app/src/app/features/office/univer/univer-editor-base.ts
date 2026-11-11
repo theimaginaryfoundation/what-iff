@@ -130,8 +130,9 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
           if (!this.readOnly()) this.saveRequested.emit();
           return;
         }
-        // Read-only is enforced here as well as in Univer: keys that would change content never reach it.
-        if (this.readOnly() && changesContent(event)) {
+        // Read-only is enforced here as well as in Univer: keys that would change content never reach
+        // it. Keys typed outside the page (a comment being written while viewing) are not its.
+        if (this.readOnly() && changesContent(event) && this.container().nativeElement.contains(event.target as Node)) {
           event.preventDefault();
           event.stopPropagation();
         }

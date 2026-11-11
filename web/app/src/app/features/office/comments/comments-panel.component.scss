@@ -37,6 +37,18 @@
   padding: 0.2rem 0.3rem;
 }
 
+.comments__status {
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  margin: 0;
+  padding: 0.35rem 0.75rem;
+
+  &--error {
+    color: var(--danger, #dc2626);
+  }
+}
+
 .comments__list {
   display: flex;
   flex: 1 1 auto;

@@ -8,6 +8,9 @@
     }
     <ui-icon-button ariaLabel="Close comments" size="xs" (activate)="closed.emit()"><ui-x-icon [size]="14" /></ui-icon-button>
   </header>
+  @if (statusText(); as text) {
+    <p class="comments__status" [class.comments__status--error]="statusIsError()" [attr.role]="statusIsError() ? 'alert' : 'status'">{{ text }}</p>
+  }
 
   <div class="comments__list">
     @if (drafting()) {

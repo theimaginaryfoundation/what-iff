@@ -5,6 +5,7 @@ import { parse } from 'pptxtojson';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { CommentPeopleService } from '../comments/comment-people.service';
+import { COMMENT_SAVER, CommentSaver } from '../../file-workspace/editors/file-editor';
 import { CommentsPanelState } from '../comments/comments-panel-state.service';
 import { normalizePackage } from '../pptx/pptx-export';
 import { OoxmlPackage } from '../shared/ooxml';
@@ -28,10 +29,14 @@ function attachment(overrides: Partial<FileAttachment> = {}): FileAttachment {
   return { id: 'f-1', user_id: 'u-1', name: 'deck.pptx', file_type: PPTX_MIME, created_at: '2026-05-01T00:00:00Z', ...overrides };
 }
 
+/** The comment saver the next editor gets, if any. */
+let testSaver: CommentSaver | null = null;
+
 describe('SlidesEditorComponent', () => {
   let fixture: ComponentFixture<SlidesEditorComponent>;
 
   beforeEach(async () => {
+    testSaver = null;
     await TestBed.configureTestingModule({
       imports: [SlidesEditorComponent],
       providers: [
@@ -39,6 +44,8 @@ describe('SlidesEditorComponent', () => {
         { provide: PPTX_PARSER, useValue: () => Promise.resolve(parse) },
         { provide: PPTX_WRITER, useValue: async () => new PptxGenJS() },
         { provide: CommentPeopleService, useValue: { me: signal({ id: 'user:u-1', name: 'Pat Lee' }) } },
+        // The workspace's comment saver, when a test gives one (comments made while viewing).
+        { provide: COMMENT_SAVER, useFactory: () => testSaver },
       ],
     }).compileComponents();
   });
@@ -293,6 +300,19 @@ describe('SlidesEditorComponent', () => {
       fixture.detectChanges();
       (el.querySelectorAll('.slides__context [role="menuitem"]')[1] as HTMLButtonElement).click();
       expect(c.comments.threads()).toEqual([]);
+    });
+
+    it('while viewing, with a saver: a comment on the slide is saved as it is made', async () => {
+      const saveComments = vi.fn().mockResolvedValue('saved');
+      testSaver = { canComment: signal(true), saveComments };
+      const el = await open(await samplePptx());
+      const c = fixture.componentInstance;
+      expect(c.commentable()).toBe(true);
+      const button = [...el.querySelectorAll<HTMLButtonElement>('.slides__status button')].find(b => b.textContent?.trim() === 'Comment')!;
+      button.click();
+      c.comments.create({ text: 'Seen in the viewer', mentions: [] });
+      await vi.waitFor(() => expect(saveComments).toHaveBeenCalledTimes(1));
+      expect((await reread()).comments.threads.map(t => t.comments[0].text)).toEqual(['Seen in the viewer']);
     });
 
     it('read-only: pins show the threads, and choosing one opens it in the panel', async () => {

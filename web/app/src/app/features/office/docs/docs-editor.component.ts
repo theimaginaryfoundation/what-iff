@@ -2,6 +2,8 @@ import { BehaviorSubject, map } from 'rxjs';
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, signal, untracked } from '@angular/core';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
+import { COMMENT_SAVER } from '../../file-workspace/editors/file-editor';
+import { CommentAutosave } from '../comments/comment-autosave';
 import { CommentPeopleService } from '../comments/comment-people.service';
 import {
   CommentDraft,
@@ -104,7 +106,11 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
     const me = this.me();
     return [me, ...commentAuthors(this.threads()).filter(p => p.id !== me.id)];
   });
-  readonly canComment = computed(() => !this.readOnly() && !!this.commentRange());
+  /** Comments can be written: while editing, or while viewing a file the user may change (saved as they are made). */
+  private readonly autosave = new CommentAutosave(inject(COMMENT_SAVER, { optional: true }), this);
+  readonly commentable = computed(() => !this.readOnly() || this.autosave.available());
+  readonly saveStatus = this.autosave.status;
+  readonly canComment = computed(() => this.commentable() && !!this.commentRange());
 
   constructor() {
     super();
@@ -283,7 +289,7 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
 
   /** Starts a thread on the selected text, or on the word at the caret. */
   startComment(): void {
-    const selection = this.readOnly() ? null : this.commentRange();
+    const selection = this.commentable() ? this.commentRange() : null;
     if (!selection || !this.marks) return;
     const quote = this.marks
       .text(selection.segmentId, selection.start, selection.end)
@@ -310,7 +316,7 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
     this.draft.set(null);
     this.activeThreadId.set(id);
     this.marked.set(new Set(this.marks.positions().keys()));
-    this.contentChanged();
+    this.commentsChanged();
   }
 
   /** The right-click menu's "Reply to comment": the thread at the caret, with its reply box open. */
@@ -342,17 +348,17 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
 
   reply(event: ReplyEvent): void {
     this.threads.update(threads => addReply(threads, event.threadId, newComment(newWordCommentId(), this.me(), event.draft)));
-    this.contentChanged();
+    this.commentsChanged();
   }
 
   edit(event: EditEvent): void {
     this.threads.update(threads => editComment(threads, event.threadId, event.commentId, event.draft));
-    this.contentChanged();
+    this.commentsChanged();
   }
 
   resolve(event: { threadId: string; resolved: boolean }): void {
     this.threads.update(threads => setResolved(threads, event.threadId, event.resolved));
-    this.contentChanged();
+    this.commentsChanged();
   }
 
   async remove(event: { threadId: string; commentId: string }): Promise<void> {
@@ -363,7 +369,13 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
       if (this.activeThreadId() === thread.id) this.activeThreadId.set(null);
     }
     this.threads.update(threads => removeComment(threads, event.threadId, event.commentId));
+    this.commentsChanged();
+  }
+
+  /** A comment change: part of the edit while editing; saved straight away while viewing. */
+  private commentsChanged(): void {
     this.contentChanged();
+    if (this.readOnly()) this.autosave.request();
   }
 
   /** Threads in the order their text appears; ones with no mark (a header's) keep their place at the end. */
