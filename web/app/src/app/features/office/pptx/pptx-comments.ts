@@ -376,7 +376,12 @@ export async function writePptxComments(
   slides: readonly CommentedSlide[],
   original: PptxComments | null,
 ): Promise<void> {
-  const changed = slides.filter(s => (s.before === null ? s.threads.length > 0 : shapeOf(s.threads) !== shapeOf(s.before)));
+  const changed: CommentedSlide[] = [];
+  for (const s of slides) {
+    const differs = s.before === null ? s.threads.length > 0 : shapeOf(s.threads) !== shapeOf(s.before);
+    // A text anchor written without its context (by an earlier save here) is written again with one.
+    if (differs || (s.before?.some(t => t.anchor.text) && (await lacksTextContext(pkg, s.path)))) changed.push(s);
+  }
   if (!changed.length) return;
   const authors = new AuthorList(original?.authors ?? []);
   for (const item of changed) await writeSlide(pkg, item, authors);
@@ -390,6 +395,13 @@ export async function writePptxComments(
     pkg.putRels(presPath, presRels);
     pkg.addOverride(path, CT_AUTHORS);
   }
+}
+
+/** Whether a slide's comment part has a text anchor with no context, which PowerPoint does not place on text. */
+async function lacksTextContext(pkg: CommentPackage, slidePath: string): Promise<boolean> {
+  const rel = (await pkg.rels(slidePath)).find(r => r.type === REL_MODERN_COMMENTS && !r.external);
+  const text = rel ? await pkg.text(resolveTarget(slidePath, rel.target)) : null;
+  return !!text && /<ac:txMk\b(?:[^>]*\/>|[^>]*>\s*<\/ac:txMk>)/.test(text);
 }
 
 class AuthorList {
@@ -453,8 +465,8 @@ async function writeSlide(pkg: CommentPackage, item: CommentedSlide, authors: Au
   let nextRels = rels.filter(r => !legacy.includes(r));
 
   const cId = slideDoc.getElementsByTagNameNS(P14, 'creationId')[0]?.getAttribute('val') ?? null;
-  const sldMk = `<pc:sldMkLst xmlns:pc="${PC}"><pc:docMk/><pc:sldMk${cId ? ` cId="${escapeXml(cId)}"` : ''} sldId="${escapeXml(item.sldId)}"/></pc:sldMkLst>`;
-  const sldMkInner = `<pc:docMk/><pc:sldMk${cId ? ` cId="${escapeXml(cId)}"` : ''} sldId="${escapeXml(item.sldId)}"/>`;
+  const sldMk = `<pc:sldMkLst xmlns:pc="${PC}"><pc:docMk/><pc:sldMk cId="${escapeXml(cId ?? '0')}" sldId="${escapeXml(item.sldId)}"/></pc:sldMkLst>`;
+  const sldMkInner = `<pc:docMk/><pc:sldMk cId="${escapeXml(cId ?? '0')}" sldId="${escapeXml(item.sldId)}"/>`;
   let slideChanged = false;
   const cms = item.threads.map(thread => {
     const was = before.get(thread.id);

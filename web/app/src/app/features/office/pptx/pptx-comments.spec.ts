@@ -275,6 +275,45 @@ describe('pptx comments', () => {
     expect(thread.quote).toBe('plan');
   });
 
+  it('gives a text anchor written without its context one on the next save, even with no comment changed', async () => {
+    const { bytes } = await commentedDeck();
+    const { deck, comments } = await read(bytes);
+    const title = deck.slides[0].elements[0];
+    const id = newCommentGuid();
+    const threads: SlideCommentThread[] = [
+      ...comments.threads,
+      {
+        id,
+        anchor: { slideId: deck.slides[0].id, x: title.left, y: title.top, elementId: title.id, text: { start: 0, length: 9 } },
+        comments: [newComment(id, ME, { text: 'Quarterly?', mentions: [] })],
+      },
+    ];
+    // A file as an earlier save wrote it: the text anchor has no context.
+    const pkg = await OoxmlPackage.open(
+      (await deckToPptx(deck, { original: bytes, imported: deck, comments: threads, importedComments: comments })).bytes,
+    );
+    pkg.put(
+      'ppt/comments/modernComment_100_0.xml',
+      (await pkg.text('ppt/comments/modernComment_100_0.xml'))!.replace(/<ac:context [^>]*\/>/, ''),
+    );
+    const stale = await pkg.save('application/vnd.openxmlformats-officedocument.presentationml.presentation');
+
+    const again = await read(stale);
+    const saved = await OoxmlPackage.open(
+      (
+        await deckToPptx(again.deck, {
+          original: stale,
+          imported: again.deck,
+          comments: again.comments.threads,
+          importedComments: again.comments,
+        })
+      ).bytes,
+    );
+    expect(await saved.text('ppt/comments/modernComment_100_0.xml')).toContain(
+      `<ac:context len="15" hash="${officeArtHash('Quarterly plan\r')}"/>`,
+    );
+  });
+
   it('hashes text as PowerPoint does (the context it wrote for "Churn 3.1%")', () => {
     expect(officeArtHash('Churn 3.1%\r')).toBe(1604253316);
   });
