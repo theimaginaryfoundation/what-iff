@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, signal, untracked } from '@angular/core';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { CommentPeopleService } from '../comments/comment-people.service';
@@ -112,7 +112,10 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
           .map(t => t.id),
       );
       this.marked();
-      this.marks?.paint({ activeId, hidden });
+      if (!this.marks) return;
+      this.marks.paint({ activeId, hidden });
+      // A new layout puts Univer's own margin corners back; the guides setting hides them again.
+      untracked(() => this.applyGuides());
     });
     // Captured, because Univer's own text input would take the keys first.
     inject<ElementRef<HTMLElement>>(ElementRef).nativeElement.addEventListener('keydown', event => this.onKeydown(event), {
