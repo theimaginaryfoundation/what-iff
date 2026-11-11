@@ -69,7 +69,8 @@ Editing and reference images:
   - markup: a copy of the image the user drew on (circles, arrows, scribbles, notes) to show where and what to change. The marks are instructions; the tool tells the image model never to draw them.
   - sketch: the user's rough drawing. The result follows its composition, rendered properly.
   - reference: a subject, character or style to carry over.
-- mask_image: a mask for the base image, white where it may change and black where it must stay. Use it when the user painted an area to change (files described as a mask). Pass the image it belongs to as the base.
+- mask_image: a mask for the base image, white where it may change and black where it must stay. Use it when the user painted an area to change (files described as a mask). A reference with role "mask" works the same. Always pass the image the mask belongs to as the base: the mask's description names it, and if that image is not in the conversation, ask the user to attach it.
+- The result's inputs list every image as it was sent, mask included; check it matches what you meant.
 - Files the user made in the markup tool say what they are in their description (for example "Mask for photo.png" or "photo.png with the user's markup drawn on it").
 - For an edit, write the prompt as the change to make ("replace the sky with a starry night"), not a description of the whole image. Without aspect_ratio an edit keeps the base image's shape.
 - Not every image provider can edit. If the result says the user's provider cannot, tell the user how to switch (Settings → Image generation) instead of retrying.`
@@ -217,7 +218,7 @@ var GenerateImageToolSpec = FunctionToolSpec{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"image": map[string]interface{}{"type": "string", "description": "The image's file name as shown in this conversation (or its id)."},
-					"role":  map[string]interface{}{"type": "string", "enum": []string{"base", "markup", "sketch", "reference"}, "description": "What the image is for. Defaults to reference."},
+					"role":  map[string]interface{}{"type": "string", "enum": []string{"base", "markup", "sketch", "reference", "mask"}, "description": "What the image is for. Defaults to reference. mask is the same as passing the image as mask_image."},
 				},
 				"required": []string{"image"},
 			},

@@ -43,10 +43,14 @@ type generateImageToolResult struct {
 	Folder      string `json:"folder,omitempty"`
 	Count       int    `json:"count,omitempty"`
 	// Provider is the vendor that made the images; ReferenceImages how many input images it had.
-	Provider        string                   `json:"provider,omitempty"`
-	ReferenceImages int                      `json:"reference_images,omitempty"`
-	Images          []generateImageToolImage `json:"images,omitempty"`
-	Error           string                   `json:"error,omitempty"`
+	Provider        string `json:"provider,omitempty"`
+	ReferenceImages int    `json:"reference_images,omitempty"`
+	// MaskImage is the mask that was applied, by file name; Inputs is every input image as sent
+	// (base first, mask last). Together they are the receipt that the request was understood.
+	MaskImage string                      `json:"mask_image,omitempty"`
+	Inputs    []generateImageInputReceipt `json:"inputs,omitempty"`
+	Images    []generateImageToolImage    `json:"images,omitempty"`
+	Error     string                      `json:"error,omitempty"`
 }
 
 func marshalGenerateImageToolResult(result generateImageToolResult) (string, error) {
@@ -213,8 +217,7 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 	// Input images are found and checked, and the vendor asked whether it edits, before the quota
 	// gate: a request that cannot run should not count against it.
 	var editor provider.ImageEditor
-	var inputs []provider.ImageInput
-	var mask []byte
+	var in imageInputs
 	if editing {
 		var err error
 		if editor, err = a.imageEditorForUser(ctx, chat.UserID); err != nil {
@@ -223,7 +226,7 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 			}
 			return a.generateImageFailure(err.Error())
 		}
-		if inputs, mask, err = a.imageInputs(ctx, chat, toolArgs.ReferenceImages, toolArgs.MaskImage); err != nil {
+		if in, err = a.resolveImageInputs(ctx, chat, toolArgs.ReferenceImages, toolArgs.MaskImage); err != nil {
 			return a.generateImageFailure(err.Error())
 		}
 	}
@@ -263,7 +266,7 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 
 	var generator provider.ImageGenerator = editor
 	generate := func(ctx context.Context) (provider.GeneratedImage, error) {
-		return editor.EditImage(ctx, provider.ImageEditRequest{Prompt: prompt, Quality: quality, AspectRatio: aspectRatio, Images: inputs, Mask: mask})
+		return editor.EditImage(ctx, provider.ImageEditRequest{Prompt: prompt, Quality: quality, AspectRatio: aspectRatio, Images: in.images, Mask: in.mask})
 	}
 	if !editing {
 		var err error
@@ -434,7 +437,9 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 		Folder:          folder,
 		Count:           count,
 		Provider:        string(generator.Provider()),
-		ReferenceImages: len(inputs),
+		ReferenceImages: len(in.images),
+		MaskImage:       in.maskName(),
+		Inputs:          in.receipt,
 		Images:          imagesMeta,
 		Error:           toolErrText,
 	})

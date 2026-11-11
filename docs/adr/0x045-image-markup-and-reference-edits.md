@@ -36,9 +36,13 @@ To avoid tool sprawl there is no separate edit tool; `generate_image` gains two 
   A bare string is accepted as a name with the role `reference`.
 - `mask_image`: the name of a mask for the base image, white where it may change and black where it must not.
   A mask without an explicit base makes the first reference the base.
+  A reference with role `mask` is taken as `mask_image`: agents reach for it first (found in testing), so it is accepted rather than refused, and an unknown role's error says where masks go.
 
 Names resolve the way the model sees images: images `generate_image` made earlier in the same turn, then the conversation's context files (ADR 0x043 §4) by name or workspace path, then the user's own files by id.
 An unknown name is refused with the image names that are in the conversation, so the model can correct itself.
+A mask without its image is refused with an error that says to pass the image as the base, or to ask the user to attach it; the mask's description names its image and says how to pass both.
+The image need not be on the same message: it is often in the conversation already, so the composer does not insist on it.
+The result lists every input as it was sent (`inputs`, by file name and role, base first and mask last) and names the mask (`mask_image`), so the agent can check from the receipt that the request was understood.
 Inputs must be PNG, JPEG or WebP (sniffed from the bytes) and at most 20 MB.
 Without `aspect_ratio`, an edit keeps the base image's shape.
 
