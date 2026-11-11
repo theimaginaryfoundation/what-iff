@@ -6,7 +6,7 @@ import { addReply, newComment, setResolved } from '../comments/comment-threads';
 import { OoxmlPackage } from '../shared/ooxml';
 import { addElement, newTextBox } from '../slides/deck-commands';
 import { blankDeck } from './deck-model';
-import { SlideCommentThread, newCommentGuid } from './pptx-comments';
+import { SlideCommentThread, newCommentGuid, officeArtHash } from './pptx-comments';
 import { deckToPptx, normalizePackage } from './pptx-export';
 import { pptxToDeck } from './pptx-import';
 
@@ -263,14 +263,20 @@ describe('pptx comments', () => {
     const out = (await deckToPptx(deck, { original: bytes, imported: deck, comments: threads, importedComments: comments })).bytes;
     const xml = (await (await OoxmlPackage.open(out)).text('ppt/comments/modernComment_100_0.xml'))!;
     expect(xml).toMatch(
-      /<ac:txMkLst [^>]*><pc:docMk\/><pc:sldMk[^>]*\/><ac:spMk id="\d+" creationId="\{[^"]+\}"\/><ac:txMk cp="10" len="4"\/><\/ac:txMkLst>/,
+      /<ac:txMkLst [^>]*><pc:docMk\/><pc:sldMk[^>]*\/><ac:spMk id="\d+" creationId="\{[^"]+\}"\/><ac:txMk cp="10" len="4"><ac:context len="15" hash="\d+"\/><\/ac:txMk><\/ac:txMkLst>/,
     );
+    // The context is the shape's text as PowerPoint hashes it: "Quarterly plan\r".
+    expect(xml).toContain(`<ac:context len="15" hash="${officeArtHash('Quarterly plan\r')}"/>`);
     const back = await read(out);
     const thread = back.comments.threads.find(t => t.id === id)!;
     expect(thread.anchor).toEqual(
       expect.objectContaining({ elementId: back.deck.slides[0].elements[0].id, text: { start: 10, length: 4 } }),
     );
     expect(thread.quote).toBe('plan');
+  });
+
+  it('hashes text as PowerPoint does (the context it wrote for "Churn 3.1%")', () => {
+    expect(officeArtHash('Churn 3.1%\r')).toBe(1604253316);
   });
 
   it('adds comments to a deck made here, saved for the first time', async () => {

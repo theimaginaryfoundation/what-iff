@@ -165,6 +165,32 @@ export async function readPptxComments(pkg: OoxmlPackage, presPath: string, deck
   return out;
 }
 
+/**
+ * The context PowerPoint checks a text anchor against (MS-ODRAWXML CT_TextCharRangeContext): the
+ * length and hash of the shape's OfficeArt plain text, each paragraph ended by '\r' and each line
+ * break a '\v'. Without it PowerPoint keeps the comment on the shape but not on its text.
+ */
+export function textContext(element: SlideElement): string {
+  const paragraphs = element.kind === 'shape' ? (element.text?.paragraphs ?? []) : [];
+  const text = paragraphs
+    .map(
+      p =>
+        `${p.runs
+          .map(r => r.text)
+          .join('')
+          .replace(/\n/g, '\v')}\r`,
+    )
+    .join('');
+  return `<ac:context len="${text.length}" hash="${officeArtHash(text)}"/>`;
+}
+
+/** MS-ODRAWXML 1.3.9.1: hash = hash * 33 + character, over UTF-16 code units, in 32 bits. */
+export function officeArtHash(text: string): number {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) hash = (Math.imul(hash, 33) + text.charCodeAt(i)) >>> 0;
+  return hash;
+}
+
 /** A shape's text as comments count it: a line per paragraph, a character per line break. */
 export function elementText(element: SlideElement): string {
   return element.kind === 'shape' ? plainText(element.text) : '';
@@ -438,7 +464,8 @@ async function writeSlide(pkg: CommentPackage, item: CommentedSlide, authors: Au
         : undefined;
     const element = thread.anchor.elementId ? item.slide.elements.find(e => e.id === thread.anchor.elementId) : undefined;
     // A thread about a shape names it (ac:deMkLst) by its id and creation id, as PowerPoint does.
-    let anchor = kept;
+    // A text anchor without its context (as an earlier save here wrote it) is written again, with one.
+    let anchor = kept && kept.includes('<ac:txMk') && !kept.includes('<ac:context') ? undefined : kept;
     if (!anchor && element) {
       const shapeId = item.shapeIdOf?.(element.id);
       const moniker = shapeId ? shapeMoniker(slideDoc, shapeId) : null;
@@ -446,7 +473,7 @@ async function writeSlide(pkg: CommentPackage, item: CommentedSlide, authors: Au
         slideChanged ||= moniker.added;
         const text = thread.anchor.text;
         anchor = text
-          ? `<ac:txMkLst xmlns:ac="${AC}" xmlns:pc="${PC}">${sldMkInner}${moniker.xml}<ac:txMk cp="${text.start}" len="${text.length}"/></ac:txMkLst>`
+          ? `<ac:txMkLst xmlns:ac="${AC}" xmlns:pc="${PC}">${sldMkInner}${moniker.xml}<ac:txMk cp="${text.start}" len="${text.length}">${textContext(element)}</ac:txMk></ac:txMkLst>`
           : `<ac:deMkLst xmlns:ac="${AC}" xmlns:pc="${PC}">${sldMkInner}${moniker.xml}</ac:deMkLst>`;
       }
     }
