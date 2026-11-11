@@ -57,6 +57,8 @@ export interface UniverCell {
   ref?: string | null;
   /** Rich text (and hyperlinks), as a document. */
   p?: UniverCellDoc | null;
+  /** Data of our own that moves with the cell (a comment thread's id, sheet-comments.ts). */
+  custom?: Record<string, unknown>;
 }
 
 export interface UniverSheet {

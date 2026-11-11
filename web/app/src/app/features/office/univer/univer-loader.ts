@@ -27,6 +27,39 @@ export interface UniverSheetsKit {
    * it when the sheet is next rendered from scratch, so a redrawn chart would look stale until then.
    */
   repaintDrawing(univer: Univer, drawing: { unitId: string; subUnitId: string; drawingId: string }, source: string): void;
+  /** Adds items to the grid's right-click menu; dispose removes their commands. */
+  addContextMenuItems(univer: Univer, items: readonly DocMenuItem[]): { dispose(): void };
+  /** The comment cells of a workbook (ADR 0x045). */
+  commentCells(univer: Univer, univerAPI: FUniver, unitId: string): SheetCommentCells;
+}
+
+/** Cells tagged with comment threads (xlsx/sheet-comments.ts), driven by the editor's threads. */
+export interface SheetCommentCells {
+  /** Marks the active thread's cell more strongly and leaves hidden (resolved) threads' cells unmarked. */
+  paint(state: { activeId: string | null; hidden: ReadonlySet<string> }): void;
+  /** Tags a cell with a thread (or clears it with null). */
+  tag(sheetId: string, row: number, col: number, threadId: string | null): Promise<boolean>;
+  /** Where each thread's cell is now, by thread id: the first cell tagged with it. */
+  locate(): Map<string, { sheetId: string; row: number; col: number }>;
+  /** The thread a cell is tagged with. */
+  at(sheetId: string, row: number, col: number): string | null;
+  /** Shows a cell: its sheet, selected and scrolled to. */
+  reveal(sheetId: string, row: number, col: number): void;
+  /** The selected cell (the top-left of the selection). */
+  activeCell(): { sheetId: string; row: number; col: number } | null;
+  activeSheetId(): string | null;
+  dispose(): void;
+}
+
+/** The parts of Univer's sheets facade the comment cells use. */
+interface SheetFacadeWorkbook {
+  getSheetBySheetId(id: string): {
+    getSheetId(): string;
+    activate(): unknown;
+    getRange(row: number, col: number): { activate(): unknown };
+  } | null;
+  getActiveSheet(): { getSheetId(): string };
+  getActiveRange(): { getRow(): number; getColumn(): number } | null;
 }
 
 export interface UniverDocsKit {
@@ -103,12 +136,60 @@ export function createFormulaWorker(): Worker | null {
 }
 
 const DOC_MAIN_COMPONENT = '__Document_Render_Main__';
+/** What adding menu items needs of a preset's exports (docs and sheets core presets both have it). */
+type MenuModule = Pick<
+  typeof import('@univerjs/preset-docs-core'),
+  'ComponentManager' | 'ContextMenuGroup' | 'ContextMenuPosition' | 'IMenuManagerService' | 'IconManager' | 'MenuItemType'
+>;
+
+/** Adds comment items to the main area's right-click menu, first in the list under the quick actions, as Word puts them. */
+function addMenuItems(
+  univer: Univer,
+  presets: UniverPresets,
+  core: MenuModule,
+  icons: typeof import('@univerjs/icons'),
+  items: readonly DocMenuItem[],
+): { dispose(): void } {
+  const injector = univer.__getInjector();
+  const commands = injector.get(presets.ICommandService);
+  const iconManager = injector.get(core.IconManager);
+  const disposers = [
+    ...Object.entries(COMMENT_MENU_ICONS).map(([name, key]) => iconManager.register(name, icons[key])),
+    ...items.map(item => commands.registerCommand({ id: item.id, type: presets.CommandType.OPERATION, handler: () => (item.run(), true) })),
+  ];
+  const iconName = (icon: DocMenuItem['icon']) => Object.keys(COMMENT_MENU_ICONS)[['new', 'reply', 'delete'].indexOf(icon)];
+  injector.get(core.IMenuManagerService).mergeMenu({
+    [core.ContextMenuPosition.MAIN_AREA]: {
+      [core.ContextMenuGroup.FORMAT]: Object.fromEntries(
+        items.map(item => [
+          item.id,
+          {
+            order: item.order - 10,
+            menuItemFactory: () => ({
+              id: item.id,
+              type: core.MenuItemType.BUTTON,
+              title: item.title,
+              icon: iconName(item.icon),
+              hidden$: item.hidden$,
+            }),
+          },
+        ]),
+      ),
+    },
+  });
+  return { dispose: () => disposers.forEach(d => d.dispose()) };
+}
+
 /** The comment menu items' icons, registered under names of our own. */
 const COMMENT_MENU_ICONS = {
   WhatIffCommentNewIcon: 'InsertCommentDoubleIcon',
   WhatIffCommentReplyIcon: 'ReplyToCommentIcon',
   WhatIffCommentDeleteIcon: 'DeleteIcon',
 } as const;
+/** The custom-data key a commented cell holds its thread's id under (xlsx/sheet-comments.ts COMMENT_CELL_KEY). */
+const SHEET_COMMENT_KEY = 'whatiffCommentThread';
+/** SetRangeValuesMutation. */
+const SHEET_SET_RANGE_VALUES_MUTATION = 'sheet.mutation.set-range-values';
 /** RichTextEditingMutation: the mutation every document change goes through. */
 const DOC_RICH_TEXT_MUTATION = 'doc.mutation.rich-text-editing';
 const DOC_BACKGROUND_COMPONENT = '__Document_Render_Background__';
@@ -139,7 +220,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       sort,
       find,
       note,
-      threadComment,
+      icons,
       enUS,
       dvUS,
       cfUS,
@@ -149,7 +230,6 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       sortUS,
       findUS,
       noteUS,
-      threadCommentUS,
     ] = await Promise.all([
       import('@univerjs/presets'),
       import('@univerjs/preset-sheets-core'),
@@ -161,7 +241,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       import('@univerjs/preset-sheets-sort'),
       import('@univerjs/preset-sheets-find-replace'),
       import('@univerjs/preset-sheets-note'),
-      import('@univerjs/preset-sheets-thread-comment'),
+      import('@univerjs/icons'),
       import('@univerjs/preset-sheets-core/locales/en-US'),
       import('@univerjs/preset-sheets-data-validation/locales/en-US'),
       import('@univerjs/preset-sheets-conditional-formatting/locales/en-US'),
@@ -171,7 +251,6 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       import('@univerjs/preset-sheets-sort/locales/en-US'),
       import('@univerjs/preset-sheets-find-replace/locales/en-US'),
       import('@univerjs/preset-sheets-note/locales/en-US'),
-      import('@univerjs/preset-sheets-thread-comment/locales/en-US'),
       linkStylesheet(document, UNIVER_SHEETS_STYLESHEET, 'univerSheets'),
     ]);
     const strings = presets.merge(
@@ -185,11 +264,84 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
       sortUS.default,
       findUS.default,
       noteUS.default,
-      threadCommentUS.default,
     );
     return {
       createUniver: presets.createUniver,
       createFormulaWorker,
+      addContextMenuItems: (univer, items) => addMenuItems(univer, presets, core as unknown as MenuModule, icons, items),
+      commentCells: (univer, univerAPI, unitId) => {
+        const injector = univer.__getInjector();
+        const render = injector.get(core.IRenderManagerService).getRenderUnitById(unitId);
+        const workbook = () => injector.get(presets.IUniverInstanceService).getUnit<import('@univerjs/presets').Workbook>(unitId);
+        let state: { activeId: string | null; hidden: ReadonlySet<string> } = { activeId: null, hidden: new Set() };
+        const idOf = (cell: unknown) => {
+          const id = (cell as { custom?: Record<string, unknown> | null } | null | undefined)?.custom?.[SHEET_COMMENT_KEY];
+          return typeof id === 'string' ? id : null;
+        };
+        // A commented cell gets the corner marker Excel draws, stronger while its thread is active.
+        const interceptor = injector.get(core.SheetInterceptorService).intercept(core.INTERCEPTOR_POINT.CELL_CONTENT, {
+          effect: presets.InterceptorEffectEnum.Style,
+          priority: 100,
+          handler: (cell, pos, next) => {
+            const id = pos.unitId === unitId ? idOf(pos.rawData) : null;
+            if (!id || state.hidden.has(id)) return next(cell);
+            const marked: { markers?: Record<string, unknown> } & Record<string, unknown> = {
+              ...(cell && cell !== pos.rawData ? cell : pos.rawData),
+            };
+            const active = id === state.activeId;
+            marked.markers = { ...marked.markers, tr: { color: active ? '#E8A400' : '#FFBD37', size: active ? 9 : 6 } };
+            return next(marked);
+          },
+        });
+        const repaint = () => injector.get(core.IRenderManagerService).getRenderUnitById(unitId)?.mainComponent?.makeForceDirty?.(true);
+        const fWorkbook = () => (univerAPI as unknown as { getWorkbook(id: string): SheetFacadeWorkbook | null }).getWorkbook(unitId);
+        void render;
+        return {
+          paint: next => {
+            state = next;
+            repaint();
+          },
+          tag: async (sheetId, row, col, threadId) => {
+            const sheet = workbook()?.getSheetBySheetId(sheetId);
+            if (!sheet) return false;
+            const custom = { ...(sheet.getCellRaw(row, col)?.custom ?? {}), [SHEET_COMMENT_KEY]: threadId };
+            // A mutation, not a command: comments are written while viewing, when the sheet is locked.
+            const done = await injector.get(presets.ICommandService).executeCommand(SHEET_SET_RANGE_VALUES_MUTATION, {
+              unitId,
+              subUnitId: sheetId,
+              cellValue: { [row]: { [col]: { custom } } },
+            });
+            repaint();
+            return done;
+          },
+          locate: () => {
+            const out = new Map<string, { sheetId: string; row: number; col: number }>();
+            for (const sheet of workbook()?.getSheets() ?? []) {
+              sheet.getCellMatrix().forValue((row, col, cell) => {
+                const id = idOf(cell);
+                if (id && !out.has(id)) out.set(id, { sheetId: sheet.getSheetId(), row, col });
+              });
+            }
+            return out;
+          },
+          at: (sheetId, row, col) => idOf(workbook()?.getSheetBySheetId(sheetId)?.getCellRaw(row, col)),
+          reveal: (sheetId, row, col) => {
+            const book = fWorkbook();
+            const sheet = book?.getSheetBySheetId(sheetId);
+            if (!sheet) return;
+            if (book!.getActiveSheet().getSheetId() !== sheetId) sheet.activate();
+            sheet.getRange(row, col).activate();
+          },
+          activeCell: () => {
+            const book = fWorkbook();
+            const sheet = book?.getActiveSheet();
+            const range = book?.getActiveRange();
+            return sheet && range ? { sheetId: sheet.getSheetId(), row: range.getRow(), col: range.getColumn() } : null;
+          },
+          activeSheetId: () => fWorkbook()?.getActiveSheet().getSheetId() ?? null,
+          dispose: () => interceptor.dispose(),
+        };
+      },
       repaintDrawing: (univer, { unitId, subUnitId, drawingId }, source) => {
         const scene = univer.__getInjector().get(core.IRenderManagerService).getRenderUnitById(unitId)?.scene;
         const shape = scene?.getObjectIncludeInGroup(`${unitId}#-#${subUnitId}#-#${drawingId}`) as
@@ -221,7 +373,6 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
           sort.UniverSheetsSortPreset(),
           find.UniverSheetsFindReplacePreset(),
           note.UniverSheetsNotePreset(),
-          threadComment.UniverSheetsThreadCommentPreset(),
         ],
       }),
     };
@@ -355,39 +506,7 @@ export function loadUniverDocs(document: Document): Promise<UniverDocsKit> {
           dispose: () => interceptor.dispose(),
         };
       },
-      addContextMenuItems: (univer, items) => {
-        const injector = univer.__getInjector();
-        const commands = injector.get(presets.ICommandService);
-        const iconManager = injector.get(core.IconManager);
-        const disposers = [
-          ...Object.entries(COMMENT_MENU_ICONS).map(([name, key]) => iconManager.register(name, icons[key])),
-          ...items.map(item =>
-            commands.registerCommand({ id: item.id, type: presets.CommandType.OPERATION, handler: () => (item.run(), true) }),
-          ),
-        ];
-        const iconName = (icon: DocMenuItem['icon']) => Object.keys(COMMENT_MENU_ICONS)[['new', 'reply', 'delete'].indexOf(icon)];
-        // First in the list under the quick actions, as Word puts its comment items.
-        injector.get(core.IMenuManagerService).mergeMenu({
-          [core.ContextMenuPosition.MAIN_AREA]: {
-            [core.ContextMenuGroup.FORMAT]: Object.fromEntries(
-              items.map(item => [
-                item.id,
-                {
-                  order: item.order - 10,
-                  menuItemFactory: () => ({
-                    id: item.id,
-                    type: core.MenuItemType.BUTTON,
-                    title: item.title,
-                    icon: iconName(item.icon),
-                    hidden$: item.hidden$,
-                  }),
-                },
-              ]),
-            ),
-          },
-        });
-        return { dispose: () => disposers.forEach(d => d.dispose()) };
-      },
+      addContextMenuItems: (univer, items) => addMenuItems(univer, presets, core, icons, items),
       options: (container, opts) => ({
         locale: presets.LocaleType.EN_US,
         locales: { [presets.LocaleType.EN_US]: strings },
