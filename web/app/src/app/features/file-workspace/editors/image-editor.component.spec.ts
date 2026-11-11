@@ -13,7 +13,7 @@ interface FakeEditorInstance {
 
 function fakeFilerobot() {
   const instances: FakeEditorInstance[] = [];
-  const state = { failRender: false };
+  const state = { failRender: false, notDrawn: false };
   class FakeFilerobot {
     // Statics, as on the real class: its typings put them on the instance, but they are not there.
     static TABS = { ADJUST: 'Adjust', FINETUNE: 'Finetune', FILTERS: 'Filters', ANNOTATE: 'Annotate', RESIZE: 'Resize' };
@@ -31,6 +31,7 @@ function fakeFilerobot() {
       this.record.terminated = true;
     }
     getCurrentImgData(info: { extension: string }) {
+      if (state.notDrawn) return {};
       return { imageData: { imageBase64: `data:image/${info.extension};base64,aGk=`, mimeType: `image/${info.extension}` }, designState: {}, hideLoadingSpinner: () => undefined };
     }
   }
@@ -105,6 +106,12 @@ describe('ImageEditorComponent', () => {
     expect(fixture.componentInstance.unsupported()).toBe(true);
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('cannot write back');
     await expect(fixture.componentInstance.content()).rejects.toThrow('cannot write image/gif');
+  });
+
+  it('asks to save again, rather than saving nothing, before the editor has drawn the image', async () => {
+    await open(file());
+    fake.state.notDrawn = true;
+    await expect(fixture.componentInstance.content()).rejects.toThrow('still loading the image');
   });
 
   it('tears the editor down and releases the object URL', async () => {

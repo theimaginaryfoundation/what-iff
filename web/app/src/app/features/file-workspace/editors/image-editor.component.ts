@@ -140,7 +140,9 @@ export class ImageEditorComponent implements FileEditor {
     if (!this.editor) return this.blob();
     const { imageData, hideLoadingSpinner } = this.editor.getCurrentImgData({ name: baseName(this.file().name), extension, quality: 0.92 }, 1);
     hideLoadingSpinner?.();
-    if (!imageData) throw new Error('the image editor has not finished loading');
+    // Filerobot hands back nothing until its canvas has drawn. The workspace shows this message by
+    // its Save button; nothing is sent, and the edits stay in the editor to save again.
+    if (!imageData) throw new Error('The image editor is still loading the image. Try saving again in a moment.');
     if (imageData.imageCanvas) {
       // The canonical name: browsers do not know image/jpg, and fall back to PNG for any type they
       // cannot encode (WebP on Safari), which would store PNG bytes under the file's type.

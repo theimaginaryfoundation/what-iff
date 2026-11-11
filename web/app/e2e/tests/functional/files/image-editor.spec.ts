@@ -69,6 +69,7 @@ test('an image opens in the image editor, and an edit saves', async ({ isMobile,
 async function contentOf(client: ApiClient, id: string): Promise<Buffer> {
   const { data, response } = await client.GET('/file-attachment/{id}', { params: { path: { id } }, parseAs: 'arrayBuffer' });
   expect(response.status, 'download').toBe(200);
+  expect(data, 'download body').toBeInstanceOf(ArrayBuffer);
   return Buffer.from(data as unknown as ArrayBuffer);
 }
 
@@ -109,11 +110,13 @@ function crc32(bytes: Buffer): number {
 
 /** A baseline or progressive JPEG's dimensions, from its start-of-frame marker. */
 function jpegSize(jpeg: Buffer): { width: number; height: number } {
+  if (jpeg[0] !== 0xff || jpeg[1] !== 0xd8) throw new Error('not a JPEG');
   let at = 2;
-  while (at < jpeg.length) {
+  while (at + 9 <= jpeg.length && jpeg[at] === 0xff) {
     const marker = jpeg[at + 1];
     const length = jpeg.readUInt16BE(at + 2);
     if (marker === 0xc0 || marker === 0xc2) return { height: jpeg.readUInt16BE(at + 5), width: jpeg.readUInt16BE(at + 7) };
+    if (length < 2) break;
     at += 2 + length;
   }
   throw new Error('not a JPEG with a start-of-frame marker');

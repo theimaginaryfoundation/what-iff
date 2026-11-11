@@ -25,17 +25,17 @@ export class FilerobotEditor {
 
   private readonly root: Root;
   private readonly imgDataRef: { current?: getCurrentImgDataFunction } = {};
-  private config: FilerobotImageEditorConfig;
+  private readonly config: FilerobotImageEditorConfig;
 
   constructor(container: HTMLElement, config: FilerobotImageEditorConfig) {
     this.root = createRoot(container);
     this.config = config;
   }
 
-  /** Renders the editor, with `extra` merged over the constructor's config. */
+  /** Renders the editor with the constructor's config, `extra`'s top-level keys replacing its own. */
   render(extra: Partial<FilerobotImageEditorConfig> = {}): void {
-    this.config = { ...this.config, ...extra, getCurrentImgDataFnRef: this.imgDataRef };
-    this.root.render(createElement(FilerobotImageEditor, this.config));
+    const config = { ...this.config, ...extra, getCurrentImgDataFnRef: this.imgDataRef };
+    this.root.render(createElement(FilerobotImageEditor, config));
   }
 
   /** The edited image; empty until the editor has rendered. */
