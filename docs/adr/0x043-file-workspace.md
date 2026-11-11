@@ -48,7 +48,7 @@ Editors implement `FileEditor`: `dirty`, `content()`, `markSaved()`, and an opti
 |---|---|---|---|
 | text | code and text files | Monaco editor; `colorize` to static HTML in the viewer | `monaco-editor` (MIT) |
 | markdown | `.md .markdown .mdx` | Rendered with a raw toggle; Monaco with a live preview | `monaco-editor`, `ngx-markdown` |
-| image | png, jpeg, webp (gif, svg and heic are viewed only) | Crop, rotate, resize, annotate, filters | `filerobot-image-editor` (MIT) |
+| image | png, jpeg, webp (gif, svg and heic are viewed only) | Crop, rotate, resize, annotate, filters | `react-filerobot-image-editor` (MIT) |
 | pdf | `.pdf` | Pages, text, search, zoom; annotations written into the file | `pdfjs-dist` (Apache-2.0) |
 | spreadsheet, csv | `.xlsx .xlsm .csv .tsv` | One component, section 8 | Univer Sheets (Apache-2.0), ExcelJS (MIT) |
 | document | `.docx` | One component, section 9 | Univer Docs (Apache-2.0) |
@@ -56,7 +56,7 @@ Editors implement `FileEditor`: `dirty`, `content()`, `markSaved()`, and an opti
 | notebook | `.ipynb` | One component, section 11 | our own cells, JupyterLite (BSD-3) to run |
 | none | archives, unknown binaries | Badge and download | |
 
-Filerobot is a React app and brings its own React 18; it runs as an island in its container, only in its lazy chunk.
+Filerobot is a React component. It is mounted with the app's own React (the one the office editors use), so the editor, react-konva and styled-components share one React; its vanilla wrapper package bundles React 18 and cannot be used beside it. It runs as an island in its container, only in its lazy chunk.
 
 GPL, AGPL and commercially licensed dependencies are not allowed; SuperDoc, OnlyOffice, Handsontable and Pintura were ruled out on that basis.
 This rests on review: no automated licence check exists.

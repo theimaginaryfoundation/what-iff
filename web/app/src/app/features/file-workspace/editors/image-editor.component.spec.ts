@@ -17,7 +17,7 @@ function fakeFilerobot() {
   class FakeFilerobot {
     // Statics, as on the real class: its typings put them on the instance, but they are not there.
     static TABS = { ADJUST: 'Adjust', FINETUNE: 'Finetune', FILTERS: 'Filters', ANNOTATE: 'Annotate', RESIZE: 'Resize' };
-    static TOOLS = { CROP: 'Crop' };
+    static TOOLS = { CROP: 'Crop', ROTATE: 'Rotate' };
     readonly record: FakeEditorInstance;
     constructor(container: HTMLElement, config: Record<string, unknown>) {
       this.record = { container, config, renderConfig: undefined, terminated: false };
@@ -80,6 +80,8 @@ describe('ImageEditorComponent', () => {
     expect(config['useBackendTranslations']).toBe(false);
     expect(config['showBackButton']).toBe(false);
     expect(renderConfig?.['tabsIds']).toEqual(['Adjust', 'Finetune', 'Filters', 'Annotate', 'Resize']);
+    // Opening on Crop saves small images cropped (see the comment in create()).
+    expect(renderConfig?.['defaultToolId']).toBe('Rotate');
     expect(fixture.componentInstance.unsupported()).toBe(false);
   });
 

@@ -50,6 +50,9 @@
   "overrides": {
     "openapi-typescript": {
       "typescript": "$typescript"
+    },
+    "react-filerobot-image-editor": {
+      "konva": "$konva"
     }
   },
   "dependencies": {
@@ -81,10 +84,10 @@
     "docx": "^9.15.3",
     "dompurify": "^3.4.14",
     "exceljs": "^4.4.0",
-    "filerobot-image-editor": "^4.8.1",
     "flowbite": "^4.0.2",
     "jszip": "^3.10.1",
     "katex": "^0.16.47",
+    "konva": "^10.9.1",
     "marked": "^18.0.10",
     "marked-katex-extension": "^5.1.12",
     "monaco-editor": "^0.57.0",
@@ -93,7 +96,12 @@
     "postcss": "^8.5.26",
     "pptxgenjs": "^4.0.1",
     "pptxtojson": "^2.2.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-filerobot-image-editor": "^4.9.1",
+    "react-konva": "^19.3.2",
     "rxjs": "~7.8.0",
+    "styled-components": "^5.3.11",
     "tailwindcss": "^4.3.3",
     "tslib": "^2.3.0"
   },
