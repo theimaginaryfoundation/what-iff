@@ -1,28 +1,30 @@
-import { ChangeDetectionStrategy, Component, ElementRef, Injector, afterNextRender, inject, signal, viewChild } from '@angular/core';
-
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  Injector,
+  afterNextRender,
+  computed,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
+import {
+  ImageGenerationProvider,
+  effectiveImageGenerationProvider,
+  imageGenerationProviderOptions,
+} from '../../../../../core/models/user.model';
 import { AnnouncerService } from '../../../../../core/services/announcer.service';
+import { LoggerService } from '../../../../../core/services/logger.service';
+import { UserPreferencesService } from '../../../../../core/services/user-preferences.service';
 import { listenForOutsideClick } from '../../../../../shared/ui';
 
-interface ImageModelOption {
-  readonly id: string;
-  readonly label: string;
-}
-
 /**
- * Placeholder catalog: the backend has no image-model list or per-user
- * preference yet (it uses one fixed engine), so the choice is kept in this
- * browser only until that API exists.
- */
-const IMAGE_MODELS: readonly ImageModelOption[] = [
-  { id: 'gpt-image-1', label: 'GPT Image 1' },
-  { id: 'gpt-image-1-mini', label: 'GPT Image 1 Mini' },
-  { id: 'gemini-flash-image', label: 'Gemini Flash Image' },
-];
-
-const STORAGE_KEY = 'whatiff.defaultImageModel';
-
-/**
- * Dropdown for the default image model, shown under the Generate Image tool.
+ * Dropdown for the default image model, shown under the Generate Image tool. It is the same
+ * setting as Settings → Image generation (`image_generation_provider`), offering the vendors this
+ * deployment has keys for, and like that select it is hidden when there is nothing to choose.
  * Closed, it shows the current default and a "default" pill. Open, each other
  * model carries a grayed "default" pill; picking a row makes it the default.
  * It is a listbox (not a native select) so the pills can sit beside the names.
@@ -31,66 +33,68 @@ const STORAGE_KEY = 'whatiff.defaultImageModel';
   selector: 'app-image-model-picker',
   standalone: true,
   template: `
-    <div class="picker">
-      <button
-        #trigger
-        type="button"
-        class="picker__trigger"
-        data-testid="image-model-trigger"
-        aria-haspopup="listbox"
-        [attr.aria-label]="'Default image model: ' + current().label"
-        [attr.aria-expanded]="open()"
-        [attr.aria-controls]="open() ? listId : null"
-        (click)="toggle()"
-        (keydown)="onTriggerKey($event)"
-      >
-        <span class="picker__name">{{ current().label }}</span>
-        <span class="pill pill--on" aria-hidden="true">default</span>
-        <svg
-          class="picker__chevron"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
+    @if (models().length > 1) {
+      <div class="picker">
+        <button
+          #trigger
+          type="button"
+          class="picker__trigger"
+          data-testid="image-model-trigger"
+          aria-haspopup="listbox"
+          [attr.aria-label]="'Default image model: ' + current().label"
+          [attr.aria-expanded]="open()"
+          [attr.aria-controls]="open() ? listId : null"
+          (click)="toggle()"
+          (keydown)="onTriggerKey($event)"
         >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-      </button>
-      @if (open()) {
-        <ul
-          #list
-          class="picker__list"
-          role="listbox"
-          tabindex="-1"
-          aria-label="Default image model"
-          [id]="listId"
-          [attr.aria-activedescendant]="optionId(activeIndex())"
-          (keydown)="onListKey($event)"
-        >
-          @for (model of models; track model.id; let i = $index) {
-            <li
-              role="option"
-              class="picker__option"
-              [id]="optionId(i)"
-              [class.picker__option--active]="i === activeIndex()"
-              [attr.aria-selected]="model.id === selected()"
-              [attr.aria-label]="model.label + (model.id === selected() ? ', default' : '')"
-              (click)="choose(model.id)"
-            >
-              <span class="picker__name">{{ model.label }}</span>
-              <span class="pill" aria-hidden="true" [class.pill--on]="model.id === selected()" [class.pill--off]="model.id !== selected()"
-                >default</span
+          <span class="picker__name">{{ current().label }}</span>
+          <span class="pill pill--on" aria-hidden="true">default</span>
+          <svg
+            class="picker__chevron"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+        @if (open()) {
+          <ul
+            #list
+            class="picker__list"
+            role="listbox"
+            tabindex="-1"
+            aria-label="Default image model"
+            [id]="listId"
+            [attr.aria-activedescendant]="optionId(activeIndex())"
+            (keydown)="onListKey($event)"
+          >
+            @for (model of models(); track model.id; let i = $index) {
+              <li
+                role="option"
+                class="picker__option"
+                [id]="optionId(i)"
+                [class.picker__option--active]="i === activeIndex()"
+                [attr.aria-selected]="model.id === selected()"
+                [attr.aria-label]="model.label + (model.id === selected() ? ', default' : '')"
+                (click)="choose(model.id)"
               >
-            </li>
-          }
-        </ul>
-      }
-    </div>
+                <span class="picker__name">{{ model.label }}</span>
+                <span class="pill" aria-hidden="true" [class.pill--on]="model.id === selected()" [class.pill--off]="model.id !== selected()"
+                  >default</span
+                >
+              </li>
+            }
+          </ul>
+        }
+      </div>
+    }
   `,
   styles: [
     `
@@ -188,8 +192,13 @@ const STORAGE_KEY = 'whatiff.defaultImageModel';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ImageModelPickerComponent {
-  readonly models = IMAGE_MODELS;
-  readonly selected = signal(readStored());
+  private readonly preferencesService = inject(UserPreferencesService);
+  private readonly preferences = toSignal(this.preferencesService.preferences$, { initialValue: null });
+
+  readonly models = computed(() => imageGenerationProviderOptions(this.preferences()));
+  /** Set while a pick is being saved, so the list shows it straight away. */
+  private readonly pending = signal<ImageGenerationProvider | null>(null);
+  readonly selected = computed(() => this.pending() ?? effectiveImageGenerationProvider(this.preferences()));
   readonly open = signal(false);
   readonly activeIndex = signal(0);
   readonly listId = 'image-model-list';
@@ -198,14 +207,21 @@ export class ImageModelPickerComponent {
   private readonly list = viewChild<ElementRef<HTMLUListElement>>('list');
   private readonly injector = inject(Injector);
   private readonly announcer = inject(AnnouncerService);
+  private readonly logger = inject(LoggerService);
 
   constructor() {
     // Registers a document capture listener and removes it via DestroyRef when this picker is destroyed.
     listenForOutsideClick(() => this.open.set(false));
+    if (!this.preferences()) {
+      this.preferencesService.getUserPreferences().subscribe({
+        error: (err: unknown) => this.logger.error('Failed to load preferences for the image model picker', err),
+      });
+    }
   }
 
-  current(): ImageModelOption {
-    return IMAGE_MODELS.find(m => m.id === this.selected()) ?? IMAGE_MODELS[0];
+  current(): { id: string; label: string } {
+    const models = this.models();
+    return models.find(m => m.id === this.selected()) ?? models[0] ?? { id: '', label: '' };
   }
 
   optionId(index: number): string {
@@ -220,15 +236,19 @@ export class ImageModelPickerComponent {
     }
   }
 
-  choose(id: string): void {
-    this.selected.set(id);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, id);
-    } catch {
-      // Storage can be unavailable (private mode); the choice then lasts for this session only.
-    }
-    this.announcer.announce(`Default image model set to ${this.current().label}`);
+  async choose(id: ImageGenerationProvider): Promise<void> {
     this.close(true);
+    if (id === this.selected()) return;
+    this.pending.set(id);
+    try {
+      await firstValueFrom(this.preferencesService.patchUserPreferences({ image_generation_provider: id }));
+      this.announcer.announce(`Default image model set to ${this.current().label}`);
+    } catch (err) {
+      this.logger.error('Failed to save the default image model', err);
+      this.announcer.announce('Could not change the default image model');
+    } finally {
+      this.pending.set(null);
+    }
   }
 
   onTriggerKey(event: KeyboardEvent): void {
@@ -239,7 +259,8 @@ export class ImageModelPickerComponent {
   }
 
   onListKey(event: KeyboardEvent): void {
-    const last = this.models.length - 1;
+    const models = this.models();
+    const last = models.length - 1;
     switch (event.key) {
       case 'ArrowDown':
         this.activeIndex.set(Math.min(this.activeIndex() + 1, last));
@@ -255,7 +276,7 @@ export class ImageModelPickerComponent {
         break;
       case 'Enter':
       case ' ':
-        this.choose(this.models[this.activeIndex()].id);
+        void this.choose(models[this.activeIndex()].id);
         break;
       case 'Escape':
         // The panel closes on Escape too; this one only closes the list.
@@ -275,7 +296,7 @@ export class ImageModelPickerComponent {
     this.activeIndex.set(
       Math.max(
         0,
-        this.models.findIndex(m => m.id === this.selected()),
+        this.models().findIndex(m => m.id === this.selected()),
       ),
     );
     this.open.set(true);
@@ -287,14 +308,4 @@ export class ImageModelPickerComponent {
     this.open.set(false);
     if (refocus) afterNextRender(() => this.trigger()?.nativeElement.focus(), { injector: this.injector });
   }
-}
-
-function readStored(): string {
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored && IMAGE_MODELS.some(m => m.id === stored)) return stored;
-  } catch {
-    // fall through to the default
-  }
-  return IMAGE_MODELS[0].id;
 }

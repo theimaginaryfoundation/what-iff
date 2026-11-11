@@ -111,3 +111,17 @@ export const IMAGE_GENERATION_PROVIDER_LABELS: Record<ImageGenerationProvider, s
   zai: 'Z.ai (GLM-Image)',
   qwen: 'Qwen (Qwen-Image)',
 };
+
+/** The image vendors a person can choose between, labelled: the ones this deployment has keys for. */
+export function imageGenerationProviderOptions(
+  preferences: UserPreferences | null | undefined,
+): { id: ImageGenerationProvider; label: string }[] {
+  return (preferences?.image_generation_providers ?? []).map(id => ({ id, label: IMAGE_GENERATION_PROVIDER_LABELS[id] ?? id }));
+}
+
+/** The vendor images actually use: the stored pick when it is offered, else the first offered (the server's fallback). */
+export function effectiveImageGenerationProvider(preferences: UserPreferences | null | undefined): ImageGenerationProvider | '' {
+  const offered = preferences?.image_generation_providers ?? [];
+  const chosen = preferences?.image_generation_provider;
+  return chosen && offered.includes(chosen) ? chosen : (offered[0] ?? '');
+}

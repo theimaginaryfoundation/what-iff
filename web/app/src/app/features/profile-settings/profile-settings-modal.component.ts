@@ -17,13 +17,14 @@ import {
   parseReasoningEffort,
 } from '../../core/models/turn-settings.model';
 import {
-  IMAGE_GENERATION_PROVIDER_LABELS,
   ImageGenerationProvider,
   UpdatePasswordRequest,
   UpdateUserRequest,
   UserPreferences,
   UserPreferencesUpdateRequest,
   UserResponse,
+  effectiveImageGenerationProvider,
+  imageGenerationProviderOptions,
 } from '../../core/models/user.model';
 import { AuthService } from '../../core/services/auth.service';
 import { LoggerService } from '../../core/services/logger.service';
@@ -92,15 +93,9 @@ export class ProfileSettingsModalComponent {
   readonly currentUser = signal<UserResponse | null>(null);
   readonly preferences = signal<UserPreferences | null>(null);
   /** Image vendors to choose between; the picker is hidden when there is no choice. */
-  readonly imageGenerationProviders = computed(() =>
-    (this.preferences()?.image_generation_providers ?? []).map(id => ({ id, label: IMAGE_GENERATION_PROVIDER_LABELS[id] ?? id })),
-  );
-  /** The vendor images actually use: the stored pick when available, else the first offered (the server's fallback). */
-  readonly imageGenerationProvider = computed(() => {
-    const offered = this.preferences()?.image_generation_providers ?? [];
-    const chosen = this.preferences()?.image_generation_provider;
-    return chosen && offered.includes(chosen) ? chosen : (offered[0] ?? '');
-  });
+  readonly imageGenerationProviders = computed(() => imageGenerationProviderOptions(this.preferences()));
+  /** The vendor images actually use (effectiveImageGenerationProvider). */
+  readonly imageGenerationProvider = computed(() => effectiveImageGenerationProvider(this.preferences()));
   readonly models = signal<readonly Model[]>([]);
   /**
    * True when the saved default model is not one the model list offers (retired or no longer

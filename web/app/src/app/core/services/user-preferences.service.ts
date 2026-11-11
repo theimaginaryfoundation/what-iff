@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, BehaviorSubject } from 'rxjs';
-import { tap } from 'rxjs/operators';
+import { switchMap, tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { UserPreferences, UserPreferencesUpdateRequest } from '../models/user.model';
 
@@ -29,6 +29,16 @@ export class UserPreferencesService {
         this.preferencesSubject.next(updatedPreferences);
       })
     );
+  }
+
+  /**
+   * Change some preferences. PUT replaces the whole record, so this merges the patch onto a fresh
+   * read rather than a copy loaded earlier, which could undo a change made elsewhere since.
+   * Two writes racing between that read and the PUT are still last-writer-wins (the API has no
+   * PATCH or version check). Errors reach the caller.
+   */
+  patchUserPreferences(patch: Partial<UserPreferencesUpdateRequest>): Observable<UserPreferences> {
+    return this.getUserPreferences().pipe(switchMap(current => this.updateUserPreferences({ ...current, ...patch })));
   }
 
   /**
