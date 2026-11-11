@@ -1,6 +1,6 @@
 # ADR 0x038: Bounded history images and JPEG uploads
 
-- **Status:** Accepted
+- **Status:** Accepted; §3 superseded by ADR 0x045 §9 (uploads are PNG again)
 - **Date:** 2026-11-02
 - **Deciders:** What Iff maintainers
 - **Issue:** [what-iff#419](https://github.com/theimaginaryfoundation/what-iff/issues/419)
@@ -47,6 +47,8 @@ Older images are left out silently, the way a model without vision already sees 
 Past a handful of images, continuity adds little and every extra image is re-sent on every turn.
 
 ### 3. Uploads are normalized to JPEG
+
+> Superseded on 2026-11-11 by ADR 0x045 §9: uploads are stored as compact lossless PNG again.
 
 `NormalizeForUpload` now re-encodes opaque images as JPEG at quality 90, which is about 1 MB for a 2048 px photo, and returns the new content type.
 Images with any transparent pixel stay PNG, because JPEG has no alpha channel and flattening a sticker or logo onto a colour would change it.

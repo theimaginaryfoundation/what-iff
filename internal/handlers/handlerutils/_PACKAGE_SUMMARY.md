@@ -9,7 +9,7 @@
 - **`fileattachment.go`:** Utilities for reading uploads and binding to models (see tests for expected behavior).
   It also owns the upload metrics for every upload path (chat, personality, image gallery), through `telemetry.Global()`.
   `UploadFileAttachment` is the multipart wrapper over `ProcessUpload`, which holds the steps that need no HTTP: type check, buffering to a temp file (at most `MaxUploadBytes`, 30 MB; exported so callers that already hold the bytes can check up front), and image normalization; the temp file is the bytes the caller then stores.
-  Image normalization (`imageutil.NormalizeForUpload`) re-encodes every accepted image (PNG, JPEG, GIF, WebP) capped at 2048px: as JPEG (quality 90) when it is opaque, as PNG when it has transparency (ADR 0x038).
+  Image normalization (`imageutil.NormalizeForUpload`) re-encodes every accepted image (PNG, JPEG, GIF, WebP) capped at 2048px: as compact PNG: 8-bit, with an exact palette when it has at most 256 colours (ADR 0x045 §9, superseding 0x038's JPEG).
   So a WebP upload is stored, thumbnailed and sent to vendors as JPEG, and the file is renamed to match.
   `ProcessUpload` returns an `*UploadError` (the status and message a client sees; it wraps `ErrUnsupportedFileType` or `ErrFileTooLarge` where they apply), and `RespondWithUploadError` writes one.
   `StoreChatAttachment` is the storage half for a chat upload: the record, the object-store key (images under the gallery path with a thumbnail, other files under the chat), and chunking.

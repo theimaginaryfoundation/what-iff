@@ -103,6 +103,18 @@ Add to message attaches `sketch-<time>`, described as a rough sketch to base an 
 Markup only creates new files; the image it was drawn on is attached as it is.
 The derived files are ordinary thread uploads in the gallery's `markup` folder, which the user can see and delete.
 
+### 9. Uploads are PNG again, kept small
+
+ADR 0x038 §3 re-encoded opaque uploads as JPEG to keep them near 1 MB.
+That caused problems in practice, and a lossy copy is wrong for what markup produces: a mask must keep its exact edges, and screenshots, sketches and line art blur.
+`NormalizeForUpload` goes back to PNG for every upload (still capped at 2048 px, still without metadata), and keeps the PNG small:
+- 8 bits per channel whatever the source had, and no alpha channel when every pixel is opaque;
+- an exact palette when the image has at most 256 colours (masks, sketches, diagrams, most screenshots), which is lossless and several times smaller;
+- default zlib compression, since the best level saved under 1% on a photo for twice the time.
+
+Photos cost more storage than as JPEG (a 1536 × 1024 photo is about 3 MB), but the memory problem 0x038 solved stays solved: history images are still capped and sent as thumbnails (0x038 §1–2, §4).
+Files already stored as JPEG are left as they are.
+
 ## Alternatives considered
 
 - **Filerobot's Annotate tab** (already in the image editor) for the marks.
@@ -123,8 +135,7 @@ The derived files are ordinary thread uploads in the gallery's `markup` folder, 
 - Any image the agent can see can be edited or used as a reference, including one it made earlier in the same turn.
 - Edits cost the same as generations at the chosen quality, metered against the vendor that ran them (`path: tool_edit`).
 - A user whose image vendor is z.ai or Qwen can draw markup but the agent cannot act on it; both the surface and the tool say so.
-- Opaque uploads are normalised to JPEG (what-iff#419), so masks and markup copies are stored as JPEG.
-  The mask is read by brightness with a 50% threshold, so compression at the edges does not matter.
+- Uploads are PNG again (§9), so masks keep exact edges; the mask is still read by brightness with a 50% threshold, so a JPEG mask from before works too.
 - Markup files collect in the gallery's `markup` folder.
 
 ## Not done yet
