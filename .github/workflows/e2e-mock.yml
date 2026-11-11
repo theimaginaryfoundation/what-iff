@@ -623,24 +623,13 @@ jobs:
         working-directory: web/app
         run: npm ci
 
-      # Bare runner (not the Playwright container), so there is no bundled
-      # postgres client — same reasoning as the `test` job's "Install psql".
-      - name: Install psql
-        run: |
-          for attempt in 1 2 3; do
-            if sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends postgresql-client; then
-              exit 0
-            fi
-            echo "attempt ${attempt} failed; retrying in $((attempt * 10))s"
-            sleep $((attempt * 10))
-          done
-          echo "could not install postgresql-client after 3 attempts"
-          exit 1
-
-      # A bare runner reaches the service over 127.0.0.1 via the published
-      # port, unlike the container job above which uses the `db` network alias.
+      # A bare runner has no postgres client, so run the statement with the
+      # psql inside the pgvector service container. Installing
+      # postgresql-client with apt here failed whenever the runner could not
+      # reach the Ubuntu mirrors, which took this job (and the coverage merge
+      # that needs its artifact) down with it.
       - name: Enable pgvector extension
-        run: PGPASSWORD=chatapp psql -h 127.0.0.1 -U chatapp -d chatapp -f docker/initdb/001_create_vector.sql
+        run: docker exec -i "${{ job.services.db.id }}" psql -v ON_ERROR_STOP=1 -U chatapp -d chatapp < docker/initdb/001_create_vector.sql
 
       - name: Prepare coverage dir
         run: |
