@@ -3,13 +3,13 @@ import { toSignal } from '@angular/core/rxjs-interop';
 
 import { imageEditingUnavailableReason } from '../../../core/models/user.model';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
-import { FileAttachmentService } from '../../../core/services/file-attachment.service';
 import { UserPreferencesService } from '../../../core/services/user-preferences.service';
 import { OverlayComponent } from '../../../shared/ui/overlay/overlay.component';
 import { XIconComponent } from '../../../shared/ui/icons/icons';
 import { ContextPanelService } from '../../chat/services/context-panel.service';
 import { ImageMarkupComponent, MarkupResult } from './image-markup.component';
-import { uploadMarkup } from './markup-upload';
+import { injectMarkupUploader } from './markup-upload';
+import { LoggerService } from '../../../core/services/logger.service';
 
 /**
  * A blank page to sketch on, from the composer's + menu (ADR 0x045 §7). The sketch becomes a new
@@ -78,7 +78,8 @@ import { uploadMarkup } from './markup-upload';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SketchOverlayComponent {
-  private readonly files = inject(FileAttachmentService);
+  private readonly logger = inject(LoggerService);
+  private readonly uploadMarkup = injectMarkupUploader();
   private readonly contextPanel = inject(ContextPanelService);
   private readonly confirmationService = inject(ConfirmationService);
   private readonly preferences = toSignal(inject(UserPreferencesService).preferences$, { initialValue: null });
@@ -105,11 +106,12 @@ export class SketchOverlayComponent {
     this.sending.set(true);
     this.error.set(null);
     try {
-      const attachments = await uploadMarkup((...args) => this.files.uploadChatFileAttachment(...args), chatId, null, result);
+      const attachments = await this.uploadMarkup(chatId, null, result);
       for (const attachment of attachments) this.contextPanel.requestComposerAttachment(attachment);
       this.contextPanel.refreshFiles();
       this.finish();
-    } catch {
+    } catch (error) {
+      this.logger.error('Could not add the sketch to the message', error);
       this.error.set('Could not add the sketch to your message. Please try again.');
     } finally {
       this.sending.set(false);

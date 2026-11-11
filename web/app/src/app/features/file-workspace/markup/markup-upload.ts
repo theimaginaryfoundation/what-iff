@@ -1,6 +1,9 @@
+import { inject } from '@angular/core';
 import { Observable, firstValueFrom } from 'rxjs';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
+import { FileAttachmentService } from '../../../core/services/file-attachment.service';
+import { ImageGalleryService } from '../../../core/services/image-gallery.service';
 import { MarkupResult } from './image-markup.component';
 import { markupStem } from './markup-strokes';
 
@@ -11,12 +14,20 @@ export const MARKUP_FOLDER = 'markup';
 export type ChatUpload = (chatId: string, file: File, folder?: string, description?: string) => Observable<FileAttachment>;
 
 /**
+ * What makes an attachable copy of an existing file; ImageGalleryService.referenceImage. A file
+ * belongs to one message, so the image a markup was drawn on (often already on a message) is
+ * attached as a reference copy that shares its stored object, as the gallery picker does.
+ */
+export type ReferenceFile = (id: string) => Observable<FileAttachment>;
+
+/**
  * Turns markup into the files for the next message (ADR 0x045 §6–7): new uploads for the mask, the
  * markup copy or the sketch, each described so the agent knows what it is, after the image they
- * were drawn on (which is attached as it is, never changed). Returns them in the order to attach.
+ * were drawn on (attached as a reference copy, never changed). Returns them in the order to attach.
  */
 export async function uploadMarkup(
   upload: ChatUpload,
+  reference: ReferenceFile,
   chatId: string,
   source: FileAttachment | null,
   result: MarkupResult,
@@ -37,7 +48,7 @@ export async function uploadMarkup(
     );
     return attachments;
   }
-  attachments.push(source);
+  attachments.push(await firstValueFrom(reference(source.id)));
   const stem = markupStem(source.name);
   if (result.mask) {
     attachments.push(
@@ -62,6 +73,20 @@ export async function uploadMarkup(
     );
   }
   return attachments;
+}
+
+/** uploadMarkup wired to the app's services. Call it in an injection context (a field initializer). */
+export function injectMarkupUploader(): (chatId: string, source: FileAttachment | null, result: MarkupResult) => Promise<FileAttachment[]> {
+  const files = inject(FileAttachmentService);
+  const gallery = inject(ImageGalleryService);
+  return (chatId, source, result) =>
+    uploadMarkup(
+      (...args) => files.uploadChatFileAttachment(...args),
+      id => gallery.referenceImage(id),
+      chatId,
+      source,
+      result,
+    );
 }
 
 function send(upload: ChatUpload, chatId: string, blob: Blob, name: string, description: string): Promise<FileAttachment> {
