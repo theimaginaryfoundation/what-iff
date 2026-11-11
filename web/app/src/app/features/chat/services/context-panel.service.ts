@@ -26,9 +26,10 @@ export class ContextPanelService {
   private readonly _activeChat = signal<Chat | null>(null);
   private readonly _mobileOpen = signal(false);
   private readonly _composerInsert = signal<string | null>(null);
-  // A file the Files tab wants attached to the next message (an upload from the tab, or a gallery
-  // pick), consumed by the chat page into the composer's pending attachments.
-  private readonly _composerAttachment = signal<FileAttachment | null>(null);
+  // Files waiting to be attached to the next message (an upload from the Files tab, a gallery pick, a
+  // Save As or markup from the file workspace), consumed by the chat page into the composer's
+  // pending attachments. A queue: markup adds several at once (ADR 0x045).
+  private readonly _composerAttachments = signal<readonly FileAttachment[]>([]);
   // The files attached to the message being composed, published by the chat page so the Files tab
   // can show them as "next message" before they are sent.
   private readonly _composerPending = signal<readonly FileAttachment[]>([]);
@@ -54,7 +55,7 @@ export class ContextPanelService {
   readonly threadUpdate = this._threadUpdate.asReadonly();
   readonly mobileOpen = this._mobileOpen.asReadonly();
   readonly composerInsert = this._composerInsert.asReadonly();
-  readonly composerAttachment = this._composerAttachment.asReadonly();
+  readonly composerAttachments = this._composerAttachments.asReadonly();
   readonly filesVersion = this._filesVersion.asReadonly();
   readonly composerPending = this._composerPending.asReadonly();
   readonly galleryPickerRequests = this._galleryPickerRequests.asReadonly();
@@ -139,13 +140,14 @@ export class ContextPanelService {
 
   /** Asks the chat page to add attachment to the message being composed (ADR 0x043 §4). */
   requestComposerAttachment(attachment: FileAttachment): void {
-    this._composerAttachment.set(attachment);
+    this._composerAttachments.update(queued => [...queued, attachment]);
   }
 
-  consumeComposerAttachment(): FileAttachment | null {
-    const attachment = this._composerAttachment();
-    this._composerAttachment.set(null);
-    return attachment;
+  /** Takes every queued attachment, oldest first. */
+  consumeComposerAttachments(): readonly FileAttachment[] {
+    const queued = this._composerAttachments();
+    this._composerAttachments.set([]);
+    return queued;
   }
 
   setComposerPending(files: readonly FileAttachment[]): void {

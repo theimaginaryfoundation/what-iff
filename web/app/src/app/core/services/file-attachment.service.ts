@@ -18,11 +18,15 @@ export class FileAttachmentService {
    * @param file The file to upload
    * @returns Observable of the created file attachment
    */
-  uploadChatFileAttachment(chatId: string, file: File, folder?: string): Observable<FileAttachment> {
+  uploadChatFileAttachment(chatId: string, file: File, folder?: string, description?: string): Observable<FileAttachment> {
     const formData = new FormData();
     formData.append('attachment', file);
     if (folder?.trim()) {
       formData.append('folder', folder.trim());
+    }
+    // Shown to the agent beside the file's name (ADR 0x045: what a mask or a markup copy is).
+    if (description?.trim()) {
+      formData.append('description', description.trim());
     }
 
     return this.http.post<FileAttachment>(`${this.apiUrl}/chat/${chatId}/file-attachment`, formData);

@@ -106,7 +106,7 @@ describe('ContextFilesTabComponent', () => {
     };
     pick(new File(['x'], 'notes.txt', { type: 'text/plain' }));
     expect(upload).toHaveBeenCalledWith('c-1', expect.any(File));
-    expect(panel.composerAttachment()?.id).toBe('f-up');
+    expect(panel.composerAttachments().map(f => f.id)).toEqual(['f-up']);
 
     pick(new File(['x'], 'malware.exe', { type: 'application/octet-stream' }));
     fixture.detectChanges();

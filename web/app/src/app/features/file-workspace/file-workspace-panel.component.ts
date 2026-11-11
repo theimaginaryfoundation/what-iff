@@ -1,14 +1,19 @@
 import { DOCUMENT, NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, viewChild } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
+import { UserPreferencesService } from '../../core/services/user-preferences.service';
+import { imageEditingUnavailableReason } from '../../core/models/user.model';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { ContextPanelService } from '../chat/services/context-panel.service';
 import { OverlayComponent } from '../../shared/ui/overlay/overlay.component';
 import { FileWorkspaceComponent } from './file-workspace.component';
 import { DOCKED_WIDTH_MAX_FRACTION, DOCKED_WIDTH_MIN_FRACTION, FileWorkspaceService } from './file-workspace.service';
+import { MarkupResult } from './markup/image-markup.component';
+import { uploadMarkup } from './markup/markup-upload';
 
 /**
  * The chat's host for the file workspace (ADR 0x043 §1): docked beside the thread on a large
@@ -54,12 +59,15 @@ import { DOCKED_WIDTH_MAX_FRACTION, DOCKED_WIDTH_MIN_FRACTION, FileWorkspaceServ
           [showGalleryLink]="true"
           [canEdit]="workspace.canEdit()"
           [chatId]="workspace.chatId()"
+          [markupAvailable]="!!workspace.chatId()"
+          [markupNotice]="markupNotice()"
           (close)="close()"
           (toggleExpand)="workspace.toggleExpanded()"
           (rename)="rename($event)"
           (delete)="remove($event)"
           (fileChanged)="onFileChanged($event)"
           (saveAs)="onSaveAs($event)"
+          (markupSubmit)="onMarkup($event)"
         />
       } @else {
         <div class="workspace-panel__missing" [attr.role]="workspace.error() ? 'alert' : 'status'">
@@ -127,6 +135,10 @@ export class FileWorkspacePanelComponent {
   private readonly confirmationService = inject(ConfirmationService);
   private readonly contextPanel = inject(ContextPanelService);
   private readonly document = inject(DOCUMENT);
+  private readonly preferences = toSignal(inject(UserPreferencesService).preferences$, { initialValue: null });
+
+  /** Said on the markup surface when the agent will not be able to use the markup (ADR 0x045 §5). */
+  readonly markupNotice = computed(() => imageEditingUnavailableReason(this.preferences()));
 
   readonly minWidth = computed(() => Math.round((this.document.defaultView?.innerWidth ?? 1280) * DOCKED_WIDTH_MIN_FRACTION));
   readonly maxWidth = computed(() => Math.round((this.document.defaultView?.innerWidth ?? 1280) * DOCKED_WIDTH_MAX_FRACTION));
@@ -165,6 +177,30 @@ export class FileWorkspacePanelComponent {
         await this.confirmationService.alert({ title: 'Save failed', message: 'Could not save the new file. Please try again.', type: 'danger' });
       },
     });
+  }
+
+  /**
+   * Markup from a thread (ADR 0x045 §6): the mask and markup copy become new files in the thread,
+   * and they join the next message with the image they were drawn on. The person then asks for the
+   * change in their own words.
+   */
+  async onMarkup(payload: { file: FileAttachment; result: MarkupResult }): Promise<void> {
+    const chatId = this.workspace.chatId();
+    const opened = this.opened();
+    if (!chatId) {
+      opened?.finishMarkup(false);
+      return;
+    }
+    try {
+      const attachments = await uploadMarkup((...args) => this.files.uploadChatFileAttachment(...args), chatId, payload.file, payload.result);
+      for (const attachment of attachments) this.contextPanel.requestComposerAttachment(attachment);
+      this.contextPanel.refreshFiles();
+      opened?.finishMarkup(true);
+      // Over the thread (a tablet or phone), the panel hides the message the markup just joined.
+      if (this.workspace.layout() !== 'docked') this.close();
+    } catch {
+      opened?.finishMarkup(false);
+    }
   }
 
   rename(payload: { id: string; name: string }): void {

@@ -35,6 +35,7 @@ import { startChatFailureAlert } from '../personality/helpers/start-chat-failure
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { AuthImagePipe } from '../../core/pipes/auth-image.pipe';
 import { ToolCallDetailModalComponent } from './components/tool-call-detail-modal/tool-call-detail-modal.component';
+import { SketchOverlayComponent } from '../file-workspace/markup/sketch-overlay.component';
 import {
   appendLiveToolCallGroup,
   appendPendingAssistantGroup,
@@ -100,6 +101,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
     ThreadBookmarksComponent,
     PersonaPickerDialogComponent,
     ToolCallDetailModalComponent,
+    SketchOverlayComponent,
     AuthImagePipe,
     ThreadListPanelComponent,
     ContextPanelToggleComponent,
@@ -310,11 +312,15 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   };
   private readonly activeHotkeyListeners = new Map<string, (event: KeyboardEvent) => void>();
   readonly workspace = inject(FileWorkspaceService);
+  /** The composer's Sketch page is open (ADR 0x045 §7). */
+  readonly sketchOpen = signal(false);
   private readonly composer = viewChild(ChatComposerComponent);
   // The Files tab adds files to the message being composed and asks for the gallery picker (ADR 0x043 §4).
   private readonly adoptContextPanelAttachment = effect(() => {
-    const attachment = this.contextPanel.composerAttachment();
-    if (attachment) untracked(() => this.onGalleryAttachment(this.contextPanel.consumeComposerAttachment()!));
+    if (this.contextPanel.composerAttachments().length === 0) return;
+    untracked(() => {
+      for (const attachment of this.contextPanel.consumeComposerAttachments()) this.onGalleryAttachment(attachment);
+    });
   });
   private readonly publishPendingAttachments = effect(() => {
     const files = this.pendingAttachments().flatMap(item => (item.attachment ? [item.attachment] : []));
@@ -748,6 +754,8 @@ ${text}` : text);
   }
 
   onGalleryAttachment(attachment: FileAttachment): void {
+    // Already on the message: markup attaches the image it was drawn on, which may be there.
+    if (this.pendingAttachments().some(item => item.attachment?.id === attachment.id)) return;
     const pending = createPendingFileAttachment({
       clientKey: `attachment:${attachment.id}`,
       attachment,

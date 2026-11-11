@@ -62,8 +62,21 @@
         </button>
         <button type="button" class="file-workspace__button" [disabled]="saving()" (click)="openSaveAs()">Save as…</button>
         <button type="button" class="file-workspace__button" [disabled]="saving()" (click)="stopEdit()">Done</button>
-      } @else if (editable()) {
-        <button type="button" class="file-workspace__button file-workspace__button--primary" (click)="startEdit()">Edit</button>
+      } @else if (mode() === 'view') {
+        @if (canMarkup()) {
+          <button
+            type="button"
+            class="file-workspace__button"
+            uiTooltip="Draw on this image to show what to change, then ask in your message"
+            placement="bottom"
+            (click)="startMarkup()"
+          >
+            Mark up
+          </button>
+        }
+        @if (editable()) {
+          <button type="button" class="file-workspace__button file-workspace__button--primary" (click)="startEdit()">Edit</button>
+        }
       }
       @if (!isRenaming() && mode() === 'view') {
         <button type="button" class="file-workspace__icon-btn" uiTooltip="Rename this file" placement="bottom" aria-label="Rename file" (click)="startRename()">
@@ -129,6 +142,16 @@
       @case ('ready') {
         @if (mode() === 'edit') {
           <!-- The editor is created in the outlet above. -->
+        } @else if (mode() === 'markup') {
+          <app-image-markup
+            [source]="blob()"
+            [name]="title()"
+            [notice]="markupNotice()"
+            [busy]="markupSending()"
+            (dirtyChange)="markupDirty.set($event)"
+            (submitted)="onMarkupSubmitted($event)"
+            (cancel)="stopMarkup()"
+          />
         } @else if (viewer(); as type) {
           <ng-container *ngComponentOutlet="type; inputs: viewerInputs() ?? undefined" />
         } @else {
