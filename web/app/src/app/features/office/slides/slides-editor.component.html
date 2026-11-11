@@ -180,7 +180,8 @@
             type="button"
             class="slides__tool"
             (click)="startComment()"
-            [title]="selected() ? 'Comment on the selected shape (Ctrl+Alt+M)' : 'Comment on this slide (Ctrl+Alt+M)'"
+            (mousedown)="$event.preventDefault()"
+            [title]="selected() ? 'Comment on the selected text or shape (Ctrl+Alt+M)' : 'Comment on this slide (Ctrl+Alt+M)'"
           >
             Comment
           </button>
@@ -234,7 +235,9 @@
           (open)="openLink($event)"
           [pins]="comments.pins()"
           [highlightId]="comments.highlightId()"
+          [textMarks]="comments.textMarks()"
           (pinSelect)="onPinSelect($event)"
+          (textPoint)="onTextPoint($event)"
         />
       </div>
       @if (commentsOpen()) {

@@ -50,6 +50,7 @@ import {
 import { SHAPE_PRESETS } from './shape-paths';
 import { ElementGeometry, PX_PER_PT, SlideCanvasComponent } from './slide-canvas.component';
 import { SlideComments } from './slide-comments';
+import { textOffset } from './comment-text';
 import { CommentPeopleService } from '../comments/comment-people.service';
 import { CommentsPanelComponent } from '../comments/comments-panel.component';
 import { CommentsPanelState } from '../comments/comments-panel-state.service';
@@ -64,6 +65,8 @@ interface SlideContextMenu {
   /** Otherwise the shape clicked, if any, and the spot on the slide in points. */
   elementId?: string | null;
   point?: { x: number; y: number };
+  /** Text selected in that shape, for a thread on the text. */
+  text?: { start: number; length: number };
 }
 
 export const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
@@ -335,10 +338,40 @@ export class SlidesEditorComponent implements FileEditor {
     this.panel.open.set(false);
   }
 
-  /** Starts a thread on the selected element, or on the slide when nothing is selected. */
+  /**
+   * Starts a thread on the text selected in a shape, else on the selected element, else on the
+   * slide.
+   */
   startComment(): void {
     if (this.readOnly()) return;
-    this.comments.start(this.selected(), this.slideIndex() + 1);
+    const text = this.selectedText();
+    const element = text ? (this.slide().elements.find(e => e.id === text.elementId) ?? null) : this.selected();
+    this.comments.start(element, this.slideIndex() + 1, undefined, text ?? undefined);
+    this.panel.open.set(true);
+  }
+
+  /** The text selected in a shape on the stage, as a plain-text range of that shape's text. */
+  private selectedText(): { elementId: string; start: number; length: number } | null {
+    const selection = this.document.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    const textEl = (
+      range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.commonAncestorContainer as Element)
+        : range.commonAncestorContainer.parentElement
+    )?.closest<HTMLElement>('.slide__text');
+    const elementId = textEl?.closest('[data-element-id]')?.getAttribute('data-element-id');
+    if (!textEl || !elementId || !this.stage()?.nativeElement.contains(textEl)) return null;
+    const start = textOffset(textEl, range.startContainer, range.startOffset);
+    const end = textOffset(textEl, range.endContainer, range.endOffset);
+    return end > start ? { elementId, start, length: end - start } : null;
+  }
+
+  /** A click in a shape's text: on commented text, its thread opens. */
+  onTextPoint(point: { elementId: string; offset: number }): void {
+    const threadId = this.comments.threadAtText(point.elementId, point.offset);
+    if (!threadId || threadId === this.comments.activeId()) return;
+    this.comments.select(threadId);
     this.panel.open.set(true);
   }
 
@@ -352,14 +385,25 @@ export class SlidesEditorComponent implements FileEditor {
    * anywhere else, start a thread on the shape there, or on the slide at that spot.
    */
   onStageContextMenu(event: MouseEvent): void {
-    if (this.readOnly() || this.editingId()) return;
+    if (this.readOnly()) return;
     const target = event.target as Element;
     const slideEl = target.closest('.slide');
     if (!slideEl) return;
+    // Text selected in a shape being edited: comment on it.
+    const text = this.selectedText();
+    if (this.editingId() && !text) return;
     event.preventDefault();
     const host = this.host.nativeElement.getBoundingClientRect();
     const at = { left: event.clientX - host.left, top: event.clientY - host.top };
-    const threadId = target.closest('.slide__pin')?.getAttribute('data-thread-id');
+    if (text) {
+      this.contextMenu.set({ ...at, elementId: text.elementId, text });
+      return;
+    }
+    const textEl = target.closest<HTMLElement>('.slide__text');
+    const onText = textEl ? this.textPointAt(textEl, event) : null;
+    const threadId =
+      target.closest('.slide__pin')?.getAttribute('data-thread-id') ??
+      (onText ? this.comments.threadAtText(onText.elementId, onText.offset) : null);
     if (threadId && threadId !== 'draft') {
       this.contextMenu.set({ ...at, threadId });
       return;
@@ -368,6 +412,15 @@ export class SlidesEditorComponent implements FileEditor {
     const rect = slideEl.getBoundingClientRect();
     const perPt = PX_PER_PT * this.scale();
     this.contextMenu.set({ ...at, elementId, point: { x: (event.clientX - rect.left) / perPt, y: (event.clientY - rect.top) / perPt } });
+  }
+
+  /** The plain-text position under the pointer in a shape's text. */
+  private textPointAt(textEl: HTMLElement, event: MouseEvent): { elementId: string; offset: number } | null {
+    const elementId = textEl.closest('[data-element-id]')?.getAttribute('data-element-id');
+    const doc = this.document as Document & { caretRangeFromPoint?(x: number, y: number): Range | null };
+    const range = doc.caretRangeFromPoint?.(event.clientX, event.clientY);
+    if (!elementId || !range || !textEl.contains(range.startContainer)) return null;
+    return { elementId, offset: textOffset(textEl, range.startContainer, range.startOffset) };
   }
 
   closeContextMenu(): void {
@@ -379,8 +432,8 @@ export class SlidesEditorComponent implements FileEditor {
     this.closeContextMenu();
     if (!menu || this.readOnly()) return;
     const element = menu.elementId ? (this.slide().elements.find(e => e.id === menu.elementId) ?? null) : null;
-    if (element) this.selectedId.set(element.id);
-    this.comments.start(element, this.slideIndex() + 1, element ? undefined : menu.point);
+    if (element && !menu.text) this.selectedId.set(element.id);
+    this.comments.start(element, this.slideIndex() + 1, element ? undefined : menu.point, menu.text);
     this.panel.open.set(true);
   }
 

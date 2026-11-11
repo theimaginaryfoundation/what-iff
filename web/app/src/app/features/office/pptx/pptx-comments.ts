@@ -1,6 +1,6 @@
 import { CommentPerson, CommentThread, DocComment, authorPersonId, userPersonId } from '../comments/comment-threads';
 import { NS, OoxmlPackage, Relationship, escapeXml, resolveTarget } from '../shared/ooxml';
-import { Deck, Slide, SlideElement } from './deck-model';
+import { Deck, Slide, SlideElement, plainText } from './deck-model';
 
 /**
  * Slide comments (ADR 0x045) between a .pptx and the editor's comment threads.
@@ -21,6 +21,8 @@ export interface SlideCommentAnchor {
   y: number;
   /** The element it is about, when it is about one. */
   elementId?: string;
+  /** A range of that element's text, in plain-text characters (see slides/comment-text.ts). */
+  text?: { start: number; length: number };
 }
 
 export type SlideCommentThread = CommentThread<SlideCommentAnchor>;
@@ -163,6 +165,11 @@ export async function readPptxComments(pkg: OoxmlPackage, presPath: string, deck
   return out;
 }
 
+/** A shape's text as comments count it: a line per paragraph, a character per line break. */
+export function elementText(element: SlideElement): string {
+  return element.kind === 'shape' ? plainText(element.text) : '';
+}
+
 /** Where a thread about `element` puts its pin when the file gives no position: the element's top-right corner. */
 function cornerOf(element: SlideElement): { x: number; y: number } {
   return { x: element.left + element.width, y: element.top };
@@ -182,9 +189,12 @@ function modernThreads(doc: Document, slide: Slide, authors: Map<string, PptxAut
   };
   return kids(doc.documentElement, P188, 'cm').map(cm => {
     // A shape anchor names the shape by its id on the slide (ac:spMk, or another moniker with an id).
-    const shapeMk = Array.from(kid(cm, AC, 'deMkLst')?.getElementsByTagNameNS(AC, '*') ?? []).find(
+    // A text anchor (ac:txMkLst) names the shape the same way, then the range of its text.
+    const monikers = kid(cm, AC, 'deMkLst') ?? kid(cm, AC, 'txMkLst');
+    const shapeMk = Array.from(monikers?.getElementsByTagNameNS(AC, '*') ?? []).find(
       el => el.localName.endsWith('Mk') && el.getAttribute('id'),
     );
+    const txMk = monikers?.localName === 'txMkLst' ? Array.from(monikers.getElementsByTagNameNS(AC, 'txMk'))[0] : undefined;
     const element = shapeMk ? slide.elements.find(e => e.sourceId === shapeMk.getAttribute('id')) : undefined;
     const pos = kid(cm, P188, 'pos');
     const offset = pos ? { x: Number(pos.getAttribute('x') ?? 0) / EMU_PER_PT, y: Number(pos.getAttribute('y') ?? 0) / EMU_PER_PT } : null;
@@ -200,6 +210,15 @@ function modernThreads(doc: Document, slide: Slide, authors: Map<string, PptxAut
       comments: [comment(cm), ...kids(kid(cm, P188, 'replyLst'), P188, 'reply').map(comment)],
     };
     if (element) thread.quote = element.name;
+    const cp = Number(txMk?.getAttribute('cp'));
+    const len = Number(txMk?.getAttribute('len') ?? 0);
+    if (element && txMk && Number.isInteger(cp) && cp >= 0 && len > 0) {
+      thread.anchor.text = { start: cp, length: len };
+      const words = elementText(element)
+        .slice(cp, cp + len)
+        .trim();
+      if (words) thread.quote = words;
+    }
     const status = cm.getAttribute('status');
     if (status === 'resolved' || status === 'closed') thread.resolved = true;
     return thread;
@@ -285,6 +304,7 @@ function shapeOf(threads: readonly SlideCommentThread[]): string {
       Math.round(t.anchor.x),
       Math.round(t.anchor.y),
       t.anchor.elementId ?? '',
+      t.anchor.text ? `${t.anchor.text.start}+${t.anchor.text.length}` : '',
       t.comments.map(c => [c.id, c.authorId, c.authorName, c.text]),
     ]),
   );
@@ -424,11 +444,14 @@ async function writeSlide(pkg: CommentPackage, item: CommentedSlide, authors: Au
       const moniker = shapeId ? shapeMoniker(slideDoc, shapeId) : null;
       if (moniker) {
         slideChanged ||= moniker.added;
-        anchor = `<ac:deMkLst xmlns:ac="${AC}" xmlns:pc="${PC}">${sldMkInner}${moniker.xml}</ac:deMkLst>`;
+        const text = thread.anchor.text;
+        anchor = text
+          ? `<ac:txMkLst xmlns:ac="${AC}" xmlns:pc="${PC}">${sldMkInner}${moniker.xml}<ac:txMk cp="${text.start}" len="${text.length}"/></ac:txMkLst>`
+          : `<ac:deMkLst xmlns:ac="${AC}" xmlns:pc="${PC}">${sldMkInner}${moniker.xml}</ac:deMkLst>`;
       }
     }
     // A shape anchor positions the pin from the shape's top-left, a slide anchor from the slide's.
-    const onShape = !!anchor && anchor.includes('deMkLst') && !!element;
+    const onShape = !!anchor && /deMkLst|txMkLst/.test(anchor) && !!element;
     const origin = onShape ? { x: element!.left, y: element!.top } : { x: 0, y: 0 };
     const pos = `<p188:pos x="${Math.round((thread.anchor.x - origin.x) * EMU_PER_PT)}" y="${Math.round((thread.anchor.y - origin.y) * EMU_PER_PT)}"/>`;
     const [first, ...rest] = thread.comments;

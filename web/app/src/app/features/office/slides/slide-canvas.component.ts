@@ -1,15 +1,63 @@
 import { NgStyle, NgTemplateOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, computed, inject, input, output, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  ElementRef,
+  afterRenderEffect,
+  computed,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 
 import { Border, ChartElement, Fill, Paragraph, Slide, SlideElement, TableCell, TextBody } from '../pptx/deck-model';
 import { chartSvgDataUrl } from '../shared/chart-svg';
 import { isLinePreset, shapePath } from './shape-paths';
 import { domToParagraphs, paragraphsToHtml } from './text-dom';
+import { textOffset, textRange } from './comment-text';
 
 /** Points to CSS pixels: the slide is laid out in points and scaled to fit. */
 export const PX_PER_PT = 96 / 72;
 const PIN_SIZE_PX = 22;
+
+/** A commented range of a shape's text. */
+export interface CommentTextMark {
+  elementId: string;
+  start: number;
+  length: number;
+  active: boolean;
+}
+
+/** Every canvas's commented ranges go in the two highlights the global stylesheet paints. */
+const HIGHLIGHT = { open: 'whatiff-comment', active: 'whatiff-comment-active' };
+
+function highlightNamed(name: string): { add(range: Range): void; delete(range: Range): void } | null {
+  const registry = (globalThis.CSS as unknown as { highlights?: Map<string, unknown> } | undefined)?.highlights;
+  const Highlight = (globalThis as unknown as { Highlight?: new () => { add(range: Range): void; delete(range: Range): void } }).Highlight;
+  if (!registry || !Highlight) return null;
+  let highlight = registry.get(name) as { add(range: Range): void; delete(range: Range): void } | undefined;
+  if (!highlight) {
+    highlight = new Highlight();
+    registry.set(name, highlight);
+  }
+  return highlight;
+}
+
+function addCommentRange(range: Range, active: boolean): Range {
+  highlightNamed(active ? HIGHLIGHT.active : HIGHLIGHT.open)?.add(range);
+  return range;
+}
+
+function clearCommentRanges(ranges: Range[]): void {
+  for (const range of ranges) {
+    highlightNamed(HIGHLIGHT.open)?.delete(range);
+    highlightNamed(HIGHLIGHT.active)?.delete(range);
+  }
+  ranges.length = 0;
+}
 
 /** A comment thread's marker on the slide. */
 export interface CommentPin {
@@ -60,6 +108,8 @@ export class SlideCanvasComponent {
   readonly pins = input<readonly CommentPin[]>([]);
   /** The element the active comment thread is about, outlined. */
   readonly highlightId = input<string | null>(null);
+  /** Commented ranges of shapes' text, marked as Word marks commented text. */
+  readonly textMarks = input<readonly CommentTextMark[]>([]);
 
   readonly select = output<string | null>();
   /** The user started dragging or resizing: a point for the editor's undo history. */
@@ -71,6 +121,8 @@ export class SlideCanvasComponent {
   readonly open = output<string>();
   /** A comment pin was chosen. */
   readonly pinSelect = output<string>();
+  /** A click landed in a shape's text, at this plain-text position. */
+  readonly textPoint = output<{ elementId: string; offset: number }>();
 
   readonly handles = HANDLES;
   readonly cssWidth = computed(() => this.size().width * PX_PER_PT * this.scale());
@@ -105,6 +157,21 @@ export class SlideCanvasComponent {
   } | null = null;
 
   constructor() {
+    // Commented text is painted through the CSS Custom Highlight API, so the text's DOM (which the
+    // user may be editing) is never touched.
+    const ranges: Range[] = [];
+    afterRenderEffect(() => {
+      const marks = this.textMarks();
+      this.slide();
+      this.editingId();
+      clearCommentRanges(ranges);
+      for (const mark of marks) {
+        const text = this.host.nativeElement.querySelector<HTMLElement>(`[data-element-id="${CSS.escape(mark.elementId)}"] .slide__text`);
+        const range = text ? textRange(text, mark.start, mark.start + mark.length) : null;
+        if (range) ranges.push(addCommentRange(range, mark.active));
+      }
+    });
+    inject(DestroyRef).onDestroy(() => clearCommentRanges(ranges));
     // Once the element being edited is rendered editable, put the caret at its end.
     afterRenderEffect(() => {
       const id = this.editingId();
@@ -240,6 +307,23 @@ export class SlideCanvasComponent {
       left: Math.max(0, Math.min(pin.x * scale, this.cssWidth() - PIN_SIZE_PX)),
       top: Math.max(0, Math.min(pin.y * scale - PIN_SIZE_PX, this.cssHeight() - PIN_SIZE_PX)),
     };
+  }
+
+  /** A click in a shape's text: where in the text, for opening a thread on commented text. */
+  onTextClick(event: MouseEvent, el: SlideElement): void {
+    const text = event.currentTarget as HTMLElement;
+    const doc = text.ownerDocument as Document & {
+      caretPositionFromPoint?(x: number, y: number): { offsetNode: Node; offset: number } | null;
+      caretRangeFromPoint?(x: number, y: number): Range | null;
+    };
+    const caret = doc.caretPositionFromPoint?.(event.clientX, event.clientY);
+    const point = caret
+      ? { node: caret.offsetNode, offset: caret.offset }
+      : (() => {
+          const range = doc.caretRangeFromPoint?.(event.clientX, event.clientY);
+          return range ? { node: range.startContainer, offset: range.startOffset } : null;
+        })();
+    if (point && text.contains(point.node)) this.textPoint.emit({ elementId: el.id, offset: textOffset(text, point.node, point.offset) });
   }
 
   onBackgroundPointerDown(event: PointerEvent): void {

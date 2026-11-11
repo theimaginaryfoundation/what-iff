@@ -246,6 +246,33 @@ describe('pptx comments', () => {
     expect(anchorOf(onBudget).elementId).toBe(backSlide.elements[0].id);
   });
 
+  it("keeps a thread on a range of a shape's text, as PowerPoint's text anchor", async () => {
+    const { bytes } = await commentedDeck();
+    const { deck, comments } = await read(bytes);
+    const s1 = deck.slides[0];
+    const title = s1.elements[0];
+    const id = newCommentGuid();
+    const threads: SlideCommentThread[] = [
+      ...comments.threads,
+      {
+        id,
+        anchor: { slideId: s1.id, x: title.left + title.width, y: title.top, elementId: title.id, text: { start: 10, length: 4 } },
+        comments: [newComment(id, ME, { text: 'Which plan?', mentions: [] })],
+      },
+    ];
+    const out = (await deckToPptx(deck, { original: bytes, imported: deck, comments: threads, importedComments: comments })).bytes;
+    const xml = (await (await OoxmlPackage.open(out)).text('ppt/comments/modernComment_100_0.xml'))!;
+    expect(xml).toMatch(
+      /<ac:txMkLst [^>]*><pc:docMk\/><pc:sldMk[^>]*\/><ac:spMk id="\d+" creationId="\{[^"]+\}"\/><ac:txMk cp="10" len="4"\/><\/ac:txMkLst>/,
+    );
+    const back = await read(out);
+    const thread = back.comments.threads.find(t => t.id === id)!;
+    expect(thread.anchor).toEqual(
+      expect.objectContaining({ elementId: back.deck.slides[0].elements[0].id, text: { start: 10, length: 4 } }),
+    );
+    expect(thread.quote).toBe('plan');
+  });
+
   it('adds comments to a deck made here, saved for the first time', async () => {
     const box = newTextBox(100, 80, 160, 60, 'Box');
     const fresh = blankDeck('d', 'new.pptx');

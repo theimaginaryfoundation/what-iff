@@ -12,8 +12,9 @@ import {
 } from '../comments/comment-threads';
 import { EditEvent, ReplyEvent } from '../comments/comments-panel.component';
 import { Deck, Slide, SlideElement } from '../pptx/deck-model';
-import { SlideCommentAnchor, SlideCommentThread, newCommentGuid } from '../pptx/pptx-comments';
-import { CommentPin } from './slide-canvas.component';
+import { SlideCommentAnchor, SlideCommentThread, elementText, newCommentGuid } from '../pptx/pptx-comments';
+import { followText } from './comment-text';
+import { CommentPin, CommentTextMark } from './slide-canvas.component';
 
 /** Where a slide thread's pin goes when it is about the whole slide: along the top, clear of earlier ones. */
 const SLIDE_PIN = { x: 12, y: 24, step: 26 };
@@ -86,11 +87,39 @@ export class SlideComments {
       pins.push({ id: 'draft', x: draft.anchor.x, y: draft.anchor.y, active: true, label: 'New comment' });
     return pins;
   });
+  /** Commented ranges of text on the current slide: open threads, the active one, the one being started. */
+  readonly textMarks = computed<CommentTextMark[]>(() => {
+    const active = this.activeId();
+    const marks: CommentTextMark[] = this.onSlide()
+      .filter(t => t.anchor.text && t.anchor.elementId && (!t.resolved || t.id === active))
+      .map(t => ({ elementId: t.anchor.elementId!, start: t.anchor.text!.start, length: t.anchor.text!.length, active: t.id === active }));
+    const draft = this.draft();
+    if (draft?.anchor.text && draft.anchor.elementId && draft.anchor.slideId === this.slide().id) {
+      marks.push({ elementId: draft.anchor.elementId, start: draft.anchor.text.start, length: draft.anchor.text.length, active: true });
+    }
+    return marks;
+  });
+
+  /** The thread on this text position of an element, the narrowest where ranges overlap. */
+  threadAtText(elementId: string, offset: number): string | null {
+    const hits = this.onSlide().filter(
+      t =>
+        t.anchor.elementId === elementId &&
+        t.anchor.text &&
+        offset >= t.anchor.text.start &&
+        offset < t.anchor.text.start + t.anchor.text.length,
+    );
+    hits.sort((a, b) => a.anchor.text!.length - b.anchor.text!.length);
+    return hits[0]?.id ?? null;
+  }
+
   /** The element the active thread (or the one being started) is about. */
   readonly highlightId = computed(() => {
     const draft = this.draft();
-    if (draft) return draft.anchor.elementId ?? null;
-    return this.onSlide().find(t => t.id === this.activeId())?.anchor.elementId ?? null;
+    // A thread on a range of text marks the text instead.
+    if (draft) return draft.anchor.text ? null : (draft.anchor.elementId ?? null);
+    const active = this.onSlide().find(t => t.id === this.activeId());
+    return active?.anchor.text ? null : (active?.anchor.elementId ?? null);
   });
 
   /** The deck the anchors were last placed against, so a moved shape takes its pins along. */
@@ -103,10 +132,26 @@ export class SlideComments {
     this.draft.set(null);
   }
 
-  /** Starts a thread on `element`, or on the slide (at `at`, when given) when there is none. */
-  start(element: SlideElement | null, slideNumber: number, at?: { x: number; y: number }): void {
+  /**
+   * Starts a thread on `element` (on a range of its text, when given), or on the slide (at `at`,
+   * when given) when there is none.
+   */
+  start(element: SlideElement | null, slideNumber: number, at?: { x: number; y: number }, text?: { start: number; length: number }): void {
     const slideId = this.slide().id;
     let anchor: SlideCommentAnchor;
+    const words =
+      element && text
+        ? elementText(element)
+            .slice(text.start, text.start + text.length)
+            .replace(/\s+/g, ' ')
+            .trim()
+        : '';
+    if (element && text && words) {
+      anchor = { slideId, x: element.left + element.width, y: element.top, elementId: element.id, text };
+      this.draft.set({ anchor, quote: words });
+      this.activeId.set(null);
+      return;
+    }
     if (element) anchor = { slideId, x: element.left + element.width, y: element.top, elementId: element.id };
     else if (at) anchor = { slideId, x: at.x, y: at.y };
     else {
@@ -173,9 +218,21 @@ export class SlideComments {
       if (!t.anchor.elementId) return t;
       const was = where(before, t.anchor.slideId, t.anchor.elementId);
       const now = where(deck, t.anchor.slideId, t.anchor.elementId);
-      if (!was || !now || (was.left === now.left && was.top === now.top)) return t;
+      if (!was || !now || was === now) return t;
+      let anchor = t.anchor;
+      if (was.left !== now.left || was.top !== now.top)
+        anchor = { ...anchor, x: anchor.x + now.left - was.left, y: anchor.y + now.top - was.top };
+      // A commented range follows its words through an edit; with the words gone it is about the shape.
+      if (anchor.text) {
+        const start = followText(elementText(was), elementText(now), anchor.text.start, anchor.text.length);
+        if (start === null) {
+          const { text: _gone, ...rest } = anchor;
+          anchor = rest;
+        } else if (start !== anchor.text.start) anchor = { ...anchor, text: { start, length: anchor.text.length } };
+      }
+      if (anchor === t.anchor) return t;
       moved = true;
-      return { ...t, anchor: { ...t.anchor, x: t.anchor.x + now.left - was.left, y: t.anchor.y + now.top - was.top } };
+      return { ...t, anchor };
     });
     if (moved) this.threads.set(next);
   }

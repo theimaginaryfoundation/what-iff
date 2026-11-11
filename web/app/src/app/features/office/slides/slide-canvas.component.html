@@ -110,6 +110,7 @@
             [attr.contenteditable]="editing ? 'true' : null"
             [innerHTML]="textHtml(el.text)"
             (blur)="onTextBlur($event, el)"
+            (click)="onTextClick($event, el)"
             (keydown)="editing ? onTextKeydown($event) : null"
           ></div>
         }
