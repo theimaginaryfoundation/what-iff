@@ -20,6 +20,11 @@ import { FileEditor } from './file-editor';
 
 type FilerobotCtor = typeof import('filerobot-image-editor').default;
 type Filerobot = InstanceType<FilerobotCtor>;
+/**
+ * Filerobot's tab and tool ids. The library sets them as statics on the class, but its typings
+ * declare them on the instance, where they are undefined at runtime.
+ */
+type FilerobotIds = Pick<Filerobot, 'TABS' | 'TOOLS'>;
 
 /**
  * Loads the Filerobot image editor (MIT) on first use; a token so tests can hand in a fake.
@@ -206,8 +211,8 @@ export class ImageEditorComponent implements FileEditor {
       savingPixelRatio: 1,
       previewPixelRatio: view?.devicePixelRatio ?? 1,
     });
-    // TABS and TOOLS are instance properties, so the tab set goes in with render().
-    const { TABS, TOOLS } = editor;
+    // The tab set goes in with render(); TABS and TOOLS are statics on the class (see FilerobotIds).
+    const { TABS, TOOLS } = ctor as unknown as FilerobotIds;
     editor.render({
       source: this.objectUrl!,
       savingPixelRatio: 1,

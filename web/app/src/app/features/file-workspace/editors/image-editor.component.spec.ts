@@ -15,8 +15,9 @@ function fakeFilerobot() {
   const instances: FakeEditorInstance[] = [];
   const state = { failRender: false };
   class FakeFilerobot {
-    TABS = { ADJUST: 'Adjust', FINETUNE: 'Finetune', FILTERS: 'Filters', ANNOTATE: 'Annotate', RESIZE: 'Resize' };
-    TOOLS = { CROP: 'Crop' };
+    // Statics, as on the real class: its typings put them on the instance, but they are not there.
+    static TABS = { ADJUST: 'Adjust', FINETUNE: 'Finetune', FILTERS: 'Filters', ANNOTATE: 'Annotate', RESIZE: 'Resize' };
+    static TOOLS = { CROP: 'Crop' };
     readonly record: FakeEditorInstance;
     constructor(container: HTMLElement, config: Record<string, unknown>) {
       this.record = { container, config, renderConfig: undefined, terminated: false };
