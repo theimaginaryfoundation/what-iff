@@ -14,6 +14,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -288,11 +289,19 @@ func TestTurnOnlyToolSpecs_AskUserOnlyWithPromptJob(t *testing.T) {
 }
 
 func TestInteractivePromptJob(t *testing.T) {
+	ctx := context.Background()
+	app := metering.WithTurnSource(ctx, metering.TurnSourceApp)
 	job := &models.Job{ID: uuid.New(), JobType: JobTypeChatMessage}
-	assert.Same(t, job, interactivePromptJob(job, &chatContext{}))
-	assert.Nil(t, interactivePromptJob(job, &chatContext{relayPlatform: "Discord"}))
-	assert.Nil(t, interactivePromptJob(&models.Job{JobType: "agent_job_run"}, &chatContext{}))
-	assert.Nil(t, interactivePromptJob(nil, &chatContext{}))
+	assert.Same(t, job, interactivePromptJob(ctx, job, &chatContext{}))
+	assert.Same(t, job, interactivePromptJob(app, job, &chatContext{}))
+	assert.Nil(t, interactivePromptJob(app, &models.Job{JobType: "agent_job_run"}, &chatContext{}))
+	assert.Nil(t, interactivePromptJob(ctx, nil, &chatContext{}))
+
+	// In a relay thread, only a turn sent from the app can be answered.
+	relay := &chatContext{relayPlatform: "Discord"}
+	assert.Same(t, job, interactivePromptJob(app, job, relay))
+	assert.Nil(t, interactivePromptJob(metering.WithTurnSource(ctx, "discord"), job, relay))
+	assert.Nil(t, interactivePromptJob(ctx, job, relay), "a turn that didn't say where it came from")
 }
 
 // An unanswered ask_user ends an Advanced run as needs_input, with one forced final answer (the

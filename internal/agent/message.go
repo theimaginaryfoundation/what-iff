@@ -1048,7 +1048,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 		a.setJobStatusFailed(ctx, chatJob, err)
 		return nil, err
 	}
-	chatCtx.promptJob = interactivePromptJob(chatJob, chatCtx)
+	chatCtx.promptJob = interactivePromptJob(ctx, chatJob, chatCtx)
 	// Resolve active mood and load mood-driven rituals before determining action type
 	// (a mood may inject image-generation rituals). Mode skills are injected into the
 	// mode context segment, not the user message.

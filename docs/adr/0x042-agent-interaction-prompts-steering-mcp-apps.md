@@ -31,8 +31,11 @@ The pending prompt is published on the job's progress (`ChatTurnProgress.prompt`
 `POST /chat/{chatId}/prompts/{promptId}/answer` validates the answer against the prompt (only offered options, form values typed to the schema, bounded text) and stores it with a conditional update.
 That way two tabs cannot both answer, and an answer after expiry gets a 409.
 
-- **Who can be asked:** only an interactive web turn (a `chat_message` job outside a relay thread; `interactivePromptJob`).
+- **Who can be asked:** only an interactive web turn (a `chat_message` job; `interactivePromptJob`).
   Scheduled runs, webhooks, relays and sub-agents have nobody to ask: `ask_user` is not offered there, and MCP elicitations are cancelled.
+  In a relay thread, a turn sent from the app (turn source `app`) is interactive like any other; only the turns the relay starts are not.
+- **Questions or approval, not both.** The two halves of `ask_user` are optional, but OpenAI's strict function calling (the Responses API default) treats every property as required, so the model fills the unused half with empties.
+  Only a half with content counts: an approval with a blank action, or questions with no text, are ignored.
 - **Timeout (Gori's call):** a prompt waits `AGENT_PROMPT_TIMEOUT` (default 10 min, max 1 h).
   An unanswered `ask_user` tells the model to stop and ask in its reply. The tool round ends there, and an Advanced run ends with the new end reason **`needs_input`**, which is unfinished, so its open plan carries into the next turn.
   The person answers later as a normal message, and no worker is held indefinitely.

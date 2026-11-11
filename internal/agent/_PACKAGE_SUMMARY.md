@@ -54,6 +54,7 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
   `unload_tools` is not scope-gated so stale state can still be cleared.
 - **Agent prompts (ADR 0x042, `agent_prompt.go`):** a turn that needs the person writes an `agent_prompt` row, shows it on the job's progress (`ChatTurnProgress.Prompt`) and waits (`awaitPrompt`: polls the row, woken at once by `AnswerPrompt` on the same instance), up to `AGENT_PROMPT_TIMEOUT` (10m).
   Only an interactive web turn has a `promptJob` (`interactivePromptJob`); elsewhere nobody can answer.
+  In a relay thread that means a turn sent from the app (`metering.TurnSourceApp`), not one the relay started.
   Waiting is left out of the Advanced duration limit (`promptWaited`); an expired prompt sets `awaitingUser`, which ends the tool round (Standard) or the run as `needs_input` (Advanced) so the model asks in its reply.
   `AnswerPrompt` validates the answer against the prompt (`validatePromptResponse`, `validateElicitationContent`).
 - **`ask_user` (`ask_user_tool.go`):** a turn-only tool (with `update_plan` in `turnOnlyToolSpecs`) asking 1-4 questions or an approval through an agent prompt.

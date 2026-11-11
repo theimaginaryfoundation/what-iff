@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -346,10 +347,15 @@ func toolUseIDFrom(ctx context.Context) string {
 }
 
 // interactivePromptJob is the job a person can answer this turn's prompts on: a web chat turn's
-// own chat_message job. Relay threads (Discord, Buzz, Slack) answer elsewhere, and agent-job runs
-// (scheduled, webhook, welcome) have nobody waiting, so they get nil and ask_user is not offered.
-func interactivePromptJob(job *models.Job, chatCtx *chatContext) *models.Job {
-	if job == nil || job.JobType != JobTypeChatMessage || chatCtx == nil || chatCtx.relayPlatform != "" {
+// own chat_message job. Agent-job runs (scheduled, webhook, welcome) have nobody waiting, so they
+// get nil and ask_user is not offered. In a relay thread (Discord, Buzz, Slack) only a turn sent
+// from the app gets one: a turn the relay started was written elsewhere, by someone who can't
+// see the card.
+func interactivePromptJob(ctx context.Context, job *models.Job, chatCtx *chatContext) *models.Job {
+	if job == nil || job.JobType != JobTypeChatMessage || chatCtx == nil {
+		return nil
+	}
+	if chatCtx.relayPlatform != "" && metering.TurnSourceFromContext(ctx) != metering.TurnSourceApp {
 		return nil
 	}
 	return job
