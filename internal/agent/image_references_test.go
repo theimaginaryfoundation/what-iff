@@ -110,6 +110,12 @@ func TestGenerateImageTool_EditsWithTheChosenVendor(t *testing.T) {
 	require.True(t, result.Success)
 	require.Equal(t, "google", result.Provider)
 	require.Equal(t, 2, result.ReferenceImages)
+	require.Equal(t, "photo-mask.png", result.MaskImage, "the receipt shows the mask was applied")
+	require.Equal(t, []generateImageInputReceipt{
+		{Image: "photo.png", Role: "base"},
+		{Image: "photo-markup.png", Role: "markup"},
+		{Image: "photo-mask.png", Role: "mask"},
+	}, result.Inputs)
 	require.Equal(t, "same_as_base", result.AspectRatio)
 
 	require.Len(t, meter.records, 1)
@@ -158,9 +164,9 @@ func TestGenerateImageTool_EditArgumentErrors(t *testing.T) {
 		want string
 	}{
 		{"unknown name lists the images here", map[string]any{"prompt": "x", "reference_images": []any{"bird.png"}}, `no image named "bird.png" in this conversation; images here: cat.png, dog.png`},
-		{"mask without an image", map[string]any{"prompt": "x", "mask_image": "cat.png"}, "mask_image needs the image it masks"},
+		{"mask without an image", map[string]any{"prompt": "x", "mask_image": "cat.png"}, `mask_image "cat.png" needs the image it masks`},
 		{"two bases", map[string]any{"prompt": "x", "reference_images": []any{map[string]any{"image": "cat.png", "role": "base"}, map[string]any{"image": "dog.png", "role": "base"}}}, "only one reference image can be the base"},
-		{"unknown role", map[string]any{"prompt": "x", "reference_images": []any{map[string]any{"image": "cat.png", "role": "vibe"}}}, `invalid role "vibe"`},
+		{"unknown role", map[string]any{"prompt": "x", "reference_images": []any{map[string]any{"image": "cat.png", "role": "vibe"}}}, `a mask goes in mask_image`},
 		{"too many", map[string]any{"prompt": "x", "reference_images": []any{"cat.png", "dog.png", "cat.png", "dog.png"}}, "at most 3"},
 	}
 	for _, tc := range cases {
@@ -181,17 +187,47 @@ func TestImageInputs_MaskMakesTheFirstReferenceTheBase(t *testing.T) {
 	a := &Agent{logger: zap.NewNop()}
 	png := testPNG(t, 2, 2, color.White)
 	ctx := withTurnImages(turnImageAttachment("a.png", png), turnImageAttachment("m.png", png))
-	inputs, mask, err := a.imageInputs(ctx, &models.Chat{}, []generateImageReference{{Image: "a.png"}}, "m.png")
+	in, err := a.resolveImageInputs(ctx, &models.Chat{}, []generateImageReference{{Image: "a.png"}}, "m.png")
 	require.NoError(t, err)
-	require.Equal(t, provider.ImageRoleBase, inputs[0].Role)
-	require.Equal(t, png, mask)
+	require.Equal(t, provider.ImageRoleBase, in.images[0].Role)
+	require.Equal(t, png, in.mask)
+	require.Equal(t, []generateImageInputReceipt{{Image: "a.png", Role: "base"}, {Image: "m.png", Role: "mask"}}, in.receipt)
+}
+
+// Models reach for role "mask" in reference_images; it is taken as mask_image.
+func TestImageInputs_ARoleMaskReferenceIsTheMask(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()}
+	base, mask := testPNG(t, 2, 2, color.White), testPNG(t, 2, 2, color.Black)
+	ctx := withTurnImages(turnImageAttachment("a.png", base), turnImageAttachment("m.png", mask))
+	in, err := a.resolveImageInputs(ctx, &models.Chat{}, []generateImageReference{{Image: "a.png", Role: "base"}, {Image: "m.png", Role: "Mask"}}, "")
+	require.NoError(t, err)
+	require.Len(t, in.images, 1)
+	require.Equal(t, mask, in.mask)
+	require.Equal(t, "m.png", in.maskName())
+
+	_, err = a.resolveImageInputs(ctx, &models.Chat{}, []generateImageReference{{Image: "a.png"}, {Image: "m.png", Role: "mask"}}, "m.png")
+	require.ErrorContains(t, err, "only one mask per request")
+
+	_, err = a.resolveImageInputs(ctx, &models.Chat{}, []generateImageReference{{Image: "a.png"}, {Role: "mask"}}, "")
+	require.ErrorContains(t, err, "needs an image name", "never dropped silently")
+}
+
+// A mask alone (the user attached it without its image) is refused in words the agent can act on.
+func TestImageInputs_AMaskWithoutItsImageSaysWhatToDo(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()}
+	ctx := withTurnImages(turnImageAttachment("photo-mask.png", testPNG(t, 2, 2, color.White)))
+	_, err := a.resolveImageInputs(ctx, &models.Chat{}, nil, "photo-mask.png")
+	require.ErrorContains(t, err, `mask_image "photo-mask.png" needs the image it masks`)
+	require.ErrorContains(t, err, "ask the user to attach it")
 }
 
 func TestImageInputs_RefusesNonImages(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
 	ctx := withTurnImages(turnImageAttachment("notes.png", []byte("just some text, honestly")))
-	_, _, err := a.imageInputs(ctx, &models.Chat{}, []generateImageReference{{Image: "notes.png"}}, "")
+	_, err := a.resolveImageInputs(ctx, &models.Chat{}, []generateImageReference{{Image: "notes.png"}}, "")
 	require.ErrorContains(t, err, "notes.png is not an image")
 }
 

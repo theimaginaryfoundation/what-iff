@@ -63,7 +63,7 @@ export async function uploadMarkup(
         chatId,
         result.mask,
         `${stem}-mask.png`,
-        `Mask for ${source.name}: white marks the area the user wants changed, black the area to keep.`,
+        `Mask for ${source.name}: white marks the area the user wants changed, black the area to keep. Pass ${source.name} as the base image and this file as mask_image.`,
       ),
     );
   }

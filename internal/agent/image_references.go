@@ -58,49 +58,96 @@ type resolvedImage struct {
 	mime string
 }
 
-// imageInputs resolves the tool's reference_images and mask_image into a vendor request's images
-// and mask. The base image goes first; a mask without one makes the first reference the base.
-func (a *Agent) imageInputs(ctx context.Context, chat *models.Chat, refs []generateImageReference, maskName string) ([]provider.ImageInput, []byte, error) {
-	if len(refs) > provider.MaxEditImages {
-		return nil, nil, fmt.Errorf("at most %d reference_images are supported", provider.MaxEditImages)
+// imageInputs is what a request's reference_images and mask_image resolved to.
+type imageInputs struct {
+	images []provider.ImageInput
+	mask   []byte
+	// receipt names every input as it was found, in the order sent (base first, mask last), so the
+	// tool result shows the model exactly what went to the image vendor.
+	receipt []generateImageInputReceipt
+}
+
+// maskName is the applied mask's file name, or "" without one.
+func (in imageInputs) maskName() string {
+	if n := len(in.receipt); n > 0 && in.receipt[n-1].Role == roleMask {
+		return in.receipt[n-1].Image
+	}
+	return ""
+}
+
+// generateImageInputReceipt is one input image in generate_image's result.
+type generateImageInputReceipt struct {
+	Image string `json:"image"`
+	Role  string `json:"role"`
+}
+
+// roleMask is the role that puts a reference in mask_image's place: models reach for it, so it is
+// accepted rather than refused.
+const roleMask = "mask"
+
+// resolveImageInputs resolves the tool's reference_images and mask_image. The base image goes
+// first; a mask without one makes the first reference the base. A reference with role "mask" is
+// the mask, as if passed as mask_image.
+func (a *Agent) resolveImageInputs(ctx context.Context, chat *models.Chat, refs []generateImageReference, maskName string) (imageInputs, error) {
+	maskName = strings.TrimSpace(maskName)
+	images := make([]generateImageReference, 0, len(refs))
+	for _, ref := range refs {
+		if strings.EqualFold(strings.TrimSpace(ref.Role), roleMask) {
+			if maskName != "" {
+				return imageInputs{}, fmt.Errorf("only one mask per request: pass it once, as mask_image")
+			}
+			if maskName = strings.TrimSpace(ref.Image); maskName == "" {
+				return imageInputs{}, fmt.Errorf("a reference with role mask needs an image name")
+			}
+			continue
+		}
+		images = append(images, ref)
+	}
+	if len(images) > provider.MaxEditImages {
+		return imageInputs{}, fmt.Errorf("at most %d reference_images are supported, besides the mask", provider.MaxEditImages)
 	}
 	resolver := a.newImageResolver(ctx, chat)
-	inputs := make([]provider.ImageInput, 0, len(refs))
+	var out imageInputs
 	bases := 0
-	for _, ref := range refs {
+	for _, ref := range images {
 		role, ok := referenceRoles[strings.ToLower(strings.TrimSpace(ref.Role))]
 		if !ok {
-			return nil, nil, fmt.Errorf("invalid role %q for %s (expected base, markup, sketch or reference)", ref.Role, ref.Image)
+			return imageInputs{}, fmt.Errorf("invalid role %q for %s (expected base, markup, sketch or reference; a mask goes in mask_image)", ref.Role, ref.Image)
 		}
 		img, err := resolver.resolve(ref.Image)
 		if err != nil {
-			return nil, nil, err
+			return imageInputs{}, err
 		}
 		input := provider.ImageInput{Data: img.data, MIMEType: img.mime, Role: role}
+		receipt := generateImageInputReceipt{Image: img.name, Role: string(role)}
 		if role == provider.ImageRoleBase {
 			if bases++; bases > 1 {
-				return nil, nil, fmt.Errorf("only one reference image can be the base")
+				return imageInputs{}, fmt.Errorf("only one reference image can be the base")
 			}
-			inputs = append([]provider.ImageInput{input}, inputs...)
+			out.images = append([]provider.ImageInput{input}, out.images...)
+			out.receipt = append([]generateImageInputReceipt{receipt}, out.receipt...)
 			continue
 		}
-		inputs = append(inputs, input)
+		out.images = append(out.images, input)
+		out.receipt = append(out.receipt, receipt)
 	}
-	var mask []byte
-	if strings.TrimSpace(maskName) != "" {
-		if len(inputs) == 0 {
-			return nil, nil, fmt.Errorf("mask_image needs the image it masks in reference_images")
+	if maskName != "" {
+		if len(out.images) == 0 {
+			return imageInputs{}, fmt.Errorf("mask_image %q needs the image it masks: pass that image in reference_images with role base. "+
+				"A mask's description names its image; if that image is not in this conversation, ask the user to attach it with the mask", maskName)
 		}
 		img, err := resolver.resolve(maskName)
 		if err != nil {
-			return nil, nil, err
+			return imageInputs{}, err
 		}
-		mask = img.data
-		if inputs[0].Role != provider.ImageRoleBase {
-			inputs[0].Role = provider.ImageRoleBase
+		out.mask = img.data
+		if out.images[0].Role != provider.ImageRoleBase {
+			out.images[0].Role = provider.ImageRoleBase
+			out.receipt[0].Role = string(provider.ImageRoleBase)
 		}
+		out.receipt = append(out.receipt, generateImageInputReceipt{Image: img.name, Role: roleMask})
 	}
-	return inputs, mask, nil
+	return out, nil
 }
 
 // imageResolver finds images by the names the model saw: images generated earlier in this turn,

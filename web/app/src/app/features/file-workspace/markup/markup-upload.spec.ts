@@ -43,6 +43,7 @@ describe('uploadMarkup', () => {
       ['chat-1', 'beach-markup.png', 'image/png', MARKUP_FOLDER],
     ]);
     expect(uploads[0].description).toContain('Mask for beach.jpg: white marks the area');
+    expect(uploads[0].description).toContain('Pass beach.jpg as the base image and this file as mask_image.');
     expect(uploads[1].description).toContain('instructions, not content');
   });
 
