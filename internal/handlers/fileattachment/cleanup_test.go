@@ -23,6 +23,14 @@ type memRows struct {
 	rows map[uuid.UUID]models.FileAttachment
 }
 
+func (m *memRows) GetFileCommentSet(context.Context, uuid.UUID, uuid.UUID) (*models.FileCommentSet, error) {
+	return nil, nil
+}
+
+func (m *memRows) PutFileCommentSet(context.Context, uuid.UUID, uuid.UUID, models.FileCommentSet, int) (int, error) {
+	return 1, nil
+}
+
 func (m *memRows) GetChat(context.Context, uuid.UUID, uuid.UUID) (*models.Chat, error) {
 	return &models.Chat{}, nil
 }

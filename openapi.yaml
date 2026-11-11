@@ -9157,6 +9157,114 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /file-attachment/{id}/comments:
+    get:
+      summary: A text file's comments
+      description: >-
+        The comment threads of a text or code file (ADR 0x045), which has no place for comments of
+        its own, placed on its current content. When the file changed since the comments were
+        written (by the user or by an agent), each anchor is carried to the new text word by word:
+        kept on its words, its start moved to the first word left after it and its end to the last
+        one before it; a thread none of whose words are left is on the whole file (`anchor` null)
+        with the quote it had.
+      tags: [File Attachments]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: File attachment ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The threads, the `content_version` they are placed on, and the revision a write sends back
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileComments'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: File attachment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The file is not text (or is over 4 MB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Write a text file's comments
+      description: >-
+        Stores the file's threads (ADR 0x045), their anchors placed on the text of
+        `content_version`, which must be the file's current content, over the `revision` the client
+        read (0 for a file with no comments yet). Each thread's `quote` is set from the text.
+      tags: [File Attachments]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: File attachment ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutFileCommentsRequest'
+      responses:
+        '200':
+          description: The threads as stored, with the new revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileComments'
+        '400':
+          description: Invalid attachment ID or body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: File attachment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The comments changed since the client read them
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '412':
+          description: The file changed since the comments were placed on it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The file is not text (or is over 4 MB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /file-attachment/{id}/content:
     put:
       summary: Replace a file's content
@@ -12488,6 +12596,93 @@ components:
         container:
           $ref: '#/components/schemas/ChatContainerStatus'
       required: [files]
+    FileCommentRange:
+      type: object
+      description: A range of the file's text, in UTF-16 code units.
+      required: [start, end]
+      properties:
+        start:
+          type: integer
+        end:
+          type: integer
+    FileCommentMention:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          description: '`user:<id>` for a WhatIff user, `author:<name>` for someone known by name'
+        name:
+          type: string
+    FileComment:
+      type: object
+      required: [id, author_id, author_name, created_at, text]
+      properties:
+        id:
+          type: string
+        author_id:
+          type: string
+        author_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        text:
+          type: string
+          description: Plain text; a mention is its `@Name` written into it.
+        mentions:
+          type: array
+          items:
+            $ref: '#/components/schemas/FileCommentMention'
+    FileCommentThread:
+      type: object
+      required: [id, anchor, quote, resolved, comments]
+      properties:
+        id:
+          type: string
+        anchor:
+          description: The range the thread is on, or null when it is on the whole file.
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/FileCommentRange'
+        quote:
+          type: string
+          description: The text the thread is on (or was on, for a thread on the whole file).
+        resolved:
+          type: boolean
+        comments:
+          type: array
+          description: The first comment, then the replies.
+          items:
+            $ref: '#/components/schemas/FileComment'
+    FileComments:
+      type: object
+      required: [threads, content_version, revision]
+      properties:
+        threads:
+          type: array
+          items:
+            $ref: '#/components/schemas/FileCommentThread'
+        content_version:
+          type: integer
+          description: The file content the anchors are placed on.
+        revision:
+          type: integer
+          description: Sent back with a write; 0 when the file has no comments yet.
+    PutFileCommentsRequest:
+      type: object
+      required: [threads, content_version, revision]
+      properties:
+        threads:
+          type: array
+          items:
+            $ref: '#/components/schemas/FileCommentThread'
+        content_version:
+          type: integer
+          minimum: 1
+        revision:
+          type: integer
+          minimum: 0
     FileAttachment:
       type: object
       properties:

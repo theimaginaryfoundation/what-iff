@@ -27,6 +27,28 @@ type stubStore struct {
 	deleteFn         func(context.Context, uuid.UUID, uuid.UUID) error
 	referencedKeysFn func(context.Context, []string) (map[string]bool, error)
 	swapFn           func(context.Context, uuid.UUID, uuid.UUID, string, string, datastore.SwapFileObjectOptions) (bool, error)
+	// comments is a file's stored comment set, when a test keeps one.
+	comments *models.FileCommentSet
+}
+
+func (s stubStore) GetFileCommentSet(context.Context, uuid.UUID, uuid.UUID) (*models.FileCommentSet, error) {
+	if s.comments == nil || s.comments.Revision == 0 {
+		return nil, nil
+	}
+	cp := *s.comments
+	return &cp, nil
+}
+
+func (s stubStore) PutFileCommentSet(_ context.Context, _, _ uuid.UUID, set models.FileCommentSet, expect int) (int, error) {
+	if s.comments == nil {
+		return 1, nil
+	}
+	if s.comments.Revision != expect {
+		return 0, datastore.ErrFileCommentsRevision
+	}
+	set.Revision = expect + 1
+	*s.comments = set
+	return set.Revision, nil
 }
 
 func (s stubStore) GetChat(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error) {

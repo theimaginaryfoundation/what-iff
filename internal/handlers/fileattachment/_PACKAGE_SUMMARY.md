@@ -7,6 +7,8 @@ HTTP API for **file attachments** metadata and download flows at `/api/file-atta
 ## Responsibilities
 
 - **`Handler`:** CRUD/list for attachments per OpenAPI; coordinates with datastore and storage presigned URLs as implemented.
+- **`GET`/`PUT /file-attachment/{id}/comments` (`comments.go`):** the comment threads of a text or code file (ADR 0x045), through `internal/filecomments`.
+  A read returns them placed on the file's current content; a write sends the `content_version` its anchors are placed on (412 when that is not the current content) and the `revision` it read (409 when the comments changed since); 415 for a file that is not text.
 - **`PUT /file-attachment/{id}/content` (`content.go`):** replaces a file's content from the file workspace (ADR 0x043 §3).
   The body is the whole file; `If-Match` is the `content_version` the client loaded (bare or quoted, `*` or absent for an unconditional overwrite); `?chat_id=` names the conversation the save came from.
   It returns the updated attachment with the new version as the `ETag`; a stale version is 412 with `details.content_version`, a skill file 403, a mismatched `Content-Type` 415, an invalid image 400, an oversized body 413, no object store 503.
@@ -34,6 +36,7 @@ HTTP API for **file attachments** metadata and download flows at `/api/file-atta
 
 - *(See chat handler tests for upload quotas; add here if standalone behaviors grow.)*
 - `cleanup_test.go` — delete removes an unreferenced object and thumbnail, keeps one a reference copy shares, survives an object-store failure; legacy chat document download without `s3_key`.
+- `comments_test.go` — the comment routes: a write, a read that carries the anchors across a change made elsewhere, 412 for anchors placed on old content, 409 for a stale revision, 415 for binary, 404, 400.
 - `content_test.go` — the content route's statuses (200 with ETag, 412 with the current version, 400 If-Match, 404, 415) against stubs; the save itself is tested in `internal/filesave`.
 
 ## Related documentation

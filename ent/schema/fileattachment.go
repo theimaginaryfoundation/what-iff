@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"entgo.io/ent"
+	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
@@ -109,6 +110,10 @@ func (FileAttachment) Edges() []ent.Edge {
 			Ref("files").
 			Unique().
 			Field("skill_id"),
+		// Comments on a text or code file (ADR 0x045), which go with the file.
+		edge.To("comment_set", FileCommentSet.Type).
+			Unique().
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }
 
