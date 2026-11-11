@@ -208,6 +208,9 @@ func TestImageInputs_ARoleMaskReferenceIsTheMask(t *testing.T) {
 
 	_, err = a.resolveImageInputs(ctx, &models.Chat{}, []generateImageReference{{Image: "a.png"}, {Image: "m.png", Role: "mask"}}, "m.png")
 	require.ErrorContains(t, err, "only one mask per request")
+
+	_, err = a.resolveImageInputs(ctx, &models.Chat{}, []generateImageReference{{Image: "a.png"}, {Role: "mask"}}, "")
+	require.ErrorContains(t, err, "needs an image name", "never dropped silently")
 }
 
 // A mask alone (the user attached it without its image) is refused in words the agent can act on.

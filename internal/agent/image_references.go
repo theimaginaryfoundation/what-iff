@@ -96,7 +96,9 @@ func (a *Agent) resolveImageInputs(ctx context.Context, chat *models.Chat, refs 
 			if maskName != "" {
 				return imageInputs{}, fmt.Errorf("only one mask per request: pass it once, as mask_image")
 			}
-			maskName = strings.TrimSpace(ref.Image)
+			if maskName = strings.TrimSpace(ref.Image); maskName == "" {
+				return imageInputs{}, fmt.Errorf("a reference with role mask needs an image name")
+			}
 			continue
 		}
 		images = append(images, ref)
