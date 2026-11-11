@@ -26,6 +26,7 @@
                 "input": "public"
               }
             ],
+            "allowedCommonJsDependencies": ["react", "react-dom"],
             "styles": [
               "src/styles.scss",
               {

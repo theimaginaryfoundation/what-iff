@@ -18,23 +18,17 @@ import {
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { FileEditor } from './file-editor';
 
-type FilerobotCtor = typeof import('filerobot-image-editor').default;
+type FilerobotCtor = typeof import('./filerobot').FilerobotEditor;
 type Filerobot = InstanceType<FilerobotCtor>;
-/**
- * Filerobot's tab and tool ids. The library sets them as statics on the class, but its typings
- * declare them on the instance, where they are undefined at runtime.
- */
-type FilerobotIds = Pick<Filerobot, 'TABS' | 'TOOLS'>;
 
 /**
- * Loads the Filerobot image editor (MIT) on first use; a token so tests can hand in a fake.
- * Filerobot is a React app with its own React 18 (and react-konva, styled-components) nested under
- * it in node_modules. It runs as an isolated island in its container: nothing of ours talks to its
- * React, and it is only in this lazy chunk, so the app's bundle does not carry it.
+ * Loads the Filerobot image editor (MIT, see ./filerobot) on first use; a token so tests can hand
+ * in a fake. It is a React island in its container, on the app's React, and only in this lazy
+ * chunk, so the app's bundle does not carry it.
  */
 export const FILEROBOT_LOADER = new InjectionToken<() => Promise<FilerobotCtor>>('FILEROBOT_LOADER', {
   providedIn: 'root',
-  factory: () => () => import('filerobot-image-editor').then(m => m.default),
+  factory: () => () => import('./filerobot').then(m => m.FilerobotEditor),
 });
 
 /** The formats the editor can write back. A save keeps the file's type, so other images are view-only here. */
@@ -146,6 +140,9 @@ export class ImageEditorComponent implements FileEditor {
     if (!this.editor) return this.blob();
     const { imageData, hideLoadingSpinner } = this.editor.getCurrentImgData({ name: baseName(this.file().name), extension, quality: 0.92 }, 1);
     hideLoadingSpinner?.();
+    // Filerobot hands back nothing until its canvas has drawn. The workspace shows this message by
+    // its Save button; nothing is sent, and the edits stay in the editor to save again.
+    if (!imageData) throw new Error('The image editor is still loading the image. Try saving again in a moment.');
     if (imageData.imageCanvas) {
       // The canonical name: browsers do not know image/jpg, and fall back to PNG for any type they
       // cannot encode (WebP on Safari), which would store PNG bytes under the file's type.
@@ -211,15 +208,18 @@ export class ImageEditorComponent implements FileEditor {
       savingPixelRatio: 1,
       previewPixelRatio: view?.devicePixelRatio ?? 1,
     });
-    // The tab set goes in with render(); TABS and TOOLS are statics on the class (see FilerobotIds).
-    const { TABS, TOOLS } = ctor as unknown as FilerobotIds;
+    const { TABS, TOOLS } = ctor;
     editor.render({
       source: this.objectUrl!,
       savingPixelRatio: 1,
       previewPixelRatio: view?.devicePixelRatio ?? 1,
       tabsIds: [TABS.ADJUST, TABS.FINETUNE, TABS.FILTERS, TABS.ANNOTATE, TABS.RESIZE],
       defaultTabId: TABS.ADJUST,
-      defaultToolId: TOOLS.CROP,
+      // Not Crop. Filerobot 4.9.1's crop tool sizes its box from a provisional image size reported
+      // before the canvas is measured, and keeps it: an image scaled up to fit (anything smaller
+      // than the canvas) then saves cropped, a 400x300 image as 321x240. Opened later, once the
+      // size is final, the crop tool starts with the whole image.
+      defaultToolId: TOOLS.ROTATE,
     });
     return editor;
   }
