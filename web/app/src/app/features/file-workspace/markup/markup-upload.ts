@@ -7,8 +7,13 @@ import { ImageGalleryService } from '../../../core/services/image-gallery.servic
 import { MarkupResult } from './image-markup.component';
 import { markupStem } from './markup-strokes';
 
-/** The gallery folder markup files are filed in, so they stay together and out of the way. */
-export const MARKUP_FOLDER = 'markup';
+/**
+ * The gallery folder masks and markup copies are filed in. They matter for a turn or two, so they
+ * collect out of the way instead of cluttering the gallery.
+ */
+export const MARKUP_FOLDER = 'image_masks';
+/** Where sketches go: the person's own drawings, worth finding again. */
+export const SKETCH_FOLDER = 'sketches';
 
 /** What uploads a file into the thread; FileAttachmentService.uploadChatFileAttachment. */
 export type ChatUpload = (chatId: string, file: File, folder?: string, description?: string) => Observable<FileAttachment>;
@@ -44,6 +49,7 @@ export async function uploadMarkup(
         result.markup,
         name,
         'A rough sketch by the user to base an image on. Follow its composition; it is not the finished style.',
+        SKETCH_FOLDER,
       ),
     );
     return attachments;
@@ -89,8 +95,15 @@ export function injectMarkupUploader(): (chatId: string, source: FileAttachment 
     );
 }
 
-function send(upload: ChatUpload, chatId: string, blob: Blob, name: string, description: string): Promise<FileAttachment> {
-  return firstValueFrom(upload(chatId, new File([blob], name, { type: 'image/png' }), MARKUP_FOLDER, description));
+function send(
+  upload: ChatUpload,
+  chatId: string,
+  blob: Blob,
+  name: string,
+  description: string,
+  folder = MARKUP_FOLDER,
+): Promise<FileAttachment> {
+  return firstValueFrom(upload(chatId, new File([blob], name, { type: 'image/png' }), folder, description));
 }
 
 /** A sortable local time for a sketch's name: 2026-11-11-1432. */

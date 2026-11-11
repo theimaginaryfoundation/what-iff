@@ -12,6 +12,15 @@
         {{ uploading() ? 'Uploading…' : 'Upload' }}
       </button>
       <button type="button" class="files-tab__button" [disabled]="!chatId()" (click)="fromGallery()">From gallery</button>
+      <button
+        type="button"
+        class="files-tab__button"
+        [disabled]="!chatId()"
+        uiTooltip="Draw a sketch on a blank page and add it to your message"
+        (click)="newCanvas()"
+      >
+        New canvas
+      </button>
       <input #picker type="file" class="files-tab__picker" aria-label="Choose a file to add" (change)="onPicked($event)" />
     </div>
   </div>

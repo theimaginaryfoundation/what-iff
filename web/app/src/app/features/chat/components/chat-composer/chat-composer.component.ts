@@ -476,7 +476,7 @@ let nextPreviewId = 0;
                   </button>
                   <button type="button" role="menuitem" (click)="openSketchFromMenu()">
                     <ui-edit-icon [size]="13" />
-                    Sketch
+                    New canvas
                   </button>
                 </div>
               }

@@ -326,6 +326,15 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     const files = this.pendingAttachments().flatMap(item => (item.attachment ? [item.attachment] : []));
     untracked(() => this.contextPanel.setComposerPending(files));
   });
+  // The count is the service's, which outlives this page: only a request made while it is shown opens
+  // the canvas, not one from an earlier visit.
+  private handledSketchRequests = this.contextPanel.sketchRequests();
+  private readonly openSketchOnRequest = effect(() => {
+    const requests = this.contextPanel.sketchRequests();
+    if (requests === this.handledSketchRequests) return;
+    this.handledSketchRequests = requests;
+    untracked(() => this.sketchOpen.set(true));
+  });
   private readonly openGalleryPickerOnRequest = effect(() => {
     if (this.contextPanel.galleryPickerRequests() > 0) untracked(() => this.composer()?.openGalleryPicker());
   });

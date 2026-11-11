@@ -22,8 +22,8 @@ import { LoggerService } from '../../../core/services/logger.service';
   template: `
     <ui-overlay [open]="open()" labelledBy="sketch-overlay-title" variant="inset" (dismiss)="requestClose()">
       <header class="sketch__bar">
-        <h2 id="sketch-overlay-title" class="sketch__title">Sketch</h2>
-        <button type="button" class="sketch__close" aria-label="Close sketch" (click)="requestClose()">
+        <h2 id="sketch-overlay-title" class="sketch__title">New canvas</h2>
+        <button type="button" class="sketch__close" aria-label="Close canvas" (click)="requestClose()">
           <ui-x-icon [size]="14" />
         </button>
       </header>
