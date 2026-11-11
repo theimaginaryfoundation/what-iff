@@ -74,6 +74,8 @@ export class CommentsPanelComponent {
   readonly me = input.required<CommentPerson>();
   readonly people = input<readonly CommentPerson[]>([]);
   readonly readOnly = input(false);
+  /** Opens a thread's reply box (a "Reply to comment" from the editor's menu); a new object each time. */
+  readonly replyRequest = input<{ threadId: string } | null>(null);
   /** Said when there are no threads, about how to start one. */
   readonly emptyHint = input('Select something and choose Comment to start a thread.');
 
@@ -102,6 +104,10 @@ export class CommentsPanelComponent {
   private readonly cards = viewChildren<ElementRef<HTMLElement>>('card');
 
   constructor() {
+    effect(() => {
+      const request = this.replyRequest();
+      if (request) untracked(() => this.replying.set(request.threadId));
+    });
     // The active thread is brought into view when the editor selects it.
     effect(() => {
       const active = this.activeId();

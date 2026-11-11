@@ -17,6 +17,15 @@ import {
 } from '../shared/ooxml';
 import { Deck, Slide, SlideElement, TableElement } from './deck-model';
 import {
+  COMMENT_REL_EXT,
+  CommentedSlide,
+  PptxComments,
+  REL_MODERN_COMMENTS,
+  SlideCommentThread,
+  threadsOn,
+  writePptxComments,
+} from './pptx-comments';
+import {
   A,
   P,
   SlideWriteContext,
@@ -66,6 +75,8 @@ const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 export interface PatchOptions {
   original: ArrayBuffer | Uint8Array;
   imported: Deck;
+  /** The comment threads to save and those the file was read with (ADR 0x045); left out, comments stay as they were. */
+  comments?: { threads: readonly SlideCommentThread[]; imported: PptxComments };
 }
 
 /** A stable JSON form of a model value, without the editor's own ids. */
@@ -252,7 +263,8 @@ export async function patchPptx(deck: Deck, opts: PatchOptions, fidelity: Fideli
   for (const sldId of children(child(pres.documentElement, P, 'sldIdLst'), P, 'sldId')) {
     const rId = attr(sldId, NS.r, 'id') ?? '';
     const rel = presRels.find(r => r.id === rId);
-    if (rel && rel.type === REL.slide) entries.push({ path: resolveTarget(presPath, rel.target), sldId: sldId.getAttribute('id') ?? '', rId });
+    if (rel && rel.type === REL.slide)
+      entries.push({ path: resolveTarget(presPath, rel.target), sldId: sldId.getAttribute('id') ?? '', rId });
   }
   const importedByPath = new Map<string, Slide>();
   for (const slide of opts.imported.slides) if (slide.sourcePath) importedByPath.set(slide.sourcePath, slide);
@@ -266,7 +278,13 @@ export async function patchPptx(deck: Deck, opts: PatchOptions, fidelity: Fideli
   for (const [index, slide] of deck.slides.entries()) {
     if (slide.sourcePath && entryByPath.has(slide.sourcePath) && !used.has(slide.sourcePath)) {
       used.add(slide.sourcePath);
-      resolved.push({ slide, path: slide.sourcePath, base: importedByPath.get(slide.sourcePath) ?? null, fresh: false, sldId: entryByPath.get(slide.sourcePath)!.sldId });
+      resolved.push({
+        slide,
+        path: slide.sourcePath,
+        base: importedByPath.get(slide.sourcePath) ?? null,
+        fresh: false,
+        sldId: entryByPath.get(slide.sourcePath)!.sldId,
+      });
       continue;
     }
     const path = `ppt/slides/slide${slideNumber++}.xml`;
@@ -274,8 +292,12 @@ export async function patchPptx(deck: Deck, opts: PatchOptions, fidelity: Fideli
     if (from) {
       pkg.put(path, pkg.bytes(from)!);
       // The copy has no notes or comments of its own yet.
-      const rels = (await pkg.rels(from)).filter(r => r.type !== REL.notesSlide && r.type !== REL.comments);
+      const rels = (await pkg.rels(from)).filter(
+        r => r.type !== REL.notesSlide && r.type !== REL.comments && r.type !== REL_MODERN_COMMENTS,
+      );
       pkg.putRels(path, rels);
+      const copy = await pkg.xml(path);
+      if (copy && dropCommentRel(copy)) pkg.putXml(path, copy);
       resolved.push({ slide, path, base: importedByPath.get(from) ?? null, fresh: true, sldId: null });
     } else {
       // A slide made here takes the layout of the slide before it (or the first one).
@@ -295,7 +317,8 @@ export async function patchPptx(deck: Deck, opts: PatchOptions, fidelity: Fideli
     if (used.has(entry.path)) continue;
     for (const rel of await pkg.rels(entry.path)) {
       if (rel.external) continue;
-      if (rel.type === REL.notesSlide || rel.type === REL.comments) pkg.remove(resolveTarget(entry.path, rel.target));
+      if (rel.type === REL.notesSlide || rel.type === REL.comments || rel.type === REL_MODERN_COMMENTS)
+        pkg.remove(resolveTarget(entry.path, rel.target));
     }
     pkg.remove(entry.path);
   }
@@ -305,11 +328,45 @@ export async function patchPptx(deck: Deck, opts: PatchOptions, fidelity: Fideli
   const mediaNumber = { n: pkg.nextNumber(/^ppt\/media\/image(\d+)\./) };
   for (const item of resolved) {
     if (!item.fresh && item.base && sameModel(item.slide, item.base)) continue;
-    await patchSlidePart(pkg, item, { notesNumber, mediaNumber, notesMasterTarget: notesMaster ? resolveTarget(presPath, notesMaster.target) : null }, fidelity);
+    await patchSlidePart(
+      pkg,
+      item,
+      { notesNumber, mediaNumber, notesMasterTarget: notesMaster ? resolveTarget(presPath, notesMaster.target) : null },
+      fidelity,
+    );
   }
 
   // 4. The slide list, relationships and sections; untouched when the slides are the same parts in the same order.
-  if (resolved.every((item, i) => entries[i]?.path === item.path) && resolved.length === entries.length) return pkg.save();
+  if (!(resolved.every((item, i) => entries[i]?.path === item.path) && resolved.length === entries.length))
+    writeSlideList(pkg, pres, presPath, presRels, entries, resolved, used);
+
+  // 5. Comments, once every slide has its id.
+  if (opts.comments) {
+    const { threads, imported } = opts.comments;
+    const beforeByPath = new Map<string, SlideCommentThread[]>();
+    for (const slide of opts.imported.slides)
+      if (slide.sourcePath) beforeByPath.set(slide.sourcePath, threadsOn(imported.threads, slide.id));
+    const slides: CommentedSlide[] = resolved.map(item => ({
+      path: item.path,
+      sldId: item.sldId ?? '',
+      slide: item.slide,
+      threads: threadsOn(threads, item.slide.id),
+      before: item.fresh ? null : (beforeByPath.get(item.path) ?? []),
+    }));
+    await writePptxComments(pkg, presPath, slides, imported);
+  }
+  return pkg.save();
+}
+
+function writeSlideList(
+  pkg: Package,
+  pres: Document,
+  presPath: string,
+  presRels: Relationship[],
+  entries: SlideEntry[],
+  resolved: ResolvedSlide[],
+  used: Set<string>,
+): void {
   const keptRels = presRels.filter(r => r.type !== REL.slide || used.has(resolveTarget(presPath, r.target)));
   let nextRel = 1;
   const relIds = new Set(keptRels.map(r => r.id));
@@ -324,10 +381,12 @@ export async function patchPptx(deck: Deck, opts: PatchOptions, fidelity: Fideli
   for (const old of children(list, P, 'sldId')) list.removeChild(old);
   const sections = sectionList(pres);
   const sectionOf = new Map<string, Element>();
-  for (const section of sections) for (const id of children(child(section, P14, 'sldIdLst'), P14, 'sldId')) sectionOf.set(id.getAttribute('id') ?? '', section);
+  for (const section of sections)
+    for (const id of children(child(section, P14, 'sldIdLst'), P14, 'sldId')) sectionOf.set(id.getAttribute('id') ?? '', section);
   const removedIds = new Set(entries.filter(e => !used.has(e.path)).map(e => e.sldId));
   for (const section of sections) {
-    for (const id of children(child(section, P14, 'sldIdLst'), P14, 'sldId')) if (removedIds.has(id.getAttribute('id') ?? '')) id.parentNode?.removeChild(id);
+    for (const id of children(child(section, P14, 'sldIdLst'), P14, 'sldId'))
+      if (removedIds.has(id.getAttribute('id') ?? '')) id.parentNode?.removeChild(id);
   }
   let previousSldId: string | null = null;
   for (const item of resolved) {
@@ -335,6 +394,7 @@ export async function patchPptx(deck: Deck, opts: PatchOptions, fidelity: Fideli
     const rId = existing?.rId ?? freshRelId();
     if (!existing) keptRels.push({ id: rId, type: REL.slide, target: relativeTarget(presPath, item.path), external: false });
     const sldId = existing?.sldId ?? String(nextSldId++);
+    item.sldId = sldId;
     const el = list.appendChild(pres.createElementNS(P, 'p:sldId'));
     el.setAttribute('id', sldId);
     el.setAttributeNS(NS.r, 'r:id', rId);
@@ -349,6 +409,43 @@ export async function patchPptx(deck: Deck, opts: PatchOptions, fidelity: Fideli
   }
   pkg.putXml(presPath, pres);
   pkg.putRels(presPath, keptRels);
+}
+
+/** Removes a slide's link to its modern comment part; true when it had one. */
+function dropCommentRel(slide: Document): boolean {
+  const extLst = child(slide.documentElement, P, 'extLst');
+  const exts = children(extLst, P, 'ext').filter(e => e.getAttribute('uri') === COMMENT_REL_EXT);
+  for (const ext of exts) extLst!.removeChild(ext);
+  if (extLst && !children(extLst, P, 'ext').length) extLst.parentNode?.removeChild(extLst);
+  return exts.length > 0;
+}
+
+/**
+ * Adds comments to a package written from scratch (pptxgenjs), whose slides are slide1..n in deck
+ * order.
+ */
+export async function addCommentsToNewPackage(bytes: Uint8Array, deck: Deck, threads: readonly SlideCommentThread[]): Promise<Uint8Array> {
+  if (!threads.length) return bytes;
+  const pkg = await Package.open(bytes);
+  const main = (await pkg.rels('')).find(r => r.type === REL_TYPE.officeDocument);
+  const presPath = main ? resolveTarget('', main.target) : 'ppt/presentation.xml';
+  const pres = await pkg.xml(presPath);
+  const presRels = await pkg.rels(presPath);
+  if (!pres) return bytes;
+  const slides: CommentedSlide[] = [];
+  for (const [i, sldIdEl] of children(child(pres.documentElement, P, 'sldIdLst'), P, 'sldId').entries()) {
+    const rel = presRels.find(r => r.id === attr(sldIdEl, NS.r, 'id'));
+    const slide = deck.slides[i];
+    if (!rel || !slide) continue;
+    slides.push({
+      path: resolveTarget(presPath, rel.target),
+      sldId: sldIdEl.getAttribute('id') ?? '',
+      slide,
+      threads: threadsOn(threads, slide.id),
+      before: null,
+    });
+  }
+  await writePptxComments(pkg, presPath, slides, null);
   return pkg.save();
 }
 
@@ -358,7 +455,10 @@ function sectionList(pres: Document): Element[] {
 
 /** "../slideLayouts/slideLayout1.xml" for a target seen from a part's folder. */
 function relativeTarget(fromPart: string, toPart: string): string {
-  const fromDir = fromPart.slice(0, fromPart.lastIndexOf('/') + 1).split('/').filter(Boolean);
+  const fromDir = fromPart
+    .slice(0, fromPart.lastIndexOf('/') + 1)
+    .split('/')
+    .filter(Boolean);
   const to = toPart.split('/');
   let i = 0;
   while (i < fromDir.length && i < to.length - 1 && fromDir[i] === to[i]) i++;
@@ -605,7 +705,8 @@ function patchElement(node: Element, el: SlideElement, was: SlideElement | undef
       patchTable(node, el, was?.kind === 'table' ? was : undefined, ctx);
       return;
     case 'group':
-      if (!was || !sameModel(el.children, was.kind === 'group' ? was.children : null)) ctx.warn('Group contents are kept as in the original');
+      if (!was || !sameModel(el.children, was.kind === 'group' ? was.children : null))
+        ctx.warn('Group contents are kept as in the original');
       return;
     case 'chart':
       return;
@@ -642,4 +743,3 @@ function patchTable(node: Element, el: TableElement, was: TableElement | undefin
   if (was && (el.colWidths.join() !== was.colWidths.join() || el.rowHeights.join() !== was.rowHeights.join()))
     ctx.warn('Table column widths and row heights are kept as in the original');
 }
-

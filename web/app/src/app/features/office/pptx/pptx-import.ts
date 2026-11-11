@@ -17,6 +17,7 @@ import {
   TableElement,
   emptyTextBody,
 } from './deck-model';
+import { PptxComments, readPptxComments } from './pptx-comments';
 import { hex, htmlToPlainText, textBodyFromHtml } from './pptx-text';
 
 export interface PptxImportOptions {
@@ -27,6 +28,8 @@ export interface PptxImportOptions {
 export interface PptxImportResult {
   deck: Deck;
   report: FidelityReport;
+  /** The comment threads on its slides, and the comment parts they came from (ADR 0x045). */
+  comments: PptxComments;
 }
 
 /** The parser is loaded lazily; the converter itself is pure so tests and workers can feed it JSON. */
@@ -38,12 +41,16 @@ export async function pptxToDeck(bytes: ArrayBuffer | Uint8Array, opts: PptxImpo
   const buffer = bytes instanceof Uint8Array ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) : bytes;
   const json = await parse(buffer as ArrayBuffer, { imageMode: 'base64' });
   let slideParts: SlideParts | undefined;
+  let pkg: OoxmlPackage | null = null;
   try {
-    slideParts = await listSlideParts(await OoxmlPackage.open(bytes));
+    pkg = await OoxmlPackage.open(bytes);
+    slideParts = await listSlideParts(pkg);
   } catch {
     slideParts = undefined;
   }
-  return jsonToDeck(json, opts, slideParts);
+  const result = jsonToDeck(json, opts, slideParts);
+  if (pkg && slideParts) result.comments = await readPptxComments(pkg, slideParts.presPath, result.deck);
+  return result;
 }
 
 const REL_SLIDE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide';
@@ -55,6 +62,8 @@ export interface SlideParts {
   byNumber: string[];
   /** Slide parts in presentation order (`p:sldIdLst`), the order PowerPoint shows them in. */
   order: string[];
+  /** The presentation part. */
+  presPath: string;
 }
 
 export async function listSlideParts(pkg: OoxmlPackage): Promise<SlideParts> {
@@ -77,7 +86,7 @@ export async function listSlideParts(pkg: OoxmlPackage): Promise<SlideParts> {
       if (rel && rel.type === REL_SLIDE) order.push(resolveTarget(presPath, rel.target));
     }
   }
-  return { byNumber, order };
+  return { byNumber, order, presPath };
 }
 
 /**
@@ -119,7 +128,7 @@ export function jsonToDeck(json: PptxJson, opts: PptxImportOptions, slideParts?:
     if (ordered.length < deck.slides.length) fidelity.warn('Slide parts the presentation does not list were left out');
     if (ordered.length) deck.slides = ordered;
   }
-  return { deck, report: fidelity.report() };
+  return { deck, report: fidelity.report(), comments: { threads: [], authors: [] } };
 }
 
 /**

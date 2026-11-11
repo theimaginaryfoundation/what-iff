@@ -10,7 +10,7 @@
           type="button"
           class="univer-editor__tool"
           [disabled]="!canComment()"
-          title="Comment on the selected text (Ctrl+Alt+M)"
+          title="Comment on the selected text or the word at the cursor (Ctrl+Alt+M)"
           (click)="startComment()"
         >
           Comment
@@ -53,7 +53,8 @@
         [me]="me()"
         [people]="people()"
         [readOnly]="readOnly()"
-        emptyHint="Select text and choose Comment to start a thread."
+        [replyRequest]="replyRequest()"
+        emptyHint="Select text, or put the cursor in a word, and choose Comment to start a thread."
         (select)="selectThread($event)"
         (create)="createThread($event)"
         (cancelDraft)="cancelDraft()"

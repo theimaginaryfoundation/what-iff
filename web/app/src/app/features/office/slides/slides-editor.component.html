@@ -176,6 +176,14 @@
           </div>
         }
         <div class="slides__group slides__group--end">
+          <button
+            type="button"
+            class="slides__tool"
+            (click)="startComment()"
+            [title]="selected() ? 'Comment on the selected shape (Ctrl+Alt+M)' : 'Comment on this slide (Ctrl+Alt+M)'"
+          >
+            Comment
+          </button>
           <button type="button" class="slides__tool" (click)="notesOpen.set(!notesOpen())" [attr.aria-pressed]="notesOpen()">Notes</button>
         </div>
       </div>
@@ -192,11 +200,22 @@
             [attr.aria-label]="'Slide ' + (i + 1)"
           >
             <span class="slides__thumb-number">{{ i + 1 }}</span>
+            @if (comments.openBySlide().get(s.id); as open) {
+              <span class="slides__thumb-comments" [attr.aria-label]="open + (open === 1 ? ' open comment' : ' open comments')">{{
+                open
+              }}</span>
+            }
             <app-slide-canvas [slide]="s" [size]="deck().size" [scale]="thumbScale()" [interactive]="false" />
           </button>
         }
       </nav>
-      <div #stage class="slides__stage" tabindex="0" [attr.aria-label]="'Slide ' + (slideIndex() + 1) + ' of ' + deck().slides.length">
+      <div
+        #stage
+        class="slides__stage"
+        tabindex="0"
+        (contextmenu)="onStageContextMenu($event)"
+        [attr.aria-label]="'Slide ' + (slideIndex() + 1) + ' of ' + deck().slides.length"
+      >
         <app-slide-canvas
           class="slides__canvas"
           [slide]="slide()"
@@ -213,8 +232,32 @@
           (requestEdit)="onRequestEdit($event)"
           (textCommit)="onTextCommit($event)"
           (open)="openLink($event)"
+          [pins]="comments.pins()"
+          [highlightId]="comments.highlightId()"
+          (pinSelect)="onPinSelect($event)"
         />
       </div>
+      @if (commentsOpen()) {
+        <app-comments-panel
+          class="slides__comments"
+          [threads]="comments.onSlide()"
+          [activeId]="comments.activeId()"
+          [draftQuote]="comments.draft()?.quote"
+          [me]="me()"
+          [people]="comments.people()"
+          [readOnly]="readOnly()"
+          [replyRequest]="replyRequest()"
+          emptyHint="Select a shape, or nothing for the whole slide, and choose Comment."
+          (select)="comments.select($event)"
+          (create)="comments.create($event)"
+          (cancelDraft)="comments.cancelDraft()"
+          (reply)="comments.reply($event)"
+          (edit)="comments.edit($event)"
+          (remove)="comments.remove($event)"
+          (resolve)="comments.resolve($event)"
+          (closed)="closeComments()"
+        />
+      }
     </div>
     <div class="slides__status" role="toolbar" aria-label="Slide navigation and zoom">
       <div class="slides__status-group">
@@ -239,6 +282,12 @@
         </button>
       </div>
       <div class="slides__status-group">
+        <button type="button" class="slides__tool slides__comments-toggle" [attr.aria-pressed]="commentsOpen()" (click)="toggleComments()">
+          Comments
+          @if (comments.openCount()) {
+            <span class="slides__count">{{ comments.openCount() }}</span>
+          }
+        </button>
         <button type="button" class="slides__tool slides__tool--icon" (click)="zoomBy(1 / 1.25)" aria-label="Zoom out">−</button>
         <input
           type="range"
@@ -273,5 +322,25 @@
         }
       </div>
     }
+  }
+  @if (contextMenu(); as menu) {
+    <div class="slides__menu-scrim" (pointerdown)="closeContextMenu()" (contextmenu)="$event.preventDefault(); closeContextMenu()"></div>
+    <div
+      class="slides__context"
+      role="menu"
+      aria-label="Comment"
+      [style.left.px]="menu.left"
+      [style.top.px]="menu.top"
+      (keydown.escape)="closeContextMenu()"
+    >
+      @if (menu.threadId) {
+        <button type="button" role="menuitem" class="slides__menu-item" (click)="menuReply()">Reply to comment</button>
+        <button type="button" role="menuitem" class="slides__menu-item slides__menu-item--danger" (click)="menuDelete()">
+          Delete comment
+        </button>
+      } @else {
+        <button type="button" role="menuitem" class="slides__menu-item" (click)="menuNewComment()">New comment</button>
+      }
+    </div>
   }
 </div>

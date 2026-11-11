@@ -1,9 +1,11 @@
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import PptxGenJS from 'pptxgenjs';
 import { parse } from 'pptxtojson';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
+import { CommentPeopleService } from '../comments/comment-people.service';
+import { CommentsPanelState } from '../comments/comments-panel-state.service';
 import { normalizePackage } from '../pptx/pptx-export';
 import { OoxmlPackage } from '../shared/ooxml';
 import { pptxToDeck } from '../pptx/pptx-import';
@@ -36,6 +38,7 @@ describe('SlidesEditorComponent', () => {
         provideZonelessChangeDetection(),
         { provide: PPTX_PARSER, useValue: () => Promise.resolve(parse) },
         { provide: PPTX_WRITER, useValue: async () => new PptxGenJS() },
+        { provide: CommentPeopleService, useValue: { me: signal({ id: 'user:u-1', name: 'Pat Lee' }) } },
       ],
     }).compileComponents();
   });
@@ -153,9 +156,7 @@ describe('SlidesEditorComponent', () => {
     const again = await pptxToDeck(await (await c.content()).arrayBuffer(), { id: 'x', name: 'x.pptx' }, parse);
     expect(again.deck.slides[1].notes).toBe('Second save notes');
     expect(again.deck.slides[0].elements.find(e => e.kind === 'shape' && e.shapeType === 'ellipse')).toBeUndefined();
-    const typed = again.deck.slides[0].elements.filter(
-      e => e.kind === 'shape' && e.text?.paragraphs[0]?.runs[0]?.text === 'Typed',
-    );
+    const typed = again.deck.slides[0].elements.filter(e => e.kind === 'shape' && e.text?.paragraphs[0]?.runs[0]?.text === 'Typed');
     expect(typed).toHaveLength(1);
     expect(again.deck.slides[0].elements).toHaveLength(back.deck.slides[0].elements.length - 1);
   });
@@ -181,6 +182,108 @@ describe('SlidesEditorComponent', () => {
     fixture.componentInstance.saveRequested.subscribe(saveView);
     key(viewer, 's', { ctrlKey: true });
     expect(saveView).not.toHaveBeenCalled();
+  });
+
+  describe('comments', () => {
+    beforeEach(() => TestBed.inject(CommentsPanelState).open.set(null));
+    const reread = async () =>
+      pptxToDeck(new Uint8Array(await (await fixture.componentInstance.content()).arrayBuffer()), { id: 'x', name: 'x.pptx' }, parse);
+
+    it('comments on the selected shape: a pin at its corner, the shape outlined, and the thread saved into the file', async () => {
+      const el = await open(await samplePptx(), false);
+      const c = fixture.componentInstance;
+      const title = c.slide().elements[0];
+      c.onSelect(title.id);
+      c.startComment();
+      fixture.detectChanges();
+      expect(el.querySelector('.thread--draft')).not.toBeNull();
+      expect(el.querySelector(`.slides__stage [data-element-id="${title.id}"]`)?.classList).toContain('slide__element--commented');
+
+      c.comments.create({ text: 'Shorter title?', mentions: [] });
+      fixture.detectChanges();
+      expect(c.dirty()).toBe(true);
+      const pins = el.querySelectorAll('.slides__stage .slide__pin');
+      expect(pins).toHaveLength(1);
+      expect(pins[0].getAttribute('aria-label')).toBe('Comment by Pat Lee');
+      expect(el.querySelector('.slides__count')?.textContent?.trim()).toBe('1');
+      expect(el.querySelector('.slides__thumb-comments')?.textContent?.trim()).toBe('1');
+
+      const blob = await c.content();
+      c.markSaved(blob);
+      expect(c.dirty()).toBe(false);
+      const back = await pptxToDeck(new Uint8Array(await blob.arrayBuffer()), { id: 'x', name: 'x.pptx' }, parse);
+      expect(back.comments.threads).toEqual([
+        expect.objectContaining({
+          anchor: { slideId: back.deck.slides[0].id, x: title.left + title.width, y: title.top },
+          comments: [expect.objectContaining({ authorId: 'user:u-1', authorName: 'Pat Lee', text: 'Shorter title?' })],
+        }),
+      ]);
+      // A reply after the save is a change of its own.
+      c.comments.reply({ threadId: c.comments.threads()[0].id, draft: { text: 'Yes', mentions: [] } });
+      expect(c.dirty()).toBe(true);
+    });
+
+    it('comments on the slide when nothing is selected, and shows each slide its own threads', async () => {
+      const el = await open(await samplePptx(), false);
+      const c = fixture.componentInstance;
+      c.startComment();
+      c.comments.create({ text: 'Whole slide note', mentions: [] });
+      fixture.detectChanges();
+      expect(c.comments.threads()[0].anchor).toEqual({ slideId: c.slide().id, x: 12, y: 24 });
+      expect(c.comments.threads()[0].quote).toBe('Slide 1');
+      expect(el.querySelectorAll('app-comments-panel .thread')).toHaveLength(1);
+      c.goTo(1);
+      fixture.detectChanges();
+      expect(el.querySelectorAll('app-comments-panel .thread')).toHaveLength(0);
+      expect(el.querySelectorAll('.slide__pin')).toHaveLength(0);
+      expect((await reread()).comments.threads.map(t => t.comments[0].text)).toEqual(['Whole slide note']);
+    });
+
+    it("right-click: a new comment where the slide was clicked, and reply to or delete a pin's thread", async () => {
+      const el = await open(await samplePptx(), false);
+      const c = fixture.componentInstance;
+      const slideEl = el.querySelector('.slides__stage .slide') as HTMLElement;
+      const rect = slideEl.getBoundingClientRect();
+      slideEl.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: rect.left, clientY: rect.top }));
+      fixture.detectChanges();
+      const items = () => [...el.querySelectorAll('.slides__context [role="menuitem"]')].map(b => b.textContent?.trim());
+      expect(items()).toEqual(['New comment']);
+      (el.querySelector('.slides__context [role="menuitem"]') as HTMLButtonElement).click();
+      c.comments.create({ text: 'Top-left note', mentions: [] });
+      fixture.detectChanges();
+      expect(c.comments.threads()[0].anchor).toEqual({ slideId: c.slide().id, x: 0, y: 0 });
+
+      const pin = el.querySelector('.slides__stage .slide__pin') as HTMLElement;
+      pin.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      fixture.detectChanges();
+      expect(items()).toEqual(['Reply to comment', 'Delete comment']);
+      (el.querySelectorAll('.slides__context [role="menuitem"]')[0] as HTMLButtonElement).click();
+      fixture.detectChanges();
+      expect(el.querySelector('app-comments-panel textarea[aria-label="Reply"]')).not.toBeNull();
+
+      pin.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      fixture.detectChanges();
+      (el.querySelectorAll('.slides__context [role="menuitem"]')[1] as HTMLButtonElement).click();
+      expect(c.comments.threads()).toEqual([]);
+    });
+
+    it('read-only: pins show the threads, and choosing one opens it in the panel', async () => {
+      const editor = await open(await samplePptx(), false);
+      fixture.componentInstance.startComment();
+      fixture.componentInstance.comments.create({ text: 'Look here', mentions: [] });
+      const blob = await fixture.componentInstance.content();
+      void editor;
+      TestBed.inject(CommentsPanelState).open.set(false);
+
+      const el = await open(blob);
+      const c = fixture.componentInstance;
+      expect(el.querySelector('app-comments-panel')).toBeNull();
+      (el.querySelector('.slide__pin') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      expect(c.comments.activeId()).toBe(c.comments.threads()[0].id);
+      expect(el.querySelector('app-comments-panel .thread--active')?.textContent).toContain('Look here');
+      expect(el.querySelector('app-comments-panel .thread__reply')).toBeNull();
+    });
   });
 
   it('reports bytes it cannot read', async () => {

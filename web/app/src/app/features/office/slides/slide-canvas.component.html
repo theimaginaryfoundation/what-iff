@@ -24,6 +24,25 @@
       <ng-container *ngTemplateOutlet="element; context: { $implicit: el, layout: false }" />
     }
   </div>
+  @for (pin of pins(); track pin.id) {
+    @let at = pinStyle(pin);
+    <button
+      type="button"
+      class="slide__pin"
+      [class.slide__pin--active]="pin.active"
+      [style.left.px]="at.left"
+      [style.top.px]="at.top"
+      [attr.aria-label]="pin.label"
+      [attr.aria-pressed]="pin.active"
+      [attr.data-thread-id]="pin.id"
+      (pointerdown)="$event.stopPropagation()"
+      (click)="$event.stopPropagation(); pinSelect.emit(pin.id)"
+    >
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+        <path d="M4 4h16v11H9l-5 4z" fill="currentColor" />
+      </svg>
+    </button>
+  }
 </div>
 
 <ng-template #element let-el let-layout="layout">
@@ -35,6 +54,7 @@
     [class.slide__element--layout]="layout"
     [class.slide__element--selected]="selected"
     [class.slide__element--editing]="editing"
+    [class.slide__element--commented]="!layout && highlightId() === el.id"
     [class.slide__element--link]="!!el.link && !interactive()"
     [style.left.pt]="g.left"
     [style.top.pt]="g.top"

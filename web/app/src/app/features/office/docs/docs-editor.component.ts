@@ -1,3 +1,4 @@
+import { BehaviorSubject, map } from 'rxjs';
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, signal, untracked } from '@angular/core';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
@@ -86,6 +87,11 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
   /** Threads whose text is still in the document; deleting the text takes the comment with it. */
   private readonly marked = signal<ReadonlySet<string> | null>(null);
   private marks: DocCommentMarks | null = null;
+  /** Opens the active thread's reply box in the panel (the right-click menu's "Reply to comment"). */
+  readonly replyRequest = signal<{ threadId: string } | null>(null);
+  /** Whether the caret is in commented text, which decides the right-click menu's items. */
+  private readonly caretOnComment = new BehaviorSubject(false);
+  private contextMenu: { dispose(): void } | null = null;
   /** Set by a click or key press in the page, so the selection that follows can pick a thread. */
   private caretMovedByUser = false;
 
@@ -98,10 +104,7 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
     const me = this.me();
     return [me, ...commentAuthors(this.threads()).filter(p => p.id !== me.id)];
   });
-  readonly canComment = computed(() => {
-    const selection = this.selection();
-    return !this.readOnly() && !!selection && selection.end > selection.start;
-  });
+  readonly canComment = computed(() => !this.readOnly() && !!this.commentRange());
 
   constructor() {
     super();
@@ -157,7 +160,25 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
     this.marked.set(new Set(this.marks.positions().keys()));
   }
 
+  /** What a new comment would be on: the selected text, or the word at the caret. */
+  private commentRange(): TextSelection | null {
+    const selection = this.selection();
+    if (!selection) return null;
+    if (selection.end > selection.start) return selection;
+    const word = this.marks?.wordAt(selection.segmentId, selection.start);
+    return word ? { segmentId: selection.segmentId, ...word } : null;
+  }
+
+  /** The thread whose text the caret is in, if any. */
+  private threadAtCaret(): string | null {
+    const selection = this.selection();
+    return selection && !selection.segmentId ? (this.marks?.at(selection.start) ?? null) : null;
+  }
+
   protected override onDispose(): void {
+    this.contextMenu?.dispose();
+    this.contextMenu = null;
+    this.caretOnComment.next(false);
     this.timers.forEach(clearTimeout);
     this.timers = [];
     this.marks?.dispose();
@@ -186,6 +207,36 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
     this.unitId = data.id;
     this.applyGuides();
     this.attachMarks();
+    if (!readOnly && this.univer && this.docsKit) {
+      const onComment$ = this.caretOnComment.asObservable();
+      this.contextMenu =
+        this.docsKit.addContextMenuItems?.(this.univer, [
+          {
+            id: 'whatiff.doc.comment.new',
+            title: 'New comment',
+            icon: 'new',
+            order: 0,
+            hidden$: onComment$,
+            run: () => this.startComment(),
+          },
+          {
+            id: 'whatiff.doc.comment.reply',
+            title: 'Reply to comment',
+            icon: 'reply',
+            order: 0,
+            hidden$: onComment$.pipe(map(on => !on)),
+            run: () => this.replyAtCaret(),
+          },
+          {
+            id: 'whatiff.doc.comment.delete',
+            title: 'Delete comment',
+            icon: 'delete',
+            order: 0.1,
+            hidden$: onComment$.pipe(map(on => !on)),
+            run: () => void this.deleteAtCaret(),
+          },
+        ]) ?? null;
+    }
     univerAPI.addEvent(univerAPI.Event.CommandExecuted, (event: SelectionEvent) => {
       if (event.params?.unitId !== this.unitId) return;
       if (event.id === SELECTION_OPERATION) this.onSelection(event);
@@ -208,6 +259,7 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
     const segmentId = event.params?.segmentId ?? '';
     const selection = { segmentId, start: Math.min(range.startOffset, range.endOffset), end: Math.max(range.startOffset, range.endOffset) };
     this.selection.set(selection);
+    this.caretOnComment.next(!!this.threadAtCaret());
     // Univer also reports the selection when the page scrolls or loses focus (choosing a thread in
     // the panel does both); only a click or key press in the page is the user moving the caret.
     if (!this.caretMovedByUser) return;
@@ -229,10 +281,10 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
     this.panel.open.set(false);
   }
 
-  /** Starts a thread on the selected text. */
+  /** Starts a thread on the selected text, or on the word at the caret. */
   startComment(): void {
-    const selection = this.selection();
-    if (!this.canComment() || !selection || !this.marks) return;
+    const selection = this.readOnly() ? null : this.commentRange();
+    if (!selection || !this.marks) return;
     const quote = this.marks
       .text(selection.segmentId, selection.start, selection.end)
       .replace(/[\u0000-\u001f]/g, ' ')
@@ -259,6 +311,23 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
     this.activeThreadId.set(id);
     this.marked.set(new Set(this.marks.positions().keys()));
     this.contentChanged();
+  }
+
+  /** The right-click menu's "Reply to comment": the thread at the caret, with its reply box open. */
+  replyAtCaret(): void {
+    const threadId = this.threadAtCaret();
+    if (!threadId) return;
+    this.draft.set(null);
+    this.activeThreadId.set(threadId);
+    this.panel.open.set(true);
+    this.replyRequest.set({ threadId });
+  }
+
+  /** The right-click menu's "Delete comment": the whole thread at the caret. */
+  async deleteAtCaret(): Promise<void> {
+    const threadId = this.threadAtCaret();
+    if (threadId) await this.remove({ threadId, commentId: threadId });
+    this.caretOnComment.next(!!this.threadAtCaret());
   }
 
   cancelDraft(): void {

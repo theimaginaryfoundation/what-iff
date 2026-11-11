@@ -40,6 +40,19 @@ export interface UniverDocsKit {
   setDocGuides(univer: Univer, unitId: string, show: boolean): boolean;
   /** The comment marks of a document (ADR 0x045); null until its page is rendered. */
   commentMarks(univer: Univer, unitId: string): DocCommentMarks | null;
+  /** Adds items to the page's right-click menu; dispose removes their commands. */
+  addContextMenuItems(univer: Univer, items: readonly DocMenuItem[]): { dispose(): void };
+}
+
+/** An item of the document's right-click menu. */
+export interface DocMenuItem {
+  id: string;
+  title: string;
+  icon: 'new' | 'reply' | 'delete';
+  order: number;
+  /** Whether the item is left out, as it changes. */
+  hidden$: import('rxjs').Observable<boolean>;
+  run(): void;
 }
 
 /** Univer's comment decorations over a document's text, driven by the editor's own comment threads. */
@@ -57,6 +70,8 @@ export interface DocCommentMarks {
   at(offset: number): string | null;
   /** A story's text over [start, end), for quoting. */
   text(segmentId: string, start: number, end: number): string;
+  /** The word at an offset, as [start, end); null where there is none (a space, a paragraph end). */
+  wordAt(segmentId: string, offset: number): { start: number; end: number } | null;
   dispose(): void;
 }
 
@@ -88,6 +103,12 @@ export function createFormulaWorker(): Worker | null {
 }
 
 const DOC_MAIN_COMPONENT = '__Document_Render_Main__';
+/** The comment menu items' icons, registered under names of our own. */
+const COMMENT_MENU_ICONS = {
+  WhatIffCommentNewIcon: 'InsertCommentDoubleIcon',
+  WhatIffCommentReplyIcon: 'ReplyToCommentIcon',
+  WhatIffCommentDeleteIcon: 'DeleteIcon',
+} as const;
 /** RichTextEditingMutation: the mutation every document change goes through. */
 const DOC_RICH_TEXT_MUTATION = 'doc.mutation.rich-text-editing';
 const DOC_BACKGROUND_COMPONENT = '__Document_Render_Background__';
@@ -210,7 +231,7 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
 
 export function loadUniverDocs(document: Document): Promise<UniverDocsKit> {
   docsKit ??= (async () => {
-    const [presets, core, link, drawing, enUS, linkUS, drawingUS] = await Promise.all([
+    const [presets, core, link, drawing, enUS, linkUS, drawingUS, icons] = await Promise.all([
       import('@univerjs/presets'),
       import('@univerjs/preset-docs-core'),
       import('@univerjs/preset-docs-hyper-link'),
@@ -218,6 +239,7 @@ export function loadUniverDocs(document: Document): Promise<UniverDocsKit> {
       import('@univerjs/preset-docs-core/locales/en-US'),
       import('@univerjs/preset-docs-hyper-link/locales/en-US'),
       import('@univerjs/preset-docs-drawing/locales/en-US'),
+      import('@univerjs/icons'),
       linkStylesheet(document, UNIVER_DOCS_STYLESHEET, 'univerDocs'),
     ]);
     const strings = presets.merge({}, enUS.default, linkUS.default, drawingUS.default);
@@ -303,6 +325,18 @@ export function loadUniverDocs(document: Document): Promise<UniverDocsKit> {
             hits.sort((a, b) => a.endIndex - a.startIndex - (b.endIndex - b.startIndex));
             return hits[0]?.id ?? null;
           },
+          wordAt: (segmentId, offset) => {
+            const model = document();
+            const stream = (segmentId ? model?.getSelfOrHeaderFooterModel(segmentId)?.getBody() : model?.getBody())?.dataStream ?? '';
+            const word = /[\p{L}\p{N}_'’-]/u;
+            // The caret sits between characters: the word is the one it is in or just after.
+            let at = word.test(stream[offset] ?? '') ? offset : word.test(stream[offset - 1] ?? '') ? offset - 1 : -1;
+            if (at < 0) return null;
+            let start = at;
+            while (start > 0 && word.test(stream[start - 1])) start--;
+            while (at < stream.length && word.test(stream[at])) at++;
+            return { start, end: at };
+          },
           text: (segmentId, start, end) => {
             const model = document();
             const body = segmentId ? model?.getSelfOrHeaderFooterModel(segmentId)?.getBody() : model?.getBody();
@@ -310,6 +344,39 @@ export function loadUniverDocs(document: Document): Promise<UniverDocsKit> {
           },
           dispose: () => interceptor.dispose(),
         };
+      },
+      addContextMenuItems: (univer, items) => {
+        const injector = univer.__getInjector();
+        const commands = injector.get(presets.ICommandService);
+        const iconManager = injector.get(core.IconManager);
+        const disposers = [
+          ...Object.entries(COMMENT_MENU_ICONS).map(([name, key]) => iconManager.register(name, icons[key])),
+          ...items.map(item =>
+            commands.registerCommand({ id: item.id, type: presets.CommandType.OPERATION, handler: () => (item.run(), true) }),
+          ),
+        ];
+        const iconName = (icon: DocMenuItem['icon']) => Object.keys(COMMENT_MENU_ICONS)[['new', 'reply', 'delete'].indexOf(icon)];
+        // First in the list under the quick actions, as Word puts its comment items.
+        injector.get(core.IMenuManagerService).mergeMenu({
+          [core.ContextMenuPosition.MAIN_AREA]: {
+            [core.ContextMenuGroup.FORMAT]: Object.fromEntries(
+              items.map(item => [
+                item.id,
+                {
+                  order: item.order - 10,
+                  menuItemFactory: () => ({
+                    id: item.id,
+                    type: core.MenuItemType.BUTTON,
+                    title: item.title,
+                    icon: iconName(item.icon),
+                    hidden$: item.hidden$,
+                  }),
+                },
+              ]),
+            ),
+          },
+        });
+        return { dispose: () => disposers.forEach(d => d.dispose()) };
       },
       options: (container, opts) => ({
         locale: presets.LocaleType.EN_US,

@@ -1,5 +1,6 @@
 import type PptxGenJS from 'pptxgenjs';
 
+import type { PptxComments, SlideCommentThread } from './pptx-comments';
 import { FidelityCollector, FidelityReport } from '../shared/fidelity';
 import { OoxmlPackage } from '../shared/ooxml';
 import {
@@ -31,6 +32,12 @@ export interface PptxExportOptions {
   imported?: Deck | null;
   /** The pptxgenjs factory for a deck with no original. */
   factory?: PptxGenFactory;
+  /**
+   * The comment threads to save (ADR 0x045), and the comments the original was read with. Left
+   * out, a patched file keeps its comments as they were.
+   */
+  comments?: readonly SlideCommentThread[];
+  importedComments?: PptxComments | null;
 }
 
 const PT_PER_INCH = 72;
@@ -45,7 +52,10 @@ export async function deckToPptx(deck: Deck, options?: PptxGenFactory | PptxExpo
   const fidelity = new FidelityCollector();
   if (opts.original && opts.imported) {
     const { patchPptx } = await import('./pptx-patch');
-    const bytes = await patchPptx(deck, { original: opts.original, imported: opts.imported }, fidelity);
+    const comments = opts.comments
+      ? { threads: opts.comments, imported: opts.importedComments ?? { threads: [], authors: [] } }
+      : undefined;
+    const bytes = await patchPptx(deck, { original: opts.original, imported: opts.imported, ...(comments ? { comments } : {}) }, fidelity);
     return { bytes, report: fidelity.report() };
   }
   const factory = opts.factory;
@@ -54,7 +64,9 @@ export async function deckToPptx(deck: Deck, options?: PptxGenFactory | PptxExpo
   const out = await pptx.write({ outputType: 'arraybuffer' });
   const raw =
     out instanceof ArrayBuffer ? new Uint8Array(out) : out instanceof Uint8Array ? out : new Uint8Array(await (out as Blob).arrayBuffer());
-  return { bytes: await normalizePackage(raw), report: fidelity.report() };
+  let bytes = await normalizePackage(raw);
+  if (opts.comments?.length) bytes = await (await import('./pptx-patch')).addCommentsToNewPackage(bytes, deck, opts.comments);
+  return { bytes, report: fidelity.report() };
 }
 
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';

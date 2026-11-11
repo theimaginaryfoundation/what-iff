@@ -9,6 +9,17 @@ import { domToParagraphs, paragraphsToHtml } from './text-dom';
 
 /** Points to CSS pixels: the slide is laid out in points and scaled to fit. */
 export const PX_PER_PT = 96 / 72;
+const PIN_SIZE_PX = 22;
+
+/** A comment thread's marker on the slide. */
+export interface CommentPin {
+  id: string;
+  /** Slide points: where the pin's tail points. */
+  x: number;
+  y: number;
+  active: boolean;
+  label: string;
+}
 
 export type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 const HANDLES: readonly ResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
@@ -45,6 +56,10 @@ export class SlideCanvasComponent {
   readonly editingId = input<string | null>(null);
   /** Drawn for the rail: no handles, no pointer handling, a label for assistive tech. */
   readonly label = input<string>('');
+  /** Comment threads' pins (ADR 0x045), in slide points. */
+  readonly pins = input<readonly CommentPin[]>([]);
+  /** The element the active comment thread is about, outlined. */
+  readonly highlightId = input<string | null>(null);
 
   readonly select = output<string | null>();
   /** The user started dragging or resizing: a point for the editor's undo history. */
@@ -54,6 +69,8 @@ export class SlideCanvasComponent {
   readonly requestEdit = output<string>();
   readonly textCommit = output<{ id: string; paragraphs: Paragraph[]; cell?: { row: number; col: number } }>();
   readonly open = output<string>();
+  /** A comment pin was chosen. */
+  readonly pinSelect = output<string>();
 
   readonly handles = HANDLES;
   readonly cssWidth = computed(() => this.size().width * PX_PER_PT * this.scale());
@@ -215,6 +232,15 @@ export class SlideCanvasComponent {
   }
 
   // --- interaction -------------------------------------------------------------------------------
+
+  /** A pin's place on screen, kept inside the slide so a pin at its edge stays clickable. */
+  pinStyle(pin: CommentPin): { left: number; top: number } {
+    const scale = PX_PER_PT * this.scale();
+    return {
+      left: Math.max(0, Math.min(pin.x * scale, this.cssWidth() - PIN_SIZE_PX)),
+      top: Math.max(0, Math.min(pin.y * scale - PIN_SIZE_PX, this.cssHeight() - PIN_SIZE_PX)),
+    };
+  }
 
   onBackgroundPointerDown(event: PointerEvent): void {
     if (!this.interactive()) return;

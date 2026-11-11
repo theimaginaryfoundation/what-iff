@@ -43,6 +43,14 @@ function fakeUniverKit() {
     positions: () => new Map(decorations().map(d => [d.id, d.startIndex])),
     at: (offset: number) => decorations().find(d => d.startIndex <= offset && offset <= d.endIndex)?.id ?? null,
     text: (_segmentId: string, start: number, end: number) => state.data!.body.dataStream.slice(start, end),
+    wordAt: (_segmentId: string, offset: number) => {
+      const stream = state.data!.body.dataStream;
+      let start = offset;
+      let end = offset;
+      while (start > 0 && /\w/.test(stream[start - 1])) start--;
+      while (end < stream.length && /\w/.test(stream[end])) end++;
+      return end > start ? { start, end } : null;
+    },
     dispose: () => undefined,
   };
   const kit: UniverKit & { setDocGuides(univer: unknown, unitId: string, show: boolean): boolean; commentMarks(): typeof marks } = {
@@ -276,6 +284,30 @@ describe('DocsEditorComponent', () => {
         ['5D3E2F03', ['Finance signed this off.']],
       ]);
       expect(back.comments[1].comments[0].mentions).toEqual([{ id: 'author:Sam Okafor', name: 'Sam Okafor' }]);
+    });
+
+    it('the right-click items: a comment on the word at the caret, and reply to or delete the thread there', async () => {
+      // The fake kit has no context menu; the editor's actions behind it are what is tested.
+      const el = await open(attachment(), await commentedBlob(), false);
+      await vi.waitFor(() => expect(fake.state.painted.length).toBeGreaterThan(0));
+      const editor = fixture.componentInstance;
+      const stream = fake.state.data!.body.dataStream;
+      const inBudget = stream.indexOf('Budget') + 2;
+      click(inBudget);
+      editor.startComment();
+      fixture.detectChanges();
+      expect(el.querySelector('.thread--draft .thread__quote')?.textContent).toBe('Budget');
+
+      editor.cancelDraft();
+      click(stream.indexOf('three') + 1);
+      editor.replyAtCaret();
+      fixture.detectChanges();
+      expect(editor.activeThreadId()).toBe('5D3E2F01');
+      expect(el.querySelector('[data-thread-id="5D3E2F01"] textarea[aria-label="Reply"]')).not.toBeNull();
+
+      await editor.deleteAtCaret();
+      expect(editor.threads().map(t => t.id)).toEqual(['5D3E2F03']);
+      expect(fake.state.data!.body.customDecorations!.map(d => d.id)).toEqual(['5D3E2F03']);
     });
 
     it('deleting a thread removes its mark, and resolving keeps it but hides it', async () => {
