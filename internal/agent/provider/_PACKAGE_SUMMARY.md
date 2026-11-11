@@ -8,6 +8,10 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 
 - **`ModelContext` / `ModelContextSegment`:** Segment kinds (including dedicated mode prompt segment) and append/insert helpers (`InsertBeforeLastUserMessage` for optional developer lines immediately before the final user turn).
   **`StripUserMessageImages`** clears multimodal payloads when reusing a context for APIs that only accept text (e.g. expression picker + strict JSON schema on Responses API).
+- **Image edits (`image_edit.go`, ADR 0x045):** `ImageEditor` is an optional `ImageGenerator` interface for generations conditioned on input images, each with an `ImageRole`, plus an optional white-on-black mask for the base image.
+  `editInstructions` tells the model what each input is (markup is instructions, never drawn).
+  OpenAI sends every image to the edit endpoint with the mask turned into its alpha form (`alphaMaskPNG`); Gemini, which has no mask parameter, gets a guide image with the area tinted magenta (`maskGuidePNG`).
+  z.ai and Qwen do not edit yet.
 - **OpenAI:** `RenderOpenAIInputItems`, `ModelContext.BuildOpenAIResponseParams`, `OpenAIProvider`, `OpenAIAdapter`, `ProcessResponseOutput` (assistant text extraction / dedup), `BuildOpenAITools`, image generation helpers, file-attachment upload helpers.
   **`SegmentKindUserMessage` with `RoleDeveloper` and images** (expression continuity portrait) is rendered as **two** input items—developer text plus a **user** message carrying `input_image`, because the Responses API allows images only under the user role for message parts.
 - **Claude:** `BuildClaudeParams`, `ClaudeProvider`, `ClaudeAdapter`, `ClaudeFunctionTool`, `ExtractClaudeText`, `ExtractClaudeBetaText`, `UnmarshalClaudeTextJSON`.

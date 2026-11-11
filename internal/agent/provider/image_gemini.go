@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -72,7 +73,8 @@ type geminiGenerationConfig struct {
 }
 
 type geminiImageConfig struct {
-	AspectRatio string `json:"aspectRatio"`
+	// AspectRatio is empty on an edit that follows its input image's shape.
+	AspectRatio string `json:"aspectRatio,omitempty"`
 	ImageSize   string `json:"imageSize"`
 }
 
@@ -102,8 +104,19 @@ var geminiBlockedFinishReasons = map[string]bool{
 }
 
 func buildGeminiImageRequest(prompt string, quality ImageQuality, aspectRatio ImageAspectRatio) geminiImageRequest {
-	ratio := "1:1"
+	if aspectRatio == "" {
+		aspectRatio = ImageAspectRatioSquare
+	}
+	return geminiRequest([]geminiPart{{Text: prompt}}, quality, aspectRatio)
+}
+
+// geminiRequest asks for one image from parts. An empty aspectRatio leaves the shape to the
+// model, which follows the input image on an edit.
+func geminiRequest(parts []geminiPart, quality ImageQuality, aspectRatio ImageAspectRatio) geminiImageRequest {
+	ratio := ""
 	switch aspectRatio {
+	case ImageAspectRatioSquare:
+		ratio = "1:1"
 	case ImageAspectRatioLandscape:
 		ratio = "3:2"
 	case ImageAspectRatioPortrait:
@@ -115,7 +128,7 @@ func buildGeminiImageRequest(prompt string, quality ImageQuality, aspectRatio Im
 		size = "2K"
 	}
 	return geminiImageRequest{
-		Contents: []geminiContent{{Role: "user", Parts: []geminiPart{{Text: prompt}}}},
+		Contents: []geminiContent{{Role: "user", Parts: parts}},
 		GenerationConfig: geminiGenerationConfig{
 			ResponseModalities: []string{"IMAGE"},
 			ImageConfig:        geminiImageConfig{AspectRatio: ratio, ImageSize: size},
@@ -123,15 +136,55 @@ func buildGeminiImageRequest(prompt string, quality ImageQuality, aspectRatio Im
 	}
 }
 
+// buildGeminiEditRequest puts the instructions first, then every input image and, for a mask,
+// the guide image (Gemini has no mask parameter, but follows a marked-up copy well).
+func buildGeminiEditRequest(req ImageEditRequest) (geminiImageRequest, error) {
+	images := req.Images
+	guide := 0
+	var guidePNG []byte
+	if len(req.Mask) > 0 {
+		var err error
+		if guidePNG, err = maskGuidePNG(images[0].Data, req.Mask); err != nil {
+			return geminiImageRequest{}, err
+		}
+		guide = len(images) + 1
+	}
+	parts := []geminiPart{{Text: editInstructions(images, guide, false, req.Prompt)}}
+	for _, img := range images {
+		parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: inputImageMIME(img), Data: base64.StdEncoding.EncodeToString(img.Data)}})
+	}
+	if guidePNG != nil {
+		parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: "image/png", Data: base64.StdEncoding.EncodeToString(guidePNG)}})
+	}
+	return geminiRequest(parts, req.Quality, req.AspectRatio), nil
+}
+
+// EditImage is generateContent with the input images inline.
+func (g *GeminiImageGenerator) EditImage(ctx context.Context, req ImageEditRequest) (GeneratedImage, error) {
+	if err := req.validate(); err != nil {
+		return GeneratedImage{}, err
+	}
+	body, err := buildGeminiEditRequest(req)
+	if err != nil {
+		return GeneratedImage{}, err
+	}
+	return g.call(ctx, genAIOpEditImage, body)
+}
+
 func (g *GeminiImageGenerator) GenerateImage(ctx context.Context, prompt string, quality ImageQuality, aspectRatio ImageAspectRatio) (GeneratedImage, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return GeneratedImage{}, fmt.Errorf("prompt is required")
 	}
+	return g.call(ctx, genAIOpGenerateImage, buildGeminiImageRequest(prompt, quality, aspectRatio))
+}
+
+// call posts one generateContent request and reads the image out of the answer.
+func (g *GeminiImageGenerator) call(ctx context.Context, op string, body geminiImageRequest) (GeneratedImage, error) {
 	endpoint := joinURL(g.baseURL, "models/"+g.model+":generateContent")
-	call := startGenAICall(ctx, g.tel, telemetry.DependencyGemini, g.model, genAIOpGenerateImage)
+	call := startGenAICall(ctx, g.tel, telemetry.DependencyGemini, g.model, op)
 	var resp geminiImageResponse
-	err := g.postJSON(ctx, endpoint, nil, buildGeminiImageRequest(prompt, quality, aspectRatio), &resp)
+	err := g.postJSON(ctx, endpoint, nil, body, &resp)
 	if err == nil {
 		call.recordUsage(genAIUsage{Input: resp.UsageMetadata.PromptTokenCount, Output: resp.UsageMetadata.CandidatesTokenCount})
 	}

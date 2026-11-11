@@ -25,6 +25,9 @@ type generateImageToolArgs struct {
 	AspectRatio    *string `json:"aspect_ratio,omitempty"`
 	FilenamePrefix *string `json:"filename_prefix,omitempty"`
 	Folder         *string `json:"folder,omitempty"`
+	// ReferenceImages and MaskImage make the request an edit (ADR 0x045).
+	ReferenceImages []generateImageReference `json:"reference_images,omitempty"`
+	MaskImage       string                   `json:"mask_image,omitempty"`
 }
 
 type generateImageToolImage struct {
@@ -33,14 +36,17 @@ type generateImageToolImage struct {
 }
 
 type generateImageToolResult struct {
-	Success     bool                     `json:"success"`
-	Prompt      string                   `json:"prompt,omitempty"`
-	Quality     string                   `json:"quality,omitempty"`
-	AspectRatio string                   `json:"aspect_ratio,omitempty"`
-	Folder      string                   `json:"folder,omitempty"`
-	Count       int                      `json:"count,omitempty"`
-	Images      []generateImageToolImage `json:"images,omitempty"`
-	Error       string                   `json:"error,omitempty"`
+	Success     bool   `json:"success"`
+	Prompt      string `json:"prompt,omitempty"`
+	Quality     string `json:"quality,omitempty"`
+	AspectRatio string `json:"aspect_ratio,omitempty"`
+	Folder      string `json:"folder,omitempty"`
+	Count       int    `json:"count,omitempty"`
+	// Provider is the vendor that made the images; ReferenceImages how many input images it had.
+	Provider        string                   `json:"provider,omitempty"`
+	ReferenceImages int                      `json:"reference_images,omitempty"`
+	Images          []generateImageToolImage `json:"images,omitempty"`
+	Error           string                   `json:"error,omitempty"`
 }
 
 func marshalGenerateImageToolResult(result generateImageToolResult) (string, error) {
@@ -49,6 +55,16 @@ func marshalGenerateImageToolResult(result generateImageToolResult) (string, err
 		return "", fmt.Errorf("failed to marshal generate_image result: %w", err)
 	}
 	return string(out), nil
+}
+
+// generateImageFailure is a refused request: a result the model reads, not a failed tool call.
+func (a *Agent) generateImageFailure(reason string) (string, []*models.FileAttachment, error) {
+	out, err := marshalGenerateImageToolResult(generateImageToolResult{Success: false, Error: reason})
+	if err != nil {
+		a.logger.Error("failed to marshal generate_image refusal", zap.Error(err))
+		return "", nil, err
+	}
+	return out, nil, nil
 }
 
 func clampGenerateImageCount(count int) int {
@@ -163,7 +179,12 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 		return out, nil, nil
 	}
 
+	editing := len(toolArgs.ReferenceImages) > 0 || strings.TrimSpace(toolArgs.MaskImage) != ""
 	aspectRatio, arErr := parseGenerateImageAspectRatio(toolArgs.AspectRatio)
+	if editing && (toolArgs.AspectRatio == nil || strings.TrimSpace(*toolArgs.AspectRatio) == "") {
+		// An edit keeps its base image's shape unless asked otherwise.
+		aspectRatio = ""
+	}
 	if arErr != nil {
 		out, merr := marshalGenerateImageToolResult(generateImageToolResult{
 			Success: false,
@@ -187,6 +208,24 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 			return "", nil, merr
 		}
 		return out, nil, nil
+	}
+
+	// Input images are found and checked, and the vendor asked whether it edits, before the quota
+	// gate: a request that cannot run should not count against it.
+	var editor provider.ImageEditor
+	var inputs []provider.ImageInput
+	var mask []byte
+	if editing {
+		var err error
+		if editor, err = a.imageEditorForUser(ctx, chat.UserID); err != nil {
+			if errors.Is(err, errNoImageGenerator) {
+				return "", nil, err
+			}
+			return a.generateImageFailure(err.Error())
+		}
+		if inputs, mask, err = a.imageInputs(ctx, chat, toolArgs.ReferenceImages, toolArgs.MaskImage); err != nil {
+			return a.generateImageFailure(err.Error())
+		}
 	}
 
 	// Quota gate. The images are billed per image once they exist, but the gate runs
@@ -222,9 +261,18 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 		}
 	}
 
-	generator, err := a.imageGeneratorForUser(ctx, chat.UserID)
-	if err != nil {
-		return "", nil, err
+	var generator provider.ImageGenerator = editor
+	generate := func(ctx context.Context) (provider.GeneratedImage, error) {
+		return editor.EditImage(ctx, provider.ImageEditRequest{Prompt: prompt, Quality: quality, AspectRatio: aspectRatio, Images: inputs, Mask: mask})
+	}
+	if !editing {
+		var err error
+		if generator, err = a.imageGeneratorForUser(ctx, chat.UserID); err != nil {
+			return "", nil, err
+		}
+		generate = func(ctx context.Context) (provider.GeneratedImage, error) {
+			return generator.GenerateImage(ctx, prompt, quality, aspectRatio)
+		}
 	}
 
 	images := make([]provider.GeneratedImage, count)
@@ -236,7 +284,7 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			img, err := generator.GenerateImage(ctx, prompt, quality, aspectRatio)
+			img, err := generate(ctx)
 			if err != nil {
 				errs[i] = err
 				return
@@ -314,6 +362,10 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 	// Record usage for each successfully generated image (fire-and-forget). With no
 	// metering implementation linked (the open-source build) the meter is the no-op
 	// one and nothing is tracked.
+	path := "tool"
+	if editing {
+		path = "tool_edit"
+	}
 	if a.meter != nil {
 		for i := 0; i < successCount; i++ {
 			a.meter.Record(ctx, qd, metering.Usage{
@@ -324,7 +376,7 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 				ImageProvider: string(generator.Provider()),
 				Source:        metering.TurnSourceFromContext(ctx),
 				Metadata: map[string]interface{}{
-					"path":        "tool",
+					"path":        path,
 					"engine":      generator.Model(),
 					"provider":    string(generator.Provider()),
 					"image_index": i + 1,
@@ -375,14 +427,16 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 	}
 
 	out, err := marshalGenerateImageToolResult(generateImageToolResult{
-		Success:     true,
-		Prompt:      prompt,
-		Quality:     string(quality),
-		AspectRatio: string(aspectRatio),
-		Folder:      folder,
-		Count:       count,
-		Images:      imagesMeta,
-		Error:       toolErrText,
+		Success:         true,
+		Prompt:          prompt,
+		Quality:         string(quality),
+		AspectRatio:     resultAspectRatio(aspectRatio),
+		Folder:          folder,
+		Count:           count,
+		Provider:        string(generator.Provider()),
+		ReferenceImages: len(inputs),
+		Images:          imagesMeta,
+		Error:           toolErrText,
 	})
 	if err != nil {
 		a.logger.Error("failed to marshal generate_image success result", zap.Error(err))
@@ -434,4 +488,12 @@ func generatedImageFileType(mime string) (string, string) {
 		return mime, ext
 	}
 	return "image/png", ".png"
+}
+
+// resultAspectRatio reports the shape asked for; an edit that followed its base image says so.
+func resultAspectRatio(ar provider.ImageAspectRatio) string {
+	if ar == "" {
+		return "same_as_base"
+	}
+	return string(ar)
 }

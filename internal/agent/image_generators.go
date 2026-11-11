@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -72,8 +72,11 @@ func (a *Agent) imageGeneratorForUser(ctx context.Context, userID uuid.UUID) (pr
 	if a.imageGenerators == nil && a.OpenAIProvider != nil {
 		return a.OpenAIProvider.ImageGenerator(), nil
 	}
-	return nil, fmt.Errorf("no image generation provider is available")
+	return nil, errNoImageGenerator
 }
+
+// errNoImageGenerator means no image vendor is usable at all: an operational failure, not a refusal.
+var errNoImageGenerator = errors.New("no image generation provider is available")
 
 // usableImageGenerators lists, in the settings UI's order, the generators this
 // caller holds a key for. Keys can belong to accounts (providerkeys), so this
