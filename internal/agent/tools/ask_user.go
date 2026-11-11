@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -15,7 +16,7 @@ Use it when you need a decision or information only they have, or before an acti
 
 Questions: send 1 to 4 in "questions". Give each question 2 to 4 short options when the likely answers are known (the user can always write their own answer instead), or no options for an open question. Put your recommended option first and add " (Recommended)" to its label. Set multi_select when several options can apply. Set optional on a question the user can reasonably leave unanswered, such as "Anything else I should know?".
 
-Approval: send "approval" instead of "questions", saying what you want to do and why.
+Approval: send "approval" instead of "questions", saying what you want to do and why. If you must fill in both, leave the one you are not using empty (questions: [], or an approval with an empty action).
 
 The tool returns the user's answers. If they don't answer in time, it says so: then stop working and end your turn by asking in your reply.`
 
@@ -100,18 +101,20 @@ var AskUserToolSpec = FunctionToolSpec{
 	},
 }
 
+type askUserQuestion struct {
+	Question string `json:"question"`
+	Header   string `json:"header"`
+	Options  []struct {
+		Label       string `json:"label"`
+		Description string `json:"description"`
+	} `json:"options"`
+	MultiSelect bool `json:"multi_select"`
+	Optional    bool `json:"optional"`
+}
+
 type askUserArgs struct {
-	Questions []struct {
-		Question string `json:"question"`
-		Header   string `json:"header"`
-		Options  []struct {
-			Label       string `json:"label"`
-			Description string `json:"description"`
-		} `json:"options"`
-		MultiSelect bool `json:"multi_select"`
-		Optional    bool `json:"optional"`
-	} `json:"questions"`
-	Approval *struct {
+	Questions []askUserQuestion `json:"questions"`
+	Approval  *struct {
 		Action  string `json:"action"`
 		Details string `json:"details"`
 	} `json:"approval"`
@@ -123,22 +126,31 @@ func ParseAskUserArgs(raw []byte) (models.AgentPromptPayload, error) {
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return models.AgentPromptPayload{}, fmt.Errorf("invalid ask_user arguments: %w", err)
 	}
-	if args.Approval != nil && len(args.Questions) > 0 {
+	// Models fill in the half they aren't using: OpenAI's strict function calling (the Responses
+	// API default) treats every property as required, so a question call can arrive with an empty
+	// approval, and an approval with questions: []. Only a half with content counts.
+	action := ""
+	if args.Approval != nil {
+		action = strings.TrimSpace(args.Approval.Action)
+	}
+	hasQuestions := slices.ContainsFunc(args.Questions, func(q askUserQuestion) bool {
+		return strings.TrimSpace(q.Question) != ""
+	})
+	if action != "" && hasQuestions {
 		return models.AgentPromptPayload{}, fmt.Errorf("send either questions or approval, not both")
 	}
-	if args.Approval != nil {
-		action := strings.TrimSpace(args.Approval.Action)
-		if action == "" {
+	if action == "" && len(args.Questions) == 0 {
+		if args.Approval != nil {
 			return models.AgentPromptPayload{}, fmt.Errorf("approval.action is required")
 		}
+		return models.AgentPromptPayload{}, fmt.Errorf("send at least one question, or an approval")
+	}
+	if action != "" {
 		return models.AgentPromptPayload{
 			Kind:    models.AgentPromptKindApproval,
 			Title:   TruncateRunes(action, maxAskUserQuestionChars),
 			Message: TruncateRunes(strings.TrimSpace(args.Approval.Details), maxAskUserQuestionChars*2),
 		}, nil
-	}
-	if len(args.Questions) == 0 {
-		return models.AgentPromptPayload{}, fmt.Errorf("send at least one question, or an approval")
 	}
 	if len(args.Questions) > MaxAskUserQuestions {
 		return models.AgentPromptPayload{}, fmt.Errorf("ask at most %d questions at once", MaxAskUserQuestions)
