@@ -185,6 +185,11 @@ describe('DocsEditorComponent', () => {
   });
 
   describe('comments', () => {
+    /** A click in the page, then the selection Univer reports for it. */
+    const click = (start: number, end = start) => {
+      fixture.nativeElement.querySelector('.univer-editor__univer').dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      select(start, end);
+    };
     const select = (start: number, end: number) =>
       fake.state.listeners.forEach(fn =>
         (fn as (e: unknown) => void)({
@@ -211,10 +216,34 @@ describe('DocsEditorComponent', () => {
       // Read-only: no boxes or buttons that would change a comment.
       expect(el.querySelector('app-comments-panel .thread__reply')).toBeNull();
 
-      select(fake.state.data!.body.dataStream.indexOf('three') + 2, fake.state.data!.body.dataStream.indexOf('three') + 2);
+      const inThread = fake.state.data!.body.dataStream.indexOf('three') + 2;
+      // A selection Univer reports by itself (a scroll, a blur) picks nothing.
+      select(inThread, inThread);
+      fixture.detectChanges();
+      expect(fixture.componentInstance.activeThreadId()).toBeNull();
+      click(inThread);
       fixture.detectChanges();
       expect(fixture.componentInstance.activeThreadId()).toBe('5D3E2F01');
       expect(fake.state.painted.at(-1)?.activeId).toBe('5D3E2F01');
+    });
+
+    it('choosing a thread in the panel makes it active in the page and scrolls to it', async () => {
+      const el = await open(attachment(), await commentedBlob());
+      await vi.waitFor(() => expect(fake.state.painted.length).toBeGreaterThan(0));
+      fixture.detectChanges();
+      const inThread = fake.state.data!.body.dataStream.indexOf('three') + 2;
+      click(inThread);
+      fixture.detectChanges();
+      (el.querySelector('.comments__filter') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      (el.querySelector('[data-thread-id="5D3E2F03"]') as HTMLElement).click();
+      // The page scrolls and reports the old caret again, which must not take the thread back.
+      select(inThread, inThread);
+      fixture.detectChanges();
+      expect(fixture.componentInstance.activeThreadId()).toBe('5D3E2F03');
+      expect(fake.state.revealed.at(-1)).toBe('5D3E2F03');
+      // The active thread is marked even though it is resolved.
+      expect(fake.state.painted.at(-1)).toEqual({ activeId: '5D3E2F03', hidden: [] });
     });
 
     it('starts a thread on the selection, posts it with a mention, and saves it into the file', async () => {

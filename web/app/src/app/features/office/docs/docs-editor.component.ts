@@ -86,6 +86,8 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
   /** Threads whose text is still in the document; deleting the text takes the comment with it. */
   private readonly marked = signal<ReadonlySet<string> | null>(null);
   private marks: DocCommentMarks | null = null;
+  /** Set by a click or key press in the page, so the selection that follows can pick a thread. */
+  private caretMovedByUser = false;
 
   readonly shownThreads = computed(() => {
     const marked = this.marked();
@@ -118,9 +120,12 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
       untracked(() => this.applyGuides());
     });
     // Captured, because Univer's own text input would take the keys first.
-    inject<ElementRef<HTMLElement>>(ElementRef).nativeElement.addEventListener('keydown', event => this.onKeydown(event), {
-      capture: true,
-    });
+    const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+    host.addEventListener('keydown', event => this.onKeydown(event), { capture: true });
+    for (const type of ['pointerdown', 'keydown'] as const) {
+      const inPage = (event: Event) => !!(event.target as Element | null)?.closest?.('.univer-editor__stage');
+      host.addEventListener(type, event => (this.caretMovedByUser = inPage(event)), { capture: true });
+    }
   }
 
   protected async loadKit(): Promise<UniverKit> {
@@ -203,6 +208,10 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
     const segmentId = event.params?.segmentId ?? '';
     const selection = { segmentId, start: Math.min(range.startOffset, range.endOffset), end: Math.max(range.startOffset, range.endOffset) };
     this.selection.set(selection);
+    // Univer also reports the selection when the page scrolls or loses focus (choosing a thread in
+    // the panel does both); only a click or key press in the page is the user moving the caret.
+    if (!this.caretMovedByUser) return;
+    this.caretMovedByUser = false;
     // Clicking into commented text opens its thread.
     if (segmentId || !this.marks) return;
     const threadId = this.marks.at(selection.start);
