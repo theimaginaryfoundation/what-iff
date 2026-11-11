@@ -116,6 +116,8 @@ interface ResolvedSlide {
   /** True when the part is new in this save (made or copied) and so must always be written. */
   fresh: boolean;
   sldId: string | null;
+  /** Each element's `p:cNvPr` id as written, once the slide's shapes have been patched. */
+  shapeIds?: Map<string, string>;
 }
 
 class Package {
@@ -352,6 +354,11 @@ export async function patchPptx(deck: Deck, opts: PatchOptions, fidelity: Fideli
       slide: item.slide,
       threads: threadsOn(threads, item.slide.id),
       before: item.fresh ? null : (beforeByPath.get(item.path) ?? []),
+      // An unchanged slide's shapes are the file's own, so their ids are the ones they were read with.
+      shapeIdOf: (elementId: string) => {
+        if (item.shapeIds) return item.shapeIds.get(elementId);
+        return item.slide.elements.find(e => e.id === elementId)?.sourceId?.replace(/#\d+$/, '');
+      },
     }));
     await writePptxComments(pkg, presPath, slides, imported);
   }
@@ -421,6 +428,19 @@ function dropCommentRel(slide: Document): boolean {
 }
 
 /**
+ * The shape ids pptxgenjs gave a slide's elements: it writes one top-level shape per element, in
+ * order, so they pair up when the counts agree; otherwise no element can be named.
+ */
+async function writtenShapeIds(pkg: Package, path: string, slide: Slide): Promise<(elementId: string) => string | undefined> {
+  const doc = await pkg.xml(path);
+  const spTree = child(child(doc?.documentElement, P, 'cSld'), P, 'spTree');
+  const nodes = elementChildren(spTree).filter(node => nodeId(node) !== null);
+  if (nodes.length !== slide.elements.length) return () => undefined;
+  const ids = new Map(slide.elements.map((el, i) => [el.id, nodeId(nodes[i])!]));
+  return elementId => ids.get(elementId);
+}
+
+/**
  * Adds comments to a package written from scratch (pptxgenjs), whose slides are slide1..n in deck
  * order.
  */
@@ -437,12 +457,14 @@ export async function addCommentsToNewPackage(bytes: Uint8Array, deck: Deck, thr
     const rel = presRels.find(r => r.id === attr(sldIdEl, NS.r, 'id'));
     const slide = deck.slides[i];
     if (!rel || !slide) continue;
+    const path = resolveTarget(presPath, rel.target);
     slides.push({
-      path: resolveTarget(presPath, rel.target),
+      path,
       sldId: sldIdEl.getAttribute('id') ?? '',
       slide,
       threads: threadsOn(threads, slide.id),
       before: null,
+      shapeIdOf: await writtenShapeIds(pkg, path, slide),
     });
   }
   await writePptxComments(pkg, presPath, slides, null);
@@ -534,7 +556,8 @@ async function patchSlidePart(pkg: Package, item: ResolvedSlide, counters: Count
   const contentChanged = item.fresh || !base || !sameModel({ ...slide, notes: '' }, { ...base, notes: '' });
   if (contentChanged) {
     if (!base || !sameModel(slide.background, base.background)) patchBackground(cSld, slide.background, ctx);
-    patchElements(spTree, slide, base, ctx);
+    item.shapeIds = new Map();
+    patchElements(spTree, slide, base, ctx, item.shapeIds);
     pkg.putXml(path, doc);
   }
 
@@ -588,7 +611,7 @@ function blankNotesXml(): string {
 
 // --- the shapes of a slide ----------------------------------------------------------------------
 
-function patchElements(spTree: Element, slide: Slide, base: Slide | null, ctx: SlideWriteContext): void {
+function patchElements(spTree: Element, slide: Slide, base: Slide | null, ctx: SlideWriteContext, written: Map<string, string>): void {
   const treeChildren = elementChildren(spTree);
   const nodeById = new Map<string, Element>();
   const repeats = new Map<string, number>();
@@ -643,10 +666,14 @@ function patchElements(spTree: Element, slide: Slide, base: Slide | null, ctx: S
     const existing = el.sourceId ? nodeById.get(el.sourceId) : undefined;
     if (existing) {
       previous = existing;
+      const id = nodeId(existing);
+      if (id) written.set(el.id, id);
       continue;
     }
     const node = newNode(el, ctx);
     if (!node) continue;
+    const id = nodeId(node);
+    if (id) written.set(el.id, id);
     if (previous) spTree.insertBefore(node, previous.nextSibling);
     else {
       // Before the first matched shape, after the group properties.

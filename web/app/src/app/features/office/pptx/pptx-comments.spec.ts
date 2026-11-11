@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { addReply, newComment, setResolved } from '../comments/comment-threads';
 import { OoxmlPackage } from '../shared/ooxml';
+import { addElement, newTextBox } from '../slides/deck-commands';
 import { blankDeck } from './deck-model';
 import { SlideCommentThread, newCommentGuid } from './pptx-comments';
 import { deckToPptx, normalizePackage } from './pptx-export';
@@ -205,14 +206,66 @@ describe('pptx comments', () => {
     expect(await saved.text('ppt/slides/_rels/slide1.xml.rels')).not.toContain('2018/10/relationships/comments');
   });
 
-  it('adds comments to a deck made here, saved for the first time', async () => {
-    const deck = blankDeck('d', 'new.pptx');
-    const id = newCommentGuid();
+  it('keeps a thread on a shape a shape thread: on a shape made here, and on one with no creation id', async () => {
+    const { bytes } = await commentedDeck();
+    const { deck, comments } = await read(bytes);
+    const s2 = deck.slides[1];
+    const box = { ...newTextBox(200, 100, 160, 60, 'Look'), name: 'Callout' };
+    const edited = addElement(deck, s2.id, box);
+    const budget = s2.elements[0];
+    const onBox = newCommentGuid();
+    const onBudget = newCommentGuid();
     const threads: SlideCommentThread[] = [
-      { id, anchor: { slideId: deck.slides[0].id, x: 30, y: 40 }, comments: [newComment(id, ME, { text: 'First!', mentions: [] })] },
+      ...comments.threads,
+      {
+        id: onBox,
+        anchor: { slideId: s2.id, x: box.left + box.width, y: box.top, elementId: box.id },
+        comments: [newComment(onBox, ME, { text: 'New box', mentions: [] })],
+      },
+      {
+        id: onBudget,
+        anchor: { slideId: s2.id, x: budget.left + budget.width, y: budget.top, elementId: budget.id },
+        comments: [newComment(onBudget, ME, { text: 'Old title', mentions: [] })],
+      },
     ];
-    const out = (await deckToPptx(deck, { comments: threads })).bytes;
+    const out = (await deckToPptx(edited, { original: bytes, imported: deck, comments: threads, importedComments: comments })).bytes;
+    const saved = await OoxmlPackage.open(out);
+    const slide2 = (await saved.text('ppt/slides/slide2.xml'))!;
+    // Both shapes now carry a creation id, which the comments name them by.
+    const creationIds = [...slide2.matchAll(/<a16:creationId[^>]*id="(\{[^"]+\})"/g)].map(m => m[1]);
+    expect(creationIds).toHaveLength(2);
+    const commentPart = saved.paths().find(p => /modernComment_.*\.xml$/.test(p) && p !== 'ppt/comments/modernComment_100_0.xml')!;
+    const xml = (await saved.text(commentPart))!;
+    for (const id of creationIds) expect(xml).toContain(`creationId="${id}"`);
+
     const back = await read(out);
-    expect(back.comments.threads.map(t => [t.id, t.anchor.x, t.anchor.y, t.comments[0].text])).toEqual([[id, 30, 40, 'First!']]);
+    const backSlide = back.deck.slides[1];
+    const anchorOf = (id: string) => back.comments.threads.find(t => t.id === id)!.anchor;
+    const backBox = backSlide.elements.find(e => e.name === 'Callout')!;
+    expect(anchorOf(onBox)).toEqual({ slideId: backSlide.id, x: backBox.left + backBox.width, y: backBox.top, elementId: backBox.id });
+    expect(anchorOf(onBudget).elementId).toBe(backSlide.elements[0].id);
+  });
+
+  it('adds comments to a deck made here, saved for the first time', async () => {
+    const box = newTextBox(100, 80, 160, 60, 'Box');
+    const fresh = blankDeck('d', 'new.pptx');
+    const made = addElement(fresh, fresh.slides[0].id, box);
+    const id = newCommentGuid();
+    const onBox = newCommentGuid();
+    const threads: SlideCommentThread[] = [
+      { id, anchor: { slideId: fresh.slides[0].id, x: 30, y: 40 }, comments: [newComment(id, ME, { text: 'First!', mentions: [] })] },
+      {
+        id: onBox,
+        anchor: { slideId: fresh.slides[0].id, x: box.left + box.width, y: box.top, elementId: box.id },
+        comments: [newComment(onBox, ME, { text: 'On the box', mentions: [] })],
+      },
+    ];
+    const out = (await deckToPptx(made, { comments: threads })).bytes;
+    const back = await read(out);
+    expect(back.comments.threads.map(t => [t.id, Math.round(t.anchor.x), Math.round(t.anchor.y), t.comments[0].text])).toEqual([
+      [id, 30, 40, 'First!'],
+      [onBox, box.left + box.width, box.top, 'On the box'],
+    ]);
+    expect(back.comments.threads[1].anchor.elementId).toBe(back.deck.slides[0].elements[0].id);
   });
 });

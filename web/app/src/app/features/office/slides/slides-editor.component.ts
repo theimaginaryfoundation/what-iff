@@ -194,6 +194,11 @@ export class SlidesEditorComponent implements FileEditor {
       untracked(() => void this.open(blob));
     });
     this.host.nativeElement.addEventListener('keydown', event => this.onKeydown(event));
+    // A comment's pin moves with the shape it is about.
+    effect(() => {
+      const deck = this.deck();
+      untracked(() => this.comments.follow(deck));
+    });
     inject(DestroyRef).onDestroy(() => {
       this.generation += 1;
       this.resizeObserver?.disconnect();
@@ -254,7 +259,7 @@ export class SlidesEditorComponent implements FileEditor {
       this.imported = result.deck;
       this.importedComments = result.comments;
       this.deck.set(result.deck);
-      this.comments.load(result.comments.threads);
+      this.comments.load(result.comments.threads, result.deck);
       this.slideIndex.set(0);
       this.selectedId.set(null);
       this.editingId.set(null);

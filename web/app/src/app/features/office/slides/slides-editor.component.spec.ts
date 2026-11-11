@@ -214,13 +214,41 @@ describe('SlidesEditorComponent', () => {
       const back = await pptxToDeck(new Uint8Array(await blob.arrayBuffer()), { id: 'x', name: 'x.pptx' }, parse);
       expect(back.comments.threads).toEqual([
         expect.objectContaining({
-          anchor: { slideId: back.deck.slides[0].id, x: title.left + title.width, y: title.top },
+          anchor: {
+            slideId: back.deck.slides[0].id,
+            x: title.left + title.width,
+            y: title.top,
+            elementId: back.deck.slides[0].elements[0].id,
+          },
           comments: [expect.objectContaining({ authorId: 'user:u-1', authorName: 'Pat Lee', text: 'Shorter title?' })],
         }),
       ]);
       // A reply after the save is a change of its own.
       c.comments.reply({ threadId: c.comments.threads()[0].id, draft: { text: 'Yes', mentions: [] } });
       expect(c.dirty()).toBe(true);
+    });
+
+    it("a shape thread's pin moves with its shape, and undo moves it back", async () => {
+      const el = await open(await samplePptx(), false);
+      const c = fixture.componentInstance;
+      const title = c.slide().elements[0];
+      c.onSelect(title.id);
+      c.startComment();
+      c.comments.create({ text: 'Follow me', mentions: [] });
+      fixture.detectChanges();
+      const at = () => c.comments.threads()[0].anchor;
+      expect(at()).toEqual(expect.objectContaining({ x: title.left + title.width, y: title.top }));
+      c.onGestureStart();
+      c.onGeometryChange({
+        id: title.id,
+        geometry: { left: title.left + 50, top: title.top + 20, width: title.width, height: title.height },
+      });
+      fixture.detectChanges();
+      expect(at()).toEqual(expect.objectContaining({ x: title.left + title.width + 50, y: title.top + 20 }));
+      c.undo();
+      fixture.detectChanges();
+      expect(at()).toEqual(expect.objectContaining({ x: title.left + title.width, y: title.top }));
+      void el;
     });
 
     it('comments on the slide when nothing is selected, and shows each slide its own threads', async () => {

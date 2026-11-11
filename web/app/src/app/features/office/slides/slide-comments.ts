@@ -93,7 +93,11 @@ export class SlideComments {
     return this.onSlide().find(t => t.id === this.activeId())?.anchor.elementId ?? null;
   });
 
-  load(threads: SlideCommentThread[]): void {
+  /** The deck the anchors were last placed against, so a moved shape takes its pins along. */
+  private placedOn: Deck | null = null;
+
+  load(threads: SlideCommentThread[], deck: Deck): void {
+    this.placedOn = deck;
     this.threads.set(threads);
     this.activeId.set(null);
     this.draft.set(null);
@@ -152,6 +156,28 @@ export class SlideComments {
     if (event.threadId === event.commentId && this.activeId() === event.threadId) this.activeId.set(null);
     this.threads.update(threads => removeComment(threads, event.threadId, event.commentId));
     this.changed();
+  }
+
+  /**
+   * Moves the pins of threads about shapes that moved since the deck was last seen (a drag, an
+   * undo), so a pin stays where it was on its shape. Not a change of its own: the shape moved.
+   */
+  follow(deck: Deck): void {
+    const before = this.placedOn;
+    this.placedOn = deck;
+    if (!before || before === deck) return;
+    const where = (d: Deck, slideId: string, elementId: string) =>
+      d.slides.find(sl => sl.id === slideId)?.elements.find(e => e.id === elementId);
+    let moved = false;
+    const next = this.threads().map(t => {
+      if (!t.anchor.elementId) return t;
+      const was = where(before, t.anchor.slideId, t.anchor.elementId);
+      const now = where(deck, t.anchor.slideId, t.anchor.elementId);
+      if (!was || !now || (was.left === now.left && was.top === now.top)) return t;
+      moved = true;
+      return { ...t, anchor: { ...t.anchor, x: t.anchor.x + now.left - was.left, y: t.anchor.y + now.top - was.top } };
+    });
+    if (moved) this.threads.set(next);
   }
 
   /** Leaving a slide leaves its thread being started. */

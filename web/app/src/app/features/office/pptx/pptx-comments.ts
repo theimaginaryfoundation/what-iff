@@ -270,6 +270,8 @@ export interface CommentedSlide {
   threads: readonly SlideCommentThread[];
   /** The threads it had when read, or null when the part is new in this save. */
   before: readonly SlideCommentThread[] | null;
+  /** The `p:cNvPr` id an element of the slide was written with, if it can be named. */
+  shapeIdOf?: (elementId: string) => string | undefined;
 }
 
 const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n';
@@ -406,6 +408,8 @@ async function writeSlide(pkg: CommentPackage, item: CommentedSlide, authors: Au
 
   const cId = slideDoc.getElementsByTagNameNS(P14, 'creationId')[0]?.getAttribute('val') ?? null;
   const sldMk = `<pc:sldMkLst xmlns:pc="${PC}"><pc:docMk/><pc:sldMk${cId ? ` cId="${escapeXml(cId)}"` : ''} sldId="${escapeXml(item.sldId)}"/></pc:sldMkLst>`;
+  const sldMkInner = `<pc:docMk/><pc:sldMk${cId ? ` cId="${escapeXml(cId)}"` : ''} sldId="${escapeXml(item.sldId)}"/>`;
+  let slideChanged = false;
   const cms = item.threads.map(thread => {
     const was = before.get(thread.id);
     const kept =
@@ -413,17 +417,28 @@ async function writeSlide(pkg: CommentPackage, item: CommentedSlide, authors: Au
         ? anchors.get(thread.id.toUpperCase())
         : undefined;
     const element = thread.anchor.elementId ? item.slide.elements.find(e => e.id === thread.anchor.elementId) : undefined;
-    // A kept shape anchor positions the pin from the shape; a written slide anchor from the slide.
-    const keptShape = !!kept && kept.includes('deMkLst');
-    const origin = keptShape && element ? { x: element.left, y: element.top } : { x: 0, y: 0 };
+    // A thread about a shape names it (ac:deMkLst) by its id and creation id, as PowerPoint does.
+    let anchor = kept;
+    if (!anchor && element) {
+      const shapeId = item.shapeIdOf?.(element.id);
+      const moniker = shapeId ? shapeMoniker(slideDoc, shapeId) : null;
+      if (moniker) {
+        slideChanged ||= moniker.added;
+        anchor = `<ac:deMkLst xmlns:ac="${AC}" xmlns:pc="${PC}">${sldMkInner}${moniker.xml}</ac:deMkLst>`;
+      }
+    }
+    // A shape anchor positions the pin from the shape's top-left, a slide anchor from the slide's.
+    const onShape = !!anchor && anchor.includes('deMkLst') && !!element;
+    const origin = onShape ? { x: element!.left, y: element!.top } : { x: 0, y: 0 };
     const pos = `<p188:pos x="${Math.round((thread.anchor.x - origin.x) * EMU_PER_PT)}" y="${Math.round((thread.anchor.y - origin.y) * EMU_PER_PT)}"/>`;
     const [first, ...rest] = thread.comments;
     const replies = rest.length
       ? `<p188:replyLst>${rest.map(c => `<p188:reply ${attrs(c, authors.idFor(c))}>${txBody(c.text)}</p188:reply>`).join('')}</p188:replyLst>`
       : '';
     const status = thread.resolved ? ' status="resolved"' : '';
-    return `<p188:cm ${attrs(first, authors.idFor(first))}${status}>${kept ?? sldMk}${pos}${replies}${txBody(first.text)}</p188:cm>`;
+    return `<p188:cm ${attrs(first, authors.idFor(first))}${status}>${anchor ?? sldMk}${pos}${replies}${txBody(first.text)}</p188:cm>`;
   });
+  if (slideChanged) pkg.putXml(item.path, slideDoc);
 
   if (!cms.length) {
     if (modernPath) pkg.remove(modernPath);
@@ -449,6 +464,41 @@ async function writeSlide(pkg: CommentPackage, item: CommentedSlide, authors: Au
     pkg.putXml(item.path, slideDoc);
   }
   if (!modernRel || legacy.length) pkg.putRels(item.path, nextRels);
+}
+
+const A16 = 'http://schemas.microsoft.com/office/drawing/2014/main';
+/** The `a:ext` that carries a shape's creation id. */
+const CREATION_ID_EXT = '{FF2B5EF4-FFF2-40B4-BE49-F238E27FC236}';
+const MONIKER_BY_NODE: Record<string, string> = {
+  sp: 'spMk',
+  pic: 'picMk',
+  cxnSp: 'cxnSpMk',
+  grpSp: 'grpSpMk',
+  graphicFrame: 'graphicFrameMk',
+};
+
+/**
+ * The moniker naming a shape on the slide (ac:spMk and its kin): its id and its creation id. A
+ * shape with no creation id (one made here, or by another writer) is given one, as PowerPoint gives
+ * every shape; `added` says the slide changed.
+ */
+function shapeMoniker(slideDoc: Document, shapeId: string): { xml: string; added: boolean } | null {
+  const cNvPr = Array.from(slideDoc.getElementsByTagNameNS(P, 'cNvPr')).find(el => el.getAttribute('id') === shapeId);
+  const node = cNvPr?.parentElement?.parentElement;
+  const name = node ? MONIKER_BY_NODE[node.localName] : undefined;
+  if (!cNvPr || !name) return null;
+  let creation = Array.from(cNvPr.getElementsByTagNameNS(A16, 'creationId'))[0];
+  let added = false;
+  if (!creation) {
+    let extLst = Array.from(cNvPr.children).find(el => el.namespaceURI === A && el.localName === 'extLst');
+    if (!extLst) extLst = cNvPr.appendChild(slideDoc.createElementNS(A, 'a:extLst'));
+    const ext = extLst.appendChild(slideDoc.createElementNS(A, 'a:ext'));
+    ext.setAttribute('uri', CREATION_ID_EXT);
+    creation = ext.appendChild(slideDoc.createElementNS(A16, 'a16:creationId'));
+    creation.setAttribute('id', newCommentGuid());
+    added = true;
+  }
+  return { xml: `<ac:${name} id="${escapeXml(shapeId)}" creationId="${escapeXml(creation.getAttribute('id') ?? '')}"/>`, added };
 }
 
 function freePath(pkg: CommentPackage, base: string): string {
