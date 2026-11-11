@@ -37,6 +37,8 @@ export class ContextPanelService {
   private readonly _filesVersion = signal(0);
   // Bumped when the Files tab asks the composer to open its gallery picker.
   private readonly _galleryPickerRequests = signal(0);
+  // Bumped when the Files tab asks for a blank canvas to sketch on (ADR 0x045 §7).
+  private readonly _sketchRequests = signal(0);
   private readonly _composerThreadReferences = signal<Chat[]>([]);
   private readonly _toolCalls = signal<readonly ToolCall[]>([]);
   private readonly _latestBreakdown = signal<ContextBreakdown | null>(null);
@@ -59,6 +61,7 @@ export class ContextPanelService {
   readonly filesVersion = this._filesVersion.asReadonly();
   readonly composerPending = this._composerPending.asReadonly();
   readonly galleryPickerRequests = this._galleryPickerRequests.asReadonly();
+  readonly sketchRequests = this._sketchRequests.asReadonly();
   /** Threads attached to the message being composed; rendered as chips above the composer. */
   readonly composerThreadReferences = this._composerThreadReferences.asReadonly();
   readonly toolCalls = this._toolCalls.asReadonly();
@@ -160,6 +163,11 @@ export class ContextPanelService {
   }
 
   /** Asks the composer to open its "Add from gallery" picker. */
+  /** Asks the chat page to open a blank canvas to sketch on. */
+  requestSketch(): void {
+    this._sketchRequests.update(n => n + 1);
+  }
+
   requestGalleryPicker(): void {
     this._galleryPickerRequests.update(n => n + 1);
   }

@@ -83,7 +83,7 @@ Pointer events cover mouse, pen and touch (`touch-action: none` on the canvas).
 Markup is offered on phones too, unlike Edit: drawing with a finger is the point.
 It is offered only where there is a thread to add to (the chat-hosted workspace), not in the gallery.
 
-Add to message uploads up to two new files into the thread, in a `markup` gallery folder, and attaches them with a reference copy of the original (`POST /image-gallery/{id}/reference`, as the gallery picker does: a file belongs to one message, and the original is usually on one already):
+Add to message uploads up to two new files into the thread, in the gallery's `image_masks` folder (they matter for a turn or two, so they collect out of the way), and attaches them with a reference copy of the original (`POST /image-gallery/{id}/reference`, as the gallery picker does: a file belongs to one message, and the original is usually on one already):
 - `<name>-mask`, when the area brush was used, described as "Mask for <name>: white marks the area the user wants changed, black the area to keep."
 - `<name>-markup`, when the pen was used, described as "<name> with the user's markup drawn on it: the marks show where and what to change, and are instructions, not content."
 
@@ -95,13 +95,15 @@ The composer's attachment hand-off became a queue: it held one file, so the seco
 
 ### 7. Sketch from a blank page
 
-The composer's + menu has **Sketch**, which opens the same surface over a blank white page (1024 px square) with a black pen.
-Add to message attaches `sketch-<time>`, described as a rough sketch to base an image on.
+**New canvas** opens the same surface over a blank white page (1024 px square) with a black pen.
+It is in the right-hand panel's Files tab, beside Upload and From gallery, where the other file and image actions are, and in the composer's + menu.
+It is not in the gallery: starting there would mean switching back to the chat to ask for anything.
+Add to message attaches `sketch-<time>` (filed in `sketches`), described as a rough sketch to base an image on.
 
 ### 8. The original is never touched
 
 Markup only creates new files; the image it was drawn on is attached as it is.
-The derived files are ordinary thread uploads in the gallery's `markup` folder, which the user can see and delete.
+The derived files are ordinary thread uploads in the gallery's `image_masks` folder, which the user can see and delete; sketches go to `sketches`.
 
 ### 9. Uploads are PNG again, kept small
 
@@ -136,7 +138,7 @@ Files already stored as JPEG are left as they are.
 - Edits cost the same as generations at the chosen quality, metered against the vendor that ran them (`path: tool_edit`).
 - A user whose image vendor is z.ai or Qwen can draw markup but the agent cannot act on it; both the surface and the tool say so.
 - Uploads are PNG again (§9), so masks keep exact edges; the mask is still read by brightness with a 50% threshold, so a JPEG mask from before works too.
-- Markup files collect in the gallery's `markup` folder.
+- Masks and markup copies collect in the gallery's `image_masks` folder, sketches in `sketches`.
 
 ## Not done yet
 

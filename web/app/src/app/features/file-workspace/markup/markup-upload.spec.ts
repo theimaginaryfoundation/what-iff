@@ -1,7 +1,7 @@
 import { of } from 'rxjs';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
-import { ChatUpload, MARKUP_FOLDER, ReferenceFile, uploadMarkup } from './markup-upload';
+import { ChatUpload, MARKUP_FOLDER, ReferenceFile, SKETCH_FOLDER, uploadMarkup } from './markup-upload';
 
 function attachment(name: string): FileAttachment {
   return { id: `id-${name}`, user_id: 'u', name, file_type: 'image/png', created_at: '' };
@@ -24,6 +24,10 @@ describe('uploadMarkup', () => {
       referenced.push(id);
       return of({ ...attachment(id.replace(/^id-/, '')), id: `ref-${id}` });
     };
+  });
+
+  it('files masks and markup out of the way', () => {
+    expect(MARKUP_FOLDER).toBe('image_masks');
   });
 
   it('attaches a reference copy of the original, then a described mask and markup copy', async () => {
@@ -59,5 +63,6 @@ describe('uploadMarkup', () => {
     expect(out.map(a => a.name)).toEqual(['sketch-2026-11-11-0905.png']);
     expect(referenced).toEqual([]);
     expect(uploads[0].description).toContain('rough sketch');
+    expect(uploads[0].folder).toBe(SKETCH_FOLDER);
   });
 });

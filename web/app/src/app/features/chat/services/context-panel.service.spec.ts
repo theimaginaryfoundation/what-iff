@@ -72,6 +72,8 @@ describe('ContextPanelService', () => {
         expect(service.filesVersion()).toBe(1);
         service.requestGalleryPicker();
         expect(service.galleryPickerRequests()).toBe(1);
+        service.requestSketch();
+        expect(service.sketchRequests()).toBe(1);
     });
 
     it('queues and consumes composer insert payload', () => {
