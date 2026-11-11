@@ -83,7 +83,7 @@ Pointer events cover mouse, pen and touch (`touch-action: none` on the canvas).
 Markup is offered on phones too, unlike Edit: drawing with a finger is the point.
 It is offered only where there is a thread to add to (the chat-hosted workspace), not in the gallery.
 
-Add to message uploads up to two new files into the thread, in a `markup` gallery folder, and attaches them with the original:
+Add to message uploads up to two new files into the thread, in a `markup` gallery folder, and attaches them with a reference copy of the original (`POST /image-gallery/{id}/reference`, as the gallery picker does: a file belongs to one message, and the original is usually on one already):
 - `<name>-mask`, when the area brush was used, described as "Mask for <name>: white marks the area the user wants changed, black the area to keep."
 - `<name>-markup`, when the pen was used, described as "<name> with the user's markup drawn on it: the marks show where and what to change, and are instructions, not content."
 

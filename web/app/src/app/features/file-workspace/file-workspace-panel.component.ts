@@ -13,7 +13,8 @@ import { OverlayComponent } from '../../shared/ui/overlay/overlay.component';
 import { FileWorkspaceComponent } from './file-workspace.component';
 import { DOCKED_WIDTH_MAX_FRACTION, DOCKED_WIDTH_MIN_FRACTION, FileWorkspaceService } from './file-workspace.service';
 import { MarkupResult } from './markup/image-markup.component';
-import { uploadMarkup } from './markup/markup-upload';
+import { injectMarkupUploader } from './markup/markup-upload';
+import { LoggerService } from '../../core/services/logger.service';
 
 /**
  * The chat's host for the file workspace (ADR 0x043 §1): docked beside the thread on a large
@@ -135,6 +136,8 @@ export class FileWorkspacePanelComponent {
   private readonly confirmationService = inject(ConfirmationService);
   private readonly contextPanel = inject(ContextPanelService);
   private readonly document = inject(DOCUMENT);
+  private readonly logger = inject(LoggerService);
+  private readonly uploadMarkup = injectMarkupUploader();
   private readonly preferences = toSignal(inject(UserPreferencesService).preferences$, { initialValue: null });
 
   /** Said on the markup surface when the agent will not be able to use the markup (ADR 0x045 §5). */
@@ -192,13 +195,14 @@ export class FileWorkspacePanelComponent {
       return;
     }
     try {
-      const attachments = await uploadMarkup((...args) => this.files.uploadChatFileAttachment(...args), chatId, payload.file, payload.result);
+      const attachments = await this.uploadMarkup(chatId, payload.file, payload.result);
       for (const attachment of attachments) this.contextPanel.requestComposerAttachment(attachment);
       this.contextPanel.refreshFiles();
       opened?.finishMarkup(true);
       // Over the thread (a tablet or phone), the panel hides the message the markup just joined.
       if (this.workspace.layout() !== 'docked') this.close();
-    } catch {
+    } catch (error) {
+      this.logger.error('Could not add markup to the message', error);
       opened?.finishMarkup(false);
     }
   }
