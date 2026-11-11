@@ -133,25 +133,25 @@ func ParseAskUserArgs(raw []byte) (models.AgentPromptPayload, error) {
 	if args.Approval != nil {
 		action = strings.TrimSpace(args.Approval.Action)
 	}
-	hasQuestions := slices.ContainsFunc(args.Questions, func(q askUserQuestion) bool {
-		return strings.TrimSpace(q.Question) != ""
-	})
-	if action != "" && hasQuestions {
-		return models.AgentPromptPayload{}, fmt.Errorf("send either questions or approval, not both")
-	}
-	if action == "" && len(args.Questions) == 0 {
-		if args.Approval != nil {
-			return models.AgentPromptPayload{}, fmt.Errorf("approval.action is required")
-		}
-		return models.AgentPromptPayload{}, fmt.Errorf("send at least one question, or an approval")
-	}
+	// An approval call: questions may be there only as the empty other half.
 	if action != "" {
+		if slices.ContainsFunc(args.Questions, func(q askUserQuestion) bool { return strings.TrimSpace(q.Question) != "" }) {
+			return models.AgentPromptPayload{}, fmt.Errorf("send either questions or approval, not both")
+		}
 		return models.AgentPromptPayload{
 			Kind:    models.AgentPromptKindApproval,
 			Title:   TruncateRunes(action, maxAskUserQuestionChars),
 			Message: TruncateRunes(strings.TrimSpace(args.Approval.Details), maxAskUserQuestionChars*2),
 		}, nil
 	}
+	// Otherwise it is a question call, and any approval is the empty other half.
+	if len(args.Questions) == 0 {
+		if args.Approval != nil {
+			return models.AgentPromptPayload{}, fmt.Errorf("approval.action is required")
+		}
+		return models.AgentPromptPayload{}, fmt.Errorf("send at least one question, or an approval")
+	}
+	// From here each question is checked in turn, so a blank one is "question N is empty".
 	if len(args.Questions) > MaxAskUserQuestions {
 		return models.AgentPromptPayload{}, fmt.Errorf("ask at most %d questions at once", MaxAskUserQuestions)
 	}
