@@ -13711,8 +13711,17 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The file is neither an image nor text (or is text over 4 MB) */
+                /** @description The file is neither an image nor text (a file with comments that grew past 4 MB returns them on the whole file instead) */
                 415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file's stored content could not be found */
+                503: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -13796,8 +13805,26 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description The body is over 4 MB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description The file is neither an image nor text (or is text over 4 MB) */
                 415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file's stored content could not be found */
+                503: {
                     headers: {
                         [name: string]: unknown;
                     };

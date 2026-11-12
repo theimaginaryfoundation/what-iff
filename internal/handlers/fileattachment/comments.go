@@ -70,6 +70,10 @@ func (h *Handler) PutFileComments(w http.ResponseWriter, r *http.Request) {
 	var req putFileCommentsRequest
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ContentVersion < 1 || req.Revision < 0 {
+		if maxErr := (*http.MaxBytesError)(nil); errors.As(err, &maxErr) {
+			handlerutils.RespondWithError(w, h.logger, http.StatusRequestEntityTooLarge, handlerutils.CodeNotSet, "The comments are larger than 4 MB", nil)
+			return
+		}
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid comments", err)
 		return
 	}
@@ -91,6 +95,8 @@ func (h *Handler) respondCommentsError(w http.ResponseWriter, err error) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusConflict, handlerutils.CodeNotSet, "The comments changed since they were read", nil)
 	case errors.Is(err, filecomments.ErrNotText):
 		handlerutils.RespondWithError(w, h.logger, http.StatusUnsupportedMediaType, handlerutils.CodeNotSet, "Comments can be placed only on images and on UTF-8 text files of at most 4 MB", nil)
+	case errors.Is(err, filecomments.ErrContentMissing):
+		handlerutils.RespondWithError(w, h.logger, http.StatusServiceUnavailable, handlerutils.CodeNotSet, "The file's content could not be found", err)
 	default:
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read or write the comments", err)
 	}

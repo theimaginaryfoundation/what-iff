@@ -9204,7 +9204,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '415':
-          description: The file is neither an image nor text (or is text over 4 MB)
+          description: The file is neither an image nor text (a file with comments that grew past 4 MB returns them on the whole file instead)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: The file's stored content could not be found
           content:
             application/json:
               schema:
@@ -9268,8 +9274,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '413':
+          description: The body is over 4 MB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '415':
           description: The file is neither an image nor text (or is text over 4 MB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: The file's stored content could not be found
           content:
             application/json:
               schema:

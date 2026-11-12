@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -28,6 +29,8 @@ type fakeStore struct {
 	set    *models.FileCommentSet
 	setFor uuid.UUID
 	puts   int
+	// afterGet, when set, runs once after the next GetFileAttachment: a save landing mid-request.
+	afterGet func()
 }
 
 func (f *fakeStore) GetFileAttachment(_ context.Context, _ uuid.UUID, id uuid.UUID) (*models.FileAttachment, error) {
@@ -36,6 +39,10 @@ func (f *fakeStore) GetFileAttachment(_ context.Context, _ uuid.UUID, id uuid.UU
 		row = c
 	}
 	copied := *row
+	if after := f.afterGet; after != nil {
+		f.afterGet = nil
+		after()
+	}
 	return &copied, nil
 }
 
@@ -146,6 +153,61 @@ func TestReadCarriesAnchorsToTextChangedElsewhere(t *testing.T) {
 	}
 }
 
+func TestAMissingObjectMovesNoAnchor(t *testing.T) {
+	svc, store, files := setup(line)
+	ctx := context.Background()
+	if _, err := svc.Write(ctx, uuid.New(), store.file.ID, []models.FileCommentThread{thread("words", 11, 25)}, 1, 0); err != nil {
+		t.Fatal(err)
+	}
+	edited := []byte("Now: " + line)
+
+	// The row is on k2 when a read loads it; a save then swaps it to k3 and releases k2 before the
+	// read reaches the object.
+	files["k2"], files["k3"] = []byte("Then: "+line), edited
+	store.file.S3Key, store.file.ContentVersion = "k2", 2
+	store.afterGet = func() {
+		delete(files, "k2")
+		store.file.S3Key, store.file.ContentVersion = "k3", 3
+	}
+	got, err := svc.Read(ctx, uuid.New(), store.file.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Threads[0].Anchor == nil || got.Threads[0].Anchor.Start != 16 {
+		t.Fatalf("the read did not retry on the new object: %+v", got.Threads[0])
+	}
+
+	// An object that is simply gone is an error, and nothing is stored over the baseline.
+	store.file.S3Key = "gone"
+	puts := store.puts
+	if _, err := svc.Read(ctx, uuid.New(), store.file.ID); !errors.Is(err, ErrContentMissing) || store.puts != puts {
+		t.Fatalf("got %v, puts %d→%d", err, puts, store.puts)
+	}
+	if _, err := svc.Write(ctx, uuid.New(), store.file.ID, nil, 3, got.Revision); !errors.Is(err, ErrContentMissing) {
+		t.Fatalf("write: %v", err)
+	}
+	// A write that lost the race to a save is told the content changed, so it re-reads.
+	store.afterGet = func() { store.file.ContentVersion = 4 }
+	if _, err := svc.Write(ctx, uuid.New(), store.file.ID, nil, 3, got.Revision); !errors.Is(err, ErrStaleContent) {
+		t.Fatalf("raced write: %v", err)
+	}
+
+	// A file that stopped being text keeps its comments readable, on the whole file.
+	files["binary"] = []byte{0xff, 0xfe, 0x00}
+	store.file.S3Key = "binary"
+	puts = store.puts
+	if got, err := svc.Read(ctx, uuid.New(), store.file.ID); err != nil || len(got.Threads) != 1 || got.Threads[0].Anchor != nil || store.puts != puts {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+
+	// An empty file is text, not a missing one.
+	files["empty"] = []byte{}
+	store.file.S3Key, store.file.ContentVersion = "empty", 5
+	if _, err := svc.Read(ctx, uuid.New(), store.file.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReadOfAFileWithNoCommentsAndOfBinary(t *testing.T) {
 	svc, store, files := setup(line)
 	got, err := svc.Read(context.Background(), uuid.New(), store.file.ID)
@@ -229,5 +291,30 @@ func TestAnImagesThreadsAreOnTheWholeFileAndOutliveAnEdit(t *testing.T) {
 	// A write is still placed on the image's current content.
 	if _, err := svc.Write(ctx, uuid.New(), store.file.ID, got.Threads, 1, got.Revision); !errors.Is(err, ErrStaleContent) {
 		t.Fatalf("stale: %v", err)
+	}
+}
+
+func TestWriteSetsAuthorshipOnTheServer(t *testing.T) {
+	svc, store, _ := setup(line)
+	ctx := context.Background()
+	userID := uuid.New()
+	me := "user:" + userID.String()
+	agent := models.FileComment{ID: "a1", AuthorID: "personality:p1", AuthorName: "Vix", CreatedAt: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), Text: "Agent says"}
+	store.set = &models.FileCommentSet{Threads: []models.FileCommentThread{{ID: "t", Comments: []models.FileComment{agent}}}, BaselineKey: "k1", BaselineText: line, Revision: 1}
+	store.setFor = store.file.ID
+
+	future := time.Now().Add(time.Hour)
+	forged := models.FileComment{ID: "a1", AuthorID: me, AuthorName: "Pat", Text: "Reworded"}
+	mine := models.FileComment{ID: "c2", AuthorID: "personality:p1", AuthorName: "Pat", CreatedAt: future, Text: "Mine"}
+	got, err := svc.Write(ctx, userID, store.file.ID, []models.FileCommentThread{{ID: "t", Comments: []models.FileComment{forged, mine}}}, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := got.Threads[0].Comments
+	if cs[0].AuthorID != "personality:p1" || cs[0].Text != "Agent says" || !cs[0].CreatedAt.Equal(agent.CreatedAt) {
+		t.Fatalf("the agent's comment changed: %+v", cs[0])
+	}
+	if cs[1].AuthorID != me || cs[1].CreatedAt.After(time.Now()) {
+		t.Fatalf("a new comment is the user's, dated by the server: %+v", cs[1])
 	}
 }

@@ -23,9 +23,10 @@ Keeps ranges of a text on the same words as the text changes (ADR 0x045): the an
 - **Offsets are UTF-16 code units**, as the browser and the Monaco editor count them, so the client and the server name the same text.
 - **Myers' diff with a bound.**
   The common head and tail are matched first, and the search keeps only the diagonals each step reads back.
-  Past `MaxEdits` changed words a range is found by its own text, nearest to where it was, which is what a rewrite of the whole file comes down to.
+  Past `MaxEdits` changed words, or past `maxSteps` of work (a large file with many edits), a range is found by its own text, nearest to where it was, which is what a rewrite of the whole file comes down to.
+  Token values are numbered once (a vocabulary shared by both texts), so the diff compares integers and each value is held once.
 - **A range that starts or ends inside a kept word keeps that part of the word.**
 
 ## Testing
 
-- `textanchor_test.go` — edits inside, before and after a range, a range inside a word, a range whose words are all gone, code edits, UTF-16 counting with emoji and a byte order mark, and the fallback past the diff's bound.
+- `textanchor_test.go` — edits inside, before and after a range, a range inside a word, a range whose words are all gone, code edits, UTF-16 counting with emoji and a byte order mark, the fallback past the diff's bound, and a 4 MB file edited throughout staying well under a second.
