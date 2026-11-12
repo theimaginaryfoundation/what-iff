@@ -3,6 +3,7 @@ package agent
 import (
 	"github.com/theimaginaryfoundation/what-iff/internal/officecomments"
 	"github.com/theimaginaryfoundation/what-iff/internal/officecomments/docx"
+	"github.com/theimaginaryfoundation/what-iff/internal/officecomments/pptx"
 )
 
 // officeCommentFormats are the Office formats whose comments the agent reads and writes (ADR
@@ -10,5 +11,6 @@ import (
 func officeCommentFormats() map[string]officecomments.Format {
 	return map[string]officecomments.Format{
 		".docx": docx.New(),
+		".pptx": pptx.New(),
 	}
 }
