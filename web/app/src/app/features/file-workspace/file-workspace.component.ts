@@ -44,7 +44,7 @@ import { EDITOR_LOADER, VIEWER_LOADER, hasEditor, viewerFor } from './viewers/re
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
-/** The image types markup can draw on: what browsers decode and image vendors accept (ADR 0x045). */
+/** The image types markup can draw on: what browsers decode and image vendors accept (ADR 0x047). */
 const MARKUP_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
 
 /**
@@ -104,7 +104,7 @@ export class FileWorkspaceComponent {
   readonly canEdit = input(true);
   /** The conversation a save is made from, carried on the save so its container is updated. */
   readonly chatId = input<string | null>(null);
-  /** Whether "Mark up" is offered: the host can add the result to a message (the chat; ADR 0x045). */
+  /** Whether "Mark up" is offered: the host can add the result to a message (the chat; ADR 0x047). */
   readonly markupAvailable = input(false);
   /** A warning for the markup surface, such as an image vendor that cannot edit. */
   readonly markupNotice = input<string | null>(null);
@@ -150,7 +150,7 @@ export class FileWorkspaceComponent {
   readonly isRenaming = signal(false);
   readonly renameDraft = signal('');
 
-  // Editing (ADR 0x043 §3) and markup (ADR 0x045).
+  // Editing (ADR 0x043 §3) and markup (ADR 0x047).
   readonly mode = signal<'view' | 'edit' | 'markup'>('view');
   readonly editable = computed(() => this.canEdit() && hasEditor(this.kind(), this.file().file_type) && this.state() === 'ready');
   readonly editorDirty = signal(false);
@@ -283,7 +283,7 @@ export class FileWorkspaceComponent {
     return true;
   }
 
-  // --- markup (ADR 0x045) -------------------------------------------------------------------------
+  // --- markup (ADR 0x047) -------------------------------------------------------------------------
 
   startMarkup(): void {
     if (!this.canMarkup() || this.mode() !== 'view') return;

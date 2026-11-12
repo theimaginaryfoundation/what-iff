@@ -126,7 +126,7 @@ export function effectiveImageGenerationProvider(preferences: UserPreferences | 
   return chosen && offered.includes(chosen) ? chosen : (offered[0] ?? '');
 }
 
-/** The image vendors that can edit images and take masks and reference images (ADR 0x045). */
+/** The image vendors that can edit images and take masks and reference images (ADR 0x047). */
 export const IMAGE_EDITING_PROVIDERS: readonly ImageGenerationProvider[] = ['openai', 'google'];
 
 /**

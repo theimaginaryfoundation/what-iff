@@ -8968,7 +8968,7 @@ paths:
                   description: >-
                     Optional description stored with the file and shown to the agent beside its
                     name. The image markup tool uses it to say what a derived file is, such as a
-                    mask (ADR 0x045).
+                    mask (ADR 0x047).
               required:
                 - attachment
       responses:

@@ -123,7 +123,7 @@ export class ContextFilesTabComponent {
     this.contextPanel.requestGalleryPicker();
   }
 
-  /** A blank page to sketch on (ADR 0x045 §7); the chat page opens it. */
+  /** A blank page to sketch on (ADR 0x047 §7); the chat page opens it. */
   newCanvas(): void {
     this.contextPanel.requestSketch();
   }

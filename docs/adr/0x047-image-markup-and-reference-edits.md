@@ -1,4 +1,4 @@
-# ADR 0x045: Image markup and reference-image edits
+# ADR 0x047: Image markup and reference-image edits
 
 - **Status:** Accepted
 - **Date:** 2026-11-11
@@ -64,13 +64,16 @@ Masks are white-on-black images, which the agent can look at and understand.
   It sends no `input_fidelity`: the current image model refuses the parameter, and keeps what is outside the mask without it.
 - **Gemini** gets a *guide image* instead: the base with the masked area tinted magenta at 55%, plus a sentence saying the tint only marks the area.
 
+The translation happens once per request (`ImageEditor.PrepareEdit`), before the quota check and before the images are requested in parallel.
+A mask that marks nothing, or cannot be decoded, is refused there with a message the agent can act on, and costs nothing.
+
 Both were checked live on a photo (sky masked, a tree circled in markup): each changed only the marked area and drew neither the tint nor the circle.
 
 ### 5. No cross-vendor fallback
 
 A request with reference images or a mask goes to the vendor the user chose under Settings → Image generation, and nowhere else.
 Moving it to another vendor could cost more than the user chose, or send their images to a company they did not pick.
-When the chosen vendor cannot edit, the tool refuses with a message telling the agent to say so and how to switch; text-only generation still works.
+When the chosen vendor cannot edit, or has no key for the caller, the tool refuses with a message telling the agent to say so and how to fix it; text-only generation still works, and keeps its existing fallback to a vendor that has a key.
 The markup surface warns up front, from the same preference (`imageEditingUnavailableReason`), so the person knows before drawing.
 
 ### 6. Mark up in the file workspace
@@ -91,6 +94,9 @@ Add to message uploads up to two new files into the thread, in the gallery's `im
 - `<name>-mask`, when the area brush was used, described as "Mask for <name>: white marks the area the user wants changed, black the area to keep."
 - `<name>-markup`, when the pen was used, described as "<name> with the user's markup drawn on it: the marks show where and what to change, and are instructions, not content."
 
+The reference copy is left out when the message already holds the original, or a reference copy of it from an earlier markup.
+The upload is all or nothing: when one file fails, the ones already made are deleted, so trying again does not leave duplicates in the thread.
+
 The descriptions reach the agent in the attachment label it already sees, so it knows what each file is without a naming convention.
 Uploads accept a `description` field for this.
 Over the thread (tablet, phone) the panel closes afterwards, so the message with its attachments is in view.
@@ -101,6 +107,7 @@ The composer's attachment hand-off became a queue: it held one file, so the seco
 
 **New canvas** opens the same surface over a blank white page (1024 px square) with a black pen.
 It is in the right-hand panel's Files tab, beside Upload and From gallery, where the other file and image actions are, and in the composer's + menu.
+Both are disabled until the chat has a thread, since the sketch is uploaded into it.
 It is not in the gallery: starting there would mean switching back to the chat to ask for anything.
 Add to message attaches `sketch-<time>` (filed in `sketches`), described as a rough sketch to base an image on.
 
