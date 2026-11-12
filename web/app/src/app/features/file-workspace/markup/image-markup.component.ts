@@ -52,7 +52,7 @@ const MIN_SIZE = 2;
 const MAX_SIZE = 160;
 
 /**
- * Drawing on an image to steer image generation (ADR 0x045 §6–7): an area brush that becomes a
+ * Drawing on an image to steer image generation (ADR 0x047 §6–7): an area brush that becomes a
  * mask and a pen whose strokes become a marked-up copy. With no source it is a blank page for a
  * sketch, with the pen only. It never changes the image it is given; the host turns the result into
  * new files for the next message.
@@ -247,6 +247,8 @@ export class ImageMarkupComponent {
   private readonly document = inject(DOCUMENT);
   private readonly stage = viewChild.required<ElementRef<HTMLElement>>('stage');
   private readonly view = viewChild.required<ElementRef<HTMLCanvasElement>>('view');
+  /** The offscreen layer the area strokes are painted on in redraw, reused between frames. */
+  private areaLayer: HTMLCanvasElement | null = null;
 
   /** The image to mark up; null is a blank page for a sketch. */
   readonly source = input<Blob | null>(null);
@@ -502,11 +504,18 @@ export class ImageMarkupComponent {
     const strokes = this.strokes();
     if (hasTool(strokes, 'area')) {
       // Painted solid on its own layer and laid on see-through, so overlapping strokes do not darken.
-      const layer = this.document.createElement('canvas');
-      layer.width = canvas.width;
-      layer.height = canvas.height;
+      // The layer is kept between frames: a new display-sized canvas per frame churns memory while
+      // painting on a high-DPI screen.
+      const layer = (this.areaLayer ??= this.document.createElement('canvas'));
+      if (layer.width !== canvas.width || layer.height !== canvas.height) {
+        // Resizing clears it as well.
+        layer.width = canvas.width;
+        layer.height = canvas.height;
+      }
       const layerCtx = layer.getContext('2d');
       if (layerCtx) {
+        layerCtx.setTransform(1, 0, 0, 1, 0, 0);
+        layerCtx.clearRect(0, 0, layer.width, layer.height);
         layerCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
         drawStrokes(layerCtx, strokes, 'area', AREA_DISPLAY_COLOR);
         ctx.globalAlpha = AREA_DISPLAY_ALPHA;

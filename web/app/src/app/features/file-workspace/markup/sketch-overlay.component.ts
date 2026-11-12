@@ -6,13 +6,12 @@ import { ConfirmationService } from '../../../core/services/confirmation.service
 import { UserPreferencesService } from '../../../core/services/user-preferences.service';
 import { OverlayComponent } from '../../../shared/ui/overlay/overlay.component';
 import { XIconComponent } from '../../../shared/ui/icons/icons';
-import { ContextPanelService } from '../../chat/services/context-panel.service';
 import { ImageMarkupComponent, MarkupResult } from './image-markup.component';
-import { injectMarkupUploader } from './markup-upload';
+import { injectMarkupSender } from './markup-upload';
 import { LoggerService } from '../../../core/services/logger.service';
 
 /**
- * A blank page to sketch on, from the composer's + menu (ADR 0x045 §7). The sketch becomes a new
+ * A blank page to sketch on, from the composer's + menu (ADR 0x047 §7). The sketch becomes a new
  * file in the thread, attached to the message being written; the person says what to make of it.
  */
 @Component({
@@ -79,8 +78,7 @@ import { LoggerService } from '../../../core/services/logger.service';
 })
 export class SketchOverlayComponent {
   private readonly logger = inject(LoggerService);
-  private readonly uploadMarkup = injectMarkupUploader();
-  private readonly contextPanel = inject(ContextPanelService);
+  private readonly sendMarkup = injectMarkupSender();
   private readonly confirmationService = inject(ConfirmationService);
   private readonly preferences = toSignal(inject(UserPreferencesService).preferences$, { initialValue: null });
 
@@ -101,14 +99,17 @@ export class SketchOverlayComponent {
   }
 
   async onSubmitted(result: MarkupResult): Promise<void> {
+    if (this.sending()) return;
     const chatId = this.chatId();
-    if (!chatId || this.sending()) return;
+    if (!chatId) {
+      // The entry points need a thread; say so rather than ignore the press if one slips through.
+      this.error.set('Start the chat with a first message, then add your sketch.');
+      return;
+    }
     this.sending.set(true);
     this.error.set(null);
     try {
-      const attachments = await this.uploadMarkup(chatId, null, result);
-      for (const attachment of attachments) this.contextPanel.requestComposerAttachment(attachment);
-      this.contextPanel.refreshFiles();
+      await this.sendMarkup(chatId, null, result);
       this.finish();
     } catch (error) {
       this.logger.error('Could not add the sketch to the message', error);

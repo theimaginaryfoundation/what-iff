@@ -312,7 +312,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   };
   private readonly activeHotkeyListeners = new Map<string, (event: KeyboardEvent) => void>();
   readonly workspace = inject(FileWorkspaceService);
-  /** The composer's Sketch page is open (ADR 0x045 §7). */
+  /** The composer's Sketch page is open (ADR 0x047 §7). */
   readonly sketchOpen = signal(false);
   private readonly composer = viewChild(ChatComposerComponent);
   // The Files tab adds files to the message being composed and asks for the gallery picker (ADR 0x043 §4).
@@ -763,7 +763,7 @@ ${text}` : text);
   }
 
   onGalleryAttachment(attachment: FileAttachment): void {
-    // Already on the message: markup attaches the image it was drawn on, which may be there.
+    // Already on the message (the same file added twice from the Files tab or gallery).
     if (this.pendingAttachments().some(item => item.attachment?.id === attachment.id)) return;
     const pending = createPendingFileAttachment({
       clientKey: `attachment:${attachment.id}`,
