@@ -27,6 +27,7 @@ var sandboxedToolSurface = map[string]struct {
 	agenttools.AgentFileReadToolSpec.Name:     {false, "reads the owner's account-wide files"},
 	agenttools.FileCommentsToolSpec.Name:      {false, "reads and writes comments on the owner's files"},
 	agenttools.AgentFileWriteToolSpec.Name:    {false, "writes files into the owner's account-wide file area"},
+	agenttools.DiagramToolSpec.Name:           {false, "reads and writes diagrams in the owner's account-wide file area"},
 	agenttools.EntityGetToolSpec.Name:         {false, "reads the owner's entity wiki, shared by their conversations"},
 	agenttools.EntityWriteToolSpec.Name:       {false, "writes the owner's entity wiki, shared by their conversations"},
 	agenttools.CreateMemoryToolSpec.Name:      {true, "always writes a Chat-scoped memory in a sandbox"},

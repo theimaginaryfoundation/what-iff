@@ -123,8 +123,10 @@ type Agent struct {
 	agentFileTool  *tools.AgentFileTool
 	// fileCommentsTool reads and writes comments on the user's files (ADR 0x046).
 	fileCommentsTool *tools.FileCommentsTool
-	chunkPipeline    *filechunker.FileChunkPipeline
-	fileStore        storage.FileStore
+	// diagramTool changes draw.io diagrams by element (ADR 0x049), through agentFileTool.
+	diagramTool   *tools.DiagramTool
+	chunkPipeline *filechunker.FileChunkPipeline
+	fileStore     storage.FileStore
 	// expressionPortraitThumbCache caches thumbnails loaded for expression continuity in message context (bounded).
 	expressionPortraitThumbCache *expressionPortraitThumbCache
 	// tokenCounter is shared for segment token estimates and is safe for concurrent use (stateless tokenizer).
@@ -333,6 +335,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 	// the file workspace saves a file (ADR 0x046).
 	fileSaver := filesave.New(ds, fileStore, a.chunkPipeline, logger)
 	a.agentFileTool.WithUserFileSaver(fileSaver)
+	a.diagramTool = tools.NewDiagramTool(a.agentFileTool)
 	a.fileCommentsTool.WithOffice(filecomments.NewOffice(ds, fileStore, fileSaver, officeCommentFormats()))
 	a.listTool.SetMCPDiscoverer(a.mcpClient)
 	if a.lifecycleCtx == nil {

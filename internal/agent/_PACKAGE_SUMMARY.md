@@ -200,6 +200,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - **Model context rules** (segment ordering, caching prefix, when **not** to hand-build `ResponseNewParams`) are documented in [architecture summary](../../docs/ARCHITECTURE_SUMMARY.md) under **Model context and providers** and **When to build `ResponseNewParams` by hand**.
 - **`messageContextBuilder.build`** requires non-nil telemetry with a non-nil logger (see architecture doc).
 - **Agent comments** (ADR 0x046): `officeCommentFormats` (`office_comments.go`) lists the Office formats `file_comments` reads and writes, and `NewAgent` gives the file tools the workspace's save service (`filesave`) for granted files and Office comments.
+  The `diagram` tool (ADR 0x049) is built on the same `AgentFileTool`, so it shares that save service.
   `saveAgentResponse` sets the reply's `comment_refs` from its `file_comments` calls (`tools.CommentRefsFromCalls`).
 - **Document comment context** (ADR 0x046, `comment_context.go`): a `FILE_COMMENT` item is rendered in its own user turn, after the message text (`withFileCommentContext`, current turn and history), not merged by `appendMergedAdditionalContext`.
   The after-inference rewrite of a message's context in `job_phase.go` keeps it (`sentWithMessage`) and replaces only the memories.

@@ -86,6 +86,10 @@ func toolContextPolicyFor(toolName string) toolContextPolicy {
 		// File reads can be long (up to ~24k chars) and both go stale once the agent writes again;
 		// keep them for a while, then re-read.
 		return toolContextPolicy{persist: true, ttlTurns: agentStoreReadTTLTurns}
+	case tools.DiagramToolSpec.Name:
+		// A diagram list can be long and goes stale with the next change, like a file read; a
+		// change's ack is small but names elements a later list shows anyway.
+		return toolContextPolicy{persist: true, ttlTurns: agentStoreReadTTLTurns}
 	case tools.LoadSkillToolSpec.Name:
 		// A load_skill result carries the skill's instructions for the rest of its own turn. From
 		// the next turn the skills segment carries them for as long as the skill stays loaded, so
