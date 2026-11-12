@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 	"time"
@@ -179,4 +180,27 @@ func TestPurgeUserObjects_RemovesUserPrefixAndExportBundles(t *testing.T) {
 	for _, k := range theirs {
 		require.True(t, s.has(t, k), "other users' objects are untouched: "+k)
 	}
+}
+
+func TestPreviewsGoWithTheirObject(t *testing.T) {
+	ctx := context.Background()
+	userID := uuid.New()
+	s := newLocalTestStore(t)
+	diagram := models.FileAttachment{ID: uuid.New(), Name: "flow.drawio", FileType: "application/vnd.jgraph.mxfile"}
+	diagram.S3Key = path.Join("users", userID.String(), "files", "flow.drawio")
+	old := path.Join("users", userID.String(), "files", "flow-old.drawio")
+	for _, k := range []string{diagram.S3Key, old, FileKeyForPreview(diagram.S3Key), FileKeyForPreviewThumbnail(diagram.S3Key), FileKeyForPreview(old)} {
+		s.put(t, k, 0)
+	}
+
+	// A save released the old object: its preview goes, the current one's stays.
+	require.True(t, ReleaseReplacedObject(ctx, zap.NewNop(), s.FileStore, &fakeRefs{}, old))
+	require.False(t, s.has(t, FileKeyForPreview(old)))
+	require.True(t, s.has(t, FileKeyForPreview(diagram.S3Key)))
+
+	// The file deleted: the object and its preview go.
+	ReleaseAttachmentObjects(ctx, zap.NewNop(), s.FileStore, &fakeRefs{}, userID, []models.FileAttachment{diagram})
+	require.False(t, s.has(t, diagram.S3Key))
+	require.False(t, s.has(t, FileKeyForPreview(diagram.S3Key)))
+	require.False(t, s.has(t, FileKeyForPreviewThumbnail(diagram.S3Key)))
 }

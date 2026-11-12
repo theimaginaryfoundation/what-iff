@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/drawio"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 )
 
 const userDiagram = `<mxfile host="Electron">
@@ -175,4 +176,27 @@ func TestDiagram_ListIsCapped(t *testing.T) {
 	require.Contains(t, note, "2 elements are left out")
 	_, note = capElements(pages, 10)
 	require.Empty(t, note)
+}
+
+func TestDiagram_ListShowsThePreviewOfThisVersion(t *testing.T) {
+	fx, tool := newDiagramFixture()
+	chat := fx.chat(uuid.New())
+	upload := fx.userUpload("", "flow.drawio", userDiagram)
+	list := func() (map[string]any, []ResultImage) {
+		ctx, shown := WithResultImages(appTurn)
+		out, err := tool.Run(ctx, chat, []byte(`{"action":"list","file":"flow.drawio"}`))
+		require.NoError(t, err)
+		var res map[string]any
+		require.NoError(t, json.Unmarshal([]byte(out), &res))
+		return res, shown.Images()
+	}
+
+	res, images := list()
+	require.Contains(t, res["preview"], "No picture of this version yet")
+	require.Empty(t, images)
+
+	fx.objects.objs[storage.FileKeyForPreview(upload.S3Key)] = []byte("png bytes")
+	res, images = list()
+	require.Contains(t, res["preview"], "A picture of this version")
+	require.Equal(t, []ResultImage{{Data: []byte("png bytes"), MediaType: "image/png"}}, images)
 }

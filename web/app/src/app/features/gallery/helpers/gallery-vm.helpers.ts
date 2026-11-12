@@ -1,5 +1,5 @@
 import { FileAttachment, isImageAttachment } from '../../../core/models/file-attachment.model';
-import { fileBadge } from './file-preview.helpers';
+import { fileBadge, previewKindFor } from './file-preview.helpers';
 import { formatSource, GalleryImageSource, sourceForImage } from './image-source.helpers';
 
 export type GalleryDateRange = 'any' | '7d' | '30d' | '90d';
@@ -30,6 +30,8 @@ export interface GalleryTileVm {
   /** Image bytes; empty for files, which have no thumbnail. */
   thumbnailUrl: string;
   fullUrl: string;
+  /** A picture of a file that has one (a diagram's preview, ADR 0x049 §8), which may not exist yet; empty otherwise. */
+  previewUrl: string;
 }
 
 export interface GalleryDateGroup {
@@ -48,6 +50,7 @@ export function toGalleryTileVm(
   image: FileAttachment,
   getImageUrl: (id: string, size: 'thumbnail' | 'full') => string,
   personalityNames: Record<string, string>,
+  getPreviewUrl?: (id: string, size: 'thumbnail' | 'full') => string,
 ): GalleryTileVm {
   const source = sourceForImage(image);
   const associatedPersonalities = image.personalities ?? [];
@@ -56,12 +59,8 @@ export function toGalleryTileVm(
     .map(ref => personalityNames[ref.id] ?? ref.name)
     .filter((name): name is string => !!name?.trim());
   const personalityId = image.personality_id ?? personalityIds[0] ?? null;
-  const personalityName = resolvedNames[0] ?? (personalityId ? personalityNames[personalityId] ?? null : null);
-  const personalityNameList = resolvedNames.length > 0
-    ? resolvedNames
-    : personalityName
-      ? [personalityName]
-      : [];
+  const personalityName = resolvedNames[0] ?? (personalityId ? (personalityNames[personalityId] ?? null) : null);
+  const personalityNameList = resolvedNames.length > 0 ? resolvedNames : personalityName ? [personalityName] : [];
   const isFile = !isImageAttachment(image);
   return {
     id: image.id,
@@ -77,6 +76,11 @@ export function toGalleryTileVm(
     badge: isFile ? fileBadge(image) : '',
     thumbnailUrl: isFile ? '' : getImageUrl(image.id, 'thumbnail'),
     fullUrl: isFile ? '' : getImageUrl(image.id, 'full'),
+    // The version in the URL, so a saved diagram's new picture is not taken for the old one's.
+    previewUrl:
+      isFile && getPreviewUrl && previewKindFor(image) === 'diagram'
+        ? `${getPreviewUrl(image.id, 'thumbnail')}&v=${image.content_version ?? 0}`
+        : '',
   };
 }
 

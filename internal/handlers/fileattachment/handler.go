@@ -57,4 +57,6 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	fileAttachmentRouter.HandleFunc("/{id}/content", h.ReplaceFileAttachmentContent).Methods("PUT")
 	fileAttachmentRouter.HandleFunc("/{id}/comments", h.GetFileComments).Methods("GET")
 	fileAttachmentRouter.HandleFunc("/{id}/comments", h.PutFileComments).Methods("PUT")
+	fileAttachmentRouter.HandleFunc("/{id}/preview", h.GetFilePreview).Methods("GET")
+	fileAttachmentRouter.HandleFunc("/{id}/preview", h.PutFilePreview).Methods("PUT")
 }

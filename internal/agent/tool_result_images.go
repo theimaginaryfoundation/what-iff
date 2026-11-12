@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -38,6 +39,19 @@ func toolResultImagesFromAttachments(atts []*models.FileAttachment) []provider.U
 			RawBytes:  raw,
 			MediaType: mediaType,
 		})
+	}
+	return out
+}
+
+// shownToolImages are the pictures a tool showed with its result (tools.AddResultImage), for a
+// model that takes images; none for one that does not.
+func shownToolImages(chatCtx *chatContext, images []tools.ResultImage) []provider.UserMessageImage {
+	if len(images) == 0 || chatCtx == nil || !chatCtx.modelVisionSupport {
+		return nil
+	}
+	out := make([]provider.UserMessageImage, 0, len(images))
+	for _, img := range images {
+		out = append(out, provider.UserMessageImage{RawBytes: img.Data, MediaType: img.MediaType})
 	}
 	return out
 }

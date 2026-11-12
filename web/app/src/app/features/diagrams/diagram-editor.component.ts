@@ -16,6 +16,7 @@ import {
 import { DomSanitizer } from '@angular/platform-browser';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
+import { FileAttachmentService } from '../../core/services/file-attachment.service';
 import { saveBlobAsFile } from '../../core/utils/download.helpers';
 import { ButtonComponent } from '../../shared/ui/button/button.component';
 import { COMMENT_SAVER, FileEditor } from '../file-workspace/editors/file-editor';
@@ -27,6 +28,7 @@ import { CommentsPanelComponent } from '../office/comments/comments-panel.compon
 import { CommentsPanelState } from '../office/comments/comments-panel-state.service';
 import { DiagramComments } from './diagram-comments';
 import { DIAGRAMS_URL } from './diagram-site.config';
+import { DiagramPreview } from './diagram-preview';
 import { BridgeEvent, DrawioAction, dataUrlToBlob, drawioUrl, exportName, readDrawioMessage } from './drawio-frame';
 
 const DIAGRAM_MIME = 'application/vnd.jgraph.mxfile';
@@ -34,6 +36,8 @@ const DIAGRAM_MIME = 'application/vnd.jgraph.mxfile';
 const EXPORT_TIMEOUT_MS = 30_000;
 
 type ImageFormat = 'png' | 'svg';
+/** What an export asks the editor for. */
+type ExportSpec = Omit<Extract<DrawioAction, { action: 'export' }>, 'action' | 'requestId'>;
 
 /**
  * A draw.io diagram (.drawio) in the file workspace (ADR 0x049): the draw.io editor, from its own
@@ -91,6 +95,9 @@ export class DiagramEditorComponent implements FileEditor {
   private ready = false;
   /** Until the workspace's bytes are read, the editor waits for them rather than load nothing. */
   private haveBytes = false;
+  /** The file's bytes as the workspace last handed them, and whether the editor was loaded with them. */
+  private stored: string | null = null;
+  private showingStored = false;
   /** What each blob content() handed out holds, so markSaved knows what was saved. */
   private readonly handedOut = new WeakMap<Blob, string>();
   // --- comments (ADR 0x045, 0x049): on elements, kept beside the file ------------------------------
@@ -123,6 +130,11 @@ export class DiagramEditorComponent implements FileEditor {
   private hadComments = false;
   /** The threads (and mentions) as they were when each blob handed to the host was made. */
   private readonly handedOutComments = new WeakMap<Blob, { threads: TextCommentThread[]; mentions: number }>();
+
+  /** The picture of the diagram kept for the gallery and agents (ADR 0x049 §8). */
+  private readonly preview = new DiagramPreview(inject(FileAttachmentService), () =>
+    this.requestExport({ format: 'png', scale: 1, background: '#ffffff' }),
+  );
 
   /** Exports asked for, by request id, waiting for the editor's answer. */
   private readonly exports = new Map<string, (data: string | null) => void>();
@@ -158,7 +170,9 @@ export class DiagramEditorComponent implements FileEditor {
     this.exporting.set(format);
     this.exportFailed.set(false);
     try {
-      const data = await this.requestExport(format);
+      const data = await this.requestExport(
+        format === 'png' ? { format: 'xmlpng', scale: 2, background: '#ffffff' } : { format: 'xmlsvg', background: '#ffffff' },
+      );
       const blob = data ? dataUrlToBlob(data) : null;
       if (blob) saveBlobAsFile(blob, exportName(this.file().name, format));
       else this.exportFailed.set(true);
@@ -167,7 +181,7 @@ export class DiagramEditorComponent implements FileEditor {
     }
   }
 
-  private requestExport(format: ImageFormat): Promise<string | null> {
+  private requestExport(spec: ExportSpec): Promise<string | null> {
     const requestId = `whatiff-export-${++this.nextExport}`;
     return new Promise(resolve => {
       const timer = setTimeout(() => finish(null), EXPORT_TIMEOUT_MS);
@@ -177,11 +191,7 @@ export class DiagramEditorComponent implements FileEditor {
         resolve(data);
       };
       this.exports.set(requestId, finish);
-      this.send(
-        format === 'png'
-          ? { action: 'export', format: 'xmlpng', scale: 2, background: '#ffffff', requestId }
-          : { action: 'export', format: 'xmlsvg', background: '#ffffff', requestId },
-      );
+      this.send({ action: 'export', ...spec, requestId });
     });
   }
 
@@ -197,8 +207,12 @@ export class DiagramEditorComponent implements FileEditor {
     this.setDirty(this.latest !== this.baseline || this.commentsDirty);
   }
 
-  /** Writes the comments, checked against the diagram the save stored (FileEditor.saved). */
+  /**
+   * After a save (FileEditor.saved): the new version's preview, when the editor still shows what
+   * was saved, and the comments, checked against the diagram the save stored.
+   */
   async saved(file: FileAttachment, content: Blob): Promise<void> {
+    if (this.handedOut.get(content) === this.latest) void this.preview.saved(file);
     const handed = this.handedOutComments.get(content);
     const threads = handed?.threads ?? this.comments.snapshot();
     // A file that never had comments has nothing to write.
@@ -243,6 +257,7 @@ export class DiagramEditorComponent implements FileEditor {
   private async take(blob: Blob): Promise<void> {
     const text = await blob.text();
     this.haveBytes = true;
+    this.stored = text;
     // After a save the workspace hands back what this editor wrote.
     if (text === this.latest && this.ready) return;
     if (this.dirty()) return;
@@ -254,6 +269,7 @@ export class DiagramEditorComponent implements FileEditor {
     if (this.pending === null) return;
     const xml = this.pending;
     this.pending = null;
+    this.showingStored = xml === this.stored;
     this.send({ action: 'load', xml, autosave: 1, title: this.file().name });
   }
 
@@ -278,6 +294,8 @@ export class DiagramEditorComponent implements FileEditor {
         this.baseline = this.latest = message.xml;
         this.setDirty(this.commentsDirty);
         this.state.set('ready');
+        // The file as it is stored is shown: it gets a preview if it has none.
+        if (this.showingStored) void this.preview.shown(this.file());
         break;
       case 'autosave':
         if (this.readOnly()) return;

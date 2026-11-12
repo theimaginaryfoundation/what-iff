@@ -7,6 +7,7 @@ import (
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
@@ -167,7 +168,7 @@ func (a *Agent) executeToolUses(ctx context.Context, chatCtx *chatContext, round
 		results[i], generatedAttachments[i], toolErrs[i] = a.executeToolUseWithRecovery(ctx, chatCtx, use)
 		progress.Finished(results[i])
 		a.notifyToolUseGeneratedAttachments(chatCtx, use, generatedAttachments[i])
-		results[i].Images = toolResultImagesFromAttachments(generatedAttachments[i])
+		results[i].Images = append(results[i].Images, toolResultImagesFromAttachments(generatedAttachments[i])...)
 	}
 
 	modelToolCalls := make([]*models.ToolCall, len(results))
@@ -273,7 +274,8 @@ func (a *Agent) executeToolUseWithRecovery(ctx context.Context, chatCtx *chatCon
 			}
 		}()
 
-		output, generatedAttachments, err := a.dispatchToolUse(withToolUseID(ctx, use.ID), chatCtx, use)
+		callCtx, shown := tools.WithResultImages(withToolUseID(ctx, use.ID))
+		output, generatedAttachments, err := a.dispatchToolUse(callCtx, chatCtx, use)
 		toolErr = err
 		if err != nil {
 			result.IsErr = true
@@ -281,6 +283,7 @@ func (a *Agent) executeToolUseWithRecovery(ctx context.Context, chatCtx *chatCon
 		} else {
 			result.Output = output
 			attachments = generatedAttachments
+			result.Images = shownToolImages(chatCtx, shown.Images())
 		}
 	}()
 

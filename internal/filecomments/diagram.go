@@ -3,7 +3,6 @@ package filecomments
 import (
 	"errors"
 	"strconv"
-	"strings"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/drawio"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -18,16 +17,9 @@ import (
 // a thread whose element is gone is on the whole file with the label it had, as a text thread is
 // once its words are gone.
 
-// diagramType is the media type of a .drawio file.
-const diagramType = "application/vnd.jgraph.mxfile"
-
 // isDiagram reports whether the file is a draw.io diagram, whose threads are on its elements.
 func isDiagram(file *models.FileAttachment) bool {
-	if strings.EqualFold(file.FileType, diagramType) {
-		return true
-	}
-	name := strings.ToLower(file.Name)
-	return strings.HasSuffix(name, ".drawio") || strings.HasSuffix(name, ".drawio.xml")
+	return drawio.IsDiagramFile(file.Name, file.FileType)
 }
 
 // OnCells checks each thread against the diagram's XML: a thread on an element that is there is

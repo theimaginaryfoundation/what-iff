@@ -10,6 +10,9 @@
 - **Attachment object cleanup** (`attachment_cleanup.go`):
   ent cascades delete attachment rows without touching the store, so callers read the affected rows first and release them after the delete.
   - `ReleaseAttachmentObjects` deletes a deleted row's object (its `s3_key`, or the legacy derived keys when empty) only when `AttachmentKeyRefs` reports no remaining row references it, plus the row's own thumbnail.
+  - Both release paths also delete a deleted diagram object's preview (`DeletePreviews`).
+- **Previews** (`preview.go`, ADR 0x049 §8): a picture of a diagram the browser drew, keyed by the stored object it shows (`FileKeyForPreview`, `FileKeyForPreviewThumbnail`: `users/{id}/previews/{hash of the object key}.png` and `.thumb.jpg`).
+  Keying by object means a preview matches the content it was drawn from, rows sharing the object share it, and a save (always a new object) leaves the file with none until it is drawn again.
     It first confirms the rows are actually gone (`ExistingFileAttachmentIDs`), so a cascade that did not fire never strips a surviving row.
     Best effort: failures are logged and counted, never returned.
   - `PurgeUserObjects` removes the whole `users/{id}/` prefix and the account's export bundles under `exports/{id}/` (`UserExportPrefix`; `accountexport` writes there via `ExportBundleRoot`) after account deletion.

@@ -85,6 +85,7 @@ export class GalleryPageComponent implements OnInit {
   private readonly chatService = inject(ChatService);
   private readonly personalityService = inject(PersonalityService);
   private readonly fileAttachmentService = inject(FileAttachmentService);
+  private readonly previewUrl = (id: string, size: 'thumbnail' | 'full') => this.fileAttachmentService.previewUrl(id, size);
   private readonly confirmationService = inject(ConfirmationService);
   private readonly mediaJobs = inject(PersonalityMediaJobService);
   private readonly route = inject(ActivatedRoute);
@@ -160,12 +161,14 @@ export class GalleryPageComponent implements OnInit {
   });
   readonly tiles = computed(() => {
     const namesById = this.personalityNames();
-    return this.sortedImages().map(image => toGalleryTileVm(image, this.galleryService.getImageUrl.bind(this.galleryService), namesById));
+    return this.sortedImages().map(image =>
+      toGalleryTileVm(image, this.galleryService.getImageUrl.bind(this.galleryService), namesById, this.previewUrl),
+    );
   });
   readonly selectedTile = computed(() => {
     const selected = this.view.selectedImage();
     if (!selected) return null;
-    return toGalleryTileVm(selected, this.galleryService.getImageUrl.bind(this.galleryService), this.personalityNames());
+    return toGalleryTileVm(selected, this.galleryService.getImageUrl.bind(this.galleryService), this.personalityNames(), this.previewUrl);
   });
   readonly selectedIndex = computed(() => {
     const selectedId = this.view.selectedImageId();

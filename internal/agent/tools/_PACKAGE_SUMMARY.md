@@ -30,6 +30,7 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
     On Word, PowerPoint and Excel files it goes through `filecomments.Office` (`WithOffice`) instead, with Office anchors (`slide`, `sheet`, `cell`), and each change saves the file, replacing its content (no version history).
     Each write returns a `comment_ref`; `CommentRefsFromCalls` turns a turn's calls into the reply's `comment_refs`, one per thread.
   - `DiagramTool` — `diagram` (ADR 0x049, `diagram.go`): lists, validates, creates and changes draw.io diagrams by element (`add_node`, `add_edge`, `add_container`, `add_note`, `set_label`, `set_style`, `move`, `delete`), with the XML work in `internal/drawio`.
+    `list` shows the model the diagram's preview (ADR 0x049 §8), when one of its current version exists, through `AddResultImage`.
     It is thin over `AgentFileTool`: `create` goes through its `create` (an agent file, type `application/vnd.jgraph.mxfile`), every change through its `rewrite` (own file in place, a granted user file through `filesave`), and `list`/`validate` read any of the user's diagrams.
     A refusal from `internal/drawio` (unknown id, bad style, compressed page, a change that would leave a new problem) reaches the model as a file refusal, and nothing is saved.
     An agent may change only files its personality created (with no personality, its conversation); user uploads are read-only and can be copied.
@@ -47,6 +48,8 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   - `list_models`, `list_personalities`, `run_subagent` — shared function specs consumed by `internal/agent` dispatch.
 - **Shared helpers:** `tool_helpers.go` — marshal/unmarshal tool results, validation, truncation for logs (`tool_helpers_test.go`).
 - **`prompts.go`:** Tool-specific system strings where needed.
+
+- **Pictures with a result** (`result_images.go`): a tool shows the model a picture with its result by `AddResultImage` on the call's context; the agent loop collects them (`WithResultImages`) and sends them after the result to models that take images.
 
 ## Key types and entry points
 
@@ -111,7 +114,7 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
 - `catalog_human_description_test.go` — every built-in user-toggleable catalog entry has non-empty human-facing copy distinct from its agent-facing prompt; runtime/external definitions may omit it and rely on the API fallback contract.
 - `list_test.go` — unified list kinds (filters, scopes, empty-conversation / terminal-job omission, origin and tree view).
 - `agent_files_test.go`, `agent_files_patch_test.go`, `entity_test.go` — agent files (ownership, user files read-only, retries, paging, heading search, sandbox refusal), diff application, and the entity tools, against in-memory fakes.
-- `diagram_test.go` — the diagram tool over the agent file fakes: create, every change and list on an agent's diagram, refusals leaving the file byte-identical, a user's diagram readable but changed only with a grant (one saved version, only the label's bytes changed), compressed and non-diagram files, sandbox refusal.
+- `diagram_test.go` — the diagram tool over the agent file fakes: `list` showing the preview of the current version, or saying there is none; create, every change and list on an agent's diagram, refusals leaving the file byte-identical, a user's diagram readable but changed only with a grant (one saved version, only the label's bytes changed), compressed and non-diagram files, sandbox refusal.
 - `tool_helpers_test.go` — marshaling and validation utilities.
 - `toolconstants_test.go` — schema parity with shared specs.
 

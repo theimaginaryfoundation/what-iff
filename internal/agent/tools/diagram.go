@@ -9,6 +9,7 @@ import (
 
 	"github.com/theimaginaryfoundation/what-iff/internal/drawio"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
 )
 
@@ -189,8 +190,10 @@ type diagramResult struct {
 	Outline  string           `json:"outline,omitempty"`
 	Valid    *bool            `json:"valid,omitempty"`
 	Problems []drawio.Problem `json:"problems,omitempty"`
-	Note     string           `json:"note,omitempty"`
-	Error    string           `json:"error,omitempty"`
+	// Preview says whether a picture of the diagram is shown with the result (list).
+	Preview string `json:"preview,omitempty"`
+	Note    string `json:"note,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // DiagramTool implements diagram over the agent file tools.
@@ -378,7 +381,31 @@ func (t *DiagramTool) read(ctx context.Context, chat *models.Chat, a diagramArgs
 		res.Outline = res.Outline[:diagramOutlineMax] + "\n…"
 	}
 	res.Pages, res.Note = capElements(pages, diagramListMax)
+	res.Preview = t.showPreview(ctx, att)
 	return res, nil
+}
+
+// diagramPreviewMaxBytes is the largest preview shown at full size; a larger one is shown as its
+// thumbnail.
+const diagramPreviewMaxBytes = 3 << 20
+
+// showPreview shows the model the diagram's preview (ADR 0x049 §8), the picture the user's editor
+// last drew of this version, with the result, and says what it showed.
+func (t *DiagramTool) showPreview(ctx context.Context, att *models.FileAttachment) string {
+	if t.files.files == nil || att.S3Key == "" {
+		return ""
+	}
+	data, err := t.files.files.DownloadFile(ctx, storage.FileKeyForPreview(att.S3Key))
+	mediaType := "image/png"
+	if err == nil && len(data) > diagramPreviewMaxBytes {
+		data, err = t.files.files.DownloadFile(ctx, storage.FileKeyForPreviewThumbnail(att.S3Key))
+		mediaType = "image/jpeg"
+	}
+	if err != nil || len(data) == 0 {
+		return "No picture of this version yet: one is drawn when the user next opens the diagram."
+	}
+	AddResultImage(ctx, data, mediaType)
+	return "A picture of this version, as the user's editor drew it, follows this result (if you can see images)."
 }
 
 // pickPage is the one page ref names (its name, or its number from 1).
@@ -412,9 +439,7 @@ func capElements(pages []drawio.Page, max int) ([]drawio.Page, string) {
 
 // isDiagramFile reports whether att is a draw.io file by its name or type.
 func isDiagramFile(att *models.FileAttachment) bool {
-	name := strings.ToLower(att.Name)
-	return strings.HasSuffix(name, ".drawio") || strings.HasSuffix(name, ".drawio.xml") ||
-		att.FileType == "application/vnd.jgraph.mxfile" || strings.HasSuffix(name, ".xml")
+	return drawio.IsDiagramFile(att.Name, att.FileType) || strings.HasSuffix(strings.ToLower(att.Name), ".xml")
 }
 
 func (t *DiagramTool) create(ctx context.Context, chat *models.Chat, a diagramArgs) (diagramResult, error) {

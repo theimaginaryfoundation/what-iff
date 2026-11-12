@@ -189,6 +189,33 @@
   width: 42%;
 }
 
+.tile__file-preview {
+  align-items: flex-end;
+  // A diagram's preview is drawn on white (ADR 0x049 §8), so it sits on a white card in both themes.
+  background: #ffffff;
+  border: 1px solid var(--color-border-base);
+  border-radius: 0.5rem;
+  display: flex;
+  height: 62%;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0.375rem;
+  position: relative;
+  width: 82%;
+
+  img {
+    height: 100%;
+    object-fit: contain;
+    width: 100%;
+  }
+
+  .tile__file-badge {
+    bottom: 0.375rem;
+    position: absolute;
+    right: 0.375rem;
+  }
+}
+
 .tile__file-badge {
   background: color-mix(in srgb, var(--color-accent) 16%, transparent);
   border-radius: 0.25rem;
@@ -217,7 +244,6 @@
   color: var(--color-text-muted);
   font-size: 0.625rem;
 }
-
 
 /* A file tile shows its name already; the image hover caption would only cover it. */
 .tile--file .tile__overlay {

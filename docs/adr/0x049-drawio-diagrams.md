@@ -84,6 +84,17 @@ A thread is on one element, or on the whole diagram:
 - Visio's older binary formats (`.vsd`) are refused with a hint to save as `.vsdx`: draw.io converts them only with a server.
 - Where the app has no diagram editor, a Visio file is refused.
 
+### 8. A preview of each diagram
+
+The server cannot draw a diagram, so the browser that shows one sends a picture of it: a PNG the editor exports, stored with a JPEG thumbnail beside the file (`GET`/`PUT /file-attachment/{id}/preview`).
+
+- It is drawn when a diagram is shown that has none of its current version (one just uploaded, converted or changed by an agent), and after every save.
+- It is kept by the stored object it shows, not by the file: a preview always matches the content it was drawn from, the copies of a file that share its object share it, and a save, which always writes a new object, leaves the file without one until it is drawn again.
+  It is deleted with its object.
+- The gallery shows it as the diagram's tile.
+- The `diagram` tool's `list` shows it to models that take images, with the outline, or says there is none of this version yet.
+  A diagram an agent changed has none until the user opens it.
+
 ## Consequences
 
 - Users draw and edit diagrams in the workspace, and agents change the same files as text.
@@ -92,6 +103,6 @@ A thread is on one element, or on the whole diagram:
 
 ## Later
 
-- **A preview image** saved with each diagram, for the gallery and for agents to look at; and PDF, which draw.io makes only with an export server.
+- **PDF**, which draw.io makes only with an export server.
 - **c4a tooling** for diagrams: inspecting, laying out with Graphviz, converting from Mermaid and rendering.
 - **Hosting**: the deployed site's bucket, distribution and `frame-ancestors`, and the deploy workflow's build.

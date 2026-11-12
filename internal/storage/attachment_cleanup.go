@@ -92,21 +92,24 @@ func ReleaseAttachmentObjects(ctx context.Context, logger *zap.Logger, store Fil
 		shared = nil
 	}
 
-	del := func(key string) {
+	del := func(key string) bool {
 		if err := store.DeleteFile(ctx, key); err != nil {
 			res.Failed++
 			logger.Warn("attachment cleanup: object delete failed",
 				zap.String("user_id", userID.String()), zap.String("key", key), zap.Error(err))
-			return
+			return false
 		}
 		res.Deleted++
+		return true
 	}
 	for _, k := range shared {
 		if referenced[k] {
 			res.Kept++
 			continue
 		}
-		del(k)
+		if del(k) {
+			DeletePreviews(ctx, logger, store, k)
+		}
 	}
 	for _, k := range thumbs {
 		del(k)
@@ -142,6 +145,7 @@ func ReleaseReplacedObject(ctx context.Context, logger *zap.Logger, store FileSt
 		logger.Warn("attachment cleanup: replaced object delete failed", zap.String("key", key), zap.Error(err))
 		return false
 	}
+	DeletePreviews(ctx, logger, store, key)
 	return true
 }
 

@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
-import { Observable, map, switchMap } from 'rxjs';
+import { Observable, catchError, map, of, switchMap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { FileAttachment, FileAttachmentFilters, ChatContextFilesResponse } from '../models/file-attachment.model';
 import { PaginatedResponse } from '../models/common.model';
@@ -60,6 +60,26 @@ export class FileAttachmentService {
       params = params.set('chat_id', chatId);
     }
     return this.http.put<FileAttachment>(`${this.apiUrl}/file-attachment/${attachmentId}/content`, content, { headers, params });
+  }
+
+  /** Where a diagram's preview is (ADR 0x049 §8): its PNG, or its JPEG thumbnail. 404 when it has none of its current version. */
+  previewUrl(attachmentId: string, size: 'full' | 'thumbnail' = 'full'): string {
+    return `${this.apiUrl}/file-attachment/${attachmentId}/preview?size=${size}`;
+  }
+
+  /** Whether the file has a preview of its current version. */
+  hasPreview(attachmentId: string): Observable<boolean> {
+    return this.http.get(this.previewUrl(attachmentId, 'thumbnail'), { responseType: 'blob' }).pipe(
+      map(() => true),
+      catchError(() => of(false)),
+    );
+  }
+
+  /** Stores a PNG of a diagram as it is at content_version `version`; a 409 means it changed since. */
+  putPreview(attachmentId: string, version: number, png: Blob): Observable<void> {
+    const params = new HttpParams().set('version', String(version));
+    const headers = new HttpHeaders({ 'Content-Type': 'image/png' });
+    return this.http.put<void>(`${this.apiUrl}/file-attachment/${attachmentId}/preview`, png, { headers, params });
   }
 
   /**

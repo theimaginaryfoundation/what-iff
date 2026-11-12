@@ -20,11 +20,12 @@ Everything is a pure function over the file's text, with no I/O.
 
 - `List`, `Outline`, `Validate`, `New`, `AddCell`, `AddEdge`, `SetLabel`, `SetStyle`, `Move`, `Delete`.
 - `Page`, `Element`, `Geometry`, `Placement`, `NewCell`, `NewEdge`, `Graph`, `Problem`.
+- `IsDiagramFile`, `MediaType`: which files are diagrams (also used by `internal/filecomments` and the preview route).
 - Errors: `ErrNotDiagram`, `ErrCompressed`, `ErrInput` (the request does not fit the diagram), `*InvalidError` (the change would leave new problems).
 
 ## Dependencies
 
-- **Inbound:** `internal/agent/tools` (`DiagramTool`).
+- **Inbound:** `internal/agent/tools` (`DiagramTool`), `internal/filecomments` and `internal/handlers/fileattachment` (`IsDiagramFile`).
 - **Outbound:** standard library, and `internal/officecomments` for `XMLText` (dropping characters XML cannot hold).
 
 ## Non-obvious decisions

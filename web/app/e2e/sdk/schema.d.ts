@@ -13983,6 +13983,151 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/file-attachment/{id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a diagram's preview
+         * @description A picture of the file as it is now (ADR 0x049 §8): the PNG the browser drew of a draw.io diagram, or its JPEG thumbnail (`size=thumbnail`). 404 when there is none of the current version: every save leaves the file without one until it is drawn again.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description `full` (the default, PNG) or `thumbnail` (JPEG). */
+                    size?: "full" | "thumbnail";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The preview */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "image/png": string;
+                        "image/jpeg": string;
+                    };
+                };
+                /** @description The cached copy is current */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such file, or no preview of its current version */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /**
+         * Store a diagram's preview
+         * @description Stores a PNG of a draw.io diagram as it is at `version` (its content_version), with a thumbnail, beside the stored file (ADR 0x049 §8). The browser that drew the diagram sends it, after opening or saving it. At most 8 MB and 8000 pixels a side.
+         */
+        put: {
+            parameters: {
+                query: {
+                    /** @description The content_version the picture shows. */
+                    version: number;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "image/png": string;
+                };
+            };
+            responses: {
+                /** @description Stored */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not a diagram, no version, or not a PNG of an allowed size */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such file */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file changed since; details.content_version is the current version */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The preview is too large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/file-attachment/{id}/content": {
         parameters: {
             query?: never;

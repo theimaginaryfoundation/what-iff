@@ -239,6 +239,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   For vision models, history turns replay images too, but only the newest **`maxHistoryImages`** (5) across history and carry-over (**`selectHistoryImages`**), and as their stored thumbnails, falling back to the original when none exists and then back-filling the thumbnail (`imageutil.BackfillThumbnail`) (`history_images.go`, [ADR 0x038](../../docs/adr/0x038-bounded-history-images.md)).
   Each replayed image is re-encoded into every request, and the SDKs' JSON marshal holds about ten times the image bytes, so full-size history images could OOM a small host (what-iff#419).
   Within a turn, `generate_image` attaches each image's thumbnail (`FileAttachment.Thumbnail`); `toolResultImagesFromAttachments` shows the model that, and the save stores it as the gallery thumbnail.
+  A tool can also show a picture that is not a file of the reply (the `diagram` tool's preview, `tools.AddResultImage`): `executeToolUseWithRecovery` collects them per call and `shownToolImages` sends them to vision models only.
   Tool images without one (MCP screenshots, `find_context` fetches) still go at full size.
   Uploads are no longer mirrored to OpenAI's Files API, so there is no `file_id` path.
   Details in `provider/_PACKAGE_SUMMARY.md`.

@@ -14,6 +14,19 @@ import (
 	"strings"
 )
 
+// MediaType is a .drawio file's media type.
+const MediaType = "application/vnd.jgraph.mxfile"
+
+// IsDiagramFile reports whether a file with this name and media type is a draw.io diagram: a
+// .drawio or .drawio.xml file, or one stored with draw.io's media type.
+func IsDiagramFile(name, mediaType string) bool {
+	if strings.EqualFold(strings.TrimSpace(mediaType), MediaType) {
+		return true
+	}
+	name = strings.ToLower(name)
+	return strings.HasSuffix(name, ".drawio") || strings.HasSuffix(name, ".drawio.xml")
+}
+
 // Errors a caller can turn into a message for the model.
 var (
 	// ErrNotDiagram means the text is not a draw.io file.
