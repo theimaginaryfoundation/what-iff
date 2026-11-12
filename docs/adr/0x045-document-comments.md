@@ -61,7 +61,7 @@ On text, a thread is on a range of the text in UTF-16 code units, so the browser
 The set keeps the text the anchors were placed on, and the stored object (`s3_key`) that text came from.
 When a read finds the file's object changed, whoever changed it, it carries every anchor to the new text and stores the result, so no writer has to know about comments.
 An object the row names that cannot be found (a save replaced it during the read) is an error, never empty text, which would put every anchor nowhere.
-A file that stops being text comments can be placed on (it grew past 4 MB) keeps its comments readable, on the whole file.
+A text file past 4 MB keeps its comments on the whole file: they can be read and written there, though not on ranges of its text.
 
 Carrying follows Word: a range keeps its words.
 The old and new text are compared word by word (a Myers diff, bounded in edits and in work, so neither a large rewrite nor a large file costs more than a fraction of a second; past the bound a range is found by its words).
@@ -83,7 +83,8 @@ Comments are read and written through the original, so a comment made in a chat 
 
 The baseline is the stored object rather than a version number, because each row counts its own `content_version`.
 For the same reason, an agent's edit of its file now moves the file's chat copies with it, as a user's save already did; context-only rows (what a reply showed) keep the version they had.
-Deleting an original hands its copies, and its comments, to the earliest copy left; so does deleting the chat, personality or skill that holds it, before the cascade removes it.
+Deleting an original hands its copies, and its comments, to the earliest copy left; so does deleting the chat, personality or skill that holds it, before the cascade removes it, whether or not it has comments yet.
+A copy that came to hold comments after its original went without handing over (before this was done) hands them to its sibling copies, joining any set they hold on the whole file.
 
 ## Consequences
 

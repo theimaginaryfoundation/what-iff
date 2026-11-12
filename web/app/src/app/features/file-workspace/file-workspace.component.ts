@@ -269,7 +269,7 @@ export class FileWorkspaceComponent implements CommentSaver {
     // A comment save running in the viewer replaces the bytes (or reloads them on a conflict) when
     // it lands: the editor opens on what it leaves, or that would replace what is typed.
     if (this.commentSave) {
-      await this.commentSave;
+      await this.settleCommentSaves();
       if (this.mode() !== 'view' || this.state() !== 'ready') return;
     }
     const load = this.loadEditor(this.kind());
@@ -424,6 +424,19 @@ export class FileWorkspaceComponent implements CommentSaver {
       return await running;
     } finally {
       if (this.commentSave === running) this.commentSave = null;
+    }
+  }
+
+  /**
+   * Waits until no comment save is running: a viewer's autosave queues the next save behind the
+   * one running and starts it once that lands, so after each one this waits a task for the next
+   * to start (a comment posted during the first save would otherwise be written, or refused, once
+   * the editor is open).
+   */
+  private async settleCommentSaves(): Promise<void> {
+    while (this.commentSave) {
+      await this.commentSave;
+      await new Promise(resolve => setTimeout(resolve));
     }
   }
 

@@ -312,3 +312,94 @@ func TestCommentFileID_FollowsACopyOfAnUnlinkedCopy(t *testing.T) {
 		require.Equal(t, first.ID, got, "one set for all three rows")
 	}
 }
+
+// deleteAsCascade does what DeleteChat does for the chat's files, then deletes them as the
+// foreign-key cascade would (the test schema has no cascades).
+func deleteAsCascade(t *testing.T, ds *Datastore, userID, chatID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	doomed := entfileattachment.HasChatMessageWith(chatmessage.HasChatWith(entchat.ID(chatID)))
+	tx, err := ds.dbClient.Tx(ctx)
+	require.NoError(t, err)
+	require.NoError(t, handOverCopiesOf(ctx, tx, userID, doomed))
+	_, err = tx.FileCommentSet.Delete().Where(filecommentset.HasFileAttachmentWith(doomed)).Exec(ctx)
+	require.NoError(t, err)
+	_, err = tx.FileAttachment.Delete().Where(doomed).Exec(ctx)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+}
+
+func TestHandOverCopiesOf_RelinksCopiesBeforeAnyCommentAndAfter(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := createFATestUser(t, ds)
+	modelID := createFATestModel(t, ds)
+	chats := []uuid.UUID{createFATestChat(t, ds, userID, modelID), createFATestChat(t, ds, userID, modelID), createFATestChat(t, ds, userID, modelID)}
+	var msgs []uuid.UUID
+	for _, c := range chats {
+		msgs = append(msgs, createFATestChatMessage(t, ds, c))
+	}
+	original, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "a.md", FileType: "text/markdown", S3Key: "users/u/a.md", ChatMessageID: &msgs[0]})
+	require.NoError(t, err)
+	var copies []*models.FileAttachment
+	for _, m := range msgs[1:] {
+		c, err := ds.CreateFileAttachmentReference(ctx, userID, original.ID)
+		require.NoError(t, err)
+		require.NoError(t, ds.dbClient.FileAttachment.UpdateOneID(c.ID).SetChatMessageID(m).Exec(ctx))
+		copies = append(copies, c)
+	}
+
+	// The original's chat goes before anyone comments: the copies are still one file.
+	deleteAsCascade(t, ds, userID, chats[0])
+	for _, c := range copies {
+		got, err := ds.CommentFileID(ctx, userID, c.ID)
+		require.NoError(t, err)
+		require.Equal(t, copies[0].ID, got)
+	}
+	_, err = ds.PutFileCommentSet(ctx, userID, copies[0].ID, models.FileCommentSet{Threads: []models.FileCommentThread{{ID: "t1"}}, BaselineKey: original.S3Key}, 0)
+	require.NoError(t, err)
+
+	// Then the chat holding the new original goes: the last copy keeps the comments.
+	deleteAsCascade(t, ds, userID, chats[1])
+	got, err := ds.CommentFileID(ctx, userID, copies[1].ID)
+	require.NoError(t, err)
+	require.Equal(t, copies[1].ID, got)
+	set, err := ds.GetFileCommentSet(ctx, userID, copies[1].ID)
+	require.NoError(t, err)
+	require.NotNil(t, set)
+	require.Len(t, set.Threads, 1)
+}
+
+func TestHandOverCopies_ACopyHoldingCommentsAfterItsOriginalWentHandsThemOn(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := createFATestUser(t, ds)
+	original, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "a.md", FileType: "text/markdown", S3Key: "users/u/a.md"})
+	require.NoError(t, err)
+	c1, err := ds.CreateFileAttachmentReference(ctx, userID, original.ID)
+	require.NoError(t, err)
+	c2, err := ds.CreateFileAttachmentReference(ctx, userID, original.ID)
+	require.NoError(t, err)
+	// The state the cascade used to leave: the original gone with no hand-over, and the copies
+	// each holding comments written through them.
+	require.NoError(t, ds.dbClient.FileAttachment.DeleteOneID(original.ID).Exec(ctx))
+	thread := func(id string, start int) []models.FileCommentThread {
+		return []models.FileCommentThread{{ID: id, Anchor: &models.FileCommentRange{Start: start, End: start + 2}, Quote: "hi"}}
+	}
+	_, err = ds.PutFileCommentSet(ctx, userID, c1.ID, models.FileCommentSet{Threads: thread("t1", 0), BaselineKey: "k"}, 0)
+	require.NoError(t, err)
+	_, err = ds.PutFileCommentSet(ctx, userID, c2.ID, models.FileCommentSet{Threads: thread("t2", 4), BaselineKey: "k"}, 0)
+	require.NoError(t, err)
+
+	require.NoError(t, ds.DeleteFileAttachment(ctx, userID, c1.ID))
+	set, err := ds.GetFileCommentSet(ctx, userID, c2.ID)
+	require.NoError(t, err)
+	require.NotNil(t, set)
+	require.Len(t, set.Threads, 2, "both sets, joined")
+	require.Equal(t, "t2", set.Threads[0].ID)
+	require.NotNil(t, set.Threads[0].Anchor, "the heir's own threads keep their places")
+	require.Nil(t, set.Threads[1].Anchor, "the joined ones go on the whole file, quote kept")
+	require.Equal(t, "hi", set.Threads[1].Quote)
+}

@@ -31,7 +31,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     `filecomments.go` (ADR 0x045): `GetFileCommentSet` and `PutFileCommentSet` keep a text file's comment set (threads as JSON, the baseline text and the `s3_key` it was), owner-scoped, with a revision check (`ErrFileCommentsRevision`).
       A file and its chat copies share one set, kept on the original: `CommentFileID` resolves a row to its `original_id`, or, for a row made before that link existed, to the earliest non-context-only row on the same object, and stores the link it inferred.
       `DeleteFileAttachment` of an original hands the set and the link to its earliest remaining copy (`handOverCopies`); a file with no copies takes its set with it.
-      `DeleteChat`, `DeletePersonality` and `DeleteRitualWithFiles` do the same for the files the cascade is about to remove (`handOverCopiesOf`), choosing no heir that goes with them.
+      `DeleteChat`, `DeletePersonality` and `DeleteRitualWithFiles` do the same for the files the cascade is about to remove (`handOverCopiesOf`: every original, with or without a set yet), choosing no heir that goes with them.
+      A copy holding a set whose original is already gone hands it to its siblings; an heir that already holds a set gets the other's threads joined on the whole file (`moveCommentSet`).
       `CommentFileID` follows an original that is itself a copy (bounded), so a copy made from an unlinked copy shares the set.
     `fileeditgrant.go` (ADR 0x046): `GrantFileEdit` and `HasFileEditGrant` record and check that a chat's agent may change one of the user's files, on the file's original (so its chat copies are covered), deleted with the file or the chat.
       A grant records the chat's personality when it was made and holds only while the chat still has it; `ListFileEditGrants` and `RevokeFileEdit` list and take back a chat's grants.

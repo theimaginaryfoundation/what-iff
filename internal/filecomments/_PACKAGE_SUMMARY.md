@@ -21,7 +21,8 @@ Keeps the comments on text, code and image files (ADR 0x045), which have no plac
 - **`MentionContext`** (`mention.go`, ADR 0x046) renders the context a comment that mentions the agent sends with its message: the file, what the thread is on and the thread before the comment, bounded in length; `ShortQuote` is the quote a link to the thread shows.
 - **Images:** every thread is on the whole file (`anchor` null, no quote); no text is read and an edit leaves the threads as they are.
 - **Refusals:** `ErrNotText` for content that is neither an image nor UTF-8 text, or text over `MaxTextBytes` (4 MB).
-  A read of a file that stopped being such text returns its threads on the whole file, unstored, so they stay readable.
+  A read of a file that stopped being such text returns its threads on the whole file, unstored, so they stay readable; a text file over the limit also takes writes of threads on the whole file (`errTextTooLarge`).
+  A row with no key (from before keys were recorded) reads a missing or empty object as empty text, as it always did.
   `ErrContentMissing` when the object the row names is not there (503); a read retries it, since a save that replaced the object mid-read is the usual cause, and a write turns it into `ErrStaleContent` when the row moved on.
 
 ## Dependencies
