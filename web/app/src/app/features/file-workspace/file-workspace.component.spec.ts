@@ -395,4 +395,70 @@ describe('FileWorkspaceComponent', () => {
     expect(await payload.blob.text()).toBe('copy me');
     expect(fixture.componentInstance.saveAsOpen()).toBe(false);
   });
+  describe('markup (ADR 0x047)', () => {
+    const png = () => file({ name: 'photo.png', file_type: 'image/png' });
+
+    async function startMarkup(): Promise<HTMLElement> {
+      download.mockReturnValue(of(new Blob(['png'], { type: 'image/png' })));
+      fixture.componentRef.setInput('markupAvailable', true);
+      const el = await show(png());
+      button(el, 'Mark up')!.click();
+      fixture.detectChanges();
+      await fixture.whenStable();
+      return el;
+    }
+
+    it('offers Mark up for PNG, JPEG and WebP images where the host can take it, phones included', async () => {
+      download.mockReturnValue(of(new Blob(['png'], { type: 'image/png' })));
+      let el = await show(png());
+      expect(button(el, 'Mark up')).toBeUndefined();
+
+      fixture.componentRef.setInput('markupAvailable', true);
+      fixture.componentRef.setInput('canEdit', false);
+      fixture.detectChanges();
+      expect(button(el, 'Mark up')).toBeDefined();
+
+      el = await show(file({ name: 'loop.gif', file_type: 'image/gif' }));
+      expect(button(el, 'Mark up')).toBeUndefined();
+      download.mockReturnValue(of(textBlob('hi')));
+      el = await show(file());
+      expect(button(el, 'Mark up')).toBeUndefined();
+    });
+
+    it('swaps the viewer for the markup surface and asks before dropping a drawing', async () => {
+      const el = await startMarkup();
+      expect(el.querySelector('app-image-markup')).not.toBeNull();
+      expect(el.querySelector('.fake-viewer')).toBeNull();
+      expect(button(el, 'Edit')).toBeUndefined();
+
+      fixture.componentInstance.markupDirty.set(true);
+      confirmDiscard.mockResolvedValueOnce(false);
+      expect(await fixture.componentInstance.stopEdit()).toBe(false);
+      expect(fixture.componentInstance.mode()).toBe('markup');
+
+      expect(await fixture.componentInstance.stopEdit()).toBe(true);
+      expect(fixture.componentInstance.mode()).toBe('view');
+    });
+
+    it('hands the drawing to the host and goes back to the image once it is added', async () => {
+      await startMarkup();
+      const sent: { file: FileAttachment; result: unknown }[] = [];
+      fixture.componentInstance.markupSubmit.subscribe(e => sent.push(e));
+      const result = { mask: new Blob(['m']), markup: null };
+
+      fixture.componentInstance.onMarkupSubmitted(result);
+      fixture.componentInstance.onMarkupSubmitted(result);
+      expect(sent).toEqual([{ file: png(), result }]);
+      expect(await fixture.componentInstance.stopEdit()).toBe(false);
+
+      fixture.componentInstance.finishMarkup(false);
+      expect(fixture.componentInstance.mode()).toBe('markup');
+      expect(fixture.componentInstance.saveError()).toContain('Could not add the markup');
+
+      fixture.componentInstance.onMarkupSubmitted(result);
+      fixture.componentInstance.finishMarkup(true);
+      expect(fixture.componentInstance.mode()).toBe('view');
+      expect(fixture.componentInstance.markupDirty()).toBe(false);
+    });
+  });
 });

@@ -63,6 +63,8 @@ func (a *Agent) GeneratePersonalityPortraitImage(ctx context.Context, userID uui
 	if err != nil {
 		return nil, fmt.Errorf("decode generated portrait: %w", err)
 	}
+	// Stored compact, like every generated image (ADR 0x047 §9).
+	raw = imageutil.CompactPNGForStorage(raw)
 
 	name := "personality-portrait.png"
 	created, err := a.ds.CreateFileAttachment(ctx, userID, models.FileAttachment{

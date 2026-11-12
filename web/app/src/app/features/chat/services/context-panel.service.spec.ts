@@ -60,16 +60,20 @@ describe('ContextPanelService', () => {
 
     it('queues and consumes a composer attachment, counts file refreshes and picker requests', () => {
         const file = { id: 'f-1', user_id: 'u', name: 'a.txt', file_type: 'text/plain', created_at: '' };
+        const second = { ...file, id: 'f-2', name: 'b.txt' };
         service.requestComposerAttachment(file);
-        expect(service.composerAttachment()).toEqual(file);
-        expect(service.consumeComposerAttachment()).toEqual(file);
-        expect(service.consumeComposerAttachment()).toBeNull();
+        service.requestComposerAttachment(second);
+        expect(service.composerAttachments()).toEqual([file, second]);
+        expect(service.consumeComposerAttachments()).toEqual([file, second]);
+        expect(service.consumeComposerAttachments()).toEqual([]);
 
         expect(service.filesVersion()).toBe(0);
         service.refreshFiles();
         expect(service.filesVersion()).toBe(1);
         service.requestGalleryPicker();
         expect(service.galleryPickerRequests()).toBe(1);
+        service.requestSketch();
+        expect(service.sketchRequests()).toBe(1);
     });
 
     it('queues and consumes composer insert payload', () => {

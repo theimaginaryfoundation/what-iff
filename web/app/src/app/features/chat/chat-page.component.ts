@@ -35,6 +35,7 @@ import { startChatFailureAlert } from '../personality/helpers/start-chat-failure
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { AuthImagePipe } from '../../core/pipes/auth-image.pipe';
 import { ToolCallDetailModalComponent } from './components/tool-call-detail-modal/tool-call-detail-modal.component';
+import { SketchOverlayComponent } from '../file-workspace/markup/sketch-overlay.component';
 import {
   appendLiveToolCallGroup,
   appendPendingAssistantGroup,
@@ -100,6 +101,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
     ThreadBookmarksComponent,
     PersonaPickerDialogComponent,
     ToolCallDetailModalComponent,
+    SketchOverlayComponent,
     AuthImagePipe,
     ThreadListPanelComponent,
     ContextPanelToggleComponent,
@@ -310,15 +312,28 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   };
   private readonly activeHotkeyListeners = new Map<string, (event: KeyboardEvent) => void>();
   readonly workspace = inject(FileWorkspaceService);
+  /** The composer's Sketch page is open (ADR 0x047 §7). */
+  readonly sketchOpen = signal(false);
   private readonly composer = viewChild(ChatComposerComponent);
   // The Files tab adds files to the message being composed and asks for the gallery picker (ADR 0x043 §4).
   private readonly adoptContextPanelAttachment = effect(() => {
-    const attachment = this.contextPanel.composerAttachment();
-    if (attachment) untracked(() => this.onGalleryAttachment(this.contextPanel.consumeComposerAttachment()!));
+    if (this.contextPanel.composerAttachments().length === 0) return;
+    untracked(() => {
+      for (const attachment of this.contextPanel.consumeComposerAttachments()) this.onGalleryAttachment(attachment);
+    });
   });
   private readonly publishPendingAttachments = effect(() => {
     const files = this.pendingAttachments().flatMap(item => (item.attachment ? [item.attachment] : []));
     untracked(() => this.contextPanel.setComposerPending(files));
+  });
+  // The count is the service's, which outlives this page: only a request made while it is shown opens
+  // the canvas, not one from an earlier visit.
+  private handledSketchRequests = this.contextPanel.sketchRequests();
+  private readonly openSketchOnRequest = effect(() => {
+    const requests = this.contextPanel.sketchRequests();
+    if (requests === this.handledSketchRequests) return;
+    this.handledSketchRequests = requests;
+    untracked(() => this.sketchOpen.set(true));
   });
   private readonly openGalleryPickerOnRequest = effect(() => {
     if (this.contextPanel.galleryPickerRequests() > 0) untracked(() => this.composer()?.openGalleryPicker());
@@ -748,6 +763,8 @@ ${text}` : text);
   }
 
   onGalleryAttachment(attachment: FileAttachment): void {
+    // Already on the message (the same file added twice from the Files tab or gallery).
+    if (this.pendingAttachments().some(item => item.attachment?.id === attachment.id)) return;
     const pending = createPendingFileAttachment({
       clientKey: `attachment:${attachment.id}`,
       attachment,

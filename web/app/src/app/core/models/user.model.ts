@@ -125,3 +125,19 @@ export function effectiveImageGenerationProvider(preferences: UserPreferences | 
   const chosen = preferences?.image_generation_provider;
   return chosen && offered.includes(chosen) ? chosen : (offered[0] ?? '');
 }
+
+/** The image vendors that can edit images and take masks and reference images (ADR 0x047). */
+export const IMAGE_EDITING_PROVIDERS: readonly ImageGenerationProvider[] = ['openai', 'google'];
+
+/**
+ * Why the agent will not be able to use markup, or null when it will: images are not set up, or the
+ * vendor images use cannot edit. Requests never move to another vendor, so the person is told here.
+ */
+export function imageEditingUnavailableReason(preferences: UserPreferences | null | undefined): string | null {
+  if (!preferences) return null;
+  const provider = effectiveImageGenerationProvider(preferences);
+  if (!provider) return 'Image generation is not set up here, so the agent cannot redraw from your markup.';
+  if (IMAGE_EDITING_PROVIDERS.includes(provider)) return null;
+  const name = IMAGE_GENERATION_PROVIDER_LABELS[provider] ?? provider;
+  return `Your image generation provider, ${name}, cannot edit images, so the agent cannot redraw from this markup. Choose OpenAI or Google under Settings → Image generation to use it.`;
+}

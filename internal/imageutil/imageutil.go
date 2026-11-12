@@ -10,7 +10,6 @@ import (
 	"image"
 	_ "image/gif" // register GIF decoder
 	"image/jpeg"
-	"image/png"
 	"io"
 	"path/filepath"
 
@@ -24,25 +23,40 @@ import (
 const (
 	DefaultThumbnailMaxPx   = 256
 	DefaultUploadImageMaxPx = 2048
-	// UploadJPEGQuality is the quality opaque uploads are re-encoded at. A 2048px photo
-	// lands around 1 MB, where the PNG it used to become was ~5 MB (what-iff#419).
+	// UploadJPEGQuality is the quality a JPEG upload is re-encoded at: high enough
+	// that the second generation of loss does not show.
 	UploadJPEGQuality = 90
 )
 
 // NormalizeForUpload decodes an accepted image from input, scales it down when
-// its longest edge exceeds maxPx, and re-encodes it to output: JPEG for opaque
-// images, PNG for images with transparency (JPEG has no alpha channel). It
-// returns the renamed filename and its content type. Images that already fit
-// keep their original dimensions; normalization never upscales. Re-encoding
-// also drops metadata such as EXIF.
+// its longest edge exceeds maxPx, and re-encodes it to output. It returns the
+// renamed filename and its content type. Images that already fit keep their
+// original dimensions; normalization never upscales. Re-encoding also drops
+// metadata such as EXIF, after applying a JPEG's orientation to its pixels.
+//
+// The format follows the input (ADR 0x047 §9):
+//   - a JPEG stays a JPEG (quality UploadJPEGQuality): it is already lossy, and
+//     storing its pixels as PNG would only make it several times larger;
+//   - everything else (PNG, GIF, WebP) becomes a compact PNG; see CompactPNG.
 func NormalizeForUpload(input io.Reader, output io.Writer, fileName string, maxPx int) (string, string, error) {
 	if maxPx <= 0 {
 		maxPx = DefaultUploadImageMaxPx
 	}
 
-	src, _, err := image.Decode(input)
+	// Only a JPEG's EXIF header is needed as bytes, and it sits at the start of the
+	// file, so the head is kept and the rest is decoded as it streams.
+	head := make([]byte, exifHeadBytes)
+	n, err := io.ReadFull(input, head)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return "", "", fmt.Errorf("read image for upload: %w", err)
+	}
+	head = head[:n]
+	src, format, err := image.Decode(io.MultiReader(bytes.NewReader(head), input))
 	if err != nil {
 		return "", "", fmt.Errorf("decode image for upload: %w", err)
+	}
+	if format == "jpeg" {
+		src = applyOrientation(src, jpegOrientation(head))
 	}
 
 	bounds := src.Bounds()
@@ -60,24 +74,16 @@ func NormalizeForUpload(input io.Reader, output io.Writer, fileName string, maxP
 	}
 
 	base := fileName[:len(fileName)-len(filepath.Ext(fileName))]
-	if !isOpaque(src) {
-		if err := png.Encode(output, dst); err != nil {
-			return "", "", fmt.Errorf("encode upload image as PNG: %w", err)
+	if format == "jpeg" {
+		if err := jpeg.Encode(output, dst, &jpeg.Options{Quality: UploadJPEGQuality}); err != nil {
+			return "", "", fmt.Errorf("encode upload image as JPEG: %w", err)
 		}
-		return base + ".png", "image/png", nil
+		return base + ".jpg", "image/jpeg", nil
 	}
-	if err := jpeg.Encode(output, dst, &jpeg.Options{Quality: UploadJPEGQuality}); err != nil {
-		return "", "", fmt.Errorf("encode upload image as JPEG: %w", err)
+	if err := encodeCompactPNG(output, dst); err != nil {
+		return "", "", fmt.Errorf("encode upload image as PNG: %w", err)
 	}
-	return base + ".jpg", "image/jpeg", nil
-}
-
-// isOpaque reports whether every pixel of img is fully opaque. Decoded image types
-// implement Opaque (YCbCr, as JPEG decodes, always is); anything else is treated as
-// possibly transparent so it keeps its alpha as a PNG.
-func isOpaque(img image.Image) bool {
-	o, ok := img.(interface{ Opaque() bool })
-	return ok && o.Opaque()
+	return base + ".png", "image/png", nil
 }
 
 func scaledDimensions(srcW, srcH, maxPx int) (int, int) {

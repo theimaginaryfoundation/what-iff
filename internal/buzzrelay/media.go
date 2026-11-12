@@ -59,7 +59,8 @@ func (b *Blob) Imeta(filename string) []string {
 }
 
 // PrepareMedia readies a file for a Buzz media store: images are re-encoded the way uploads are
-// (JPEG, or PNG when transparent; scaled to the app's upload size), because Buzz refuses images
+// (a JPEG stays JPEG, anything else becomes a compact PNG; scaled to the app's upload size; see
+// imageutil.NormalizeForUpload), because Buzz refuses images
 // that carry metadata (EXIF, PNG text chunks) and stripping it is what the Buzz app does too.
 // Anything else is returned as is.
 func PrepareMedia(name, contentType string, data []byte) (string, string, []byte) {
