@@ -43,6 +43,7 @@
           class="code-editor__markdown prose prose-sm max-w-none dark:prose-invert"
           [data]="previewText()"
           (ready)="onMarkdownReady()"
+          (click)="onPreviewClick($event)"
         ></markdown>
       </div>
     }

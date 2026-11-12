@@ -24,6 +24,7 @@ import { CommentPeopleService } from '../../office/comments/comment-people.servi
 import { CommentsPanelComponent } from '../../office/comments/comments-panel.component';
 import { CommentsPanelState } from '../../office/comments/comments-panel-state.service';
 import { MonacoCommentSurface } from '../text-comments/monaco-comment-surface';
+import { PreviewCommentHighlights } from '../text-comments/preview-comment-highlights';
 import { TextCommentsState } from '../text-comments/text-comments-state';
 import { TextCommentThread, TextCommentsService } from '../text-comments/text-comments.service';
 import { MONACO_LOADER, type Monaco, monacoLanguageFor, vfsUriFor } from './monaco/monaco-loader';
@@ -74,6 +75,8 @@ export class CodeEditorComponent implements FileEditor {
   /** Comments changed since they were last written. */
   private commentsDirty = false;
   private surface: MonacoCommentSurface | null = null;
+  /** The threads shown over the Markdown preview, by their words. */
+  private readonly previewComments = new PreviewCommentHighlights();
   /** The threads as they were when each blob handed to the host was made, anchored on its text. */
   private readonly handedOutComments = new WeakMap<Blob, TextCommentThread[]>();
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -105,17 +108,15 @@ export class CodeEditorComponent implements FileEditor {
       if (blob === this.lastContent) return;
       untracked(() => void this.loadText(blob));
     });
-    // The editor marks open threads' text, the active one more strongly.
+    // The editor and the preview mark open threads' text, the active one more strongly.
     effect(() => {
-      const activeId = this.comments.activeId();
-      const hidden = new Set(
-        this.comments
-          .threads()
-          .filter(t => t.resolved && t.id !== activeId)
-          .map(t => t.id),
-      );
+      const state = this.comments.paintState();
       this.comments.positions();
-      untracked(() => this.surface?.paint({ activeId, hidden }));
+      this.showPreview();
+      untracked(() => {
+        this.surface?.paint(state);
+        this.paintPreview();
+      });
     });
     const stopTheme = followAppTheme(this.document, theme => this.monaco?.editor.setTheme(theme));
     inject(DestroyRef).onDestroy(stopTheme);
@@ -163,9 +164,9 @@ export class CodeEditorComponent implements FileEditor {
     this.panel.open.set(false);
   }
 
-  /** Starts a thread on the selection, or on the word at the caret. */
+  /** Starts a thread on the selection (in the editor or the preview), or on the word at the caret. */
   startComment(): void {
-    const range = this.surface?.selectionOrWord();
+    const range = this.previewSelection() ?? this.surface?.selectionOrWord();
     if (!range) return;
     this.comments.start(range);
     this.panel.open.set(true);
@@ -173,6 +174,35 @@ export class CodeEditorComponent implements FileEditor {
 
   selectThread(threadId: string): void {
     this.comments.select(threadId);
+    const at = this.comments.positions().get(threadId);
+    if (at) this.previewComments.reveal(at);
+  }
+
+  /** A click in the preview on a thread's text makes it active, and shows it in the editor. */
+  onPreviewClick(event: MouseEvent): void {
+    const doc = this.document as Document & { caretRangeFromPoint?(x: number, y: number): Range | null };
+    const caret = doc.caretRangeFromPoint?.(event.clientX, event.clientY);
+    const offset = caret ? this.previewComments.offsetOf(caret.startContainer, caret.startOffset) : null;
+    const threadId = offset !== null ? this.comments.threadAt(offset) : null;
+    if (threadId) this.comments.select(threadId);
+  }
+
+  /** What is selected in the preview, as a range of the text. */
+  private previewSelection(): { start: number; end: number } | null {
+    const selection = this.document.getSelection();
+    const preview = this.previewRoot();
+    if (!selection?.rangeCount || selection.isCollapsed || !preview) return null;
+    const range = selection.getRangeAt(0);
+    if (!preview.contains(range.commonAncestorContainer)) return null;
+    return this.previewComments.sourceRange(range);
+  }
+
+  private previewRoot(): HTMLElement | null {
+    return this.isMarkdown() && this.showPreview() ? this.host.nativeElement.querySelector<HTMLElement>('.code-editor__markdown') : null;
+  }
+
+  private paintPreview(): void {
+    this.previewComments.paint(this.previewRoot(), this.model?.getValue() ?? '', this.comments.positions(), this.comments.paintState());
   }
 
   private replyAtCaret(): void {
@@ -232,6 +262,7 @@ export class CodeEditorComponent implements FileEditor {
 
   onMarkdownReady(): void {
     void renderLatexMath(this.host.nativeElement);
+    this.paintPreview();
   }
 
   private async mount(): Promise<void> {
@@ -319,6 +350,7 @@ export class CodeEditorComponent implements FileEditor {
     if (this.previewTimer) clearTimeout(this.previewTimer);
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.comments.attach(null);
+    this.previewComments.dispose();
     this.surface = null;
     this.editor?.dispose();
     this.model?.dispose();

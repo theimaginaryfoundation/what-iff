@@ -4,6 +4,7 @@ import { MARKED_EXTENSIONS, provideMarkdown } from 'ngx-markdown';
 import { CommentPeopleService } from '../../office/comments/comment-people.service';
 import { TextCommentsService } from '../text-comments/text-comments.service';
 import { fakeTextComments } from '../text-comments/fake-text-comments.spec-helper';
+import { stubCommentHighlights } from '../../office/comments/comment-highlights.spec-helper';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { latexMathExtension } from '../../../core/utils/latex-math.helpers';
@@ -149,6 +150,44 @@ describe('CodeEditorComponent', () => {
         }),
       ]);
       expect(component.dirty()).toBe(false);
+    });
+
+    it('shows the threads over the Markdown preview, and takes a click or a selection there', async () => {
+      const highlights = stubCommentHighlights();
+      const text = 'Ship the **new editor** first';
+      const stored = {
+        id: 't1',
+        anchor: { start: 9, end: 23 },
+        quote: '**new editor**',
+        comments: [{ id: 't1', authorId: 'user:u-1', authorName: 'Pat Lee', createdAt: '2026-11-01T00:00:00Z', text: 'Rename?' }],
+      };
+      textComments.state.stored = { threads: [stored], contentVersion: 1, revision: 1 };
+      try {
+        await open(file({ name: 'notes.md', file_type: 'text/markdown' }), text);
+        const el = fixture.nativeElement as HTMLElement;
+        await vi.waitFor(() => expect(highlights.shown('whatiff-comment')).toEqual(['new editor']));
+
+        const strong = el.querySelector('.code-editor__markdown strong')!.firstChild!;
+        const caret = document.createRange();
+        caret.setStart(strong, 2);
+        (document as unknown as { caretRangeFromPoint: () => Range }).caretRangeFromPoint = () => caret;
+        el.querySelector('.code-editor__markdown')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        expect(fixture.componentInstance.comments.activeId()).toBe('t1');
+        await vi.waitFor(() => expect(highlights.shown('whatiff-comment-active')).toEqual(['new editor']));
+
+        const first = el.querySelector('.code-editor__markdown p')!.lastChild!;
+        const selection = document.createRange();
+        selection.setStart(first, 1);
+        selection.setEnd(first, 6);
+        document.getSelection()!.removeAllRanges();
+        document.getSelection()!.addRange(selection);
+        fixture.componentInstance.startComment();
+        expect(fixture.componentInstance.comments.draft()?.range).toEqual({ start: 24, end: 29 });
+      } finally {
+        delete (document as unknown as { caretRangeFromPoint?: unknown }).caretRangeFromPoint;
+        highlights.restore();
+        document.getSelection()?.removeAllRanges();
+      }
     });
 
     it('a save of a file that never had comments writes none', async () => {

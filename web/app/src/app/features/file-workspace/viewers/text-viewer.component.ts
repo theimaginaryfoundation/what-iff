@@ -133,14 +133,8 @@ export class TextViewerComponent {
       }
     });
     effect(() => {
-      const activeId = this.comments.activeId();
-      const hidden = new Set(
-        this.comments
-          .threads()
-          .filter(t => t.resolved && t.id !== activeId)
-          .map(t => t.id),
-      );
-      untracked(() => this.surface?.paint({ activeId, hidden }));
+      const state = this.comments.paintState();
+      untracked(() => this.surface?.paint(state));
     });
     inject(DestroyRef).onDestroy(() => this.surface?.dispose());
     effect(() => {

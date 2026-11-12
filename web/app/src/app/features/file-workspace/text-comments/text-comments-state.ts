@@ -91,6 +91,16 @@ export class TextCommentsState {
         return { ...t, quote };
       });
   });
+  /** How a surface marks the threads: the active one more strongly, resolved ones (unless active) not at all. */
+  readonly paintState = computed(() => {
+    const activeId = this.activeId();
+    const hidden: ReadonlySet<string> = new Set(
+      this.threads()
+        .filter(t => t.resolved && t.id !== activeId)
+        .map(t => t.id),
+    );
+    return { activeId, hidden };
+  });
   readonly openCount = computed(() => this.threads().filter(t => !t.resolved).length);
   readonly people = computed<CommentPerson[]>(() => {
     const me = this.me();
