@@ -24,6 +24,7 @@ import {
   mermaidExtension,
   renderMermaid,
   replaceRenderedDiagramsWithSource,
+  setMermaidEditor,
 } from './mermaid.helpers';
 
 function render(markdown: string): string {
@@ -108,6 +109,28 @@ describe('mermaid in markdown', () => {
     expect(dialog.querySelector('svg text')?.textContent).toBe('Hello');
     dialog.querySelector<HTMLButtonElement>('.mermaid-diagram__close')!.click();
     expect(document.querySelector('dialog.mermaid-diagram__dialog')).toBeNull();
+  });
+
+  it('opens the diagram in the diagram editor, where there is one, and says so if it fails', async () => {
+    // A different source from the other tests, so it is drawn here and not taken from the cache.
+    const editor = vi.fn().mockRejectedValueOnce(new Error('no')).mockResolvedValue(undefined);
+    setMermaidEditor(editor);
+    try {
+      const root = mount(render('```mermaid\nflowchart LR\n  Editable\n```'));
+      await renderMermaid(root);
+      const edit = [...root.querySelectorAll<HTMLButtonElement>('.mermaid-diagram__button')].find(b => b.textContent === 'Edit')!;
+      edit.click();
+      expect(edit.textContent).toBe('Opening…');
+      await vi.waitFor(() => expect(edit.textContent).toBe("Couldn't open"));
+      edit.click();
+      await vi.waitFor(() => expect(edit.textContent).toBe('Edit'));
+      expect(editor).toHaveBeenCalledWith('flowchart LR\n  Editable');
+    } finally {
+      setMermaidEditor(null);
+    }
+    const plain = mount(render('```mermaid\nflowchart LR\n  Plain\n```'));
+    await renderMermaid(plain);
+    expect([...plain.querySelectorAll('.mermaid-diagram__button')].map(b => b.textContent)).not.toContain('Edit');
   });
 
   it('switches between the diagram and its source', async () => {

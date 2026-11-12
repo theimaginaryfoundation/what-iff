@@ -16,7 +16,8 @@ import { saveBlobAsFile } from './download.helpers';
  *    Source Mermaid cannot draw stays as code, with a note. Drawings are cached by source and
  *    theme, so a message re-rendered as it streams does not draw its finished diagrams again.
  *
- * Each diagram gets a small toolbar: show the source instead, copy the source, download SVG or PNG.
+ * Each diagram gets a small toolbar: show the source instead, copy the source, download SVG or PNG,
+ * and, where the app has a diagram editor, open it as an editable diagram (setMermaidEditor).
  */
 
 export const MERMAID_CLASS = 'mermaid-diagram';
@@ -222,6 +223,36 @@ export async function renderMermaid(root: HTMLElement): Promise<void> {
   }
 }
 
+/** Opens a diagram's source as an editable draw.io diagram (ADR 0x049), where the app has an editor. */
+type MermaidEditor = (source: string) => Promise<void>;
+let mermaidEditor: MermaidEditor | null = null;
+
+/** Offers Edit on drawn diagrams (null takes it away); diagrams drawn before keep what they had. */
+export function setMermaidEditor(editor: MermaidEditor | null): void {
+  mermaidEditor = editor;
+}
+
+/** The Edit button: opens the diagram in the editor, saying so while it does and if it fails. */
+function editButton(document: Document, editor: MermaidEditor, source: string): HTMLButtonElement {
+  const title = 'Open as an editable diagram (saved as a new file)';
+  const b = button(document, 'Edit', title, () => {
+    if (b.disabled) return;
+    b.disabled = true;
+    b.textContent = 'Opening…';
+    editor(source)
+      .then(() => {
+        b.textContent = 'Edit';
+        b.title = title;
+      })
+      .catch(() => {
+        b.textContent = "Couldn't open";
+        b.title = 'The diagram could not be opened in the editor; try again';
+      })
+      .finally(() => (b.disabled = false));
+  });
+  return b;
+}
+
 function button(document: Document, label: string, title: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
@@ -273,6 +304,7 @@ function showDiagram(element: HTMLElement, svg: string, source: string): void {
       if (el) void svgToPng(document, el).then(blob => blob && saveBlobAsFile(blob, 'diagram.png'));
     }),
   );
+  if (mermaidEditor) toolbar.append(editButton(document, mermaidEditor, source));
   if (pre) pre.hidden = true;
   element.prepend(toolbar, figure);
   element.dataset[STATE] = 'drawn';

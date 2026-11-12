@@ -52,7 +52,10 @@ The `diagram` tool lets agents work by element rather than by patching XML:
 
 ### 4. Mermaid becomes native shapes
 
-draw.io's `load` takes Mermaid (`descriptor: { format: 'mermaid', data }`) and draws it as native, editable shapes, so a Mermaid diagram can become a `.drawio` file.
+draw.io's `load` takes Mermaid (`descriptor: { format: 'mermaid', data }`) and draws it as native, editable shapes; flowchart, sequence, class, state, ER, Gantt, pie and mindmap diagrams all come in as shapes.
+
+Every drawn Mermaid diagram (ADR 0x048 §4) has Edit, where the app has a diagram editor: the diagram is converted in a hidden editor, saved as a new `.drawio` file in the gallery (named after its title, or its kind), and opened there.
+The Mermaid source it came from is left as it was.
 
 ### 5. Downloads
 
@@ -81,6 +84,6 @@ A thread is on one element, or on the whole diagram:
 ## Later
 
 - **A preview image** saved with each diagram, for the gallery and for agents to look at; and PDF, which draw.io makes only with an export server.
-- **Open as editable diagram** wherever a Mermaid diagram is drawn (§4).
+- **Edit into a chat's files**: a diagram drawn in a chat goes to the gallery, not to that chat's files.
 - **c4a tooling** for diagrams: inspecting, laying out with Graphviz, converting from Mermaid and rendering.
 - **Hosting**: the deployed site's bucket, distribution and `frame-ancestors`, and the deploy workflow's build.
