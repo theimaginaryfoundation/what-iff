@@ -49,6 +49,8 @@ The `diagram` tool lets agents work by element rather than by patching XML:
 - The XML is changed as text where the decoder finds each element, so everything else is kept byte for byte, and a change that would leave the diagram with a new problem is refused.
 - It changes files as `agent_file_write` does: the agent's own diagrams, and a user's under an edit grant, saved as a new version.
 - Compressed pages are refused, with a hint to save the diagram again from the editor.
+- A build that can run draw.io and Graphviz beside the conversation registers them with the tool, which then also offers `layout` (place an existing diagram's elements again, keeping ids, labels and styles), `render` (a picture of a page, shown to the model and kept as the diagram's preview, §8) and `create` from Mermaid source (drawn as native shapes, as §4).
+  These are actions of the same tool, offered only where they work; the public build has none.
 
 ### 4. Mermaid becomes native shapes
 
@@ -104,5 +106,4 @@ The server cannot draw a diagram, so the browser that shows one sends a picture 
 ## Later
 
 - **PDF**, which draw.io makes only with an export server.
-- **c4a tooling** for diagrams: inspecting, laying out with Graphviz, converting from Mermaid and rendering.
 - **Hosting**: the deployed site's bucket, distribution and `frame-ancestors`, and the deploy workflow's build.

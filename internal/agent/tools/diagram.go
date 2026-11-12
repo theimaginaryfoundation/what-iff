@@ -147,6 +147,7 @@ type diagramArgs struct {
 	Action       string             `json:"action"`
 	File         string             `json:"file"`
 	Path         string             `json:"path"`
+	Mermaid      string             `json:"mermaid"`
 	Page         string             `json:"page"`
 	ID           string             `json:"id"`
 	Label        *string            `json:"label"`
@@ -236,6 +237,9 @@ func (t *DiagramTool) Run(ctx context.Context, chat *models.Chat, input []byte) 
 
 // checkDiagramArgs refuses a call that leaves out what its action needs.
 func checkDiagramArgs(a diagramArgs) string {
+	if msg, handled := workshopArgsProblem(a); handled {
+		return msg
+	}
 	has := func(s string) bool { return strings.TrimSpace(s) != "" }
 	need := func(fields ...string) string {
 		return fmt.Sprintf("action %q needs %s", a.Action, strings.Join(fields, " and "))
@@ -292,6 +296,8 @@ func (t *DiagramTool) run(ctx context.Context, chat *models.Chat, a diagramArgs)
 		return t.read(ctx, chat, a)
 	case "create":
 		return t.create(ctx, chat, a)
+	case "layout", "render":
+		return t.workshopAction(ctx, chat, a)
 	}
 	var res diagramResult
 	out, err := t.files.rewrite(ctx, chat, a.File, func(cur string) (string, error) {
@@ -450,6 +456,9 @@ func (t *DiagramTool) create(ctx context.Context, chat *models.Chat, a diagramAr
 	case ".drawio":
 	default:
 		return diagramResult{}, fileRefusalf("a diagram's path ends in .drawio, not %s", ext)
+	}
+	if strings.TrimSpace(a.Mermaid) != "" {
+		return t.createFromMermaid(ctx, chat, p, a.Mermaid)
 	}
 	content, err := drawio.New(drawio.Graph{Page: a.Page, Nodes: a.Nodes, Edges: a.Edges, Lanes: a.Lanes, Notes: a.Notes, Direction: a.Direction})
 	if err != nil {
