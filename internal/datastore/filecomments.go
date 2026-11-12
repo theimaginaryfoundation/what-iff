@@ -9,6 +9,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entfileattachment "github.com/theimaginaryfoundation/what-iff/ent/fileattachment"
 	"github.com/theimaginaryfoundation/what-iff/ent/filecommentset"
+	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
@@ -18,8 +19,17 @@ import (
 // CommentFileID is the file whose comments the user's row id shows: the original of a chat copy,
 // so a file and its chat copies share one set (ADR 0x045). A copy made before copies named their
 // original is resolved the way the gallery resolves one (the earliest of the owner's rows sharing
-// its stored object, context-only rows aside), and the answer is recorded on it.
+// its stored object, context-only rows aside), and the answer is recorded on it. An original that is
+// itself a copy (one made from such an unlinked copy) is resolved in turn.
 func (d *Datastore) CommentFileID(ctx context.Context, userID, id uuid.UUID) (uuid.UUID, error) {
+	return d.commentFileID(ctx, userID, id, 0)
+}
+
+// maxOriginalHops bounds how far commentFileID follows original_id links; a longer chain (or a
+// cycle, which nothing should make) stops at the row reached.
+const maxOriginalHops = 4
+
+func (d *Datastore) commentFileID(ctx context.Context, userID, id uuid.UUID, hops int) (uuid.UUID, error) {
 	row, err := d.dbClient.FileAttachment.Query().
 		Where(entfileattachment.ID(id), entfileattachment.HasOwnerWith(user.ID(userID))).
 		Only(ctx)
@@ -37,6 +47,9 @@ func (d *Datastore) CommentFileID(ctx context.Context, userID, id uuid.UUID) (uu
 			return uuid.Nil, err
 		}
 		// An original that is gone leaves the copy as the file.
+		if original && hops < maxOriginalHops {
+			return d.commentFileID(ctx, userID, *row.OriginalID, hops+1)
+		}
 		if original {
 			return *row.OriginalID, nil
 		}
@@ -69,7 +82,10 @@ func (d *Datastore) CommentFileID(ctx context.Context, userID, id uuid.UUID) (uu
 // unlinked rows on the same object, which CommentFileID would link to it), the earliest of them that
 // is not context-only becomes the original, the rest link to it, and the file's comment set moves
 // to it, so deleting a gallery file leaves its chat copies with their comments (ADR 0x045).
-func handOverCopies(ctx context.Context, tx *ent.Tx, userID, id uuid.UUID) error {
+//
+// When id goes with other rows (see handOverCopiesOf), doomed matches them, and no copy it matches
+// is chosen.
+func handOverCopies(ctx context.Context, tx *ent.Tx, userID, id uuid.UUID, doomed predicate.FileAttachment) error {
 	row, err := tx.FileAttachment.Get(ctx, id)
 	if err != nil {
 		return err
@@ -87,6 +103,9 @@ func handOverCopies(ctx context.Context, tx *ent.Tx, userID, id uuid.UUID) error
 		entfileattachment.ContextOnly(false),
 		copies,
 	)
+	if doomed != nil {
+		mine = entfileattachment.And(mine, entfileattachment.Not(doomed))
+	}
 	heir, err := tx.FileAttachment.Query().
 		Where(mine).
 		Order(ent.Asc(entfileattachment.FieldCreatedAt), ent.Asc(entfileattachment.FieldID)).
@@ -104,6 +123,24 @@ func handOverCopies(ctx context.Context, tx *ent.Tx, userID, id uuid.UUID) error
 		return err
 	}
 	return tx.FileCommentSet.Update().Where(filecommentset.FileAttachmentID(id)).SetFileAttachmentID(heir.ID).Exec(ctx)
+}
+
+// handOverCopiesOf runs before the user's rows matching doomed are deleted by a foreign-key cascade
+// (with the chat, message, personality or skill holding them), which removes their comment sets
+// with them: each of them holding a set hands it to a copy that stays (see handOverCopies).
+func handOverCopiesOf(ctx context.Context, tx *ent.Tx, userID uuid.UUID, doomed predicate.FileAttachment) error {
+	ids, err := tx.FileAttachment.Query().
+		Where(doomed, entfileattachment.HasOwnerWith(user.ID(userID)), entfileattachment.HasCommentSet()).
+		IDs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := handOverCopies(ctx, tx, userID, id, doomed); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ErrFileCommentsRevision means the comments changed since the caller read them.

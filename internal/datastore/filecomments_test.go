@@ -6,6 +6,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
+	"github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
+	entfileattachment "github.com/theimaginaryfoundation/what-iff/ent/fileattachment"
+	"github.com/theimaginaryfoundation/what-iff/ent/filecommentset"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -138,4 +142,70 @@ func TestFileCommentSet_StoredOnlyOverTheRevisionRead(t *testing.T) {
 	require.Nil(t, got, "someone else's file reads as having none")
 	_, err = ds.PutFileCommentSet(ctx, other, file.ID, models.FileCommentSet{}, 2)
 	require.ErrorIs(t, err, ErrFileAttachmentNotFound)
+}
+
+func TestHandOverCopiesOf_ACascadeKeepsTheCommentsWithACopy(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := createFATestUser(t, ds)
+	modelID := createFATestModel(t, ds)
+	chatA := createFATestChat(t, ds, userID, modelID)
+	chatB := createFATestChat(t, ds, userID, modelID)
+	msgA := createFATestChatMessage(t, ds, chatA)
+	msgB := createFATestChatMessage(t, ds, chatB)
+
+	// A file uploaded in chat A, used in chat B, and commented there.
+	original, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "a.md", FileType: "text/markdown", S3Key: "users/u/a.md", ChatMessageID: &msgA})
+	require.NoError(t, err)
+	// A second row on the same object in chat A, made first, goes with it, so it can't be the heir.
+	sameChat, err := ds.CreateFileAttachmentReference(ctx, userID, original.ID)
+	require.NoError(t, err)
+	require.NoError(t, ds.dbClient.FileAttachment.UpdateOneID(sameChat.ID).SetChatMessageID(msgA).Exec(ctx))
+	ref, err := ds.CreateFileAttachmentReference(ctx, userID, original.ID)
+	require.NoError(t, err)
+	require.NoError(t, ds.dbClient.FileAttachment.UpdateOneID(ref.ID).SetChatMessageID(msgB).Exec(ctx))
+	_, err = ds.PutFileCommentSet(ctx, userID, original.ID, models.FileCommentSet{Threads: []models.FileCommentThread{{ID: "t1"}}, BaselineKey: original.S3Key}, 0)
+	require.NoError(t, err)
+
+	// What DeleteChat does before the cascade; the test schema has no cascades, so the rows are
+	// deleted here as the cascade would.
+	doomed := entfileattachment.HasChatMessageWith(chatmessage.HasChatWith(entchat.ID(chatA)))
+	tx, err := ds.dbClient.Tx(ctx)
+	require.NoError(t, err)
+	require.NoError(t, handOverCopiesOf(ctx, tx, userID, doomed))
+	_, err = tx.FileCommentSet.Delete().Where(filecommentset.HasFileAttachmentWith(doomed)).Exec(ctx)
+	require.NoError(t, err)
+	_, err = tx.FileAttachment.Delete().Where(doomed).Exec(ctx)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	got, err := ds.CommentFileID(ctx, userID, ref.ID)
+	require.NoError(t, err)
+	require.Equal(t, ref.ID, got, "the copy in chat B is now the file, not the row in chat A")
+	set, err := ds.GetFileCommentSet(ctx, userID, ref.ID)
+	require.NoError(t, err)
+	require.NotNil(t, set, "and it kept the comments")
+	require.Len(t, set.Threads, 1)
+}
+
+func TestCommentFileID_FollowsACopyOfAnUnlinkedCopy(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := createFATestUser(t, ds)
+
+	// first and unlinked share an object from before original_id; copy was made from unlinked.
+	first, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "a.txt", FileType: "text/plain", S3Key: "users/u/a.txt"})
+	require.NoError(t, err)
+	unlinked, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "a.txt", FileType: "text/plain", S3Key: "users/u/a.txt"})
+	require.NoError(t, err)
+	copy1, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "a.txt", FileType: "text/plain", S3Key: "users/u/a.txt", OriginalID: &unlinked.ID})
+	require.NoError(t, err)
+
+	for _, id := range []uuid.UUID{copy1.ID, unlinked.ID, first.ID} {
+		got, err := ds.CommentFileID(ctx, userID, id)
+		require.NoError(t, err)
+		require.Equal(t, first.ID, got, "one set for all three rows")
+	}
 }
