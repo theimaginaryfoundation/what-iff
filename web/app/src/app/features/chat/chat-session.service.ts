@@ -511,14 +511,28 @@ export class ChatSessionService implements OnDestroy {
     return { status: 'sent' };
   }
 
+  /** Shows an error about the chat that did not come from a request this service made. */
+  reportError(message: string): void {
+    this._error.set(message);
+  }
+
   /**
    * Sends a document comment that mentioned the agent as a message (ADR 0x046): its text is the
    * comment's, and the composer's draft is left as it is. While a turn runs it is a follow-up to it.
    */
-  async sendComment(text: string, comment: CommentMessage, ref: CommentRef): Promise<ChatSendMessageResult> {
+  async sendComment(chatId: string, text: string, comment: CommentMessage, ref: CommentRef): Promise<ChatSendMessageResult> {
     const chat = this._thread();
     const message = text.trim();
-    if (!chat || !this.isActiveThread(chat.id) || !message) return { status: 'skipped' };
+    if (!message) return { status: 'skipped' };
+    // Posted in a chat that is no longer the one shown: sent there, without this chat's turn state.
+    if (!chat || chat.id !== chatId || !this.isActiveThread(chatId)) {
+      try {
+        await firstValueFrom(this.messageService.sendMessage(chatId, { message, origin: 'User', comment }, ref));
+        return { status: 'sent' };
+      } catch (error) {
+        return { status: 'failed', error };
+      }
+    }
     const steer = this.isGenerating();
     if (!steer) this.turn.beginSend();
     let response;

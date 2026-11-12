@@ -24,10 +24,10 @@ It is a person in the mention list as `agent:<personality id>` (`agent:chat` wit
 Posting a comment or reply that mentions it sends the agent a message of the chat (`POST /chat/{id}/chat-message` with `comment`), once the save that stores the comment lands: the agent then reads the thread it is asked about, and its own change to the file does not race the user's save.
 While viewing, that is as soon as the comment is saved; while editing, when the user saves the file.
 A save that fails keeps the mention for the next one, and one that throws the comment away (the file was reloaded) drops it.
-The send goes through the chat's send gate, like a message.
+The send goes through the chat's send gate, like a message (a blocked send says so), and to the chat the comment was posted in, even if another is shown by the time the save lands.
 
 - The message's text is the comment's text.
-  The composer's draft is left as it was; while a reply is running the message is a follow-up to it (ADR 0x042), and the running turn takes in its context with its text.
+  The composer's draft is left as it was; while a reply is running the message is a follow-up to it (ADR 0x042), and the running turn takes in its context with its text, clipped so the user's own words and the follow-up's framing always fit.
 - What the comment is about goes with the message as context the chat does not show: the file, what the thread is on (as the comments panel quotes it) and the thread before the comment.
   It is a `FILE_COMMENT` context item, rendered in that message's own turn after its text, now and whenever the message is in history, not merged with the conversation's other context.
   The rewrite of a message's context after inference keeps it.
@@ -65,7 +65,7 @@ A comment that mentions the agent, sent from a chat, grants that chat's agent th
 The grant is on the file's original row, so it covers the file's chat copies, and it goes with the file or the chat.
 Other chats' agents, and the same personality in another chat, are not granted it.
 The grant is for the personality the chat had when it was made: switching the chat to another personality does not pass it on.
-A send that fails takes back a grant it made.
+A send that fails puts the grant back as it was: removed if the send made it, or given back to the personality it had.
 
 A grant is used only in a turn the user started in the app.
 A job, a webhook message or a relayed message (a Discord thread) runs in the same chat but is not the user asking, and a prompt injected there must not be able to rewrite the user's files.
@@ -90,7 +90,7 @@ An agent's edit replaces the file's content exactly as a save by the user does, 
 
 Parts are edited as text where an XML decoder finds them, never marshalled back (which would change namespace prefixes), and untouched zip entries are copied as they are.
 Text written into a part drops the characters XML cannot hold, as the browser does.
-A file is read within limits: each part and all parts together may inflate only so far, and elements may nest only so deep, so a crafted file cannot exhaust memory or the stack; a part that cannot be read or parsed fails the change rather than being taken for a missing one.
+A file is read within limits: each part (a worksheet, which a note is linked from, only against the total) and all parts together may inflate only so far, and elements may nest only so deep, so a crafted file cannot exhaust memory or the stack; a part that cannot be read or parsed fails the change rather than being taken for a missing one, and the agent is told the file is too large or not readable, whichever it is.
 A Word comment from before paragraph ids (Word 2007) cannot be replied to or resolved, and the tool says so rather than write a reply Word shows as a thread of its own.
 A change is a new version of the file, saved through `filesave.Service.Replace` over the version read (`filecomments.Office`), with the same no-history rule as §4.
 

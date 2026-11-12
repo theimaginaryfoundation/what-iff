@@ -162,7 +162,8 @@ export class MessageService {
       ...(commentRef ? { comment_refs: [commentRef] } : {}),
     };
     this.addMessageToList(optimisticMessage);
-    if (messageData.origin === 'User') {
+    // A message to another chat (a comment mention posted there) does not show the open one typing.
+    if (messageData.origin === 'User' && (!this.currentChatId || chatId === this.currentChatId)) {
       this.setAssistantTyping(true);
     }
 

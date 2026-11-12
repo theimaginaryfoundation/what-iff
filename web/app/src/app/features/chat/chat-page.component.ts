@@ -234,7 +234,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
         if (!thread) return null;
         return { id: agentPersonId(thread.personality_id ?? null), name: this.selectedPersonalityName()?.trim() || 'Assistant' };
       }),
-      sendComment: (text, comment, ref) => this.sendComment(text, comment, ref),
+      sendComment: (chatId, text, comment, ref) => this.sendComment(chatId, text, comment, ref),
     });
     inject(DestroyRef).onDestroy(unregister);
     return unregister;
@@ -763,9 +763,13 @@ ${text}`
    * blocked chat does not send it, and a refusal (out of credits, no provider) shows as it does
    * for a message.
    */
-  private async sendComment(text: string, comment: CommentMessage, ref: CommentRef): Promise<boolean> {
-    if (this.sendGate.blocked()) return false;
-    const result = await this.session.sendComment(text, comment, ref);
+  private async sendComment(chatId: string, text: string, comment: CommentMessage, ref: CommentRef): Promise<boolean> {
+    if (this.sendGate.blocked()) {
+      // Said, not dropped silently: the comment is saved in the file, but the agent did not get it.
+      this.session.reportError('Your comment was saved, but it could not be sent to the agent: sending is blocked right now.');
+      return false;
+    }
+    const result = await this.session.sendComment(chatId, text, comment, ref);
     this.sendGate.refresh();
     if (isChatSendFailed(result)) {
       this.sendGate.handleSendError(result.error);

@@ -835,7 +835,7 @@ describe('ChatSessionService', () => {
             service.setActive('chat-1');
             service.draft.set('half typed');
 
-            expect(await service.sendComment(' @Scribe why? ', comment, ref)).toEqual({ status: 'sent' });
+            expect(await service.sendComment('chat-1', ' @Scribe why? ', comment, ref)).toEqual({ status: 'sent' });
             expect(messageService.sendMessage).toHaveBeenCalledWith('chat-1', { message: '@Scribe why?', origin: 'User', comment }, ref);
             expect(jobService.pollJob).toHaveBeenCalledWith('job-1', 'chat-1', CHAT_JOB_POLL_INTERVAL_MS);
             expect(service.draft()).toBe('half typed');
@@ -850,7 +850,7 @@ describe('ChatSessionService', () => {
             messageService.sendMessage.mockClear();
             jobService.pollJob.mockClear();
 
-            expect(await service.sendComment('@Scribe also this', comment, ref)).toEqual({ status: 'sent' });
+            expect(await service.sendComment('chat-1', '@Scribe also this', comment, ref)).toEqual({ status: 'sent' });
             expect(messageService.sendMessage).toHaveBeenCalledWith('chat-1', expect.objectContaining({ comment, steer: true }), ref);
             expect(jobService.pollJob).not.toHaveBeenCalled();
             expect(service.isGenerating()).toBe(true);
@@ -862,17 +862,24 @@ describe('ChatSessionService', () => {
             service.draft.set('half typed');
             messageService.sendMessage.mockReturnValue(throwError(() => new Error('network down')));
 
-            expect((await service.sendComment('@Scribe why?', comment, ref)).status).toBe('failed');
+            expect((await service.sendComment('chat-1', '@Scribe why?', comment, ref)).status).toBe('failed');
             expect(service.error()).toBe('network down');
             expect(service.draft()).toBe('half typed');
             expect(service.isGenerating()).toBe(false);
         });
 
-        it('sends nothing without text or an active chat', async () => {
-            expect((await service.sendComment('hi', comment, ref)).status).toBe('skipped');
+        it('sends nothing without text', async () => {
             service.setActive('chat-1');
-            expect((await service.sendComment('   ', comment, ref)).status).toBe('skipped');
+            expect((await service.sendComment('chat-1', '   ', comment, ref)).status).toBe('skipped');
             expect(messageService.sendMessage).not.toHaveBeenCalled();
+        });
+
+        it('sends a comment posted in another chat to that chat, leaving this one as it is', async () => {
+            service.setActive('chat-1');
+            expect(await service.sendComment('chat-0', '@Scribe why?', comment, ref)).toEqual({ status: 'sent' });
+            expect(messageService.sendMessage).toHaveBeenCalledWith('chat-0', { message: '@Scribe why?', origin: 'User', comment }, ref);
+            expect(jobService.pollJob).not.toHaveBeenCalled();
+            expect(service.isGenerating()).toBe(false);
         });
     });
 

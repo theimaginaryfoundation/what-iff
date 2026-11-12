@@ -16,39 +16,81 @@ import (
 // covers the file's chat copies too, and it is for the personality the chat had when it was made.
 
 // GrantFileEdit lets the agent of the user's chat (the personality the chat has now) change the
-// user's file fileID (any row of it). created is false when the grant was already there; granting
-// it again records the chat's current personality.
-func (d *Datastore) GrantFileEdit(ctx context.Context, userID, chatID, fileID uuid.UUID) (created bool, err error) {
+// user's file fileID (any row of it), and says what it changed (UndoFileEditGrant puts it back).
+// Granting it again records the chat's current personality.
+func (d *Datastore) GrantFileEdit(ctx context.Context, userID, chatID, fileID uuid.UUID) (models.FileEditGrantChange, error) {
+	change := models.FileEditGrantChange{ChatID: chatID, FileID: fileID}
 	original, err := d.CommentFileID(ctx, userID, fileID)
 	if err != nil {
-		return false, err
+		return change, err
 	}
 	chat, err := d.dbClient.Chat.Query().Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))).WithPersonality().Only(ctx)
 	if ent.IsNotFound(err) {
-		return false, ErrChatNotFound
+		return change, ErrChatNotFound
 	}
 	if err != nil {
-		return false, err
+		return change, err
 	}
 	personality := chatPersonality(chat)
 	existing, err := d.dbClient.FileEditGrant.Query().
 		Where(fileeditgrant.FileAttachmentID(original), fileeditgrant.ChatID(chatID)).
 		Only(ctx)
 	if err == nil {
-		update := d.dbClient.FileEditGrant.UpdateOne(existing).ClearPersonalityID()
-		if personality != nil {
-			update = d.dbClient.FileEditGrant.UpdateOne(existing).SetPersonalityID(*personality)
+		if samePersonality(existing.PersonalityID, personality) {
+			return change, nil
 		}
-		return false, update.Exec(ctx)
+		change.Moved, change.PreviousPersonality = true, existing.PersonalityID
+		return change, d.setGrantPersonality(ctx, existing, personality)
 	}
 	if !ent.IsNotFound(err) {
-		return false, err
+		return change, err
 	}
 	err = d.dbClient.FileEditGrant.Create().SetFileAttachmentID(original).SetChatID(chatID).SetNillablePersonalityID(personality).Exec(ctx)
 	if ent.IsConstraintError(err) {
-		return false, nil
+		return change, nil
 	}
-	return err == nil, err
+	change.Created = err == nil
+	return change, err
+}
+
+// UndoFileEditGrant puts back what GrantFileEdit changed: removes a grant it made, or gives a grant
+// it moved its personality back.
+func (d *Datastore) UndoFileEditGrant(ctx context.Context, userID uuid.UUID, change models.FileEditGrantChange) error {
+	switch {
+	case change.Created:
+		return d.RevokeFileEdit(ctx, userID, change.ChatID, change.FileID)
+	case change.Moved:
+		original, err := d.CommentFileID(ctx, userID, change.FileID)
+		if err != nil {
+			return err
+		}
+		grant, err := d.dbClient.FileEditGrant.Query().
+			Where(
+				fileeditgrant.FileAttachmentID(original),
+				fileeditgrant.ChatID(change.ChatID),
+				fileeditgrant.HasChatWith(entchat.HasOwnerWith(user.ID(userID))),
+			).
+			Only(ctx)
+		if ent.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return d.setGrantPersonality(ctx, grant, change.PreviousPersonality)
+	}
+	return nil
+}
+
+func (d *Datastore) setGrantPersonality(ctx context.Context, grant *ent.FileEditGrant, personality *uuid.UUID) error {
+	if personality == nil {
+		return d.dbClient.FileEditGrant.UpdateOne(grant).ClearPersonalityID().Exec(ctx)
+	}
+	return d.dbClient.FileEditGrant.UpdateOne(grant).SetPersonalityID(*personality).Exec(ctx)
+}
+
+func samePersonality(a, b *uuid.UUID) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }
 
 // chatPersonality is the chat's personality id, nil for a chat with none.

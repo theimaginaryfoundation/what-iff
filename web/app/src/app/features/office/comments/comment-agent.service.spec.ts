@@ -13,7 +13,7 @@ const IRIS = { id: agentPersonId('p-1'), name: 'Iris' };
 describe('CommentAgentService', () => {
   let service: CommentAgentService;
   const workspaceChat = signal<string | null>('c-1');
-  const sent: { text: string; comment: CommentMessage; ref: CommentRef }[] = [];
+  const sent: { to: string; text: string; comment: CommentMessage; ref: CommentRef }[] = [];
 
   beforeEach(() => {
     sent.length = 0;
@@ -28,8 +28,8 @@ describe('CommentAgentService', () => {
     return service.register({
       chatId: signal(chatId),
       agent: signal(IRIS),
-      sendComment: (text, comment, ref) => {
-        sent.push({ text, comment, ref });
+      sendComment: (to, text, comment, ref) => {
+        sent.push({ to, text, comment, ref });
         return Promise.resolve(true);
       },
     });
@@ -62,6 +62,7 @@ describe('CommentAgentService', () => {
     expect(await service.posted(file, thread, 'c2', 'major features')).toBe(true);
     expect(sent).toEqual([
       {
+        to: 'c-1',
         text: '@Iris can you list them?',
         comment: {
           file_id: 'f-1',

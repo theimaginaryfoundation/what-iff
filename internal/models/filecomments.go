@@ -65,3 +65,13 @@ type FileEditGrant struct {
 	FileName  string    `json:"file_name"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// FileEditGrantChange is what granting a chat's agent a file changed, so a send that then fails
+// can put it back (ADR 0x046).
+type FileEditGrantChange struct {
+	ChatID, FileID uuid.UUID
+	// Created: the grant is new. Moved: it was there for another personality (or none, when
+	// PreviousPersonality is nil) and now is for the chat's.
+	Created, Moved      bool
+	PreviousPersonality *uuid.UUID
+}

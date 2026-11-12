@@ -37,16 +37,16 @@ func (h *Handler) attachComment(ctx context.Context, msg *models.ChatMessage, c 
 	}
 	// Mentioning the agent on a file lets this chat's agent change it, to do what the comment asks.
 	// It is granted before the turn starts, which may use it at once.
-	created, err := h.ds.GrantFileEdit(ctx, userID, msg.ChatID, file.ID)
+	change, err := h.ds.GrantFileEdit(ctx, userID, msg.ChatID, file.ID)
 	if err != nil {
 		if errors.Is(err, datastore.ErrChatNotFound) {
 			return undo, http.StatusNotFound, errors.New("chat not found")
 		}
 		return undo, http.StatusInternalServerError, errors.New("could not record the comment")
 	}
-	if created {
+	if change.Created || change.Moved {
 		undo = func() {
-			if err := h.ds.RevokeFileEdit(context.WithoutCancel(ctx), userID, msg.ChatID, file.ID); err != nil {
+			if err := h.ds.UndoFileEditGrant(context.WithoutCancel(ctx), userID, change); err != nil {
 				h.logger.Warn("could not take back a file edit grant after a failed send", zap.Error(err))
 			}
 		}

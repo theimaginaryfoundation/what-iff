@@ -99,8 +99,8 @@ func TestCommentFileID_BackfillsTheLinkFromTheSharedObject(t *testing.T) {
 	require.Equal(t, first.ID, got)
 }
 
-// grant drops GrantFileEdit's created flag.
-func grant(_ bool, err error) error { return err }
+// grant drops what GrantFileEdit changed.
+func grant(_ models.FileEditGrantChange, err error) error { return err }
 
 func TestFileEditGrants_ForTheChatAndTheWholeFile(t *testing.T) {
 	ds, cleanup := newFileAttachmentTestDatastore(t)
@@ -121,9 +121,9 @@ func TestFileEditGrants_ForTheChatAndTheWholeFile(t *testing.T) {
 
 	// Granted through the chat copy: the file and every copy of it, in that chat only.
 	require.NoError(t, grant(ds.GrantFileEdit(ctx, userID, chat.ID, copied.ID)))
-	created, err := ds.GrantFileEdit(ctx, userID, chat.ID, file.ID)
+	again, err := ds.GrantFileEdit(ctx, userID, chat.ID, file.ID)
 	require.NoError(t, err)
-	require.False(t, created, "again is a no-op")
+	require.False(t, again.Created || again.Moved, "again is a no-op")
 	for _, id := range []uuid.UUID{file.ID, copied.ID} {
 		ok, err := ds.HasFileEditGrant(ctx, userID, chat.ID, id)
 		require.NoError(t, err)
@@ -179,9 +179,9 @@ func TestFileEditGrants_AreForThePersonalityTheChatHad(t *testing.T) {
 	file, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "brief.md", FileType: "text/markdown", S3Key: "users/u/brief.md"})
 	require.NoError(t, err)
 
-	created, err := ds.GrantFileEdit(ctx, userID, chat.ID, file.ID)
+	first, err := ds.GrantFileEdit(ctx, userID, chat.ID, file.ID)
 	require.NoError(t, err)
-	require.True(t, created)
+	require.True(t, first.Created)
 	has := func() bool {
 		ok, err := ds.HasFileEditGrant(ctx, userID, chat.ID, file.ID)
 		require.NoError(t, err)
@@ -193,9 +193,19 @@ func TestFileEditGrants_AreForThePersonalityTheChatHad(t *testing.T) {
 	require.NoError(t, ds.dbClient.Chat.UpdateOneID(chat.ID).SetPersonalityID(iris).Exec(ctx))
 	require.False(t, has())
 	// Mentioning the new one grants it, and not the old one any more.
+	moved, err := ds.GrantFileEdit(ctx, userID, chat.ID, file.ID)
+	require.NoError(t, err)
+	require.True(t, moved.Moved)
+	require.Equal(t, &vix, moved.PreviousPersonality)
+	require.True(t, has())
+	// A send that then failed puts it back: Vix's again, not Iris's.
+	require.NoError(t, ds.UndoFileEditGrant(ctx, userID, moved))
+	require.False(t, has())
+	require.NoError(t, ds.dbClient.Chat.UpdateOneID(chat.ID).SetPersonalityID(vix).Exec(ctx))
+	require.True(t, has())
+	require.NoError(t, ds.dbClient.Chat.UpdateOneID(chat.ID).SetPersonalityID(iris).Exec(ctx))
 	_, err = ds.GrantFileEdit(ctx, userID, chat.ID, file.ID)
 	require.NoError(t, err)
-	require.True(t, has())
 	require.NoError(t, ds.dbClient.Chat.UpdateOneID(chat.ID).SetPersonalityID(vix).Exec(ctx))
 	require.False(t, has())
 	require.NoError(t, ds.dbClient.Chat.UpdateOneID(chat.ID).ClearPersonality().Exec(ctx))

@@ -64,8 +64,11 @@ export class NewReplies {
 export interface CommentAgentHost {
   readonly chatId: Signal<string | null>;
   readonly agent: Signal<CommentPerson | null>;
-  /** Sends the comment to the agent as a message of the chat; false when it was not sent. */
-  sendComment(text: string, comment: CommentMessage, ref: CommentRef): Promise<boolean>;
+  /**
+   * Sends the comment to the agent as a message of chat `chatId` (the chat it was posted in, which
+   * may no longer be the one shown); false when it was not sent.
+   */
+  sendComment(chatId: string, text: string, comment: CommentMessage, ref: CommentRef): Promise<boolean>;
 }
 
 /**
@@ -221,8 +224,11 @@ export class CommentAgentService {
       earlier: thread.comments.slice(0, at).map(c => ({ author_name: c.authorName, text: c.text })),
     };
     const ref: CommentRef = { file_id: file.id, file_name: file.name, thread_id: thread.id, comment_id: comment.id, quote };
+    // The chat it is posted in: the mention waits for a save, and the chat shown may change meanwhile.
+    const chatId = host.chatId();
+    if (!chatId) return null;
     return async () => {
-      const sent = await host.sendComment(comment.text, message, ref);
+      const sent = await host.sendComment(chatId, comment.text, message, ref);
       if (sent) this.sent.update(n => n + 1);
       return sent;
     };

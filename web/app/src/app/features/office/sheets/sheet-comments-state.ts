@@ -120,8 +120,10 @@ export class SheetCommentsState {
     this.draft.set(null);
     this.activeId.set(id);
     this.refresh();
-    this.changed();
+    // The mention is queued before the change starts a save (a viewer saves at once), so that save
+    // holds it and sends it when it lands.
     this.notifyAgent(id, id);
+    this.changed();
   }
 
   /** Hands a posted comment to the agent hooks, with the cell its thread is on. */
@@ -143,8 +145,8 @@ export class SheetCommentsState {
   reply(event: ReplyEvent): void {
     const comment = newComment(newCommentGuid(), this.me(), event.draft);
     this.threads.update(threads => addReply(threads, event.threadId, comment));
-    this.changed();
     this.notifyAgent(event.threadId, comment.id);
+    this.changed();
   }
 
   edit(event: EditEvent): void {

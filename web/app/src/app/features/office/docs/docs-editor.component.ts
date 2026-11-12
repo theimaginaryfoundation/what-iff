@@ -328,8 +328,10 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
     this.draft.set(null);
     this.activeThreadId.set(id);
     this.marked.set(new Set(this.marks.positions().keys()));
-    this.commentsChanged();
+    // The mention is queued before the change starts a save (a viewer saves at once), so that save
+    // holds it and sends it when it lands.
     this.agentHooks.posted(thread, id, thread.quote ?? '');
+    this.commentsChanged();
   }
 
   /** The right-click menu's "Reply to comment": the thread at the caret, with its reply box open. */
@@ -362,9 +364,9 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
   reply(event: ReplyEvent): void {
     const comment = newComment(newWordCommentId(), this.me(), event.draft);
     this.threads.update(threads => addReply(threads, event.threadId, comment));
-    this.commentsChanged();
     const thread = this.threads().find(t => t.id === event.threadId);
     if (thread) this.agentHooks.posted(thread, comment.id, thread.quote ?? '');
+    this.commentsChanged();
   }
 
   edit(event: EditEvent): void {
