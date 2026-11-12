@@ -4,6 +4,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { NEVER, Observable, map, of, Subject, throwError } from 'rxjs';
 
+import { CommentAutosave } from '../office/comments/comment-autosave';
+
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
@@ -73,7 +75,15 @@ describe('FileWorkspaceComponent', () => {
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
-        { provide: FileAttachmentService, useValue: { downloadFileAttachment: download, downloadFileContent: (id: string) => (download as unknown as (id: string) => Observable<Blob>)(id).pipe(map((blob: Blob) => ({ blob, version: downloadVersion }))), replaceContent } },
+        {
+          provide: FileAttachmentService,
+          useValue: {
+            downloadFileAttachment: download,
+            downloadFileContent: (id: string) =>
+              (download as unknown as (id: string) => Observable<Blob>)(id).pipe(map((blob: Blob) => ({ blob, version: downloadVersion }))),
+            replaceContent,
+          },
+        },
         { provide: ConfirmationService, useValue: { alert, confirmDiscardChanges: confirmDiscard, confirm } },
         { provide: VIEWER_LOADER, useValue: (kind: string) => loadViewer(kind) },
         { provide: EDITOR_LOADER, useValue: (kind: string) => (kind === 'none' ? null : Promise.resolve(FakeEditorComponent)) },
@@ -299,7 +309,9 @@ describe('FileWorkspaceComponent', () => {
   it('turns a stale version into the conflict dialog, with reload, overwrite and save-as', async () => {
     const { el, editor } = await startEditing();
     editor.edit('mine');
-    replaceContent.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 412, error: { details: { content_version: 7 } } })));
+    replaceContent.mockReturnValueOnce(
+      throwError(() => new HttpErrorResponse({ status: 412, error: { details: { content_version: 7 } } })),
+    );
     await fixture.componentInstance.save();
     fixture.detectChanges();
     expect(fixture.componentInstance.conflictVersion()).toBe(7);
@@ -311,7 +323,9 @@ describe('FileWorkspaceComponent', () => {
     await vi.waitFor(() => expect(fixture.componentInstance.conflictVersion()).toBeNull());
 
     editor.edit('again');
-    replaceContent.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 412, error: { details: { content_version: 8 } } })));
+    replaceContent.mockReturnValueOnce(
+      throwError(() => new HttpErrorResponse({ status: 412, error: { details: { content_version: 8 } } })),
+    );
     await fixture.componentInstance.save();
     download.mockReturnValue(of(textBlob('theirs')));
     fixture.componentInstance.reloadAfterConflict();
@@ -324,6 +338,104 @@ describe('FileWorkspaceComponent', () => {
     (fixture.componentInstance['editorRef']!.instance as FakeEditorComponent).edit('x');
     await fixture.componentInstance.save();
     expect(fixture.componentInstance.saveError()).toContain('Could not save');
+  });
+
+  describe('comments made while viewing (ADR 0x045)', () => {
+    const viewer = (losses: string[] = []) => {
+      const markSaved = vi.fn();
+      return { editor: { content: () => Promise.resolve(textBlob('with comment')), markSaved, losses: signal(losses) }, markSaved };
+    };
+
+    it('writes them as the new version, with the loaded version as If-Match, only while viewing a file the user may change', async () => {
+      downloadVersion = 3;
+      await show(file());
+      const ws = fixture.componentInstance;
+      const changed = vi.fn();
+      ws.fileChanged.subscribe(changed);
+      expect(ws.canComment()).toBe(true);
+      const { editor, markSaved } = viewer();
+      expect(await ws.saveComments(editor)).toBe('saved');
+      expect(replaceContent).toHaveBeenCalledWith('f-1', expect.any(Blob), 'text/plain', 3, null);
+      expect(markSaved).toHaveBeenCalledTimes(1);
+      expect(changed).toHaveBeenCalledTimes(1);
+      // The next comment saves over the version just written.
+      replaceContent.mockReturnValueOnce(of(file({ content_version: 3 })));
+      await ws.saveComments(editor);
+      expect(replaceContent.mock.calls[1][3]).toBe(2);
+
+      fixture.componentRef.setInput('canEdit', false);
+      fixture.detectChanges();
+      expect(ws.canComment()).toBe(false);
+      expect(await ws.saveComments(editor)).toBe('failed');
+    });
+
+    it('opens the editor on what a running comment save stores, not on the bytes it replaces', async () => {
+      await show(file());
+      const ws = fixture.componentInstance;
+      const landing = new Subject<FileAttachment>();
+      replaceContent.mockReturnValueOnce(landing);
+      const saving = ws.saveComments(viewer().editor);
+      const editing = ws.startEdit();
+      await new Promise(resolve => setTimeout(resolve));
+      expect(ws['editorRef']).toBeNull();
+      landing.next(file({ content_version: 2 }));
+      landing.complete();
+      expect(await saving).toBe('saved');
+      await editing;
+      await fixture.whenStable();
+      const editor = ws['editorRef']!.instance as FakeEditorComponent;
+      expect(await editor.blob().text()).toBe('with comment');
+    });
+
+    it('waits for a comment queued behind the running save before opening the editor', async () => {
+      await show(file());
+      const ws = fixture.componentInstance;
+      const first = new Subject<FileAttachment>();
+      replaceContent.mockReturnValueOnce(first).mockReturnValueOnce(of(file({ content_version: 3 })));
+      const autosave = new CommentAutosave(ws, viewer().editor);
+      autosave.request();
+      autosave.request(); // a second comment, posted while the first saves
+      const editing = ws.startEdit();
+      await new Promise(resolve => setTimeout(resolve)); // the first save is now writing
+      first.next(file({ content_version: 2 }));
+      first.complete();
+      await editing;
+      expect(replaceContent).toHaveBeenCalledTimes(2);
+      expect(autosave.status()).toBe('saved');
+      expect(ws.mode()).toBe('edit');
+    });
+
+    it('lets the user comment on a file no editor can write, but writes none into it', async () => {
+      await show(file({ name: 'loop.gif', file_type: 'image/gif' }));
+      const ws = fixture.componentInstance;
+      expect(ws.editable()).toBe(false);
+      expect(ws.canComment()).toBe(true);
+      expect(await ws.saveComments(viewer().editor)).toBe('failed');
+      expect(replaceContent).not.toHaveBeenCalled();
+    });
+
+    it('reloads the file when it changed elsewhere, rather than overwrite it', async () => {
+      await show(file());
+      replaceContent.mockReturnValueOnce(
+        throwError(() => new HttpErrorResponse({ status: 412, error: { details: { content_version: 7 } } })),
+      );
+      download.mockClear();
+      expect(await fixture.componentInstance.saveComments(viewer().editor)).toBe('conflict');
+      expect(download).toHaveBeenCalledWith('f-1');
+    });
+
+    it('asks once per file before a save that would lose content, and reloads when declined', async () => {
+      await show(file());
+      const ws = fixture.componentInstance;
+      confirm.mockResolvedValueOnce(false);
+      download.mockClear();
+      expect(await ws.saveComments(viewer(['Charts']).editor)).toBe('cancelled');
+      expect(replaceContent).not.toHaveBeenCalled();
+      expect(download).toHaveBeenCalled();
+      expect(await ws.saveComments(viewer(['Charts']).editor)).toBe('saved');
+      expect(await ws.saveComments(viewer(['Charts']).editor)).toBe('saved');
+      expect(confirm).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('asks before leaving edit mode or closing with unsaved changes', async () => {
@@ -363,7 +475,9 @@ describe('FileWorkspaceComponent', () => {
     editor.edit('lossy');
     confirm.mockResolvedValueOnce(false);
     await fixture.componentInstance.save();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Save over the original?', message: expect.stringContaining('Charts (Sales)') }));
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Save over the original?', message: expect.stringContaining('Charts (Sales)') }),
+    );
     expect(replaceContent).not.toHaveBeenCalled();
     confirm.mockResolvedValueOnce(true);
     await fixture.componentInstance.save();

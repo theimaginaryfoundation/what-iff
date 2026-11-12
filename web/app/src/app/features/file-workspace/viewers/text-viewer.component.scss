@@ -1,8 +1,11 @@
+@use "./viewer-comments" as comments;
+
 :host {
   display: flex;
   flex-direction: column;
   min-height: 0;
   height: 100%;
+  position: relative;
 }
 
 .text-viewer__toolbar {
@@ -28,7 +31,7 @@
     font-size: 0.8125rem;
     padding: 0.3rem 0.75rem;
 
-    &[aria-pressed='true'] {
+    &[aria-pressed="true"] {
       background: var(--accent);
       color: var(--text-on-accent, #fff);
     }
@@ -112,5 +115,62 @@
 
   td {
     color: var(--text-primary);
+  }
+}
+
+// Comments (ADR 0x045): their buttons at the end of the toolbar, the panel beside the text, and the
+// right-click menu over it.
+.text-viewer__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+
+  > .text-viewer__body {
+    min-width: 0;
+  }
+}
+
+@include comments.comment-controls(".text-viewer");
+
+.text-viewer__scrim {
+  inset: 0;
+  position: fixed;
+  z-index: 29;
+}
+
+.text-viewer__menu {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  min-width: 11rem;
+  padding: 0.3rem;
+  position: absolute;
+  z-index: 30;
+}
+
+.text-viewer__menu-item {
+  background: none;
+  border: none;
+  border-radius: 0.3rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+
+  &:hover:not(:disabled) {
+    background: var(--accent-bg);
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+
+  &--danger {
+    color: var(--danger, #dc2626);
   }
 }

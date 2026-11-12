@@ -352,6 +352,9 @@ func TestUploadExpressionCellAttachment_StoresImageAndThumbnail(t *testing.T) {
 func expectDeleteFileAttachment(mock sqlmock.Sqlmock, attID uuid.UUID) {
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT .* FROM `file_attachments`").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(attID.String()))
+	// The row, then its chat copies (none) to hand its comments to.
+	mock.ExpectQuery("SELECT .* FROM `file_attachments`").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(attID.String()))
+	mock.ExpectQuery("SELECT .* FROM `file_attachments`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectExec("DELETE FROM `file_attachments`").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 }

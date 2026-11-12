@@ -169,39 +169,20 @@ func (h *Handler) GetFileAttachmentContent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	keys := make([]string, 0, 2)
-	if k := strings.TrimSpace(attachment.S3Key); k != "" {
-		keys = append(keys, k)
-	}
-	// Legacy rows without s3_key: derive the key. FileKeyForAttachment takes the CHAT id (the
-	// datastore resolves it through the chat message), not the chat message id.
-	keys = append(keys, storage.FileKeyForAttachment(
-		userID,
-		attachment.ID,
-		attachment.Name,
-		attachment.FileType,
-		attachment.ChatID,
-		attachment.PersonalityID,
-	))
-
-	var data []byte
-	for _, key := range keys {
-		blob, downloadErr := fileStore.DownloadFile(r.Context(), key)
-		if downloadErr != nil {
-			handlerutils.RespondWithError(
-				w,
-				h.logger,
-				http.StatusInternalServerError,
-				handlerutils.CodeNotSet,
-				fmt.Sprintf("Failed to download file attachment %q", attachment.Name),
-				downloadErr,
-			)
-			return
-		}
-		if len(blob) != 0 {
-			data = blob
-			break
-		}
+	data, downloadErr := storage.ReadAttachment(r.Context(), fileStore, storage.AttachmentObject{
+		UserID: userID, ID: attachment.ID, S3Key: attachment.S3Key, Name: attachment.Name, FileType: attachment.FileType,
+		ChatID: attachment.ChatID, PersonalityID: attachment.PersonalityID,
+	})
+	if downloadErr != nil {
+		handlerutils.RespondWithError(
+			w,
+			h.logger,
+			http.StatusInternalServerError,
+			handlerutils.CodeNotSet,
+			fmt.Sprintf("Failed to download file attachment %q", attachment.Name),
+			downloadErr,
+		)
+		return
 	}
 	if len(data) == 0 {
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "File content not available", nil)

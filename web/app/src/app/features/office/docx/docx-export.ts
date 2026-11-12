@@ -15,6 +15,15 @@ import {
 import { paragraphSegments, sdtTags, withRunExtras } from './docx-revisions';
 import { H_ALIGN, H_RELATIVE, V_ALIGN, V_RELATIVE } from './docx-body';
 import { notesPartXml, wordNoteIds } from './docx-notes';
+import {
+  COMMENT_PARTS,
+  CommentWritePlan,
+  DocxCommentThread,
+  WordComments,
+  planCommentParts,
+  readWordComments,
+  wordThreads,
+} from './docx-comments';
 import { PartRels, PatchSource, SourceNumbering, readSourceNumbering } from './docx-patch';
 import {
   SECTPR_ORDER,
@@ -30,6 +39,7 @@ import {
   stylesXml,
 } from './docx-styles';
 import {
+  CUSTOM_DECORATION_COMMENT,
   CUSTOM_RANGE,
   DocBody,
   DocCustomRange,
@@ -49,6 +59,16 @@ import {
   isNoBorder,
 } from './univer-doc-types';
 
+export interface DocxExportOptions {
+  /**
+   * The comment threads to save (ADR 0x045), each placed by the comment decoration with its id.
+   * Left out, the file's own comments are kept as they were.
+   */
+  comments?: readonly DocxCommentThread[];
+  /** Threads of the file's that are not shown, kept as they are (DocxImportResult.unplacedComments). */
+  keepComments?: readonly string[];
+}
+
 export interface DocxExportResult {
   bytes: Uint8Array;
   report: FidelityReport;
@@ -62,11 +82,15 @@ const CT_NUMBERING = 'application/vnd.openxmlformats-officedocument.wordprocessi
  * file's bytes it works in patch mode (docx-patch.ts): the original package is the base and only
  * the edited parts are regenerated, so nothing the editor does not model is lost.
  */
-export async function documentToDocx(document: DocDocument, original?: ArrayBuffer | Uint8Array): Promise<DocxExportResult> {
+export async function documentToDocx(
+  document: DocDocument,
+  original?: ArrayBuffer | Uint8Array,
+  opts: DocxExportOptions = {},
+): Promise<DocxExportResult> {
   const fidelity = new FidelityCollector();
   const source = original ? await PatchSource.open(original) : null;
   const pkg = source ? source.pkg : OoxmlPackage.empty();
-  const writer = new DocxWriter(document, fidelity, source);
+  const writer = new DocxWriter(document, fidelity, source, opts.comments, opts.keepComments);
   await writer.write(pkg);
   return { bytes: await pkg.save(DOCX_MIME), report: fidelity.report() };
 }
@@ -92,11 +116,15 @@ class DocxWriter {
   /** Note ids referenced from the body, by kind, in reference order; only these stories are written. */
   private readonly referencedNotes: Record<'footnote' | 'endnote', string[]> = { footnote: [], endnote: [] };
   private noteWordIds = new Map<string, string>();
+  /** Word ids of each thread's comments, first comment first, by thread id. */
+  private commentWordIds = new Map<string, string[]>();
 
   constructor(
     private readonly doc: DocDocument,
     private readonly fidelity: FidelityCollector,
     private readonly source: PatchSource | null,
+    private readonly comments?: readonly DocxCommentThread[],
+    private readonly keepComments?: readonly string[],
   ) {
     const defaults = defaultNamedStyles();
     this.styles = { ...defaults, ...(doc.styles ?? {}) };
@@ -131,6 +159,7 @@ class DocxWriter {
       }
     }
     this.noteWordIds = wordNoteIds(Object.keys(this.doc.notes ?? {}));
+    const commentParts = await this.planComments(mainPath);
     if (this.source) {
       for (const part of [...Object.values(this.doc.headers ?? {}), ...Object.values(this.doc.footers ?? {})]) {
         if (part.docxPath && this.source.pkg.has(part.docxPath)) {
@@ -148,6 +177,14 @@ class DocxWriter {
         `<w:document ${mainRoot}><w:body>${bodyXml}${sectPr}</w:body></w:document>`,
     );
     await this.notesParts(pkg, docRels, addRel, mainPath);
+    for (const part of COMMENT_PARTS) {
+      const xml = commentParts.parts?.[part.key];
+      if (xml === undefined) continue;
+      const path = commentParts.paths[part.key] ?? `${dirOf(mainPath)}${part.file}`;
+      pkg.put(path, xml);
+      addRel(docRels, part.rel, relativeTo(mainPath, path));
+      if (!this.source?.hasOverride(`/${path}`)) this.overrides.push({ partName: `/${path}`, contentType: part.contentType });
+    }
     if (this.source) {
       pkg.put(`${dirOf(mainPath)}_rels/${baseOf(mainPath)}.rels`, relsXml(docRels));
       pkg.put('[Content_Types].xml', this.source.contentTypesXml(this.defaults, this.overrides));
@@ -185,6 +222,33 @@ class DocxWriter {
         this.overrides.map(o => override(o.partName, o.contentType)).join('') +
         `</Types>`,
     );
+  }
+
+  /**
+   * Which Word ids each thread's comments get, and the comment parts to write: none when the
+   * threads are the file's own, unchanged (docx-comments.ts).
+   */
+  private async planComments(mainPath: string): Promise<CommentWritePlan & { paths: WordComments['paths'] }> {
+    const original = this.source ? await readWordComments(this.source.pkg, mainPath, await this.source.pkg.rels(mainPath)) : null;
+    const threads =
+      this.comments ?? [...(original ? wordThreads(original).threads.values() : [])].map(t => ({ ...t, anchor: { segmentId: '' } }));
+    // A thread is written only where its decoration still marks the text.
+    const marked = new Set(
+      [this.doc.body, ...Object.values(this.doc.headers ?? {}).map(h => h.body), ...Object.values(this.doc.footers ?? {}).map(f => f.body)]
+        .flatMap(b => b.customDecorations ?? [])
+        .filter(d => d.type === CUSTOM_DECORATION_COMMENT)
+        .map(d => d.id),
+    );
+    const plan = planCommentParts(
+      threads.filter(t => marked.has(t.id)),
+      original,
+      {
+        styles: { commentText: !!this.styles['CommentText'], commentReference: !!this.styles['CommentReference'] },
+        keep: this.keepComments,
+      },
+    );
+    this.commentWordIds = plan.wordIds;
+    return { ...plan, paths: original?.paths ?? {} };
   }
 
   /** Lists from the original keep their numIds; lists the editor made are appended after them. */
@@ -368,7 +432,9 @@ class DocxWriter {
     };
     // Controls around whole blocks open with the first block that holds their start, and close after
     // the block that holds their end, so an edit that moves either end still leaves them balanced.
-    const pending = ctx.blockSdts.filter(r => r.startIndex >= from && r.startIndex <= to).sort((a, b) => a.startIndex - b.startIndex || b.endIndex - a.endIndex);
+    const pending = ctx.blockSdts
+      .filter(r => r.startIndex >= from && r.startIndex <= to)
+      .sort((a, b) => a.startIndex - b.startIndex || b.endIndex - a.endIndex);
     const open: { end: number; close: string }[] = [];
     const openFor = (first: number, last: number) => {
       // Those before this block lie inside a table already written, whose cells opened their own.
@@ -621,6 +687,15 @@ class DocxWriter {
       if (flows.some(h => h.endIndex === end && h.startIndex >= start)) pushFirst(ctx.outerClose, end, close);
       else pushFirst(ctx.after, end, close);
     };
+    // A comment thread: every comment in it is marked over the same text, as Word marks replies.
+    for (const decoration of body.customDecorations ?? []) {
+      const wordIds = decoration.type === CUSTOM_DECORATION_COMMENT ? this.commentWordIds.get(decoration.id) : undefined;
+      if (!wordIds?.length) continue;
+      const reference = this.styles['CommentReference'] ? '<w:rPr><w:rStyle w:val="CommentReference"/></w:rPr>' : '';
+      for (const id of wordIds) push(ctx.before, decoration.startIndex, `<w:commentRangeStart w:id="${id}"/>`);
+      for (const id of wordIds)
+        push(ctx.after, decoration.endIndex, `<w:commentRangeEnd w:id="${id}"/><w:r>${reference}<w:commentReference w:id="${id}"/></w:r>`);
+    }
     const sorted = (body.customRanges ?? []).slice().sort((a, b) => a.startIndex - b.startIndex || b.endIndex - a.endIndex);
     for (const range of sorted) {
       const collapsed = !!range.properties?.['collapsed'];
@@ -658,21 +733,6 @@ class DocxWriter {
           push(ctx.before, range.startIndex, `<w:bookmarkStart w:id="${id}" w:name="${name}"/>`);
           if (collapsed) push(ctx.before, range.startIndex, `<w:bookmarkEnd w:id="${id}"/>`);
           else push(ctx.after, range.endIndex, `<w:bookmarkEnd w:id="${id}"/>`);
-          break;
-        }
-        case CUSTOM_RANGE.COMMENT: {
-          if (!this.source) {
-            this.fidelity.drop('Comments');
-            break;
-          }
-          const id = escapeXml(String(range.properties?.['commentId'] ?? ''));
-          if (!id) break;
-          if (!collapsed) push(ctx.before, range.startIndex, `<w:commentRangeStart w:id="${id}"/>`);
-          push(
-            ctx.after,
-            range.endIndex,
-            `${collapsed ? '' : `<w:commentRangeEnd w:id="${id}"/>`}<w:r>${this.styles['CommentReference'] ? '<w:rPr><w:rStyle w:val="CommentReference"/></w:rPr>' : ''}<w:commentReference w:id="${id}"/></w:r>`,
-          );
           break;
         }
         case CUSTOM_RANGE.FOOTNOTE:
@@ -849,7 +909,11 @@ class DocxWriter {
           gridCol += span;
         } else if (vMergeContinue.has(`${rowIndex}:${gridCol}`)) {
           // The covered cell under a vertical merge is written as a continuation cell.
-          cells.push({ start: cellStart - 1, end: j, xml: this.cellXml(ctx, cellStart, cellStart, cell, widths[gridCol] ?? 0, 'continue') });
+          cells.push({
+            start: cellStart - 1,
+            end: j,
+            xml: this.cellXml(ctx, cellStart, cellStart, cell, widths[gridCol] ?? 0, 'continue'),
+          });
           gridCol += 1;
         } else {
           gridCol += 1;
@@ -869,7 +933,11 @@ class DocxWriter {
       if (row?.repeatHeaderRow) trPr.push({ name: 'tblHeader', xml: '<w:tblHeader/>' });
       const trPrXml = orderedProperties(trPr, row?.docxTrPr, TRPR_ORDER);
       wrapControls(stream, cells, ctx.cellSdts);
-      rows.push({ start: rowStart, end: rowEnd, xml: `<w:tr>${trPrXml ? `<w:trPr>${trPrXml}</w:trPr>` : ''}${cells.map(c => c.xml).join('')}</w:tr>` });
+      rows.push({
+        start: rowStart,
+        end: rowEnd,
+        xml: `<w:tr>${trPrXml ? `<w:trPr>${trPrXml}</w:trPr>` : ''}${cells.map(c => c.xml).join('')}</w:tr>`,
+      });
       rowIndex++;
     }
     wrapControls(stream, rows, ctx.rowSdts);
@@ -1060,7 +1128,7 @@ const NAMESPACES = `xmlns:w="${NS.w}" xmlns:r="${NS.r}" xmlns:wp="${NS.wp}" xmln
  */
 export function rootNamespaces(originalXml: string | null | undefined): string {
   const attrs = new Map<string, string>();
-  const start = originalXml ? /<(?:\w+:)?(?:document|hdr|ftr)\b([^>]*)>/.exec(originalXml)?.[1] ?? '' : '';
+  const start = originalXml ? (/<(?:\w+:)?(?:document|hdr|ftr)\b([^>]*)>/.exec(originalXml)?.[1] ?? '') : '';
   for (const m of start.matchAll(/\s(xmlns:\w+|mc:Ignorable)="([^"]*)"/g)) attrs.set(m[1], m[2]);
   for (const m of NAMESPACES.matchAll(/(xmlns:\w+)="([^"]*)"/g)) attrs.set(m[1], m[2]);
   return [...attrs].map(([name, value]) => `${name}="${escapeXml(value)}"`).join(' ');

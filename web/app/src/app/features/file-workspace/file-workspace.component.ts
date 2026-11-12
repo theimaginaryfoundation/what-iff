@@ -8,6 +8,7 @@ import {
   ViewContainerRef,
   computed,
   effect,
+  forwardRef,
   inject,
   input,
   output,
@@ -33,7 +34,7 @@ import {
 } from '../../shared/ui/icons/icons';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
-import { FileEditor } from './editors/file-editor';
+import { COMMENT_SAVER, CommentSaveResult, CommentSaver, FileEditor } from './editors/file-editor';
 import { ImageMarkupComponent, MarkupResult } from './markup/image-markup.component';
 import { galleryDisplayBaseName, galleryFilenameFromBaseName } from '../gallery/helpers/gallery-filename.helpers';
 import { FilePreviewKind, fileTypeLabel, previewKindFor } from '../gallery/helpers/file-preview.helpers';
@@ -74,8 +75,10 @@ const MARKUP_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/web
   templateUrl: './file-workspace.component.html',
   styleUrl: './file-workspace.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // The viewer it hosts saves comments made while viewing through it (ADR 0x045).
+  providers: [{ provide: COMMENT_SAVER, useExisting: forwardRef(() => FileWorkspaceComponent) }],
 })
-export class FileWorkspaceComponent {
+export class FileWorkspaceComponent implements CommentSaver {
   private readonly files = inject(FileAttachmentService);
   private readonly confirmationService = inject(ConfirmationService);
   private readonly workspace = inject(FileWorkspaceService);
@@ -158,8 +161,19 @@ export class FileWorkspaceComponent {
   readonly editorBusy = signal(false);
   /** Leaving edit or markup mode would lose something: unsaved changes, work in progress, a drawing. */
   readonly holdsWork = computed(() => this.editorDirty() || this.editorBusy() || this.markupDirty());
+  /**
+   * Comments can be written while viewing a file the user may change (ADR 0x045). Kept beside the
+   * file (text, images) that is all they need; written into it (saveComments), the file needs an editor too.
+   */
+  readonly canComment = computed(() => this.canEdit() && this.state() === 'ready' && this.mode() === 'view');
+  /** The file whose lossy save the user accepted for comments, so they are asked once, not per comment. */
+  private lossyCommentsAccepted: string | null = null;
   readonly canMarkup = computed(
-    () => this.markupAvailable() && this.kind() === 'image' && MARKUP_TYPES.has((this.file().file_type || '').toLowerCase()) && this.state() === 'ready',
+    () =>
+      this.markupAvailable() &&
+      this.kind() === 'image' &&
+      MARKUP_TYPES.has((this.file().file_type || '').toLowerCase()) &&
+      this.state() === 'ready',
   );
   readonly markupDirty = signal(false);
   readonly markupSending = signal(false);
@@ -250,6 +264,12 @@ export class FileWorkspaceComponent {
 
   async startEdit(): Promise<void> {
     if (!this.editable() || this.mode() === 'edit') return;
+    // A comment save running in the viewer replaces the bytes (or reloads them on a conflict) when
+    // it lands: the editor opens on what it leaves, or that would replace what is typed.
+    if (this.commentSave) {
+      await this.settleCommentSaves();
+      if (this.mode() !== 'view' || this.state() !== 'ready') return;
+    }
     const load = this.loadEditor(this.kind());
     const outlet = this.editorOutlet();
     const blob = this.blob();
@@ -362,15 +382,22 @@ export class FileWorkspaceComponent {
         this.saving.set(true);
       }
       const ifMatch = opts.overwrite ? null : this.loadedVersion;
-      const updated = await new Promise<FileAttachment>((resolve, reject) =>
-        this.files.replaceContent(file.id, content, file.file_type, ifMatch, this.chatId()).pipe(take(1)).subscribe({ next: resolve, error: reject }),
-      );
+      const updated = await this.writeContent(file, content, ifMatch);
       this.conflictVersion.set(null);
       this.loadedVersion = updated.content_version ?? this.loadedVersion + 1;
       this.blob.set(content);
       editor.markSaved(content);
       this.editorDirty.set(editor.dirty());
-      this.fileChanged.emit({ ...file, ...updated, chat_id: updated.chat_id ?? file.chat_id });
+      const stored = { ...file, ...updated, chat_id: updated.chat_id ?? file.chat_id };
+      this.fileChanged.emit(stored);
+      if (editor.saved) {
+        try {
+          await editor.saved(stored, content);
+        } catch {
+          this.saveError.set('The file was saved, but its comments were not. Save again to retry.');
+        }
+        this.editorDirty.set(editor.dirty());
+      }
     } catch (error) {
       const current = conflictVersionOf(error);
       if (current !== null) {
@@ -381,6 +408,90 @@ export class FileWorkspaceComponent {
     } finally {
       this.saving.set(false);
     }
+  }
+
+  /**
+   * Writes the viewer's comments as the file's new version (CommentSaver). A save that would lose
+   * content asks first, once per file; declining, or a version written elsewhere meanwhile, reloads
+   * the file as it is, without the comment.
+   */
+  async saveComments(editor: Pick<FileEditor, 'content' | 'markSaved' | 'losses'>): Promise<CommentSaveResult> {
+    const running = this.writeComments(editor);
+    this.commentSave = running;
+    try {
+      return await running;
+    } finally {
+      if (this.commentSave === running) this.commentSave = null;
+    }
+  }
+
+  /**
+   * Waits until no comment save is running: a viewer's autosave queues the next save behind the
+   * one running and starts it once that lands, so after each one this waits a task for the next
+   * to start (a comment posted during the first save would otherwise be written, or refused, once
+   * the editor is open).
+   */
+  private async settleCommentSaves(): Promise<void> {
+    while (this.commentSave) {
+      await this.commentSave;
+      await new Promise(resolve => setTimeout(resolve));
+    }
+  }
+
+  /** A comment save running in the viewer (saveComments), which startEdit waits for. */
+  private commentSave: Promise<CommentSaveResult> | null = null;
+
+  private async writeComments(editor: Pick<FileEditor, 'content' | 'markSaved' | 'losses'>): Promise<CommentSaveResult> {
+    const file = this.file();
+    if (!this.canComment() || !this.editable()) return 'failed';
+    let content: Blob;
+    try {
+      content = await editor.content();
+    } catch {
+      return 'failed';
+    }
+    const losses = editor.losses?.() ?? [];
+    if (losses.length && this.lossyCommentsAccepted !== file.id) {
+      if (!(await this.confirmLossySave(losses))) {
+        this.reloadContent();
+        return 'cancelled';
+      }
+      this.lossyCommentsAccepted = file.id;
+    }
+    try {
+      const updated = await this.writeContent(file, content, this.loadedVersion);
+      this.loadedVersion = updated.content_version ?? this.loadedVersion + 1;
+      this.blob.set(content);
+      editor.markSaved(content);
+      this.fileChanged.emit({ ...file, ...updated, chat_id: updated.chat_id ?? file.chat_id });
+      return 'saved';
+    } catch (error) {
+      if (conflictVersionOf(error) !== null) {
+        this.reloadContent();
+        return 'conflict';
+      }
+      return 'failed';
+    }
+  }
+
+  private writeContent(file: FileAttachment, content: Blob, ifMatch: number | null): Promise<FileAttachment> {
+    return new Promise<FileAttachment>((resolve, reject) =>
+      this.files
+        .replaceContent(file.id, content, file.file_type, ifMatch, this.chatId())
+        .pipe(take(1))
+        .subscribe({ next: resolve, error: reject }),
+    );
+  }
+
+  /** CommentSaver: a viewer found the file changed elsewhere. Only a viewer asks, so no edits are lost. */
+  showCurrentContent(): void {
+    if (this.mode() === 'view') this.reloadContent();
+  }
+
+  /** Shows the file as stored now, dropping what the viewer holds. */
+  private reloadContent(): void {
+    this.generation += 1;
+    this.refetch();
   }
 
   /** The editor cannot keep everything the original had: saving over it loses that for good. */
@@ -459,17 +570,20 @@ export class FileWorkspaceComponent {
     const file = this.file();
     this.state.set('loading');
     const generation = this.generation;
-    this.files.downloadFileContent(file.id).pipe(take(1)).subscribe({
-      next: ({ blob, version }) => {
-        if (generation !== this.generation) return;
-        if (version !== null) this.loadedVersion = version;
-        this.blob.set(blob);
-        this.state.set('ready');
-      },
-      error: () => {
-        if (generation === this.generation) this.state.set('error');
-      },
-    });
+    this.files
+      .downloadFileContent(file.id)
+      .pipe(take(1))
+      .subscribe({
+        next: ({ blob, version }) => {
+          if (generation !== this.generation) return;
+          if (version !== null) this.loadedVersion = version;
+          this.blob.set(blob);
+          this.state.set('ready');
+        },
+        error: () => {
+          if (generation === this.generation) this.state.set('error');
+        },
+      });
   }
 
   private destroyEditor(): void {
@@ -492,7 +606,11 @@ export class FileWorkspaceComponent {
       },
       error: () => {
         this.downloading.set(false);
-        void this.confirmationService.alert({ title: 'Download failed', message: 'Could not download this file. Please try again.', type: 'danger' });
+        void this.confirmationService.alert({
+          title: 'Download failed',
+          message: 'Could not download this file. Please try again.',
+          type: 'danger',
+        });
       },
     });
   }

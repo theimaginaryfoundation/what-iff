@@ -24,6 +24,10 @@ type attachmentStore interface {
 	filesave.Store
 	// Whether a save's chat is the caller's, and sandboxed.
 	GetChat(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error)
+	// Comments on text, code and image files (filecomments.Service).
+	CommentFileID(ctx context.Context, userID, id uuid.UUID) (uuid.UUID, error)
+	GetFileCommentSet(ctx context.Context, userID, fileID uuid.UUID) (*models.FileCommentSet, error)
+	PutFileCommentSet(ctx context.Context, userID, fileID uuid.UUID, set models.FileCommentSet, expectRevision int) (int, error)
 }
 
 type attachmentAgent interface {
@@ -51,4 +55,6 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	fileAttachmentRouter.HandleFunc("/{id}", h.GetFileAttachmentContent).Methods("GET")
 	fileAttachmentRouter.HandleFunc("/{id}", h.DeleteFileAttachment).Methods("DELETE")
 	fileAttachmentRouter.HandleFunc("/{id}/content", h.ReplaceFileAttachmentContent).Methods("PUT")
+	fileAttachmentRouter.HandleFunc("/{id}/comments", h.GetFileComments).Methods("GET")
+	fileAttachmentRouter.HandleFunc("/{id}/comments", h.PutFileComments).Methods("PUT")
 }

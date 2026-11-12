@@ -13,6 +13,7 @@ import {
   twipsToPx,
 } from '../shared/ooxml';
 import { BodyBuilder, BodyContext, extrasXml } from './docx-body';
+import { DocxCommentThread, anchorThreads, readWordComments } from './docx-comments';
 import { noteIdFor, parseNotes } from './docx-notes';
 import { parseTableStyles } from './docx-table-styles';
 import { ParsedStyles, parseNumbering, parseStyles, paragraphPropsFromPPr } from './docx-styles';
@@ -37,6 +38,10 @@ export interface DocxImportOptions {
 export interface DocxImportResult {
   document: DocDocument;
   report: FidelityReport;
+  /** The comment threads, in the order they appear in the text (ADR 0x045). */
+  comments: DocxCommentThread[];
+  /** Threads the file has that have no place in the text shown (a footnote's, a text box's): a save keeps them as they are. */
+  unplacedComments: string[];
 }
 
 /**
@@ -241,7 +246,9 @@ export async function packageToDocument(pkg: OoxmlPackage, opts: DocxImportOptio
     // Layout reads `drawings`; the drawing plugin that paints them loads from its resource.
     document.resources = [{ name: RESOURCE_DOC_DRAWINGS, data: JSON.stringify({ data: drawings, order: drawingsOrder }) }];
   }
-  return { document, report: fidelity.report() };
+  const { threads: comments, unplaced } = anchorThreads(document, await readWordComments(pkg, mainPath, rels));
+  if (unplaced.length) fidelity.warn('Comments without a place in the text are kept but not shown', 'Comments');
+  return { document, report: fidelity.report(), comments, unplacedComments: unplaced };
 }
 
 /** Paragraph styles that carry numbering (w:style/w:pPr/w:numPr), walking basedOn. */
@@ -342,16 +349,7 @@ async function sectionSetup(
   return out;
 }
 
-const MODELLED_SECTPR = new Set([
-  'headerReference',
-  'footerReference',
-  'type',
-  'pgSz',
-  'pgMar',
-  'pgNumType',
-  'cols',
-  'titlePg',
-]);
+const MODELLED_SECTPR = new Set(['headerReference', 'footerReference', 'type', 'pgSz', 'pgMar', 'pgNumType', 'cols', 'titlePg']);
 
 /** After inserting one character at `at`, every recorded offset at or past it moves by one. */
 function shiftOffsets(body: DocDocument['body'], at: number): void {

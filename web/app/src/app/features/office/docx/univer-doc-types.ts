@@ -99,6 +99,17 @@ export interface DocCustomRange {
   properties?: Record<string, unknown>;
 }
 
+export interface DocCustomDecoration {
+  id: string;
+  /** CustomDecorationType: 0 comment. */
+  type: number;
+  startIndex: number;
+  /** Inclusive, as custom ranges are. */
+  endIndex: number;
+  /** Univer paints an active comment's text with a background. */
+  active?: boolean;
+}
+
 export interface DocCustomBlock {
   startIndex: number;
   blockId: string;
@@ -138,6 +149,8 @@ export interface DocBody {
   /** Opaque runs on custom-block sentinels; they move with edits like custom blocks but are not drawings. */
   docxRawCustomBlocks?: DocCustomBlock[];
   customRanges?: DocCustomRange[];
+  /** Univer's comment marks over text (ADR 0x045): one per thread, its id the thread's. */
+  customDecorations?: DocCustomDecoration[];
   tables?: DocCustomTable[];
   docxRawBlocks?: DocRawBlock[];
 }
@@ -363,6 +376,9 @@ export const TOKEN = {
   TAB: '\t',
   CUSTOM_BLOCK: '\b',
 } as const;
+
+/** CustomDecorationType.COMMENT. */
+export const CUSTOM_DECORATION_COMMENT = 0;
 
 export const CUSTOM_RANGE = { HYPERLINK: 0, FIELD: 1, SDT: 2, BOOKMARK: 3, COMMENT: 4, CUSTOM: 5, FOOTNOTE: 8, ENDNOTE: 9 } as const;
 /** The character a footnote or endnote reference occupies in the stream; Univer draws the note's label over it. */

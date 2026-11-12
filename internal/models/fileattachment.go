@@ -54,6 +54,8 @@ type FileAttachment struct {
 	// (Datastore.CreateContextReference): no new upload, no gallery copy (the gallery leaves these
 	// rows out), and the Discord relay does not post it.
 	ContextOnly bool `json:"-"`
+	// OriginalID is the file this row is a chat copy of (ADR 0x045); nil for an original.
+	OriginalID *uuid.UUID `json:"-"`
 	// S3Key is the canonical object key for the full-resolution file. Set at
 	// upload time so that renaming the display Name never breaks retrieval.
 	S3Key string `json:"s3_key,omitempty"`

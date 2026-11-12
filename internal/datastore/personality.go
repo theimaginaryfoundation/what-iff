@@ -6,6 +6,7 @@ import (
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
+	entfileattachment "github.com/theimaginaryfoundation/what-iff/ent/fileattachment"
 	"github.com/theimaginaryfoundation/what-iff/ent/mood"
 	"github.com/theimaginaryfoundation/what-iff/ent/personality"
 	"github.com/theimaginaryfoundation/what-iff/ent/schema"
@@ -730,6 +731,15 @@ func (d *Datastore) DeletePersonality(ctx context.Context, userID, id uuid.UUID)
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}
 		return ErrPersonalityNotFound
+	}
+
+	// The cascade removes the personality's files and their comment sets: hand those to copies elsewhere.
+	if err := handOverCopiesOf(ctx, tx, userID, entfileattachment.HasPersonalityWith(personality.ID(id))); err != nil {
+		d.logger.Error("failed to hand a personality's files' comments to their copies", zap.Error(err))
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return err
 	}
 
 	// Delete personality

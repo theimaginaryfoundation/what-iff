@@ -70,7 +70,7 @@ export function parsePersons(doc: Document | null): ThreadPerson[] {
   });
 }
 
-function bodyOf(text: string): CommentBody {
+export function bodyOf(text: string): CommentBody {
   // Univer ends a body with a paragraph and a section; line breaks inside it are paragraphs.
   const inner = text.replace(/\r\n|\n/g, '\r');
   const paragraphs: { startIndex: number }[] = [];
@@ -79,8 +79,11 @@ function bodyOf(text: string): CommentBody {
   return { dataStream: `${inner}\r\n`, textRuns: [], paragraphs };
 }
 
-function textOf(body: { dataStream?: string } | undefined): string {
-  return (body?.dataStream ?? '').replace(/\r\n$/, '').replace(/\r/g, '\n').replace(/[\u001e\u001f]/g, '');
+export function textOf(body: { dataStream?: string } | undefined): string {
+  return (body?.dataStream ?? '')
+    .replace(/\r\n$/, '')
+    .replace(/\r/g, '\n')
+    .replace(/[\u001e\u001f]/g, '');
 }
 
 /** One sheet's threads as Univer's snapshot holds them: roots with their replies in `children`. */
@@ -141,7 +144,9 @@ export function legacyNoteText(root: UniverComment): string {
 }
 
 function newGuid(): string {
-  const random = globalThis.crypto?.randomUUID?.() ?? 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => Math.floor(Math.random() * 16).toString(16));
+  const random =
+    globalThis.crypto?.randomUUID?.() ??
+    'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => Math.floor(Math.random() * 16).toString(16));
   return `{${random.toUpperCase()}}`;
 }
 
@@ -179,6 +184,20 @@ export interface ThreadedWriteState {
 }
 
 function personGuid(comment: UniverComment, state: ThreadedWriteState): string {
+  // People named by the editor (sheet-comments.ts): a WhatIff user by id, anyone else by name.
+  const name = comment.authorName || FALLBACK_AUTHOR;
+  if (comment.personId.startsWith('user:')) {
+    const userId = comment.personId.slice('user:'.length);
+    const known = [...state.persons.values()].find(p => p.providerId === 'WhatIff' && p.userId === userId);
+    if (known) return known.id;
+    const id = state.ids.guid(comment.personId);
+    state.persons.set(id, { id, displayName: name, userId, providerId: 'WhatIff' });
+    return id;
+  }
+  if (comment.personId.startsWith('author:')) {
+    const known = [...state.persons.values()].find(p => p.displayName === name && p.providerId !== 'WhatIff');
+    if (known) return known.id;
+  }
   const raw = comment.personId || comment.authorName || FALLBACK_AUTHOR;
   const id = state.ids.guid(raw);
   if (!state.persons.has(id)) {
@@ -212,7 +231,10 @@ export function threadedCommentsXml(threads: readonly UniverComment[], state: Th
 
 export function personsXml(persons: Iterable<ThreadPerson>): string {
   const body = [...persons]
-    .map(p => `<person displayName="${escapeXml(p.displayName)}" id="${p.id}" userId="${escapeXml(p.userId ?? p.displayName)}" providerId="${escapeXml(p.providerId ?? 'None')}"/>`)
+    .map(
+      p =>
+        `<person displayName="${escapeXml(p.displayName)}" id="${p.id}" userId="${escapeXml(p.userId ?? p.displayName)}" providerId="${escapeXml(p.providerId ?? 'None')}"/>`,
+    )
     .join('');
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><personList xmlns="${TC_NS}" xmlns:x="${MAIN_NS}">${body}</personList>`;
 }

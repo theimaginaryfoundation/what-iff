@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"entgo.io/ent"
+	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
@@ -84,6 +85,13 @@ func (FileAttachment) Fields() []ent.Field {
 			Default(1).
 			Positive().
 			Comment("Bumped by every content write. A save sends the version it loaded back as If-Match; a mismatch is refused."),
+		// A chat copy of a gallery file (Datastore.CreateFileAttachmentReference) is the same file:
+		// it names its original, so what belongs to the file, such as its comments (ADR 0x045), is
+		// found through any of its rows however their content moves.
+		field.UUID("original_id", uuid.UUID{}).
+			Optional().
+			Nillable().
+			Comment("The file this row is a chat copy of; null for an original (and for copies made before the column, until they are resolved)."),
 		field.String("content_sha256").
 			Optional().
 			Comment("Hex SHA-256 of the stored object, set by every content write (ADR 0x043); empty on rows uploaded before that and never changed. Lets a container compare its copy without reading the object."),
@@ -109,6 +117,10 @@ func (FileAttachment) Edges() []ent.Edge {
 			Ref("files").
 			Unique().
 			Field("skill_id"),
+		// Comments on a text or code file (ADR 0x045), which go with the file.
+		edge.To("comment_set", FileCommentSet.Type).
+			Unique().
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }
 

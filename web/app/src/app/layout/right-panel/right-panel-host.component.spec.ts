@@ -1,4 +1,4 @@
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
@@ -7,6 +7,9 @@ import { RightPanelService } from '../../core/services/right-panel.service';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
 import { FileWorkspaceService, LARGE_VIEWPORT_QUERY, MEDIUM_VIEWPORT_QUERY } from '../../features/file-workspace/file-workspace.service';
+import { CommentPeopleService } from '../../features/office/comments/comment-people.service';
+import { fakeTextComments } from '../../features/file-workspace/text-comments/fake-text-comments.spec-helper';
+import { TextCommentsService } from '../../features/file-workspace/text-comments/text-comments.service';
 import { RightPanelHostComponent } from './right-panel-host.component';
 
 describe('RightPanelHostComponent', () => {
@@ -14,14 +17,27 @@ describe('RightPanelHostComponent', () => {
 
   beforeEach(async () => {
     localStorage.clear();
-    vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query === LARGE_VIEWPORT_QUERY || query === MEDIUM_VIEWPORT_QUERY }) as MediaQueryList);
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      query => ({ matches: query === LARGE_VIEWPORT_QUERY || query === MEDIUM_VIEWPORT_QUERY }) as MediaQueryList,
+    );
     await TestBed.configureTestingModule({
       imports: [RightPanelHostComponent],
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
-        { provide: ImageGalleryService, useValue: { getFileInfo: () => of({ id: 'f-1', user_id: 'u', name: 'a.txt', file_type: 'text/plain', created_at: '' }) } },
-        { provide: FileAttachmentService, useValue: { downloadFileAttachment: () => of(new Blob(['x'])), downloadFileContent: () => of({ blob: new Blob(['x']), version: null }) } },
+        {
+          provide: ImageGalleryService,
+          useValue: { getFileInfo: () => of({ id: 'f-1', user_id: 'u', name: 'a.txt', file_type: 'text/plain', created_at: '' }) },
+        },
+        { provide: CommentPeopleService, useValue: { me: signal({ id: 'user:u', name: 'Pat Lee' }) } },
+        { provide: TextCommentsService, useValue: fakeTextComments() },
+        {
+          provide: FileAttachmentService,
+          useValue: {
+            downloadFileAttachment: () => of(new Blob(['x'])),
+            downloadFileContent: () => of({ blob: new Blob(['x']), version: null }),
+          },
+        },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(RightPanelHostComponent);

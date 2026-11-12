@@ -1,24 +1,73 @@
 <div class="code-editor" [class.code-editor--split]="isMarkdown() && showPreview()">
-  @if (isMarkdown()) {
-    <div class="code-editor__toolbar">
+  <div class="code-editor__toolbar">
+    @if (isMarkdown()) {
       <button type="button" class="code-editor__toggle" [attr.aria-pressed]="showPreview()" (click)="togglePreview()">
-        {{ showPreview() ? 'Hide preview' : 'Show preview' }}
+        {{ showPreview() ? "Hide preview" : "Show preview" }}
       </button>
-    </div>
-  }
+    }
+    <span class="code-editor__end">
+      @if (canStartComment()) {
+        <button
+          type="button"
+          class="code-editor__toggle"
+          title="Comment on the selected text or the word at the cursor (Ctrl+Alt+M)"
+          (mousedown)="$event.preventDefault()"
+          (click)="startComment()"
+        >
+          Comment
+        </button>
+      }
+      <button
+        type="button"
+        class="code-editor__toggle code-editor__comments-toggle"
+        [attr.aria-pressed]="commentsOpen()"
+        (click)="toggleComments()"
+      >
+        Comments
+        @if (comments.openCount()) {
+          <span class="code-editor__count">{{ comments.openCount() }}</span>
+        }
+      </button>
+    </span>
+  </div>
   <div class="code-editor__panes">
     <div class="code-editor__pane">
-      @if (state() === 'error') {
+      @if (state() === "error") {
         <p class="code-editor__placeholder" role="alert">The editor could not load. Download the file to edit it elsewhere.</p>
-      } @else if (state() === 'loading') {
+      } @else if (state() === "loading") {
         <p class="code-editor__placeholder" role="status">Loading the editor…</p>
       }
       <div #editor class="code-editor__monaco" [attr.aria-label]="'Editor for ' + file().name" [hidden]="state() !== 'ready'"></div>
     </div>
     @if (isMarkdown() && showPreview()) {
       <div class="code-editor__pane code-editor__preview" aria-label="Preview">
-        <markdown class="code-editor__markdown prose prose-sm max-w-none dark:prose-invert" [data]="previewText()" (ready)="onMarkdownReady()"></markdown>
+        <markdown
+          class="code-editor__markdown prose prose-sm max-w-none dark:prose-invert"
+          [data]="previewText()"
+          (ready)="onMarkdownReady()"
+          (click)="onPreviewClick($event)"
+        ></markdown>
       </div>
+    }
+    @if (commentsOpen() && state() === "ready") {
+      <app-comments-panel
+        class="code-editor__comments"
+        [threads]="comments.shown()"
+        [activeId]="comments.activeId()"
+        [draftQuote]="comments.draft()?.quote"
+        [me]="me()"
+        [people]="comments.people()"
+        [replyRequest]="replyRequest()"
+        emptyHint="Select text, or put the cursor in a word, and choose Comment to start a thread."
+        (select)="selectThread($event)"
+        (create)="comments.create($event)"
+        (cancelDraft)="comments.cancelDraft()"
+        (reply)="comments.reply($event)"
+        (edit)="comments.edit($event)"
+        (remove)="comments.remove($event)"
+        (resolve)="comments.resolve($event)"
+        (closed)="closeComments()"
+      />
     }
   </div>
 </div>

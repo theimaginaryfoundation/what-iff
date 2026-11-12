@@ -44,6 +44,7 @@ func toFileAttachmentModel(e *ent.FileAttachment) *models.FileAttachment {
 		S3Key:       e.S3Key,
 		Folder:      e.Folder,
 		ContextOnly: e.ContextOnly,
+		OriginalID:  e.OriginalID,
 		CreatedAt:   e.CreatedAt,
 
 		Origin:                 models.FileOrigin(e.Origin),
@@ -211,6 +212,9 @@ func (d *Datastore) CreateFileAttachment(ctx context.Context, userID uuid.UUID, 
 
 	if fileAttachment.S3Key != "" {
 		create.SetS3Key(fileAttachment.S3Key)
+	}
+	if fileAttachment.OriginalID != nil {
+		create.SetOriginalID(*fileAttachment.OriginalID)
 	}
 
 	if fileAttachment.Folder != "" {
@@ -731,6 +735,14 @@ func (d *Datastore) DeleteFileAttachment(ctx context.Context, userID, id uuid.UU
 		return ErrFileAttachmentNotFound
 	}
 
+	if err := handOverCopies(ctx, tx, userID, id, nil); err != nil {
+		d.logger.Error("failed to hand a file's copies to a new original", zap.Error(err))
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return err
+	}
+
 	// Delete file attachment
 	err = tx.FileAttachment.DeleteOneID(id).Exec(ctx)
 	if err != nil {
@@ -778,12 +790,18 @@ func (d *Datastore) CreateFileAttachmentReference(ctx context.Context, userID, s
 		return nil, err
 	}
 
+	// A copy of a copy is a copy of the same original.
+	original := src.ID
+	if src.OriginalID != nil {
+		original = *src.OriginalID
+	}
 	ref := models.FileAttachment{
-		UserID:   userID,
-		Name:     src.Name,
-		FileType: src.FileType,
-		FileID:   src.FileID,
-		S3Key:    src.S3Key,
+		UserID:     userID,
+		Name:       src.Name,
+		FileType:   src.FileType,
+		FileID:     src.FileID,
+		S3Key:      src.S3Key,
+		OriginalID: &original,
 	}
 	if ref.S3Key == "" {
 		ref.S3Key = d.legacyReferenceKey(userID, src)

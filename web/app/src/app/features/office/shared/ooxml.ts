@@ -142,8 +142,21 @@ export function serializeXml(node: Node): string {
   return new XMLSerializer().serializeToString(node);
 }
 
+/**
+ * Characters XML 1.0 does not allow at all, escaped or not: C0 controls other than tab, line feed
+ * and carriage return, U+FFFE and U+FFFF, and unpaired surrogates. Pasted text can hold them (a
+ * vertical tab, a form feed), and one in a part makes Office refuse the file.
+ */
+const NOT_XML =
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/** text without the characters XML cannot hold (see NOT_XML). */
+export function xmlSafe(text: string): string {
+  return text.replace(NOT_XML, '');
+}
+
 export function escapeXml(text: string): string {
-  return text.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[ch] as string);
+  return xmlSafe(text).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[ch] as string);
 }
 
 /** Direct children with the given namespace and local name. */

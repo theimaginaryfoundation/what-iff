@@ -13661,6 +13661,186 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/file-attachment/{id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A text or image file's comments
+         * @description The comment threads of a text, code or image file (ADR 0x045), which has no place for comments of its own, placed on its current content. When the file changed since the comments were written (by the user or by an agent), each anchor is carried to the new text word by word: kept on its words, its start moved to the first word left after it and its end to the last one before it; a thread none of whose words are left is on the whole file (`anchor` null) with the quote it had. A file and its chat copies have one set of comments: any of their ids reads and writes the same threads.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description File attachment ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The threads, the `content_version` they are placed on, and the revision a write sends back */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FileComments"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description File attachment not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file is neither an image nor text (a file with comments that grew past 4 MB returns them on the whole file instead) */
+                415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file's stored content could not be found */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /**
+         * Write a text or image file's comments
+         * @description Stores the file's threads (ADR 0x045), their anchors placed on the text of `content_version`, which must be the file's current content, over the `revision` the client read (0 for a file with no comments yet). Each thread's `quote` is set from the text. An image's threads are all on the whole file: an `anchor` sent for one is dropped.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description File attachment ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PutFileCommentsRequest"];
+                };
+            };
+            responses: {
+                /** @description The threads as stored, with the new revision */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FileComments"];
+                    };
+                };
+                /** @description Invalid attachment ID or body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description File attachment not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The comments changed since the client read them */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file changed since the comments were placed on it */
+                412: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The body is over 4 MB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file is neither an image nor text (or is text over 4 MB) */
+                415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file's stored content could not be found */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/file-attachment/{id}/content": {
         parameters: {
             query?: never;
@@ -16187,6 +16367,48 @@ export interface components {
         ChatContextFilesResponse: {
             files: components["schemas"]["ChatContextFile"][];
             container?: components["schemas"]["ChatContainerStatus"];
+        };
+        /** @description A range of the file's text, in UTF-16 code units. */
+        FileCommentRange: {
+            start: number;
+            end: number;
+        };
+        FileCommentMention: {
+            /** @description `user:<id>` for a WhatIff user, `author:<name>` for someone known by name */
+            id: string;
+            name: string;
+        };
+        FileComment: {
+            id: string;
+            author_id: string;
+            author_name: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Plain text; a mention is its `@Name` written into it. */
+            text: string;
+            mentions?: components["schemas"]["FileCommentMention"][];
+        };
+        FileCommentThread: {
+            id: string;
+            /** @description The range the thread is on, or null when it is on the whole file. */
+            anchor: components["schemas"]["FileCommentRange"] | null;
+            /** @description The text the thread is on (or was on, for a thread on the whole file). */
+            quote: string;
+            resolved: boolean;
+            /** @description The first comment, then the replies. */
+            comments: components["schemas"]["FileComment"][];
+        };
+        FileComments: {
+            threads: components["schemas"]["FileCommentThread"][];
+            /** @description The file content the anchors are placed on. */
+            content_version: number;
+            /** @description Sent back with a write; 0 when the file has no comments yet. */
+            revision: number;
+        };
+        PutFileCommentsRequest: {
+            threads: components["schemas"]["FileCommentThread"][];
+            content_version: number;
+            revision: number;
         };
         /**
          * @example {

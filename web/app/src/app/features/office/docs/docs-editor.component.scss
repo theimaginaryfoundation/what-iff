@@ -1,0 +1,46 @@
+.univer-editor__bar {
+  align-items: center;
+}
+
+.docs-editor__comments-toggle {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.docs-editor__count {
+  background: var(--accent);
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0.15rem 0.4rem;
+}
+
+.docs-editor__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+
+  > .univer-editor__stage {
+    min-width: 0;
+  }
+}
+
+.docs-editor__comments {
+  flex: 0 0 300px;
+  max-width: 45%;
+}
+
+@media (max-width: 640px) {
+  .docs-editor__body {
+    flex-direction: column;
+  }
+
+  .docs-editor__comments {
+    flex: 0 0 45%;
+    max-width: none;
+  }
+}

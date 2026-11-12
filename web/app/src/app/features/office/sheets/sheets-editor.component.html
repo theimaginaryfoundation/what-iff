@@ -2,10 +2,34 @@
   @if (!noticeDismissed()) {
     <app-fidelity-notice [losses]="losses()" [warnings]="warnings()" (dismiss)="dismissNotice()" />
   }
-  @if (showObjectsBar()) {
-    <div class="sheets-editor__bar" role="toolbar" aria-label="Charts, pivot tables and slicers">
-      @for (entry of panels; track entry.id) {
-        <button type="button" class="sheets-editor__tool" [attr.aria-pressed]="panel() === entry.id" (click)="togglePanel(entry.id)">{{ entry.label }}</button>
+  @if (showObjectsBar() || (!isCsv() && state() === "ready")) {
+    <div class="sheets-editor__bar" role="toolbar" aria-label="Spreadsheet">
+      @if (showObjectsBar()) {
+        @for (entry of panels; track entry.id) {
+          <button type="button" class="sheets-editor__tool" [attr.aria-pressed]="panel() === entry.id" (click)="togglePanel(entry.id)">
+            {{ entry.label }}
+          </button>
+        }
+      }
+      @if (!isCsv() && state() === "ready") {
+        <span class="sheets-editor__end">
+          @if (commentable()) {
+            <button type="button" class="sheets-editor__tool" title="Comment on the selected cell (Ctrl+Alt+M)" (click)="startComment()">
+              Comment
+            </button>
+          }
+          <button
+            type="button"
+            class="sheets-editor__tool sheets-editor__comments-toggle"
+            [attr.aria-pressed]="commentsOpen()"
+            (click)="toggleComments()"
+          >
+            Comments
+            @if (comments.openCount()) {
+              <span class="sheets-editor__count">{{ comments.openCount() }}</span>
+            }
+          </button>
+        </span>
       }
     </div>
   }
@@ -44,6 +68,28 @@
           }
         }
       </aside>
+    }
+    @if (commentsOpen() && state() === "ready") {
+      <app-comments-panel
+        class="sheets-editor__comments"
+        [threads]="comments.onSheet()"
+        [activeId]="comments.activeId()"
+        [draftQuote]="comments.draft()?.quote"
+        [me]="me()"
+        [people]="comments.people()"
+        [readOnly]="!commentable()"
+        [saveStatus]="saveStatus()"
+        [replyRequest]="replyRequest()"
+        emptyHint="Select a cell and choose Comment to start a thread."
+        (select)="comments.select($event)"
+        (create)="comments.create($event)"
+        (cancelDraft)="comments.cancelDraft()"
+        (reply)="comments.reply($event)"
+        (edit)="comments.edit($event)"
+        (remove)="comments.remove($event)"
+        (resolve)="comments.resolve($event)"
+        (closed)="closeComments()"
+      />
     }
   </div>
 </div>

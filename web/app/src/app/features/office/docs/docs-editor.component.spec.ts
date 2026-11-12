@@ -1,4 +1,4 @@
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Document as DocxDocument, Packer, Paragraph, TextRun } from 'docx';
 
@@ -9,6 +9,11 @@ import { docxToDocument } from '../docx/docx-import';
 import { DocDocument } from '../docx/univer-doc-types';
 import { MUTATION, UniverKit } from '../univer/univer-editor-base';
 import { UNIVER_DOCS_LOADER } from '../univer/univer-loader';
+import { CommentPeopleService } from '../comments/comment-people.service';
+import { COMMENT_SAVER, CommentSaver } from '../../file-workspace/editors/file-editor';
+import { CommentsPanelState } from '../comments/comments-panel-state.service';
+import { commentedDocx } from '../docx/docx-comments.spec-helper';
+import { CUSTOM_DECORATION_COMMENT } from '../docx/univer-doc-types';
 import { DocsEditorComponent } from './docs-editor.component';
 
 function fakeUniverKit() {
@@ -19,12 +24,42 @@ function fakeUniverKit() {
     listeners: [] as ((event: { id: string; type: number }) => void)[],
     data: null as DocDocument | null,
     guides: [] as boolean[],
+    painted: [] as { activeId: string | null; hidden: string[] }[],
+    revealed: [] as string[],
   };
-  const kit: UniverKit & { setDocGuides(univer: unknown, unitId: string, show: boolean): boolean } = {
+  // Comment marks over the fake's document, as Univer's decorations would be.
+  const decorations = () => (state.data!.body.customDecorations ??= []);
+  const marks = {
+    paint: (s: { activeId: string | null; hidden: ReadonlySet<string> }) =>
+      state.painted.push({ activeId: s.activeId, hidden: [...s.hidden] }),
+    add: async (id: string, _segmentId: string, start: number, end: number) => {
+      decorations().push({ id, type: CUSTOM_DECORATION_COMMENT, startIndex: start, endIndex: end - 1 });
+      return true;
+    },
+    remove: async (id: string) => {
+      state.data!.body.customDecorations = decorations().filter(d => d.id !== id);
+      return true;
+    },
+    reveal: (id: string) => state.revealed.push(id),
+    positions: () => new Map(decorations().map(d => [d.id, d.startIndex])),
+    at: (offset: number) => decorations().find(d => d.startIndex <= offset && offset <= d.endIndex)?.id ?? null,
+    text: (_segmentId: string, start: number, end: number) => state.data!.body.dataStream.slice(start, end),
+    wordAt: (_segmentId: string, offset: number) => {
+      const stream = state.data!.body.dataStream;
+      let start = offset;
+      let end = offset;
+      while (start > 0 && /\w/.test(stream[start - 1])) start--;
+      while (end < stream.length && /\w/.test(stream[end])) end++;
+      return end > start ? { start, end } : null;
+    },
+    dispose: () => undefined,
+  };
+  const kit: UniverKit & { setDocGuides(univer: unknown, unitId: string, show: boolean): boolean; commentMarks(): typeof marks } = {
     setDocGuides: (_univer, _unitId, show) => {
       state.guides.push(show);
       return true;
     },
+    commentMarks: () => marks,
     options: (container, opts) => ({ presets: [], container, readOnly: opts?.readOnly }) as never,
     createUniver: (options => {
       const o = options as unknown as { container: HTMLElement; readOnly?: boolean };
@@ -66,15 +101,25 @@ function attachment(overrides: Partial<FileAttachment> = {}): FileAttachment {
   return { id: 'f-1', user_id: 'u-1', name: 'letter.docx', file_type: DOCX_MIME, created_at: '2026-05-01T00:00:00Z', ...overrides };
 }
 
+/** The comment saver the next editor gets, if any. */
+let testSaver: CommentSaver | null = null;
+
 describe('DocsEditorComponent', () => {
   let fixture: ComponentFixture<DocsEditorComponent>;
   let fake: ReturnType<typeof fakeUniverKit>;
 
   beforeEach(async () => {
+    testSaver = null;
     fake = fakeUniverKit();
     await TestBed.configureTestingModule({
       imports: [DocsEditorComponent],
-      providers: [provideZonelessChangeDetection(), { provide: UNIVER_DOCS_LOADER, useValue: () => Promise.resolve(fake.kit) }],
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: UNIVER_DOCS_LOADER, useValue: () => Promise.resolve(fake.kit) },
+        { provide: CommentPeopleService, useValue: { me: signal({ id: 'user:u-1', name: 'Pat Lee' }) } },
+        // The workspace's comment saver, when a test gives one (comments made while viewing).
+        { provide: COMMENT_SAVER, useFactory: () => testSaver },
+      ],
     }).compileComponents();
   });
 
@@ -135,14 +180,16 @@ describe('DocsEditorComponent', () => {
   });
 
   it('hides the guides by default, and shows them only when asked while editing', async () => {
+    const guidesButton = (root: HTMLElement) =>
+      [...root.querySelectorAll<HTMLButtonElement>('.univer-editor__tool')].find(b => b.textContent?.includes('Show guides'));
     const view = await open(attachment(), await docxBlob());
     expect(fake.state.guides.at(-1)).toBe(false);
-    expect(view.querySelector('.univer-editor__tool')).toBeNull();
+    expect(guidesButton(view)).toBeUndefined();
     fixture.destroy();
 
     const el = await open(attachment(), await docxBlob(), false);
     expect(fake.state.guides.at(-1)).toBe(false);
-    const toggle = el.querySelector('.univer-editor__tool') as HTMLButtonElement;
+    const toggle = guidesButton(el)!;
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     toggle.click();
     fixture.detectChanges();
@@ -150,6 +197,166 @@ describe('DocsEditorComponent', () => {
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
     toggle.click();
     expect(fake.state.guides.at(-1)).toBe(false);
+  });
+
+  describe('comments', () => {
+    /** A click in the page, then the selection Univer reports for it. */
+    const click = (start: number, end = start) => {
+      fixture.nativeElement.querySelector('.univer-editor__univer').dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      select(start, end);
+    };
+    const select = (start: number, end: number) =>
+      fake.state.listeners.forEach(fn =>
+        (fn as (e: unknown) => void)({
+          id: 'doc.operation.set-selections',
+          type: 1,
+          params: { unitId: 'doc-f-1', segmentId: '', ranges: [{ startOffset: start, endOffset: end }] },
+        }),
+      );
+    const commentedBlob = async () => new Blob([(await commentedDocx()) as BlobPart], { type: DOCX_MIME });
+
+    beforeEach(() => TestBed.inject(CommentsPanelState).open.set(null));
+
+    it('shows the open threads beside the document, and clicking commented text selects its thread', async () => {
+      const el = await open(attachment(), await commentedBlob());
+      await vi.waitFor(() => expect(fake.state.painted.length).toBeGreaterThan(0));
+      fixture.detectChanges();
+      // Open threads open the panel; the resolved one is listed only on request, and unmarked.
+      expect(el.querySelector('.docs-editor__count')?.textContent?.trim()).toBe('1');
+      const threads = [...el.querySelectorAll('app-comments-panel .thread')];
+      expect(threads.map(t => t.getAttribute('data-thread-id'))).toEqual(['5D3E2F01']);
+      expect(threads[0].textContent).toContain('Is three realistic?');
+      expect(threads[0].querySelector('.comment__mention')?.textContent).toBe('@Dana Reyes');
+      expect(fake.state.painted.at(-1)).toEqual({ activeId: null, hidden: ['5D3E2F03'] });
+      // Read-only: no boxes or buttons that would change a comment.
+      expect(el.querySelector('app-comments-panel .thread__reply')).toBeNull();
+
+      const inThread = fake.state.data!.body.dataStream.indexOf('three') + 2;
+      // A selection Univer reports by itself (a scroll, a blur) picks nothing.
+      select(inThread, inThread);
+      fixture.detectChanges();
+      expect(fixture.componentInstance.activeThreadId()).toBeNull();
+      click(inThread);
+      fixture.detectChanges();
+      expect(fixture.componentInstance.activeThreadId()).toBe('5D3E2F01');
+      expect(fake.state.painted.at(-1)?.activeId).toBe('5D3E2F01');
+    });
+
+    it('choosing a thread in the panel makes it active in the page and scrolls to it', async () => {
+      const el = await open(attachment(), await commentedBlob());
+      await vi.waitFor(() => expect(fake.state.painted.length).toBeGreaterThan(0));
+      fixture.detectChanges();
+      const inThread = fake.state.data!.body.dataStream.indexOf('three') + 2;
+      click(inThread);
+      fixture.detectChanges();
+      (el.querySelector('.comments__filter') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      (el.querySelector('[data-thread-id="5D3E2F03"]') as HTMLElement).click();
+      // The page scrolls and reports the old caret again, which must not take the thread back.
+      select(inThread, inThread);
+      fixture.detectChanges();
+      expect(fixture.componentInstance.activeThreadId()).toBe('5D3E2F03');
+      expect(fake.state.revealed.at(-1)).toBe('5D3E2F03');
+      // The active thread is marked even though it is resolved.
+      expect(fake.state.painted.at(-1)).toEqual({ activeId: '5D3E2F03', hidden: [] });
+    });
+
+    it('starts a thread on the selection, posts it with a mention, and saves it into the file', async () => {
+      const el = await open(attachment(), await commentedBlob(), false);
+      await vi.waitFor(() => expect(fake.state.painted.length).toBeGreaterThan(0));
+      const editor = fixture.componentInstance;
+      const stream = fake.state.data!.body.dataStream;
+      const at = stream.indexOf('this quarter');
+      select(at, at + 'this quarter'.length);
+      fixture.detectChanges();
+      expect(editor.canComment()).toBe(true);
+      editor.startComment();
+      fixture.detectChanges();
+      expect(el.querySelector('.thread--draft .thread__quote')?.textContent).toBe('this quarter');
+
+      await editor.createThread({ text: 'Which quarter, @Sam Okafor?', mentions: [{ id: 'author:Sam Okafor', name: 'Sam Okafor' }] });
+      fixture.detectChanges();
+      expect(editor.dirty()).toBe(true);
+      const created = editor.threads().find(t => t.quote === 'this quarter')!;
+      expect(created.comments[0]).toEqual(
+        expect.objectContaining({ authorId: 'user:u-1', authorName: 'Pat Lee', text: 'Which quarter, @Sam Okafor?' }),
+      );
+      expect(editor.threads().map(t => t.id)).toEqual(['5D3E2F01', created.id, '5D3E2F03']);
+      editor.reply({ threadId: '5D3E2F01', draft: { text: 'Agreed.', mentions: [] } });
+
+      const back = await docxToDocument(await (await editor.content()).arrayBuffer(), { id: 'x', name: 'x.docx' });
+      expect(back.comments.map(t => [t.id, t.comments.map(c => c.text)])).toEqual([
+        ['5D3E2F01', ['Is three realistic?', 'Yes. @Dana Reyes can you confirm?', 'Agreed.']],
+        [created.id, ['Which quarter, @Sam Okafor?']],
+        ['5D3E2F03', ['Finance signed this off.']],
+      ]);
+      expect(back.comments[1].comments[0].mentions).toEqual([{ id: 'author:Sam Okafor', name: 'Sam Okafor' }]);
+    });
+
+    it('while viewing, with a saver: comments can be written, and each is saved as it is made', async () => {
+      const saveComments = vi.fn().mockResolvedValue('saved');
+      testSaver = { canComment: signal(true), saveComments, showCurrentContent: vi.fn() };
+      const el = await open(attachment(), await commentedBlob());
+      await vi.waitFor(() => expect(fake.state.painted.length).toBeGreaterThan(0));
+      fixture.detectChanges();
+      const editor = fixture.componentInstance;
+      expect(editor.commentable()).toBe(true);
+      expect(el.querySelector('app-comments-panel .thread__reply')).not.toBeNull();
+      click(fake.state.data!.body.dataStream.indexOf('Budget') + 1);
+      editor.startComment();
+      await editor.createThread({ text: 'From the viewer', mentions: [] });
+      await vi.waitFor(() => expect(saveComments).toHaveBeenCalledTimes(1));
+      editor.reply({ threadId: '5D3E2F01', draft: { text: 'Me too', mentions: [] } });
+      await vi.waitFor(() => expect(saveComments).toHaveBeenCalledTimes(2));
+      // What the saver writes is the document with the comments.
+      const back = await docxToDocument(await (await editor.content()).arrayBuffer(), { id: 'x', name: 'x.docx' });
+      expect(back.comments.map(t => t.comments.at(-1)!.text)).toEqual(['Me too', 'From the viewer', 'Finance signed this off.']);
+    });
+
+    it('while viewing, without a saver: comments are read-only', async () => {
+      const el = await open(attachment(), await commentedBlob());
+      await vi.waitFor(() => expect(fake.state.painted.length).toBeGreaterThan(0));
+      fixture.detectChanges();
+      expect(fixture.componentInstance.commentable()).toBe(false);
+      expect(el.querySelector('app-comments-panel .thread__reply')).toBeNull();
+    });
+
+    it('the right-click items: a comment on the word at the caret, and reply to or delete the thread there', async () => {
+      // The fake kit has no context menu; the editor's actions behind it are what is tested.
+      const el = await open(attachment(), await commentedBlob(), false);
+      await vi.waitFor(() => expect(fake.state.painted.length).toBeGreaterThan(0));
+      const editor = fixture.componentInstance;
+      const stream = fake.state.data!.body.dataStream;
+      const inBudget = stream.indexOf('Budget') + 2;
+      click(inBudget);
+      editor.startComment();
+      fixture.detectChanges();
+      expect(el.querySelector('.thread--draft .thread__quote')?.textContent).toBe('Budget');
+
+      editor.cancelDraft();
+      click(stream.indexOf('three') + 1);
+      editor.replyAtCaret();
+      fixture.detectChanges();
+      expect(editor.activeThreadId()).toBe('5D3E2F01');
+      expect(el.querySelector('[data-thread-id="5D3E2F01"] textarea[aria-label="Reply"]')).not.toBeNull();
+
+      await editor.deleteAtCaret();
+      expect(editor.threads().map(t => t.id)).toEqual(['5D3E2F03']);
+      expect(fake.state.data!.body.customDecorations!.map(d => d.id)).toEqual(['5D3E2F03']);
+    });
+
+    it('deleting a thread removes its mark, and resolving keeps it but hides it', async () => {
+      await open(attachment(), await commentedBlob(), false);
+      await vi.waitFor(() => expect(fake.state.painted.length).toBeGreaterThan(0));
+      const editor = fixture.componentInstance;
+      editor.resolve({ threadId: '5D3E2F01', resolved: true });
+      fixture.detectChanges();
+      expect(fake.state.painted.at(-1)?.hidden).toEqual(['5D3E2F01', '5D3E2F03']);
+      await editor.remove({ threadId: '5D3E2F03', commentId: '5D3E2F03' });
+      expect(fake.state.data!.body.customDecorations!.map(d => d.id)).toEqual(['5D3E2F01']);
+      const back = await docxToDocument(await (await editor.content()).arrayBuffer(), { id: 'x', name: 'x.docx' });
+      expect(back.comments.map(t => [t.id, t.resolved])).toEqual([['5D3E2F01', true]]);
+    });
   });
 
   it('reports bytes it cannot read', async () => {

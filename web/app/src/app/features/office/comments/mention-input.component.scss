@@ -1,0 +1,63 @@
+:host {
+  display: block;
+}
+
+.mention-input {
+  position: relative;
+}
+
+.mention-input__box {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  color: var(--text-primary);
+  display: block;
+  font: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  min-height: 2.5rem;
+  padding: 0.4rem 0.55rem;
+  resize: vertical;
+  width: 100%;
+
+  &:focus {
+    border-color: var(--accent);
+    outline: none;
+  }
+}
+
+.mention-input__list {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.14);
+  left: 0;
+  list-style: none;
+  margin: 0.25rem 0 0;
+  max-width: 100%;
+  min-width: 12rem;
+  padding: 0.25rem;
+  position: absolute;
+  top: 100%;
+  z-index: 5;
+}
+
+.mention-input__option {
+  border-radius: 0.35rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  padding: 0.3rem 0.5rem;
+
+  &--active,
+  &:hover {
+    background: var(--accent-bg);
+  }
+}
+
+.mention-input__actions {
+  display: flex;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  margin-top: 0.4rem;
+}

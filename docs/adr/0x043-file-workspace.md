@@ -134,7 +134,7 @@ Univer needs a visible container with a definite height when created, so the sta
 Formulas run in `univer-formula.worker.ts`, one worker per sheets instance, terminated with it.
 Where workers are unavailable the engine stays on the main thread.
 
-All Univer packages must be the same version: a mismatched preset loads a second copy of its core and breaks dependency injection, so `@univerjs/preset-sheets-thread-comment` is pinned.
+All Univer packages must be the same version: a mismatched package loads a second copy of its core and breaks dependency injection, so `@univerjs/icons`, the one Univer package depended on directly rather than through a preset, is pinned to the version the presets use.
 
 ### 8. Spreadsheets
 

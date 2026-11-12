@@ -49,6 +49,27 @@ import {
 } from './deck-commands';
 import { SHAPE_PRESETS } from './shape-paths';
 import { ElementGeometry, PX_PER_PT, SlideCanvasComponent } from './slide-canvas.component';
+import { SlideComments } from './slide-comments';
+import { textOffset } from './comment-text';
+import { COMMENT_SAVER } from '../../file-workspace/editors/file-editor';
+import { CommentAutosave } from '../comments/comment-autosave';
+import { CommentPeopleService } from '../comments/comment-people.service';
+import { CommentsPanelComponent } from '../comments/comments-panel.component';
+import { CommentsPanelState } from '../comments/comments-panel-state.service';
+import { PptxComments, SlideCommentThread } from '../pptx/pptx-comments';
+
+/** The slide's right-click menu: where it opened (in the editor's box), and on what. */
+interface SlideContextMenu {
+  left: number;
+  top: number;
+  /** A comment pin's thread, for "Reply to comment" and "Delete comment". */
+  threadId?: string;
+  /** Otherwise the shape clicked, if any, and the spot on the slide in points. */
+  elementId?: string | null;
+  point?: { x: number; y: number };
+  /** Text selected in that shape, for a thread on the text. */
+  text?: { start: number; length: number };
+}
 
 export const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 const FONT_SIZES = [10, 12, 14, 18, 24, 28, 32, 40, 48, 60, 72];
@@ -63,7 +84,7 @@ const THUMB_WIDTH_PX = 148;
 @Component({
   selector: 'app-slides-editor',
   standalone: true,
-  imports: [SlideCanvasComponent, FidelityNoticeComponent],
+  imports: [SlideCanvasComponent, FidelityNoticeComponent, CommentsPanelComponent],
   templateUrl: './slides-editor.component.html',
   styleUrl: './slides-editor.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -141,6 +162,20 @@ export class SlidesEditorComponent implements FileEditor {
     return bg?.type === 'color' ? bg.color : '#FFFFFF';
   });
 
+  // --- comments (ADR 0x045) ------------------------------------------------------------------------
+  readonly me = inject(CommentPeopleService).me;
+  readonly comments = new SlideComments(this.deck, this.slide, this.me, () => this.commentsChanged());
+  /** Comments can be written: while editing, or while viewing a file the user may change (saved as they are made). */
+  private readonly autosave = new CommentAutosave(inject(COMMENT_SAVER, { optional: true }), this);
+  readonly commentable = computed(() => !this.readOnly() || this.autosave.available());
+  readonly saveStatus = this.autosave.status;
+  private readonly panel = inject(CommentsPanelState);
+  /** The panel opens by itself on a deck with open threads, until the user opens or closes it. */
+  readonly commentsOpen = computed(() => this.panel.open() ?? this.comments.openCount() > 0);
+  /** The comments the file was read with; a save leaves a slide's comment part alone while its threads match. */
+  private importedComments: PptxComments | null = null;
+  private readonly savedComments = new WeakMap<Blob, readonly SlideCommentThread[]>();
+
   private readonly history = new DeckHistory();
   private readonly rendered = signal(false);
   private generation = 0;
@@ -168,6 +203,11 @@ export class SlidesEditorComponent implements FileEditor {
       untracked(() => void this.open(blob));
     });
     this.host.nativeElement.addEventListener('keydown', event => this.onKeydown(event));
+    // A comment's pin moves with the shape it is about.
+    effect(() => {
+      const deck = this.deck();
+      untracked(() => this.comments.follow(deck));
+    });
     inject(DestroyRef).onDestroy(() => {
       this.generation += 1;
       this.resizeObserver?.disconnect();
@@ -178,11 +218,19 @@ export class SlidesEditorComponent implements FileEditor {
 
   async content(): Promise<Blob> {
     const deck = this.deck();
-    const { bytes, report } = await deckToPptx(deck, { original: this.original, imported: this.imported, factory: this.writer });
+    const threads = this.comments.threads();
+    const { bytes, report } = await deckToPptx(deck, {
+      original: this.original,
+      imported: this.imported,
+      factory: this.writer,
+      comments: threads,
+      importedComments: this.importedComments,
+    });
     this.exportReport.set(report);
     const blob = new Blob([bytes as BlobPart], { type: PPTX_MIME });
     this.lastContent = blob;
     this.savedDecks.set(blob, deck);
+    this.savedComments.set(blob, threads);
     // Every save patches the file as it was opened, against the deck read from it. Patching what an
     // earlier save wrote would not work: shapes added since opening have no id in that file, so they
     // would be inserted again, and shapes deleted after that save would stay.
@@ -192,7 +240,8 @@ export class SlidesEditorComponent implements FileEditor {
   markSaved(saved?: Blob): void {
     // The deck is immutable, so a change made while the save was running is a different object.
     const deck = saved && this.savedDecks.get(saved);
-    this.setDirty(deck !== undefined && deck !== this.deck());
+    const threads = saved && this.savedComments.get(saved);
+    this.setDirty(deck !== undefined && (deck !== this.deck() || threads !== this.comments.threads()));
   }
 
   dismissNotice(): void {
@@ -217,7 +266,9 @@ export class SlidesEditorComponent implements FileEditor {
       this.report.set(result.report);
       this.original = bytes;
       this.imported = result.deck;
+      this.importedComments = result.comments;
       this.deck.set(result.deck);
+      this.comments.load(result.comments.threads, result.deck);
       this.slideIndex.set(0);
       this.selectedId.set(null);
       this.editingId.set(null);
@@ -280,6 +331,144 @@ export class SlidesEditorComponent implements FileEditor {
     this.slideIndex.set(Math.max(0, Math.min(index, n - 1)));
     this.selectedId.set(null);
     this.editingId.set(null);
+    this.comments.slideChanged();
+  }
+
+  // --- comments ----------------------------------------------------------------------------------
+
+  toggleComments(): void {
+    this.panel.open.set(!this.commentsOpen());
+  }
+
+  closeComments(): void {
+    this.panel.open.set(false);
+  }
+
+  /**
+   * Starts a thread on the text selected in a shape, else on the selected element, else on the
+   * slide.
+   */
+  startComment(): void {
+    if (!this.commentable()) return;
+    const text = this.selectedText();
+    const element = text ? (this.slide().elements.find(e => e.id === text.elementId) ?? null) : this.selected();
+    this.comments.start(element, this.slideIndex() + 1, undefined, text ?? undefined);
+    this.panel.open.set(true);
+  }
+
+  /** The text selected in a shape on the stage, as a plain-text range of that shape's text. */
+  private selectedText(): { elementId: string; start: number; length: number } | null {
+    const selection = this.document.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    const textEl = (
+      range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.commonAncestorContainer as Element)
+        : range.commonAncestorContainer.parentElement
+    )?.closest<HTMLElement>('.slide__text');
+    const elementId = textEl?.closest('[data-element-id]')?.getAttribute('data-element-id');
+    if (!textEl || !elementId || !this.stage()?.nativeElement.contains(textEl)) return null;
+    const start = textOffset(textEl, range.startContainer, range.startOffset);
+    const end = textOffset(textEl, range.endContainer, range.endOffset);
+    return end > start ? { elementId, start, length: end - start } : null;
+  }
+
+  /** A click in a shape's text: on commented text, its thread opens. */
+  onTextPoint(point: { elementId: string; offset: number }): void {
+    const threadId = this.comments.threadAtText(point.elementId, point.offset);
+    if (!threadId || threadId === this.comments.activeId()) return;
+    this.comments.select(threadId);
+    this.panel.open.set(true);
+  }
+
+  /** The right-click menu, where it was opened and what it offers. */
+  readonly contextMenu = signal<SlideContextMenu | null>(null);
+  /** Opens a thread's reply box in the panel (the right-click menu's "Reply to comment"). */
+  readonly replyRequest = signal<{ threadId: string } | null>(null);
+
+  /**
+   * The slide's right-click menu, while editing: on a comment pin, reply to or delete its thread;
+   * anywhere else, start a thread on the shape there, or on the slide at that spot.
+   */
+  onStageContextMenu(event: MouseEvent): void {
+    if (!this.commentable()) return;
+    const target = event.target as Element;
+    const slideEl = target.closest('.slide');
+    if (!slideEl) return;
+    // Text selected in a shape being edited: comment on it.
+    const text = this.selectedText();
+    if (this.editingId() && !text) return;
+    event.preventDefault();
+    const host = this.host.nativeElement.getBoundingClientRect();
+    const at = { left: event.clientX - host.left, top: event.clientY - host.top };
+    if (text) {
+      this.contextMenu.set({ ...at, elementId: text.elementId, text });
+      return;
+    }
+    const textEl = target.closest<HTMLElement>('.slide__text');
+    const onText = textEl ? this.textPointAt(textEl, event) : null;
+    const threadId =
+      target.closest('.slide__pin')?.getAttribute('data-thread-id') ??
+      (onText ? this.comments.threadAtText(onText.elementId, onText.offset) : null);
+    if (threadId && threadId !== 'draft') {
+      this.contextMenu.set({ ...at, threadId });
+      return;
+    }
+    const elementId = target.closest('[data-element-id]:not(.slide__element--layout)')?.getAttribute('data-element-id') ?? null;
+    const rect = slideEl.getBoundingClientRect();
+    const perPt = PX_PER_PT * this.scale();
+    this.contextMenu.set({ ...at, elementId, point: { x: (event.clientX - rect.left) / perPt, y: (event.clientY - rect.top) / perPt } });
+  }
+
+  /** The plain-text position under the pointer in a shape's text. */
+  private textPointAt(textEl: HTMLElement, event: MouseEvent): { elementId: string; offset: number } | null {
+    const elementId = textEl.closest('[data-element-id]')?.getAttribute('data-element-id');
+    const doc = this.document as Document & { caretRangeFromPoint?(x: number, y: number): Range | null };
+    const range = doc.caretRangeFromPoint?.(event.clientX, event.clientY);
+    if (!elementId || !range || !textEl.contains(range.startContainer)) return null;
+    return { elementId, offset: textOffset(textEl, range.startContainer, range.startOffset) };
+  }
+
+  closeContextMenu(): void {
+    this.contextMenu.set(null);
+  }
+
+  menuNewComment(): void {
+    const menu = this.contextMenu();
+    this.closeContextMenu();
+    if (!menu || !this.commentable()) return;
+    const element = menu.elementId ? (this.slide().elements.find(e => e.id === menu.elementId) ?? null) : null;
+    if (element && !menu.text) this.selectedId.set(element.id);
+    this.comments.start(element, this.slideIndex() + 1, element ? undefined : menu.point, menu.text);
+    this.panel.open.set(true);
+  }
+
+  menuReply(): void {
+    const threadId = this.contextMenu()?.threadId;
+    this.closeContextMenu();
+    if (!threadId) return;
+    this.comments.select(threadId);
+    this.panel.open.set(true);
+    this.replyRequest.set({ threadId });
+  }
+
+  menuDelete(): void {
+    const threadId = this.contextMenu()?.threadId;
+    this.closeContextMenu();
+    if (threadId) this.comments.remove({ threadId, commentId: threadId });
+  }
+
+  /** A comment change: part of the edit while editing; saved straight away while viewing. */
+  private commentsChanged(): void {
+    this.setDirty(true);
+    if (this.readOnly()) this.autosave.request();
+  }
+
+  /** A pin on the slide was chosen: its thread becomes active, and the panel shows it. */
+  onPinSelect(threadId: string): void {
+    if (threadId === 'draft') return;
+    this.comments.select(threadId);
+    this.panel.open.set(true);
   }
 
   addSlide(): void {
@@ -554,6 +743,11 @@ export class SlidesEditorComponent implements FileEditor {
     const target = event.target as HTMLElement;
     const typing = target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT';
     const mod = event.ctrlKey || event.metaKey;
+    if (mod && event.altKey && event.key.toLowerCase() === 'm') {
+      event.preventDefault();
+      this.startComment();
+      return;
+    }
     if (mod && !event.shiftKey && event.key.toLowerCase() === 's') {
       event.preventDefault();
       if (!this.readOnly()) this.saveRequested.emit();

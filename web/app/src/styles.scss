@@ -100,3 +100,24 @@ html:has(.app-layout) body {
   overflow-x: auto;
   overflow-y: hidden;
 }
+
+// Commented text on a slide (ADR 0x045), painted with the CSS Custom Highlight API by the slide
+// canvas; highlights are document-wide, so their styles are global.
+::highlight(whatiff-comment) {
+  background-color: rgba(242, 201, 76, 0.35);
+}
+
+::highlight(whatiff-comment-active) {
+  background-color: rgba(242, 201, 76, 0.75);
+}
+
+// Commented text in the code editor (ADR 0x045): Monaco's decorations live outside Angular's
+// view encapsulation, so their look is global.
+.whatiff-text-comment {
+  background-color: rgba(242, 201, 76, 0.28);
+  border-bottom: 2px solid #f2c94c;
+}
+
+.whatiff-text-comment--active {
+  background-color: rgba(242, 201, 76, 0.6);
+}

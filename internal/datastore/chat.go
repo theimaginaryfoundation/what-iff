@@ -11,6 +11,7 @@ import (
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
 	entchatskillstate "github.com/theimaginaryfoundation/what-iff/ent/chatskillstate"
+	entfileattachment "github.com/theimaginaryfoundation/what-iff/ent/fileattachment"
 	entmemory "github.com/theimaginaryfoundation/what-iff/ent/memory"
 	entmodel "github.com/theimaginaryfoundation/what-iff/ent/model"
 	entmood "github.com/theimaginaryfoundation/what-iff/ent/mood"
@@ -1127,6 +1128,15 @@ func (d *Datastore) DeleteChat(ctx context.Context, userID, id uuid.UUID) error 
 	// Skill states carry the chat ID without a foreign key, so nothing cascades to them.
 	if _, err := tx.ChatSkillState.Delete().Where(entchatskillstate.ChatID(id)).Exec(ctx); err != nil {
 		d.logger.Error(i18n.T1("delete.failed", "Entity", "chat skill state"), zap.Error(err))
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return err
+	}
+
+	// The cascade removes the chat's files and their comment sets: hand those to copies elsewhere.
+	if err := handOverCopiesOf(ctx, tx, userID, entfileattachment.HasChatMessageWith(chatmessage.HasChatWith(entchat.ID(id)))); err != nil {
+		d.logger.Error("failed to hand a chat's files' comments to their copies", zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { OoxmlPackage, base64ToBytes } from '../shared/ooxml';
 import { documentToDocx } from './docx-export';
 import { docxToDocument } from './docx-import';
-import { CUSTOM_RANGE, DocDocument, NOTE_REFERENCE } from './univer-doc-types';
+import { CUSTOM_DECORATION_COMMENT, CUSTOM_RANGE, DocDocument, NOTE_REFERENCE } from './univer-doc-types';
 
 /**
  * Patch mode: a document written over its original package keeps every part the editor does
@@ -178,7 +178,7 @@ async function roundTrip(edit?: (doc: DocDocument) => void) {
 
 describe('docx patch mode', () => {
   it('reads the fixture: notes, bookmarks, comments and the text box as native or opaque content', async () => {
-    const { document, report } = await docxToDocument(await fixture(), { id: 'doc', name: 'fixture.docx' });
+    const { document, report, comments } = await docxToDocument(await fixture(), { id: 'doc', name: 'fixture.docx' });
     expect(report.dropped).toEqual([]);
     const stream = document.body.dataStream;
     expect(stream).toContain(`Noted${NOTE_REFERENCE} text.`);
@@ -194,9 +194,17 @@ describe('docx patch mode', () => {
     expect(bookmark.properties).toEqual({ name: 'target' });
     const link = ranges.find(r => r.rangeType === CUSTOM_RANGE.HYPERLINK)!;
     expect(link.properties).toEqual({ url: '#target' });
-    const comment = ranges.find(r => r.rangeType === CUSTOM_RANGE.COMMENT)!;
-    expect(stream.slice(comment.startIndex, comment.endIndex + 1)).toBe('Commented');
-    expect(comment.properties).toEqual({ commentId: '0' });
+    // A comment is a thread beside the document and a decoration over its text (ADR 0x045).
+    expect(ranges.some(r => r.rangeType === CUSTOM_RANGE.COMMENT)).toBe(false);
+    const mark = document.body.customDecorations!.find(d => d.type === CUSTOM_DECORATION_COMMENT)!;
+    expect(stream.slice(mark.startIndex, mark.endIndex + 1)).toBe('Commented');
+    expect(comments).toEqual([
+      expect.objectContaining({
+        id: mark.id,
+        quote: 'Commented',
+        comments: [expect.objectContaining({ authorName: 'Reviewer', text: 'Please check.' })],
+      }),
+    ]);
     const raw = document.body.docxRawCustomBlocks!;
     expect(raw).toHaveLength(1);
     expect(stream[raw[0].startIndex]).toBe('\b');
@@ -320,13 +328,14 @@ describe('docx patch mode', () => {
     expect(xml).toContain('<w:numId w:val="6"/>');
   });
 
-  it('without the original, comments are reported and the rest still exports', async () => {
+  it('without the original, comments are written fresh and the rest still exports', async () => {
     const first = await docxToDocument(await fixture(), { id: 'doc', name: 'fixture.docx' });
-    const exported = await documentToDocx(first.document);
-    expect(exported.report.dropped.map(d => d.feature)).toEqual(['Comments']);
+    const exported = await documentToDocx(first.document, undefined, { comments: first.comments });
+    expect(exported.report.dropped).toEqual([]);
     const pkg = await OoxmlPackage.open(exported.bytes);
     const xml = (await pkg.text('word/document.xml'))!;
-    expect(xml).not.toContain('commentRangeStart');
+    expect(xml).toContain('<w:commentRangeStart w:id="0"/>');
+    expect(await pkg.text('word/comments.xml')).toContain('Please check.');
     expect(xml).toContain('<w:footnoteReference w:id="1"/>');
     expect(await pkg.text('word/footnotes.xml')).toContain('A footnote.');
     expect(xml).toContain('<wps:wsp');
@@ -348,16 +357,26 @@ describe('table borders', () => {
   </w:styles>`;
   async function open(body: string) {
     const pkg = OoxmlPackage.empty();
-    pkg.put('_rels/.rels', `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
-    pkg.put('word/_rels/document.xml.rels', `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
+    pkg.put(
+      '_rels/.rels',
+      `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
+    );
+    pkg.put(
+      'word/_rels/document.xml.rels',
+      `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+    );
     pkg.put('word/styles.xml', styleXml);
-    pkg.put('[Content_Types].xml', `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+    pkg.put(
+      '[Content_Types].xml',
+      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`,
+    );
     pkg.put('word/document.xml', `<w:document ${W}><w:body>${body}<w:sectPr/></w:body></w:document>`);
     const bytes = await pkg.save('application/octet-stream');
     const { document } = await docxToDocument(bytes, { id: 'd', name: 'd.docx' });
     return { document, bytes, first: Object.values(document.tableSource ?? {})[0] };
   }
-  const visible = (b: { color: { rgb?: string | null }; width?: { v: number } } | undefined) => !!b && b.color.rgb !== 'transparent' && (b.width?.v ?? 1) > 0;
+  const visible = (b: { color: { rgb?: string | null }; width?: { v: number } } | undefined) =>
+    !!b && b.color.rgb !== 'transparent' && (b.width?.v ?? 1) > 0;
 
   it('states every side, invisible where Word draws nothing, so Univer does not add its default line', async () => {
     const { first } = await open(table(''));

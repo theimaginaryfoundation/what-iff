@@ -211,3 +211,32 @@
 .slide__defs {
   position: absolute;
 }
+
+// Comment pins (ADR 0x045): above the slide's content, a fixed size whatever the zoom.
+.slide__pin {
+  align-items: center;
+  background: #f2c94c;
+  border: 2px solid #ffffff;
+  border-radius: 50% 50% 50% 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  color: #5c4400;
+  cursor: pointer;
+  display: flex;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  width: 22px;
+  z-index: 5;
+
+  &--active {
+    background: var(--accent, #4f46e5);
+    color: #ffffff;
+    transform: scale(1.15);
+  }
+}
+
+.slide__element--commented {
+  outline: 2px dashed #f2c94c;
+  outline-offset: 2px;
+}

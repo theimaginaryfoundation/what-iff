@@ -1,6 +1,10 @@
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
+
+import { CommentPeopleService } from '../office/comments/comment-people.service';
+import { fakeTextComments } from './text-comments/fake-text-comments.spec-helper';
+import { TextCommentsService } from './text-comments/text-comments.service';
 import { of } from 'rxjs';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
@@ -24,9 +28,12 @@ describe('FileWorkspacePanelComponent', () => {
   beforeEach(async () => {
     localStorage.clear();
     viewport = 'large';
-    vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
-      matches: (query === LARGE_VIEWPORT_QUERY && viewport === 'large') || (query === MEDIUM_VIEWPORT_QUERY && viewport !== 'phone'),
-    }) as MediaQueryList);
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      query =>
+        ({
+          matches: (query === LARGE_VIEWPORT_QUERY && viewport === 'large') || (query === MEDIUM_VIEWPORT_QUERY && viewport !== 'phone'),
+        }) as MediaQueryList,
+    );
     rename = vi.fn().mockReturnValue(of({ ...row, name: 'renamed.txt' }));
     remove = vi.fn().mockReturnValue(of({}));
     confirm = vi.fn().mockResolvedValue(true);
@@ -36,8 +43,17 @@ describe('FileWorkspacePanelComponent', () => {
         provideZonelessChangeDetection(),
         provideRouter([]),
         { provide: ImageGalleryService, useValue: { getFileInfo: () => of(row), renameImage: rename } },
-        { provide: FileAttachmentService, useValue: { downloadFileAttachment: () => of(new Blob(['x'])), downloadFileContent: () => of({ blob: new Blob(['x']), version: null }), deleteFileAttachment: remove } },
+        {
+          provide: FileAttachmentService,
+          useValue: {
+            downloadFileAttachment: () => of(new Blob(['x'])),
+            downloadFileContent: () => of({ blob: new Blob(['x']), version: null }),
+            deleteFileAttachment: remove,
+          },
+        },
         { provide: ConfirmationService, useValue: { confirm, alert: vi.fn() } },
+        { provide: CommentPeopleService, useValue: { me: signal({ id: 'user:u-1', name: 'Pat Lee' }) } },
+        { provide: TextCommentsService, useValue: fakeTextComments() },
       ],
     }).compileComponents();
     navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true) as never;

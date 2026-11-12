@@ -13,10 +13,39 @@
 }
 
 .code-editor__toolbar {
+  align-items: center;
   border-bottom: 1px solid var(--border);
   display: flex;
+  gap: 0.35rem;
   justify-content: flex-end;
   padding: 0.4rem 1rem;
+}
+
+// Comments (ADR 0x045): their buttons at the end of the toolbar, and the panel beside the text.
+.code-editor__end {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.code-editor__comments-toggle {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.code-editor__count {
+  background: var(--accent);
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0.15rem 0.4rem;
+}
+
+.code-editor__comments {
+  flex: 0 0 300px;
+  max-width: 45%;
 }
 
 .code-editor__toggle {

@@ -293,3 +293,32 @@ func NewFileStore(ctx context.Context, bucketName, region string, logger *zap.Lo
 		logger:     logger,
 	}, nil
 }
+
+// AttachmentObject names a file attachment's stored object: its canonical key, and what the
+// key of a row stored before keys were recorded is derived from.
+type AttachmentObject struct {
+	UserID, ID            uuid.UUID
+	S3Key, Name, FileType string
+	ChatID, PersonalityID *uuid.UUID
+}
+
+// ReadAttachment is the attachment's stored bytes: its canonical key, else (for rows stored
+// before keys were recorded) the key derived from it; empty when neither holds any.
+func ReadAttachment(ctx context.Context, fs FileStore, a AttachmentObject) ([]byte, error) {
+	keys := make([]string, 0, 2)
+	if k := strings.TrimSpace(a.S3Key); k != "" {
+		keys = append(keys, k)
+	}
+	// FileKeyForAttachment takes the CHAT id, not the chat message id.
+	keys = append(keys, FileKeyForAttachment(a.UserID, a.ID, a.Name, a.FileType, a.ChatID, a.PersonalityID))
+	for _, key := range keys {
+		blob, err := fs.DownloadFile(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		if len(blob) != 0 {
+			return blob, nil
+		}
+	}
+	return nil, nil
+}

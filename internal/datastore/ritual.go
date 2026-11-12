@@ -628,6 +628,9 @@ func (d *Datastore) DeleteRitualWithFiles(ctx context.Context, userID, id uuid.U
 		if err != nil {
 			return nil, err
 		}
+		if err := handOverCopiesOf(ctx, tx, userID, entfileattachment.SkillID(id)); err != nil {
+			return nil, err
+		}
 		if err := tx.Ritual.DeleteOneID(id).Exec(ctx); err != nil {
 			d.logger.Error(i18n.T1("delete.failed", "Entity", "ritual"), zap.Error(err))
 			return nil, err
