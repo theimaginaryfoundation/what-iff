@@ -3,13 +3,17 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 import { ShieldIconComponent } from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
-/** Header indicator shown only on a sandboxed thread. Click opens the sandbox setting. */
+/**
+ * Header indicator for a thread's privacy state, shown on every open thread so it is never
+ * hidden: "Sandboxed" (warning tone) or "Not sandboxed" (muted). Click opens the sandbox setting.
+ * `null` / `undefined` means the state is not known yet, so nothing is shown.
+ */
 @Component({
   selector: 'app-thread-sandboxed-chip',
   standalone: true,
   imports: [ShieldIconComponent, TooltipDirective],
   template: `
-    @if (sandboxed()) {
+    @if (sandboxed() === true) {
       <button
         type="button"
         class="chip"
@@ -20,6 +24,18 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
       >
         <ui-shield-icon [size]="12" />
         <span>Sandboxed</span>
+      </button>
+    } @else if (sandboxed() === false) {
+      <button
+        type="button"
+        class="chip chip--open"
+        aria-label="Not sandboxed. This thread can use your memories, conversations and files. Open sandbox settings."
+        uiTooltip="Not sandboxed: this thread can use your memories, other conversations and account files."
+        placement="bottom"
+        (click)="openSettings.emit()"
+      >
+        <ui-shield-icon [size]="12" />
+        <span>Not sandboxed</span>
       </button>
     }
   `,
@@ -42,11 +58,22 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
         gap: 0.25rem;
         padding: 0.1875rem 0.5rem;
       }
+
+      .chip--open {
+        background: transparent;
+        border-color: var(--color-border-base);
+        color: var(--color-text-secondary);
+      }
+
+      .chip:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+      }
     `,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ThreadSandboxedChipComponent {
-  readonly sandboxed = input<boolean | null | undefined>(false);
+  readonly sandboxed = input<boolean | null | undefined>(null);
   readonly openSettings = output<void>();
 }

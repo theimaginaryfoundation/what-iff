@@ -71,6 +71,9 @@ describe('ThreadSandboxComponent', () => {
     expect(host().querySelector('.sandbox__note')?.textContent?.trim()).toBe(SANDBOX_CREATE_ONLY_NOTE);
     expect(button('sandbox-new-thread')).not.toBeNull();
     expect(button('sandbox-leave')).toBeNull();
+    const rows = Array.from(host().querySelectorAll('.sandbox__sees-row')).map(r => r.textContent?.replace(/\s+/g, ' ').trim());
+    expect(rows).toContain('Your memoriesAll');
+    expect(host().querySelectorAll('.sandbox__sees-value--closed').length).toBe(0);
   });
 
   it('reflects a sandboxed chat, explains what it can and cannot do, and offers the way out', () => {
@@ -78,7 +81,12 @@ describe('ThreadSandboxComponent', () => {
     fixture.detectChanges();
 
     expect(host().querySelector('.sandbox__label')?.textContent?.trim()).toBe('Sandboxed thread');
-    expect(host().querySelector('.sandbox__note')?.textContent?.trim()).toBe(SANDBOX_COPY);
+    expect(host().querySelector('.sandbox__note')).toBeNull();
+    const rows = Array.from(host().querySelectorAll('.sandbox__sees-row')).map(r => r.textContent?.replace(/\s+/g, ' ').trim());
+    expect(rows).toContain('Your memoriesThis thread only');
+    expect(rows).toContain('Other conversationsHidden');
+    expect(host().querySelectorAll('.sandbox__sees-value--closed').length).toBe(5);
+    expect(SANDBOX_COPY).toContain('A sandboxed thread');
     expect(button('sandbox-leave')).not.toBeNull();
     expect(button('sandbox-new-thread')).toBeNull();
   });

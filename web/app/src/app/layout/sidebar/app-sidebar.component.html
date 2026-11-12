@@ -831,6 +831,7 @@
             <p>Star a thread from the manager to keep it handy.</p>
           } @else {
             @for (thread of sidebarPinnedThreads(); track thread.id) {
+              <div class="app-sidebar__thread-row" [class.app-sidebar__thread-row--menu-open]="menuThreadId() === thread.id">
               <button
                 type="button"
                 class="app-sidebar__pinned-thread"
@@ -878,6 +879,11 @@
                   }
                 </span>
                 <span #threadName class="app-sidebar__thread-name">{{ thread.name }}</span>
+                @if (isSandboxed(thread)) {
+                  <span class="app-sidebar__thread-sandbox" role="img" aria-label="Sandboxed thread" uiTooltip="Sandboxed thread">
+                    <ui-shield-icon [size]="12" />
+                  </span>
+                }
                 @if (refSelectionMode() && thread.id !== threads.activeThreadId()) {
                   <span
                     class="app-sidebar__ref-check"
@@ -891,6 +897,16 @@
                   </span>
                 }
               </button>
+              @if (!refSelectionMode()) {
+                <app-thread-row-menu
+                  class="app-sidebar__thread-menu"
+                  [thread]="thread"
+                  (openChange)="menuThreadId.set($event ? thread.id : null)"
+                  (toggleStar)="toggleThreadStar($event)"
+                  (openSandbox)="openThreadSandbox($event)"
+                />
+              }
+              </div>
             }
           }
         </div>
@@ -909,6 +925,7 @@
             <p>Open a thread to see it here.</p>
           } @else {
             @for (thread of sidebarRecentThreads(); track thread.id) {
+              <div class="app-sidebar__thread-row" [class.app-sidebar__thread-row--menu-open]="menuThreadId() === thread.id">
               <button
                 type="button"
                 class="app-sidebar__pinned-thread"
@@ -956,6 +973,11 @@
                   }
                 </span>
                 <span #threadName class="app-sidebar__thread-name">{{ thread.name }}</span>
+                @if (isSandboxed(thread)) {
+                  <span class="app-sidebar__thread-sandbox" role="img" aria-label="Sandboxed thread" uiTooltip="Sandboxed thread">
+                    <ui-shield-icon [size]="12" />
+                  </span>
+                }
                 @if (refSelectionMode() && thread.id !== threads.activeThreadId()) {
                   <span
                     class="app-sidebar__ref-check"
@@ -969,6 +991,16 @@
                   </span>
                 }
               </button>
+              @if (!refSelectionMode()) {
+                <app-thread-row-menu
+                  class="app-sidebar__thread-menu"
+                  [thread]="thread"
+                  (openChange)="menuThreadId.set($event ? thread.id : null)"
+                  (toggleStar)="toggleThreadStar($event)"
+                  (openSandbox)="openThreadSandbox($event)"
+                />
+              }
+              </div>
             }
           }
         </div>

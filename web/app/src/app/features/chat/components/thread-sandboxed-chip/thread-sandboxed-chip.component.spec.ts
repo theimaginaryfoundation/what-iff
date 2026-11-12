@@ -20,9 +20,18 @@ describe('ThreadSandboxedChipComponent', () => {
     fixture = TestBed.createComponent(ThreadSandboxedChipComponent);
   });
 
-  it.each([undefined, null, false] as const)('is hidden when sandboxed is %s', sandboxed => {
+  it.each([undefined, null] as const)('is hidden while the state is unknown (%s)', sandboxed => {
     render(sandboxed);
     expect(host().querySelector('button')).toBeNull();
+  });
+
+  it('shows a muted "Not sandboxed" chip, so the state is always visible', () => {
+    render(false);
+    const chip = host().querySelector('button') as HTMLButtonElement;
+    expect(chip.textContent).toContain('Not sandboxed');
+    expect(chip.classList.contains('chip--open')).toBe(true);
+    expect(chip.getAttribute('aria-label')).toContain('Not sandboxed');
+    expect(chip.getAttribute('aria-label')).toContain('Open sandbox settings');
   });
 
   it('shows a Sandboxed chip when sandboxed', () => {

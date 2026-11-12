@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 
 import { isSandboxed } from '../../../../core/models/chat.model';
 import { ChatService } from '../../../../core/services/chat.service';
+import { AnnouncerService } from '../../../../core/services/announcer.service';
 import { ConfirmationService } from '../../../../core/services/confirmation.service';
 import { apiErrorMessage } from '../../../../core/utils/api-error.helpers';
 import { ButtonComponent } from '../../../../shared/ui/button/button.component';
@@ -37,8 +38,15 @@ export const SANDBOX_CREATE_ONLY_NOTE =
             {{ copy }}
           </ui-help-hint>
         </div>
+        <dl class="sandbox__sees" aria-label="What this thread can see" data-testid="sandbox-sees">
+          @for (row of sees(); track row.label) {
+            <div class="sandbox__sees-row">
+              <dt>{{ row.label }}</dt>
+              <dd [class.sandbox__sees-value--closed]="row.closed">{{ row.value }}</dd>
+            </div>
+          }
+        </dl>
         @if (sandboxed()) {
-          <p class="sandbox__note">{{ copy }}</p>
           <ui-button size="sm" variant="secondary" [disabled]="saving()" (activate)="leaveSandbox()" data-testid="sandbox-leave">
             Turn off sandbox
           </ui-button>
@@ -93,6 +101,34 @@ export const SANDBOX_CREATE_ONLY_NOTE =
         font-weight: 600;
       }
 
+      .sandbox__sees {
+        display: grid;
+        gap: 0.125rem;
+        justify-self: stretch;
+        margin: 0;
+      }
+
+      .sandbox__sees-row {
+        display: flex;
+        font-size: 0.75rem;
+        gap: 0.5rem;
+        justify-content: space-between;
+      }
+
+      .sandbox__sees-row dt {
+        color: var(--color-text-secondary);
+      }
+
+      .sandbox__sees-row dd {
+        color: var(--color-text-primary);
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .sandbox__sees-value--closed {
+        color: var(--color-warning) !important;
+      }
+
       .sandbox__note,
       .sandbox__error {
         font-size: 0.75rem;
@@ -114,6 +150,7 @@ export class ThreadSandboxComponent {
   private readonly context = inject(ContextPanelService);
   private readonly chatService = inject(ChatService);
   private readonly confirmation = inject(ConfirmationService);
+  private readonly announcer = inject(AnnouncerService);
   private readonly router = inject(Router);
 
   readonly copy = SANDBOX_COPY;
@@ -121,6 +158,17 @@ export class ThreadSandboxComponent {
 
   readonly chat = this.context.activeChat;
   readonly sandboxed = computed(() => isSandboxed(this.chat()));
+  /** What the thread can see, in a few words. `closed` rows are the ones the sandbox shuts. */
+  readonly sees = computed<readonly { label: string; value: string; closed: boolean }[]>(() => {
+    const sandboxed = this.sandboxed();
+    return [
+      { label: 'Your memories', value: sandboxed ? 'This thread only' : 'All', closed: sandboxed },
+      { label: 'Other conversations', value: sandboxed ? 'Hidden' : 'Visible', closed: sandboxed },
+      { label: 'Account files', value: sandboxed ? 'Hidden' : 'Visible', closed: sandboxed },
+      { label: 'Tools', value: sandboxed ? 'Limited' : 'All', closed: sandboxed },
+      { label: 'Connectors', value: sandboxed ? 'None to start' : 'Your defaults', closed: sandboxed },
+    ];
+  });
   readonly saving = signal(false);
   readonly error = signal<string | null>(null);
 
@@ -141,6 +189,7 @@ export class ThreadSandboxComponent {
     try {
       const updated = await firstValueFrom(this.chatService.patchChat(chat.id, { context_scope: 'account' }));
       this.context.publishThreadUpdate(updated);
+      this.announcer.announce('Sandbox turned off. This thread can now use your memories, conversations and files.');
     } catch (error) {
       this.error.set(apiErrorMessage(error, 'Failed to turn off the sandbox'));
     } finally {
@@ -165,6 +214,7 @@ export class ThreadSandboxComponent {
       );
       this.chatService.setLastChatId(created.id);
       await this.router.navigate(['/chat', created.id]);
+      this.announcer.announce('Sandboxed thread created');
     } catch (error) {
       this.error.set(apiErrorMessage(error, 'Failed to start a sandboxed thread'));
     } finally {

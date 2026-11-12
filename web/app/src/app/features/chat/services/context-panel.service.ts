@@ -205,6 +205,16 @@ export class ContextPanelService {
   setActiveTab(tab: ContextPanelTab): void {
     const chatId = this.activeChatId();
     if (!chatId) return;
+    this.setTabForChat(chatId, tab);
+  }
+
+  /** Remembers the tab (and opens the docked panel) for a thread that is about to open, e.g. from the sidebar. */
+  revealTabForChat(chatId: string, tab: ContextPanelTab): void {
+    this.setTabForChat(chatId, tab);
+    this.setDesktopVisible(true);
+  }
+
+  private setTabForChat(chatId: string, tab: ContextPanelTab): void {
     const next = { ...this.tabsByChat(), [chatId]: tab };
     this.tabsByChat.set(next);
     writeTabsToStorage(next);

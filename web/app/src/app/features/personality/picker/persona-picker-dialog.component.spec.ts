@@ -142,4 +142,79 @@ describe('PersonaPickerDialogComponent', () => {
         expect(component.loading()).toBe(false);
         expect(component.errorMessage()).toContain('Failed to load personalities');
     });
+
+    describe('new-thread form', () => {
+        function openForm(): void {
+            fixture.componentRef.setInput('threadForm', true);
+            setOpen(true);
+            flushList([vera, card]);
+        }
+
+        function el(selector: string): HTMLElement | null {
+            return fixture.nativeElement.querySelector(selector);
+        }
+
+        function startButton(): HTMLButtonElement {
+            return el('[data-testid="new-thread-start"] button') as HTMLButtonElement;
+        }
+
+        it('lists Choose a Personality, Privacy, then Thread Title, with Privacy no longer above the picker', () => {
+            openForm();
+
+            const headings = Array.from(fixture.nativeElement.querySelectorAll('section h3') as NodeListOf<HTMLElement>)
+                .map(h => h.textContent?.trim());
+            expect(headings).toEqual(['Choose a Personality', 'Privacy', 'Thread Title']);
+        });
+
+        it('only marks a personality on click; Start thread is what picks it', () => {
+            const picked: Personality[] = [];
+            component.select.subscribe(p => picked.push(p));
+            openForm();
+            expect(startButton().disabled).toBe(true);
+
+            (fixture.nativeElement.querySelectorAll('[role="option"]')[1] as HTMLElement).click();
+            fixture.detectChanges();
+            expect(picked).toEqual([]);
+            expect(component.chosen()?.id).toBe('p-card');
+            expect(startButton().disabled).toBe(false);
+
+            startButton().click();
+            expect(picked.map(p => p.id)).toEqual(['p-card']);
+        });
+
+        it('carries the Privacy choice and the Thread Title to the parent', () => {
+            openForm();
+            const input = el('[data-testid="new-thread-title"]') as HTMLInputElement;
+            input.value = 'Q3 retro';
+            input.dispatchEvent(new Event('input'));
+            component.sandboxed.set(true);
+
+            expect(component.threadTitle()).toBe('Q3 retro');
+            expect(component.sandboxed()).toBe(true);
+        });
+
+        it('reopens blank, without the last pick or title', () => {
+            openForm();
+            component.chosen.set(vera);
+            component.threadTitle.set('Old title');
+            setOpen(false);
+
+            setOpen(true);
+            flushList([vera, card]);
+
+            expect(component.chosen()).toBeNull();
+            expect(component.threadTitle()).toBe('');
+        });
+
+        it('keeps the one-click pick for every other caller', () => {
+            const picked: Personality[] = [];
+            component.select.subscribe(p => picked.push(p));
+            setOpen(true);
+            flushList([vera]);
+
+            (fixture.nativeElement.querySelectorAll('[role="option"]')[0] as HTMLElement).click();
+
+            expect(picked.map(p => p.id)).toEqual(['p-vera']);
+        });
+    });
 });

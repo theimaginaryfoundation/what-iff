@@ -294,9 +294,11 @@
 
 <app-persona-picker-dialog
   [open]="personaPickerOpen()"
-  title="Choose a Personality"
-  subtitle="Select a personality to continue"
+  title="Start a New Thread"
   pickerAppearance="rich"
+  [threadForm]="true"
+  [(sandboxed)]="newThreadSandboxed"
+  [(threadTitle)]="newThreadTitle"
   (select)="onPersonaPicked($event)"
   (cancel)="closePersonaPicker()"
   (create)="onPersonaPickerCreate()"

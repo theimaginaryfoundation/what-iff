@@ -3,10 +3,11 @@ import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { Subscription, catchError, map, of, startWith, switchMap } from 'rxjs';
 
+import { AnnouncerService } from '../../core/services/announcer.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { CommandPaletteService } from '../../core/services/command-palette.service';
 import { NavService } from '../../core/services/nav.service';
-import { Chat } from '../../core/models/chat.model';
+import { Chat, isSandboxed } from '../../core/models/chat.model';
 import { Personality } from '../../core/models/personality.model';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { PersonalityService } from '../../core/services/personality.service';
@@ -24,6 +25,7 @@ import {
   GearIconComponent,
   PlusIconComponent,
   SearchIconComponent,
+  ShieldIconComponent,
   SparkleIconComponent,
   UserIconComponent,
   UsersIconComponent,
@@ -36,6 +38,7 @@ import { personalityAccent, personalityAccentSurface } from '../../features/pers
 import { AvatarComponent } from '../../shared/ui/avatar/avatar.component';
 import { PersonaAccentScopeComponent } from '../../features/personality/picker/persona-accent-scope.component';
 import { AppSidebarHeaderComponent } from './app-sidebar-header.component';
+import { ThreadRowMenuComponent } from './thread-row-menu.component';
 import { AppSidebarProfileComponent } from './app-sidebar-profile.component';
 import { SidebarRecentJobsComponent } from './sidebar-recent-jobs.component';
 import { APP_MODE_HINT, CONFIG_MODE_HINT, appNavItems, configNavItems, NavItem, navTooltip } from './nav.helpers';
@@ -81,16 +84,19 @@ const SIDEBAR_MOBILE_QUERY = '(max-width: 1023px)';
     GearIconComponent,
     PlusIconComponent,
     SearchIconComponent,
+    ShieldIconComponent,
     SparkleIconComponent,
     UserIconComponent,
     UsersIconComponent,
     TooltipDirective,
+    ThreadRowMenuComponent,
   ],
   templateUrl: './app-sidebar.component.html',
   styleUrl: './app-sidebar.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class AppSidebarComponent implements OnInit, OnDestroy {
+  protected readonly isSandboxed = isSandboxed;
   readonly nav = inject(NavService);
   readonly palette = inject(CommandPaletteService);
   readonly threads = inject(ThreadListService);
@@ -102,6 +108,7 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
   private readonly personalityService = inject(PersonalityService);
   private readonly router = inject(Router);
   private readonly confirmationService = inject(ConfirmationService);
+  private readonly announcer = inject(AnnouncerService);
   private readonly contextPanel = inject(ContextPanelService);
   private readonly document = inject(DOCUMENT);
   private readonly subscriptions = new Subscription();
@@ -686,6 +693,24 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
     }
 
     await this.threads.unpinAll();
+  }
+
+  /** The thread whose row menu is open, so its row keeps the "⋮" button visible. */
+  readonly menuThreadId = signal<string | null>(null);
+
+  /** Stars or unstars a thread from the row menu, and says so for screen readers. */
+  async toggleThreadStar(thread: Chat): Promise<void> {
+    const starring = !thread.is_favorite;
+    await this.threads.togglePinned(thread);
+    this.announcer.announce(starring ? `Starred ${thread.name}` : `Removed ${thread.name} from Starred Threads`);
+  }
+
+  /** Opens the thread with the sandbox settings showing (the Memories tab holds them). */
+  openThreadSandbox(thread: Chat): void {
+    this.contextPanel.revealTabForChat(thread.id, 'memories');
+    this.threads.setActiveThreadId(thread.id);
+    void this.router.navigate(['/chat', thread.id]);
+    if (this.isMobileViewport()) this.nav.setCollapsed(true);
   }
 
   startNewThread(): void {
