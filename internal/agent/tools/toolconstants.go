@@ -61,7 +61,19 @@ Notes:
 - Quality controls cost and detail. Choose the level appropriate to the request; higher quality yields more detail.
 - Use aspect_ratio to match the subject: square for icons/avatars/logos, landscape for scenes/banners, portrait for characters/posters. Defaults to square.
 - To create multiple variations, either set count > 1 or call this tool multiple times with different prompts.
-- Use folder to file the images in a gallery folder (e.g. "charts/oura") instead of leaving them at the top level of the gallery. Folders are created as you use them. Use it for recurring output you do not want cluttering the gallery.`
+- Use folder to file the images in a gallery folder (e.g. "charts/oura") instead of leaving them at the top level of the gallery. Folders are created as you use them. Use it for recurring output you do not want cluttering the gallery.
+
+Editing and reference images:
+- To change an existing image, build on one, or follow a sketch, pass reference_images: images you can see in this conversation, by file name (including ones you generated earlier in this turn). Give each a role:
+  - base: the image to edit. The result keeps it except where asked to change. At most one.
+  - markup: a copy of the image the user drew on (circles, arrows, scribbles, notes) to show where and what to change. The marks are instructions; the tool tells the image model never to draw them.
+  - sketch: the user's rough drawing. The result follows its composition, rendered properly.
+  - reference: a subject, character or style to carry over.
+- mask_image: a mask for the base image, white where it may change and black where it must stay. Use it when the user painted an area to change (files described as a mask). A reference with role "mask" works the same. Always pass the image the mask belongs to as the base: the mask's description names it, and if that image is not in the conversation, ask the user to attach it.
+- The result's inputs list every image as it was sent, mask included; check it matches what you meant.
+- Files the user made in the markup tool say what they are in their description (for example "Mask for photo.png" or "photo.png with the user's markup drawn on it").
+- For an edit, write the prompt as the change to make ("replace the sky with a starry night"), not a description of the whole image. Without aspect_ratio an edit keeps the base image's shape.
+- Not every image provider can edit. If the result says the user's provider cannot, tell the user how to switch (Settings → Image generation) instead of retrying.`
 
 const CreateAgentJobToolDescription = `Schedule a future reminder / follow-up / check-in / task for the current user.
 
@@ -197,6 +209,23 @@ var GenerateImageToolSpec = FunctionToolSpec{
 		"folder": map[string]interface{}{
 			"type":        "string",
 			"description": "Optional gallery folder to file the images in, e.g. 'charts' or 'charts/oura' ('/' nests; case-insensitive). Omit to leave them at the top level.",
+		},
+		"reference_images": map[string]interface{}{
+			"type":        "array",
+			"description": "Optional input images (up to 3) that turn the request into an edit or a generation from references. See the tool description for roles.",
+			"maxItems":    3,
+			"items": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"image": map[string]interface{}{"type": "string", "description": "The image's file name as shown in this conversation (or its id)."},
+					"role":  map[string]interface{}{"type": "string", "enum": []string{"base", "markup", "sketch", "reference", "mask"}, "description": "What the image is for. Defaults to reference. mask is the same as passing the image as mask_image."},
+				},
+				"required": []string{"image"},
+			},
+		},
+		"mask_image": map[string]interface{}{
+			"type":        "string",
+			"description": "Optional file name of a mask for the base image: white marks the area that may change, black the area to keep.",
 		},
 	},
 	Required: []string{"prompt"},

@@ -106,7 +106,7 @@ describe('ContextFilesTabComponent', () => {
     };
     pick(new File(['x'], 'notes.txt', { type: 'text/plain' }));
     expect(upload).toHaveBeenCalledWith('c-1', expect.any(File));
-    expect(panel.composerAttachment()?.id).toBe('f-up');
+    expect(panel.composerAttachments().map(f => f.id)).toEqual(['f-up']);
 
     pick(new File(['x'], 'malware.exe', { type: 'application/octet-stream' }));
     fixture.detectChanges();
@@ -116,6 +116,8 @@ describe('ContextFilesTabComponent', () => {
     const buttons = [...el.querySelectorAll('button.files-tab__button')] as HTMLButtonElement[];
     buttons.find(b => b.textContent?.trim() === 'From gallery')!.click();
     expect(panel.galleryPickerRequests()).toBe(1);
+    buttons.find(b => b.textContent?.trim() === 'New canvas')!.click();
+    expect(panel.sketchRequests()).toBe(1);
   });
 
   it('lists files attached to the next message ahead of the thread\'s, without repeating listed ones', async () => {

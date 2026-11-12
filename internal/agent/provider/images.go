@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
@@ -58,7 +59,11 @@ func (a *OpenAIProvider) EditImagePNGBase64WithQuality(ctx context.Context, prom
 		return "", fmt.Errorf("reference image is required")
 	}
 
-	params := buildImageEditParams(prompt, quality, referenceImage, referenceMIME)
+	return a.editImage(ctx, buildImageEditParams(prompt, quality, referenceImage, referenceMIME))
+}
+
+// editImage sends one edit request and returns the first image's base64 payload.
+func (a *OpenAIProvider) editImage(ctx context.Context, params openai.ImageEditParams) (string, error) {
 	call := startGenAICall(ctx, a.tel, telemetry.DependencyOpenAI, string(params.Model), genAIOpEditImage)
 	resp, err := a.oaiClient.Images.Edit(ctx, params)
 	endImageCall(call, resp, err)
@@ -135,28 +140,67 @@ var referenceImageFilenames = map[string]string{
 }
 
 func buildImageEditParams(prompt string, quality ImageQuality, referenceImage []byte, referenceMIME string) openai.ImageEditParams {
-	oaiQuality := openai.ImageEditParamsQualityLow
+	return openai.ImageEditParams{
+		Prompt: prompt,
+		Image: openai.ImageEditParamsImageUnion{
+			OfFile: referenceImageFile(referenceImage, referenceMIME, "reference"),
+		},
+		Model:        openai.ImageModel(ImageEngine),
+		Quality:      imageEditQuality(quality),
+		Size:         openai.ImageEditParamsSize1024x1024,
+		OutputFormat: openai.ImageEditParamsOutputFormatPNG,
+	}
+}
+
+// buildImageEditRequestParams is an edit with every input image and, when set, an alpha mask
+// for the first. It sends no input_fidelity: ImageEngine refuses the parameter
+// (invalid_input_fidelity_model), and keeps what is outside the mask without it.
+func buildImageEditRequestParams(prompt string, quality ImageQuality, aspectRatio ImageAspectRatio, images []ImageInput, alphaMask []byte) openai.ImageEditParams {
+	files := make([]io.Reader, 0, len(images))
+	for i, img := range images {
+		files = append(files, referenceImageFile(img.Data, inputImageMIME(img), fmt.Sprintf("image-%d", i+1)))
+	}
+	size := openai.ImageEditParamsSize1024x1024
+	switch aspectRatio {
+	case ImageAspectRatioLandscape:
+		size = openai.ImageEditParamsSize1536x1024
+	case ImageAspectRatioPortrait:
+		size = openai.ImageEditParamsSize1024x1536
+	}
+	params := openai.ImageEditParams{
+		Prompt:       prompt,
+		Image:        openai.ImageEditParamsImageUnion{OfFileArray: files},
+		Model:        openai.ImageModel(ImageEngine),
+		Quality:      imageEditQuality(quality),
+		Size:         size,
+		OutputFormat: openai.ImageEditParamsOutputFormatPNG,
+	}
+	if len(alphaMask) > 0 {
+		params.Mask = openai.File(bytes.NewReader(alphaMask), "mask.png", "image/png")
+	}
+	return params
+}
+
+func imageEditQuality(quality ImageQuality) openai.ImageEditParamsQuality {
 	switch quality {
 	case ImageQualityMedium:
-		oaiQuality = openai.ImageEditParamsQualityMedium
+		return openai.ImageEditParamsQualityMedium
 	case ImageQualityHigh:
-		oaiQuality = openai.ImageEditParamsQualityHigh
+		return openai.ImageEditParamsQualityHigh
+	default:
+		return openai.ImageEditParamsQualityLow
 	}
+}
 
-	mime := strings.ToLower(strings.TrimSpace(referenceMIME))
+// referenceImageFile is an input image as a multipart file whose name and type agree.
+func referenceImageFile(data []byte, mime, stem string) io.Reader {
+	mime = strings.ToLower(strings.TrimSpace(mime))
 	filename, ok := referenceImageFilenames[mime]
 	if !ok {
 		mime, filename = "image/png", "reference.png"
 	}
-
-	return openai.ImageEditParams{
-		Prompt: prompt,
-		Image: openai.ImageEditParamsImageUnion{
-			OfFile: openai.File(bytes.NewReader(referenceImage), filename, mime),
-		},
-		Model:        openai.ImageModel(ImageEngine),
-		Quality:      oaiQuality,
-		Size:         openai.ImageEditParamsSize1024x1024,
-		OutputFormat: openai.ImageEditParamsOutputFormatPNG,
+	if stem != "reference" {
+		filename = stem + filename[strings.LastIndex(filename, "."):]
 	}
+	return openai.File(bytes.NewReader(data), filename, mime)
 }

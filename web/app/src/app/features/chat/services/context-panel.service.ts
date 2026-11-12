@@ -26,9 +26,10 @@ export class ContextPanelService {
   private readonly _activeChat = signal<Chat | null>(null);
   private readonly _mobileOpen = signal(false);
   private readonly _composerInsert = signal<string | null>(null);
-  // A file the Files tab wants attached to the next message (an upload from the tab, or a gallery
-  // pick), consumed by the chat page into the composer's pending attachments.
-  private readonly _composerAttachment = signal<FileAttachment | null>(null);
+  // Files waiting to be attached to the next message (an upload from the Files tab, a gallery pick, a
+  // Save As or markup from the file workspace), consumed by the chat page into the composer's
+  // pending attachments. A queue: markup adds several at once (ADR 0x047).
+  private readonly _composerAttachments = signal<readonly FileAttachment[]>([]);
   // The files attached to the message being composed, published by the chat page so the Files tab
   // can show them as "next message" before they are sent.
   private readonly _composerPending = signal<readonly FileAttachment[]>([]);
@@ -36,6 +37,8 @@ export class ContextPanelService {
   private readonly _filesVersion = signal(0);
   // Bumped when the Files tab asks the composer to open its gallery picker.
   private readonly _galleryPickerRequests = signal(0);
+  // Bumped when the Files tab asks for a blank canvas to sketch on (ADR 0x047 §7).
+  private readonly _sketchRequests = signal(0);
   private readonly _composerThreadReferences = signal<Chat[]>([]);
   private readonly _toolCalls = signal<readonly ToolCall[]>([]);
   private readonly _latestBreakdown = signal<ContextBreakdown | null>(null);
@@ -54,10 +57,11 @@ export class ContextPanelService {
   readonly threadUpdate = this._threadUpdate.asReadonly();
   readonly mobileOpen = this._mobileOpen.asReadonly();
   readonly composerInsert = this._composerInsert.asReadonly();
-  readonly composerAttachment = this._composerAttachment.asReadonly();
+  readonly composerAttachments = this._composerAttachments.asReadonly();
   readonly filesVersion = this._filesVersion.asReadonly();
   readonly composerPending = this._composerPending.asReadonly();
   readonly galleryPickerRequests = this._galleryPickerRequests.asReadonly();
+  readonly sketchRequests = this._sketchRequests.asReadonly();
   /** Threads attached to the message being composed; rendered as chips above the composer. */
   readonly composerThreadReferences = this._composerThreadReferences.asReadonly();
   readonly toolCalls = this._toolCalls.asReadonly();
@@ -139,13 +143,14 @@ export class ContextPanelService {
 
   /** Asks the chat page to add attachment to the message being composed (ADR 0x043 §4). */
   requestComposerAttachment(attachment: FileAttachment): void {
-    this._composerAttachment.set(attachment);
+    this._composerAttachments.update(queued => [...queued, attachment]);
   }
 
-  consumeComposerAttachment(): FileAttachment | null {
-    const attachment = this._composerAttachment();
-    this._composerAttachment.set(null);
-    return attachment;
+  /** Takes every queued attachment, oldest first. */
+  consumeComposerAttachments(): readonly FileAttachment[] {
+    const queued = this._composerAttachments();
+    this._composerAttachments.set([]);
+    return queued;
   }
 
   setComposerPending(files: readonly FileAttachment[]): void {
@@ -155,6 +160,11 @@ export class ContextPanelService {
   /** Tells the Files tab to reload the thread's files. */
   refreshFiles(): void {
     this._filesVersion.update(n => n + 1);
+  }
+
+  /** Asks the chat page to open a blank canvas to sketch on. */
+  requestSketch(): void {
+    this._sketchRequests.update(n => n + 1);
   }
 
   /** Asks the composer to open its "Add from gallery" picker. */

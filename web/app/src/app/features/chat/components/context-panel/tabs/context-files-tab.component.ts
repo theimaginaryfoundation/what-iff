@@ -123,6 +123,11 @@ export class ContextFilesTabComponent {
     this.contextPanel.requestGalleryPicker();
   }
 
+  /** A blank page to sketch on (ADR 0x047 §7); the chat page opens it. */
+  newCanvas(): void {
+    this.contextPanel.requestSketch();
+  }
+
   onPicked(event: Event): void {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];

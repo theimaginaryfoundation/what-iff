@@ -13370,6 +13370,8 @@ export interface paths {
                         attachment: string;
                         /** @description Optional gallery folder to file the upload in (a path such as `charts/oura`; omitted or empty is the top level). Used by Save As from the chat-hosted file workspace (ADR 0x043). The reserved `skills/` folder is refused. */
                         folder?: string;
+                        /** @description Optional description stored with the file and shown to the agent beside its name. The image markup tool uses it to say what a derived file is, such as a mask (ADR 0x047). */
+                        description?: string;
                     };
                 };
             };

@@ -57,7 +57,14 @@ import { ThreadRefChipsComponent } from '../thread-ref-chips/thread-ref-chips.co
 import { THREAD_DRAG_MIME, isThreadDrag } from '../../helpers/thread-drag.helpers';
 import { EmojiAutocompleteMenuComponent } from '../emoji-autocomplete-menu/emoji-autocomplete-menu.component';
 import { SlashMenuComponent } from '../slash-menu/slash-menu.component';
-import { BoltIconComponent, EyeOffIconComponent, FileIconComponent, ImageIconComponent, PlusIconComponent } from '../../../../shared/ui/icons/icons';
+import {
+  BoltIconComponent,
+  EditIconComponent,
+  EyeOffIconComponent,
+  FileIconComponent,
+  ImageIconComponent,
+  PlusIconComponent,
+} from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 import { ModalComponent } from '../../../../shared/ui/modal/modal.component';
 import {
@@ -103,6 +110,7 @@ let nextPreviewId = 0;
     BoltIconComponent,
     FileIconComponent,
     ImageIconComponent,
+    EditIconComponent,
     EyeOffIconComponent,
     PlusIconComponent,
     ModalComponent,
@@ -465,6 +473,17 @@ let nextPreviewId = 0;
                   <button type="button" role="menuitem" (click)="openGalleryFromMenu()">
                     <ui-image-icon [size]="13" />
                     Add from gallery
+                  </button>
+                  <!-- A sketch is uploaded into the thread, so it needs one (as on the Files tab). -->
+                  <button
+                    type="button"
+                    role="menuitem"
+                    [disabled]="!chatId()"
+                    [attr.title]="chatId() ? null : 'Send a first message to start the chat, then sketch'"
+                    (click)="openSketchFromMenu()"
+                  >
+                    <ui-edit-icon [size]="13" />
+                    New canvas
                   </button>
                 </div>
               }
@@ -1488,6 +1507,8 @@ export class ChatComposerComponent {
   readonly retryGeneration = output<void>();
   readonly stop = output<void>();
   readonly galleryAttachment = output<FileAttachment>();
+  /** The + menu's Sketch: the host opens a blank page to draw on (ADR 0x047 §7). */
+  readonly sketchRequested = output<void>();
   readonly attachmentRemoved = output<string>();
   readonly modeSelected = output<string | null>();
   readonly reasoningEffortSelected = output<ReasoningEffort | null>();
@@ -1902,6 +1923,12 @@ export class ChatComposerComponent {
     this.threadPickerOpen.set(false);
     this.modePickerOpen.set(false);
     this.openGalleryPicker();
+  }
+
+  openSketchFromMenu(): void {
+    this.closeAuxiliaryPopovers();
+    this.plusOpen.set(false);
+    this.sketchRequested.emit();
   }
 
   readonly isImageAttachment = isImageAttachment;
