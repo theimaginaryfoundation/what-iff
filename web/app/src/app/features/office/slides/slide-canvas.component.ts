@@ -18,6 +18,7 @@ import { chartSvgDataUrl } from '../shared/chart-svg';
 import { isLinePreset, shapePath } from './shape-paths';
 import { domToParagraphs, paragraphsToHtml } from './text-dom';
 import { textOffset, textRange } from './comment-text';
+import { addCommentRange, clearCommentRanges } from '../comments/comment-highlights';
 
 /** Points to CSS pixels: the slide is laid out in points and scaled to fit. */
 export const PX_PER_PT = 96 / 72;
@@ -29,34 +30,6 @@ export interface CommentTextMark {
   start: number;
   length: number;
   active: boolean;
-}
-
-/** Every canvas's commented ranges go in the two highlights the global stylesheet paints. */
-const HIGHLIGHT = { open: 'whatiff-comment', active: 'whatiff-comment-active' };
-
-function highlightNamed(name: string): { add(range: Range): void; delete(range: Range): void } | null {
-  const registry = (globalThis.CSS as unknown as { highlights?: Map<string, unknown> } | undefined)?.highlights;
-  const Highlight = (globalThis as unknown as { Highlight?: new () => { add(range: Range): void; delete(range: Range): void } }).Highlight;
-  if (!registry || !Highlight) return null;
-  let highlight = registry.get(name) as { add(range: Range): void; delete(range: Range): void } | undefined;
-  if (!highlight) {
-    highlight = new Highlight();
-    registry.set(name, highlight);
-  }
-  return highlight;
-}
-
-function addCommentRange(range: Range, active: boolean): Range {
-  highlightNamed(active ? HIGHLIGHT.active : HIGHLIGHT.open)?.add(range);
-  return range;
-}
-
-function clearCommentRanges(ranges: Range[]): void {
-  for (const range of ranges) {
-    highlightNamed(HIGHLIGHT.open)?.delete(range);
-    highlightNamed(HIGHLIGHT.active)?.delete(range);
-  }
-  ranges.length = 0;
 }
 
 /** A comment thread's marker on the slide. */

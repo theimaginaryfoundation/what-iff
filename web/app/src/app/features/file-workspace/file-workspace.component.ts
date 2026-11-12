@@ -322,7 +322,16 @@ export class FileWorkspaceComponent implements CommentSaver {
       this.blob.set(content);
       editor.markSaved(content);
       this.editorDirty.set(editor.dirty());
-      this.fileChanged.emit({ ...file, ...updated, chat_id: updated.chat_id ?? file.chat_id });
+      const stored = { ...file, ...updated, chat_id: updated.chat_id ?? file.chat_id };
+      this.fileChanged.emit(stored);
+      if (editor.saved) {
+        try {
+          await editor.saved(stored, content);
+        } catch {
+          this.saveError.set('The file was saved, but its comments were not. Save again to retry.');
+        }
+        this.editorDirty.set(editor.dirty());
+      }
     } catch (error) {
       const current = conflictVersionOf(error);
       if (current !== null) {
@@ -375,7 +384,10 @@ export class FileWorkspaceComponent implements CommentSaver {
 
   private writeContent(file: FileAttachment, content: Blob, ifMatch: number | null): Promise<FileAttachment> {
     return new Promise<FileAttachment>((resolve, reject) =>
-      this.files.replaceContent(file.id, content, file.file_type, ifMatch, this.chatId()).pipe(take(1)).subscribe({ next: resolve, error: reject }),
+      this.files
+        .replaceContent(file.id, content, file.file_type, ifMatch, this.chatId())
+        .pipe(take(1))
+        .subscribe({ next: resolve, error: reject }),
     );
   }
 
@@ -461,17 +473,20 @@ export class FileWorkspaceComponent implements CommentSaver {
     const file = this.file();
     this.state.set('loading');
     const generation = this.generation;
-    this.files.downloadFileContent(file.id).pipe(take(1)).subscribe({
-      next: ({ blob, version }) => {
-        if (generation !== this.generation) return;
-        if (version !== null) this.loadedVersion = version;
-        this.blob.set(blob);
-        this.state.set('ready');
-      },
-      error: () => {
-        if (generation === this.generation) this.state.set('error');
-      },
-    });
+    this.files
+      .downloadFileContent(file.id)
+      .pipe(take(1))
+      .subscribe({
+        next: ({ blob, version }) => {
+          if (generation !== this.generation) return;
+          if (version !== null) this.loadedVersion = version;
+          this.blob.set(blob);
+          this.state.set('ready');
+        },
+        error: () => {
+          if (generation === this.generation) this.state.set('error');
+        },
+      });
   }
 
   private destroyEditor(): void {
@@ -494,7 +509,11 @@ export class FileWorkspaceComponent implements CommentSaver {
       },
       error: () => {
         this.downloading.set(false);
-        void this.confirmationService.alert({ title: 'Download failed', message: 'Could not download this file. Please try again.', type: 'danger' });
+        void this.confirmationService.alert({
+          title: 'Download failed',
+          message: 'Could not download this file. Please try again.',
+          type: 'danger',
+        });
       },
     });
   }

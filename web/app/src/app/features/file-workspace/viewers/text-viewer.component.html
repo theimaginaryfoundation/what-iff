@@ -6,7 +6,7 @@
       @if (canRender()) {
         <div class="text-viewer__segmented" role="group" aria-label="View as">
           <button type="button" [attr.aria-pressed]="rendered()" (click)="rendered.set(true)">
-            {{ kind() === 'csv' ? 'Table' : 'Formatted' }}
+            {{ kind() === "csv" ? "Table" : "Formatted" }}
           </button>
           <button type="button" [attr.aria-pressed]="!rendered()" (click)="rendered.set(false)">Raw</button>
         </div>
@@ -17,9 +17,30 @@
           Wrap lines
         </label>
       }
+      @if (hasComments()) {
+        <span class="text-viewer__comment-tools">
+          @if (canComment()) {
+            <button
+              type="button"
+              class="text-viewer__comment-tool"
+              title="Comment on the selected text or the word at the cursor"
+              (mousedown)="$event.preventDefault()"
+              (click)="startComment()"
+            >
+              Comment
+            </button>
+          }
+          <button type="button" class="text-viewer__comment-tool" [attr.aria-pressed]="commentsOpen()" (click)="toggleComments()">
+            Comments
+            @if (comments.openCount()) {
+              <span class="text-viewer__count">{{ comments.openCount() }}</span>
+            }
+          </button>
+        </span>
+      }
       @if (data.truncated) {
         <span class="text-viewer__notice" role="status">Showing the first 1 MB. Download the file to see all of it.</span>
-      } @else if (kind() === 'markdown' && markdownTooBig()) {
+      } @else if (kind() === "markdown" && markdownTooBig()) {
         <span class="text-viewer__notice" role="status">Too long to format, so it is shown as raw text.</span>
       } @else if (showRendered() && csv()?.truncated) {
         <span class="text-viewer__notice" role="status">
@@ -28,43 +49,99 @@
       }
     </div>
 
-    <div class="text-viewer__body">
-      @if (showRendered() && kind() === 'markdown') {
-        <markdown
-          class="text-viewer__markdown prose prose-sm max-w-none dark:prose-invert"
-          [data]="text()"
-          (ready)="onMarkdownReady()"
-        ></markdown>
-      } @else if (showRendered() && csv()) {
-        @let table = csv()!;
-        <div class="text-viewer__table-wrap">
-          <table class="text-viewer__table">
-            <thead>
-              <tr>
-                @for (cell of table.header; track $index) {
-                  <th scope="col">{{ cell }}</th>
-                }
-              </tr>
-            </thead>
-            <tbody>
-              @for (row of table.rows; track $index) {
+    <div class="text-viewer__main">
+      <div class="text-viewer__body">
+        @if (showRendered() && kind() === "markdown") {
+          <markdown
+            class="text-viewer__markdown prose prose-sm max-w-none dark:prose-invert"
+            [data]="text()"
+            (ready)="onMarkdownReady()"
+          ></markdown>
+        } @else if (showRendered() && csv()) {
+          @let table = csv()!;
+          <div class="text-viewer__table-wrap">
+            <table class="text-viewer__table">
+              <thead>
                 <tr>
-                  @for (cell of row; track $index) {
-                    <td>{{ cell }}</td>
+                  @for (cell of table.header; track $index) {
+                    <th scope="col">{{ cell }}</th>
                   }
                 </tr>
-              }
-            </tbody>
-          </table>
-        </div>
-      } @else if (text() === '') {
-        <p class="text-viewer__placeholder">This file is empty.</p>
-      } @else if (highlighted(); as html) {
-        <pre class="text-viewer__text text-viewer__text--highlighted" [class.text-viewer__text--wrap]="wrapLines()" tabindex="0" [innerHTML]="html"></pre>
-      } @else {
-        <pre class="text-viewer__text" [class.text-viewer__text--wrap]="wrapLines()" tabindex="0">{{ text() }}</pre>
+              </thead>
+              <tbody>
+                @for (row of table.rows; track $index) {
+                  <tr>
+                    @for (cell of row; track $index) {
+                      <td>{{ cell }}</td>
+                    }
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else if (text() === "") {
+          <p class="text-viewer__placeholder">This file is empty.</p>
+        } @else if (highlighted(); as html) {
+          <pre
+            class="text-viewer__text text-viewer__text--highlighted"
+            [class.text-viewer__text--wrap]="wrapLines()"
+            tabindex="0"
+            [innerHTML]="html"
+            (click)="onTextClick($event)"
+            (contextmenu)="onTextContextMenu($event)"
+          ></pre>
+        } @else {
+          <pre
+            class="text-viewer__text"
+            [class.text-viewer__text--wrap]="wrapLines()"
+            tabindex="0"
+            (click)="onTextClick($event)"
+            (contextmenu)="onTextContextMenu($event)"
+            >{{ text() }}</pre>
+        }
+      </div>
+      @if (commentsOpen()) {
+        <app-comments-panel
+          class="text-viewer__comments"
+          [threads]="comments.shown()"
+          [activeId]="comments.activeId()"
+          [draftQuote]="comments.draft()?.quote"
+          [me]="me()"
+          [people]="comments.people()"
+          [readOnly]="!canComment()"
+          [saveStatus]="comments.status()"
+          [replyRequest]="replyRequest()"
+          emptyHint="Select text, or put the cursor in a word, and choose Comment to start a thread."
+          (select)="selectThread($event)"
+          (create)="comments.create($event)"
+          (cancelDraft)="comments.cancelDraft()"
+          (reply)="comments.reply($event)"
+          (edit)="comments.edit($event)"
+          (remove)="comments.remove($event)"
+          (resolve)="comments.resolve($event)"
+          (closed)="closeComments()"
+        />
       }
     </div>
+    @if (contextMenu(); as menu) {
+      <div
+        class="text-viewer__scrim"
+        (pointerdown)="contextMenu.set(null)"
+        (contextmenu)="$event.preventDefault(); contextMenu.set(null)"
+      ></div>
+      <div class="text-viewer__menu" role="menu" aria-label="Comment" [style.left.px]="menu.left" [style.top.px]="menu.top">
+        @if (menu.threadId) {
+          <button type="button" role="menuitem" class="text-viewer__menu-item" (click)="menuReply()">Reply to comment</button>
+          <button type="button" role="menuitem" class="text-viewer__menu-item text-viewer__menu-item--danger" (click)="menuDelete()">
+            Delete comment
+          </button>
+        } @else {
+          <button type="button" role="menuitem" class="text-viewer__menu-item" [disabled]="!menu.range" (click)="menuNewComment()">
+            New comment
+          </button>
+        }
+      </div>
+    }
   }
 } @else if (failed()) {
   <p class="text-viewer__placeholder" role="alert">Could not read this file as text.</p>

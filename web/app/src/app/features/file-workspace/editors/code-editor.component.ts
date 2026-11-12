@@ -20,6 +20,12 @@ import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { renderLatexMath } from '../../../core/utils/latex-math.helpers';
 import { previewKindFor } from '../../gallery/helpers/file-preview.helpers';
 import { FileEditor } from './file-editor';
+import { CommentPeopleService } from '../../office/comments/comment-people.service';
+import { CommentsPanelComponent } from '../../office/comments/comments-panel.component';
+import { CommentsPanelState } from '../../office/comments/comments-panel-state.service';
+import { MonacoCommentSurface } from '../text-comments/monaco-comment-surface';
+import { TextCommentsState } from '../text-comments/text-comments-state';
+import { TextCommentThread, TextCommentsService } from '../text-comments/text-comments.service';
 import { MONACO_LOADER, type Monaco, monacoLanguageFor, vfsUriFor } from './monaco/monaco-loader';
 import { appTheme, followAppTheme, monacoThemeFor } from './monaco/monaco-themes';
 
@@ -33,7 +39,7 @@ const PREVIEW_DEBOUNCE_MS = 250;
 @Component({
   selector: 'app-code-editor',
   standalone: true,
-  imports: [MarkdownModule],
+  imports: [MarkdownModule, CommentsPanelComponent],
   templateUrl: './code-editor.component.html',
   styleUrl: './code-editor.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -56,6 +62,22 @@ export class CodeEditorComponent implements FileEditor {
   readonly language = signal('plaintext');
   readonly isMarkdown = computed(() => previewKindFor(this.file()) === 'markdown');
   readonly showPreview = signal(true);
+
+  // --- comments (ADR 0x045): kept beside the file, written once a save has stored the text ---------
+  readonly me = inject(CommentPeopleService).me;
+  readonly comments = new TextCommentsState(inject(TextCommentsService), this.me, () => this.commentsChanged());
+  private readonly panel = inject(CommentsPanelState);
+  /** The panel opens by itself on a file with open threads, until the user opens or closes it. */
+  readonly commentsOpen = computed(() => this.panel.open() ?? this.comments.openCount() > 0);
+  /** Opens a thread's reply box in the panel (the right-click menu's "Reply to comment"). */
+  readonly replyRequest = signal<{ threadId: string } | null>(null);
+  /** Comments changed since they were last written. */
+  private commentsDirty = false;
+  private surface: MonacoCommentSurface | null = null;
+  /** The threads as they were when each blob handed to the host was made, anchored on its text. */
+  private readonly handedOutComments = new WeakMap<Blob, TextCommentThread[]>();
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private onCommentKey: import('monaco-editor').editor.IContextKey<boolean> | null = null;
   readonly previewText = signal('');
 
   private monaco: Monaco | null = null;
@@ -83,6 +105,18 @@ export class CodeEditorComponent implements FileEditor {
       if (blob === this.lastContent) return;
       untracked(() => void this.loadText(blob));
     });
+    // The editor marks open threads' text, the active one more strongly.
+    effect(() => {
+      const activeId = this.comments.activeId();
+      const hidden = new Set(
+        this.comments
+          .threads()
+          .filter(t => t.resolved && t.id !== activeId)
+          .map(t => t.id),
+      );
+      this.comments.positions();
+      untracked(() => this.surface?.paint({ activeId, hidden }));
+    });
     const stopTheme = followAppTheme(this.document, theme => this.monaco?.editor.setTheme(theme));
     inject(DestroyRef).onDestroy(stopTheme);
     effect(() => {
@@ -96,6 +130,7 @@ export class CodeEditorComponent implements FileEditor {
     const text = this.model?.getValue() ?? this.baseline;
     const blob = new Blob([text], { type: this.file().file_type || 'text/plain' });
     this.handedOut.set(blob, text);
+    this.handedOutComments.set(blob, this.comments.snapshot());
     this.lastContent = blob;
     return blob;
   }
@@ -104,7 +139,91 @@ export class CodeEditorComponent implements FileEditor {
     const current = this.model?.getValue() ?? this.baseline;
     // What was saved, which is not the current text if the user kept typing during the save.
     this.baseline = (saved && this.handedOut.get(saved)) ?? current;
-    this.setDirty(current !== this.baseline);
+    this.setDirty(current !== this.baseline || this.commentsDirty);
+  }
+
+  /** Writes the comments placed on what the save stored (FileEditor.saved). */
+  async saved(file: FileAttachment, content: Blob): Promise<void> {
+    const threads = this.handedOutComments.get(content) ?? this.comments.snapshot();
+    // A file that never had comments has nothing to write.
+    if (!threads.length && !this.hadComments) return;
+    const changedSince = this.comments.snapshot();
+    await this.comments.save(file.content_version ?? this.comments.placedOn, threads);
+    this.hadComments = threads.length > 0;
+    // Comments changed during the save are still unsaved.
+    if (JSON.stringify(changedSince) === JSON.stringify(threads)) this.commentsDirty = false;
+    this.setDirty((this.model?.getValue() ?? this.baseline) !== this.baseline || this.commentsDirty);
+  }
+
+  toggleComments(): void {
+    this.panel.open.set(!this.commentsOpen());
+  }
+
+  closeComments(): void {
+    this.panel.open.set(false);
+  }
+
+  /** Starts a thread on the selection, or on the word at the caret. */
+  startComment(): void {
+    const range = this.surface?.selectionOrWord();
+    if (!range) return;
+    this.comments.start(range);
+    this.panel.open.set(true);
+  }
+
+  selectThread(threadId: string): void {
+    this.comments.select(threadId);
+  }
+
+  private replyAtCaret(): void {
+    const threadId = this.threadAtCaret();
+    if (!threadId) return;
+    this.comments.select(threadId);
+    this.panel.open.set(true);
+    this.replyRequest.set({ threadId });
+  }
+
+  private deleteAtCaret(): void {
+    const threadId = this.threadAtCaret();
+    if (threadId) this.comments.remove({ threadId, commentId: threadId });
+  }
+
+  private threadAtCaret(): string | null {
+    const position = this.editor?.getPosition();
+    if (!position || !this.model) return null;
+    return this.comments.threadAt(this.model.getOffsetAt(position));
+  }
+
+  private commentsChanged(): void {
+    this.commentsDirty = true;
+    this.setDirty(true);
+  }
+
+  /** Whether the file has threads stored, so a save that removed the last one still writes. */
+  private hadComments = false;
+
+  /** Hooks comments up to the editor: marks, the caret, the right-click menu and Ctrl+Alt+M. */
+  private attachComments(monaco: Monaco): void {
+    const editor = this.editor;
+    const model = this.model;
+    if (!editor || !model) return;
+    this.surface?.dispose();
+    this.surface = new MonacoCommentSurface(monaco, editor, model);
+    this.comments.attach(this.surface);
+    if (this.onCommentKey) return;
+    this.onCommentKey = editor.createContextKey('whatiffOnComment', false);
+    editor.onDidChangeCursorSelection(event => {
+      const offset = model.getOffsetAt(event.selection.getPosition());
+      this.onCommentKey?.set(!!this.comments.threadAt(offset));
+      // Only the user moving the caret picks a thread; edits and reveals move it too.
+      if (event.source === 'mouse' || event.source === 'keyboard') this.comments.offsetChosen(offset);
+    });
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyM, () => this.startComment());
+    const menu = (id: string, label: string, order: number, precondition: string, run: () => void) =>
+      editor.addAction({ id, label, contextMenuGroupId: '0_whatiff_comments', contextMenuOrder: order, precondition, run });
+    menu('whatiff.text.comment.new', 'New comment', 1, '!whatiffOnComment', () => this.startComment());
+    menu('whatiff.text.comment.reply', 'Reply to comment', 1, 'whatiffOnComment', () => this.replyAtCaret());
+    menu('whatiff.text.comment.delete', 'Delete comment', 2, 'whatiffOnComment', () => this.deleteAtCaret());
   }
 
   togglePreview(): void {
@@ -164,14 +283,25 @@ export class CodeEditorComponent implements FileEditor {
       this.model.setValue(text);
     }
     this.baseline = text;
+    this.commentsDirty = false;
     this.setDirty(false);
     this.previewText.set(text);
     this.state.set('ready');
+    this.attachComments(monaco);
+    try {
+      await this.comments.load(file.id);
+      this.hadComments = this.comments.threads().length > 0;
+    } catch {
+      // A file the server cannot keep comments for (not text, too large) has none.
+    }
   }
 
   private onContentChanged(): void {
     const value = this.model?.getValue() ?? '';
-    this.setDirty(value !== this.baseline);
+    this.setDirty(value !== this.baseline || this.commentsDirty);
+    // Where the threads are is read once typing pauses.
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = setTimeout(() => this.comments.refresh(), 150);
     if (this.isMarkdown()) {
       if (this.previewTimer) clearTimeout(this.previewTimer);
       this.previewTimer = setTimeout(() => this.previewText.set(value), PREVIEW_DEBOUNCE_MS);
@@ -187,6 +317,9 @@ export class CodeEditorComponent implements FileEditor {
   private teardown(): void {
     this.generation += 1;
     if (this.previewTimer) clearTimeout(this.previewTimer);
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.comments.attach(null);
+    this.surface = null;
     this.editor?.dispose();
     this.model?.dispose();
     this.editor = null;

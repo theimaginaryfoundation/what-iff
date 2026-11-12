@@ -1,5 +1,7 @@
 import { InjectionToken, Signal } from '@angular/core';
 
+import { FileAttachment } from '../../../core/models/file-attachment.model';
+
 /**
  * What the workspace host needs from any editor it creates (ADR 0x043 §2): the content to save,
  * whether it changed, and a way to mark the saved state. Editors are created dynamically for the
@@ -15,6 +17,12 @@ export interface FileEditor {
    * have changed since `content()` was called, in which case it stays dirty.
    */
   markSaved(saved?: Blob): void;
+  /**
+   * Called after a save landed, with the file as stored (its new content_version) and what was
+   * saved: an editor whose comments live beside the file (text and code, ADR 0x045) writes them
+   * then, placed on the content just stored. A failure leaves the editor dirty, to save again.
+   */
+  saved?(file: FileAttachment, content: Blob): Promise<void>;
   /**
    * What saving would drop, in words (the office suite's fidelity report, ADR 0x043): the host
    * asks before overwriting the original when this is not empty.
