@@ -22,7 +22,14 @@ interface Run {
   width: number;
 }
 
-export class TextDomMap {
+/** How a rendering of a file's text maps to the text: the raw text exactly, formatted Markdown by its words. */
+export interface CommentTextMap {
+  range(start: number, end: number): Range | null;
+  sourceRange(selection: Range): { start: number; end: number } | null;
+  offsetOf(node: Node, offset: number): number | null;
+}
+
+export class TextDomMap implements CommentTextMap {
   private constructor(
     private readonly runs: Run[],
     readonly length: number,
@@ -101,6 +108,13 @@ export class TextDomMap {
     range.setStart(from.node, from.offset);
     range.setEnd(to.node, to.offset);
     return range.collapsed ? null : range;
+  }
+
+  /** The text range a DOM selection covers. */
+  sourceRange(selection: Range): { start: number; end: number } | null {
+    const start = this.offsetOf(selection.startContainer, selection.startOffset);
+    const end = this.offsetOf(selection.endContainer, selection.endOffset);
+    return start !== null && end !== null && end > start ? { start, end } : null;
   }
 
   /** The text offset of a DOM point (a selection's end, a click), or null when it is not in the text. */

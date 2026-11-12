@@ -23,7 +23,8 @@ import { CommentsPanelState } from '../../office/comments/comments-panel-state.s
 import { COMMENT_SAVER } from '../editors/file-editor';
 import { TextCommentsState } from '../text-comments/text-comments-state';
 import { TextCommentsService } from '../text-comments/text-comments.service';
-import { TextDomMap } from '../text-comments/text-dom-map';
+import { RenderedTextMap } from '../text-comments/rendered-text-map';
+import { CommentTextMap, TextDomMap } from '../text-comments/text-dom-map';
 import { ViewerCommentSurface } from '../text-comments/viewer-comment-surface';
 import { MONACO_LOADER, monacoLanguageFor } from '../editors/monaco/monaco-loader';
 import { appTheme, monacoThemeFor } from '../editors/monaco/monaco-themes';
@@ -104,7 +105,7 @@ export class TextViewerComponent {
     range: { start: number; end: number } | null;
   } | null>(null);
   private surface: ViewerCommentSurface | null = null;
-  private map: TextDomMap | null = null;
+  private map: CommentTextMap | null = null;
   /** A thread chosen while the text was shown formatted, to show once the raw text is. */
   private revealAfterRender: string | null = null;
 
@@ -116,6 +117,8 @@ export class TextViewerComponent {
       this.showRendered();
       this.text();
       this.commentsOpen();
+      // Formatted Markdown is mapped once it has rendered (onMarkdownReady).
+      if (this.showRendered()) return;
       const pre = this.host.nativeElement.querySelector<HTMLElement>('pre.text-viewer__text');
       this.map = pre && this.hasComments() ? TextDomMap.build(pre, this.text()) : null;
       if (pre && !this.map && html && this.hasComments()) {
@@ -154,6 +157,12 @@ export class TextViewerComponent {
 
   onMarkdownReady(): void {
     void renderLatexMath(this.host.nativeElement);
+    // Comment anchors over the formatted text, found by their words.
+    const markdown = this.host.nativeElement.querySelector<HTMLElement>('.text-viewer__markdown');
+    if (markdown && this.hasComments() && this.showRendered()) {
+      this.map = new RenderedTextMap(markdown, this.text());
+      this.surface?.repaint();
+    }
   }
 
   private async decode(blob: Blob, generation: number): Promise<void> {
@@ -199,12 +208,11 @@ export class TextViewerComponent {
     const map = this.map;
     if (!selection?.rangeCount || !map) return null;
     const range = selection.getRangeAt(0);
-    const pre = this.host.nativeElement.querySelector('pre.text-viewer__text');
-    if (!pre?.contains(range.commonAncestorContainer)) return null;
-    const start = map.offsetOf(range.startContainer, range.startOffset);
-    const end = map.offsetOf(range.endContainer, range.endOffset);
-    if (start === null || end === null) return null;
-    return end > start ? { start, end } : this.wordAt(start);
+    const shown = this.host.nativeElement.querySelector(this.showRendered() ? '.text-viewer__markdown' : 'pre.text-viewer__text');
+    if (!shown?.contains(range.commonAncestorContainer)) return null;
+    if (!range.collapsed) return map.sourceRange(range);
+    const at = map.offsetOf(range.startContainer, range.startOffset);
+    return at === null ? null : this.wordAt(at);
   }
 
   private wordAt(offset: number): { start: number; end: number } | null {
@@ -218,20 +226,24 @@ export class TextViewerComponent {
     return { start, end: at };
   }
 
-  /** Starts a thread on the selection (in the raw text; the formatted view switches to it first). */
+  /**
+   * Starts a thread on the selection. In formatted Markdown the selection's words are found in the
+   * source; when they cannot be, the raw text is shown to select in instead.
+   */
   startComment(range = this.selectedRange()): void {
     if (!this.canComment()) return;
     this.panel.open.set(true);
-    if (this.showRendered()) {
-      this.rendered.set(false);
+    if (range) {
+      this.comments.start(range);
       return;
     }
-    if (range) this.comments.start(range);
+    if (this.showRendered()) this.rendered.set(false);
   }
 
-  /** A thread chosen in the panel: shown in the raw text, where its words can be marked. */
+  /** A thread chosen in the panel: shown where its words are, or in the raw text when the formatting hides them. */
   selectThread(threadId: string): void {
-    if (this.showRendered()) {
+    const at = this.comments.positions().get(threadId);
+    if (this.showRendered() && at && !this.map?.range(at.start, at.end)) {
       this.revealAfterRender = threadId;
       this.rendered.set(false);
       return;

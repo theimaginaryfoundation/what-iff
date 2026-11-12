@@ -56,6 +56,8 @@
             class="text-viewer__markdown prose prose-sm max-w-none dark:prose-invert"
             [data]="text()"
             (ready)="onMarkdownReady()"
+            (click)="onTextClick($event)"
+            (contextmenu)="onTextContextMenu($event)"
           ></markdown>
         } @else if (showRendered() && csv()) {
           @let table = csv()!;

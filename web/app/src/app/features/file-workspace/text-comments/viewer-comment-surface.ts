@@ -1,6 +1,6 @@
 import { addCommentRange, clearCommentRanges } from '../../office/comments/comment-highlights';
 import { TextCommentSurface } from './text-comments-state';
-import { TextDomMap } from './text-dom-map';
+import { CommentTextMap } from './text-dom-map';
 
 type Span = { start: number; end: number };
 
@@ -16,7 +16,7 @@ export class ViewerCommentSurface implements TextCommentSurface {
   constructor(
     private readonly source: string,
     /** The rendering's map, which is replaced whenever the text is shown again. */
-    private readonly map: () => TextDomMap | null,
+    private readonly map: () => CommentTextMap | null,
   ) {}
 
   place(threadId: string, range: Span | null): void {
