@@ -306,7 +306,7 @@ describe('SheetsEditorComponent', () => {
 
     it('while viewing, with a saver: a comment is saved as it is made', async () => {
       const saveComments = vi.fn().mockResolvedValue('saved');
-      testSaver = { canComment: signal(true), saveComments };
+      testSaver = { canComment: signal(true), saveComments, showCurrentContent: vi.fn() };
       await open(attachment(), await xlsxBlob());
       const editor = fixture.componentInstance;
       expect(editor.commentable()).toBe(true);

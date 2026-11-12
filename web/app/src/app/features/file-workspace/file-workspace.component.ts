@@ -169,7 +169,11 @@ export class FileWorkspaceComponent implements CommentSaver {
   /** The file whose lossy save the user accepted for comments, so they are asked once, not per comment. */
   private lossyCommentsAccepted: string | null = null;
   readonly canMarkup = computed(
-    () => this.markupAvailable() && this.kind() === 'image' && MARKUP_TYPES.has((this.file().file_type || '').toLowerCase()) && this.state() === 'ready',
+    () =>
+      this.markupAvailable() &&
+      this.kind() === 'image' &&
+      MARKUP_TYPES.has((this.file().file_type || '').toLowerCase()) &&
+      this.state() === 'ready',
   );
   readonly markupDirty = signal(false);
   readonly markupSending = signal(false);
@@ -260,6 +264,12 @@ export class FileWorkspaceComponent implements CommentSaver {
 
   async startEdit(): Promise<void> {
     if (!this.editable() || this.mode() === 'edit') return;
+    // A comment save running in the viewer replaces the bytes (or reloads them on a conflict) when
+    // it lands: the editor opens on what it leaves, or that would replace what is typed.
+    if (this.commentSave) {
+      await this.commentSave;
+      if (this.mode() !== 'view' || this.state() !== 'ready') return;
+    }
     const load = this.loadEditor(this.kind());
     const outlet = this.editorOutlet();
     const blob = this.blob();
@@ -406,6 +416,19 @@ export class FileWorkspaceComponent implements CommentSaver {
    * the file as it is, without the comment.
    */
   async saveComments(editor: Pick<FileEditor, 'content' | 'markSaved' | 'losses'>): Promise<CommentSaveResult> {
+    const running = this.writeComments(editor);
+    this.commentSave = running;
+    try {
+      return await running;
+    } finally {
+      if (this.commentSave === running) this.commentSave = null;
+    }
+  }
+
+  /** A comment save running in the viewer (saveComments), which startEdit waits for. */
+  private commentSave: Promise<CommentSaveResult> | null = null;
+
+  private async writeComments(editor: Pick<FileEditor, 'content' | 'markSaved' | 'losses'>): Promise<CommentSaveResult> {
     const file = this.file();
     if (!this.canComment() || !this.editable()) return 'failed';
     let content: Blob;
@@ -445,6 +468,11 @@ export class FileWorkspaceComponent implements CommentSaver {
         .pipe(take(1))
         .subscribe({ next: resolve, error: reject }),
     );
+  }
+
+  /** CommentSaver: a viewer found the file changed elsewhere. Only a viewer asks, so no edits are lost. */
+  showCurrentContent(): void {
+    if (this.mode() === 'view') this.reloadContent();
   }
 
   /** Shows the file as stored now, dropping what the viewer holds. */

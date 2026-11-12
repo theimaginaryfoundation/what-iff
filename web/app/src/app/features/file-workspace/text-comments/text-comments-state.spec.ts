@@ -1,8 +1,9 @@
 import { signal } from '@angular/core';
-import { describe, expect, it } from 'vitest';
+import { throwError } from 'rxjs';
+import { describe, expect, it, vi } from 'vitest';
 
 import { fakeTextComments } from './fake-text-comments.spec-helper';
-import { TextCommentSurface, TextCommentsState } from './text-comments-state';
+import { TextCommentSurface, TextCommentsState, mergeThreads } from './text-comments-state';
 import { TextCommentsService } from './text-comments.service';
 
 const TEXT = 'This is an inline comment in a text file';
@@ -66,5 +67,90 @@ describe('TextCommentsState', () => {
         threads: [expect.objectContaining({ id, anchor: null, quote: 'inline comment' })],
       }),
     );
+  });
+
+  it('merges with comments written elsewhere (an agent reply) and writes again', async () => {
+    const api = fakeTextComments();
+    const state = new TextCommentsState(api as unknown as TextCommentsService, me, () => undefined);
+    const { s } = surface();
+    state.attach(s);
+    await state.load('f-1');
+    state.start({ start: 11, end: 25 });
+    state.create({ text: 'Rename this?', mentions: [] });
+    await state.save(1);
+    const id = state.threads()[0].id;
+
+    // The agent replies; the user resolves the thread without having seen the reply.
+    const agentReply = { id: 'r-agent', authorId: 'personality:p', authorName: 'Vix', createdAt: '2026-11-12T10:00:00Z', text: 'Done.' };
+    api.state.stored = {
+      ...api.state.stored,
+      revision: api.state.stored.revision + 1,
+      threads: api.state.stored.threads.map(t => ({ ...t, comments: [...t.comments, agentReply] })),
+    };
+    state.resolve({ threadId: id, resolved: true });
+    await state.save(1);
+
+    expect(api.state.puts.map(p => p.revision)).toEqual([0, 1, 2]);
+    const written = api.state.stored.threads[0];
+    expect(written.resolved).toBe(true);
+    expect(written.comments.map(c => c.id)).toEqual([id, 'r-agent']);
+    expect(state.threads()[0].comments.map(c => c.id)).toEqual([id, 'r-agent']);
+    expect(state.unsaved()).toBe(false);
+    expect(state.status()).toBe('saved');
+  });
+
+  it('reads the comments again and asks for the file when its content changed', async () => {
+    const api = fakeTextComments();
+    const contentChanged = vi.fn();
+    const state = new TextCommentsState(api as unknown as TextCommentsService, me, () => undefined, contentChanged);
+    state.attach(surface().s);
+    await state.load('f-1');
+    api.state.stored = { ...api.state.stored, contentVersion: 2, revision: 4 };
+    api.state.failNext = 412;
+    state.startOnFile();
+    state.create({ text: 'Hm', mentions: [] });
+    await expect(state.save(1)).rejects.toEqual({ status: 412 });
+    expect(contentChanged).toHaveBeenCalledTimes(1);
+    expect(state.status()).toBe('conflict');
+    // The next save is over the revision the server has now.
+    await state.save(2);
+    expect(api.state.puts.at(-1)?.revision).toBe(4);
+  });
+
+  it('is not available for a file the server keeps no comments for', async () => {
+    const api = { get: () => throwError(() => ({ status: 415 })) };
+    const state = new TextCommentsState(api as unknown as TextCommentsService, me, () => undefined);
+    await expect(state.load('f-1')).rejects.toBeTruthy();
+    expect(state.available()).toBe(false);
+  });
+
+  describe('mergeThreads', () => {
+    const c = (id: string, text = id) => ({ id, authorId: 'user:u-1', authorName: 'Pat', createdAt: '2026-11-12T10:00:00Z', text });
+    const t = (id: string, comments: ReturnType<typeof c>[], resolved = false) => ({
+      id,
+      anchor: null,
+      quote: '',
+      comments,
+      ...(resolved ? { resolved: true } : {}),
+    });
+
+    it('keeps additions from both sides and removals from either', () => {
+      const base = [t('a', [c('a')]), t('b', [c('b')])];
+      const mine = [t('a', [c('a'), c('a2')]), t('n', [c('n')])]; // replied on a, removed b, added n
+      const theirs = [t('a', [c('a'), c('a3')]), t('b', [c('b')]), t('x', [c('x')])]; // replied on a, added x
+      expect(mergeThreads(base, mine, theirs).map(th => [th.id, th.comments.map(cm => cm.id)])).toEqual([
+        ['a', ['a', 'a3', 'a2']],
+        ['x', ['x']],
+        ['n', ['n']],
+      ]);
+    });
+
+    it("prefers this side's edits and resolved state, and drops a thread with no comments left", () => {
+      const base = [t('a', [c('a', 'old')]), t('b', [c('b')])];
+      const mine = [t('a', [c('a', 'new')], true), t('b', [c('b')])];
+      const theirs = [t('a', [c('a', 'old')]), t('b', [])];
+      const merged = mergeThreads(base, mine, theirs);
+      expect(merged).toEqual([expect.objectContaining({ id: 'a', resolved: true, comments: [expect.objectContaining({ text: 'new' })] })]);
+    });
   });
 });

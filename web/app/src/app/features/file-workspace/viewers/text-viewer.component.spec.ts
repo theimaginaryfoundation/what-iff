@@ -19,7 +19,7 @@ function file(overrides: Partial<FileAttachment> = {}): FileAttachment {
 
 let textComments: ReturnType<typeof fakeTextComments>;
 /** The workspace's comment saver: comments can be written once a test says the user may change the file. */
-const saver = { canComment: signal(false), saveComments: vi.fn() } satisfies CommentSaver;
+const saver = { canComment: signal(false), saveComments: vi.fn(), showCurrentContent: vi.fn() } satisfies CommentSaver;
 
 describe('TextViewerComponent', () => {
   let fixture: ComponentFixture<TextViewerComponent>;

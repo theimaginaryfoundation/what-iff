@@ -39,7 +39,12 @@ export class ImageViewerComponent {
   // --- comments (ADR 0x045): on the whole image, kept beside the file, written as they are made ---
   private readonly saver = inject(COMMENT_SAVER, { optional: true });
   readonly me = inject(CommentPeopleService).me;
-  readonly comments = new TextCommentsState(inject(TextCommentsService), this.me, () => this.comments.autosave());
+  readonly comments = new TextCommentsState(
+    inject(TextCommentsService),
+    this.me,
+    () => this.comments.autosave(),
+    () => this.saver?.showCurrentContent(),
+  );
   private readonly panel = inject(CommentsPanelState);
   /** Whether the server keeps comments for this image (set once they have loaded). */
   readonly hasComments = signal(false);

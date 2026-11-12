@@ -284,10 +284,11 @@ function quoteOf(body: DocBody, start: number, end: number): string {
 
 /**
  * Turns the importer's comment ranges into one Univer comment decoration per thread and returns
- * the threads that have a place in the text. A range of a reply, or of a comment in a story
- * comments cannot be shown in (a footnote), is dropped.
+ * the threads that have a place in the text, and the ids of those that have none (a comment in a
+ * footnote or a text box), which a save keeps as they are (planCommentParts). A range of a reply is
+ * dropped: Word gives it its thread's.
  */
-export function anchorThreads(document: DocDocument, parsed: WordComments): { threads: DocxCommentThread[]; unplaced: number } {
+export function anchorThreads(document: DocDocument, parsed: WordComments): { threads: DocxCommentThread[]; unplaced: string[] } {
   const { threads, threadOf } = wordThreads(parsed);
   const placed = new Map<string, DocxCommentThread>();
   const order: { threadId: string; segment: number; start: number }[] = [];
@@ -318,7 +319,7 @@ export function anchorThreads(document: DocDocument, parsed: WordComments): { th
     else delete body.customRanges;
   });
   order.sort((a, b) => a.segment - b.segment || a.start - b.start);
-  return { threads: order.map(o => placed.get(o.threadId)!), unplaced: threads.size - placed.size };
+  return { threads: order.map(o => placed.get(o.threadId)!), unplaced: [...threads.keys()].filter(id => !placed.has(id)) };
 }
 
 // --- writing -----------------------------------------------------------------------------------
@@ -337,13 +338,18 @@ export interface CommentWritePlan {
   parts: Partial<Record<CommentPartKey, string>> | null;
 }
 
-function sameComments(threads: readonly DocxCommentThread[], original: WordComments): boolean {
+/** The name a comment's author is shown by: Word allows an empty w:author. */
+function authorName(c: WordComment): string {
+  return c.author || 'Unknown';
+}
+
+function sameComments(threads: readonly DocxCommentThread[], original: readonly WordComment[]): boolean {
   const flat = threads.flatMap(t => t.comments.map((c, i) => ({ c, t, first: i === 0 })));
-  if (flat.length !== original.comments.length) return false;
-  const byId = new Map(original.comments.map(c => [c.id, c]));
+  if (flat.length !== original.length) return false;
+  const byId = new Map(original.map(c => [c.id, c]));
   return flat.every(({ c, t, first }) => {
     const o = byId.get(c.id);
-    return !!o && o.text === c.text && o.author === c.authorName && (!first || o.done === !!t.resolved);
+    return !!o && o.text === c.text && authorName(o) === c.authorName && (!first || o.done === !!t.resolved);
   });
 }
 
@@ -384,25 +390,35 @@ function freshIds(id: string, taken: Set<string>): { paraId: string; durableId: 
  * are kept byte for byte and the marks reuse the file's w:ids. Otherwise every part is written
  * again: comments kept as they were reuse their original XML, new and edited ones are written
  * from their text.
+ *
+ * A comment from the file keeps its w:id: content the editor keeps verbatim (a text box, a
+ * deletion, a legacy drawing) still marks it by that id. New comments are numbered above every id
+ * in the file. The threads in `keep` (from anchorThreads: comments with no place in the text the
+ * editor shows) are written as the file has them, so those marks still find them.
  */
 export function planCommentParts(
   threads: readonly DocxCommentThread[],
   original: WordComments | null,
-  opts: { me?: CommentPerson; styles?: { commentText: boolean; commentReference: boolean } } = {},
+  opts: { me?: CommentPerson; styles?: { commentText: boolean; commentReference: boolean }; keep?: readonly string[] } = {},
 ): CommentWritePlan {
   const wordIds = new Map<string, string[]>();
-  if (original && original.comments.length && sameComments(threads, original)) {
+  const keep = new Set(opts.keep ?? []);
+  const shown = threads.filter(t => !keep.has(t.id));
+  const threadOf = original ? wordThreads(original).threadOf : new Map<string, string>();
+  const keptAsIs = (original?.comments ?? []).filter(c => keep.has(threadOf.get(c.wordId) ?? ''));
+  const editable = (original?.comments ?? []).filter(c => !keptAsIs.includes(c));
+  if (original && original.comments.length && sameComments(shown, editable)) {
     const byId = new Map(original.comments.map(c => [c.id, c.wordId]));
-    for (const t of threads)
+    for (const t of shown)
       wordIds.set(
         t.id,
         t.comments.map(c => byId.get(c.id)!),
       );
     return { wordIds, parts: null };
   }
-  if (!threads.length && !original?.comments.length) return { wordIds, parts: null };
+  if (!shown.length && !original?.comments.length) return { wordIds, parts: null };
 
-  const originals = new Map((original?.comments ?? []).map(c => [c.id, c]));
+  const originals = new Map(editable.map(c => [c.id, c]));
   const taken = new Set<string>();
   for (const c of original?.comments ?? []) if (c.lastParaId) taken.add(c.lastParaId);
   const comments: string[] = [];
@@ -410,17 +426,36 @@ export function planCommentParts(
   const ids: string[] = [];
   const extensible: string[] = [];
   const authors = new Map<string, CommentPerson>();
-  let next = 0;
-  for (const thread of threads) {
+  const usedWordIds = new Set((original?.comments ?? []).map(c => c.wordId));
+  let next = Math.max(-1, ...[...usedWordIds].map(id => Number.parseInt(id, 10)).filter(Number.isFinite)) + 1;
+  const newWordId = (): string => {
+    while (usedWordIds.has(String(next))) next++;
+    usedWordIds.add(String(next));
+    return String(next++);
+  };
+  for (const c of keptAsIs) {
+    comments.push(c.xml);
+    if (c.lastParaId) {
+      const parent = c.parentParaId ? ` w15:paraIdParent="${c.parentParaId}"` : '';
+      extended.push(`<w15:commentEx w15:paraId="${c.lastParaId}"${parent} w15:done="${c.done ? 1 : 0}"/>`);
+      if (c.durableId) {
+        ids.push(`<w16cid:commentId w16cid:paraId="${c.lastParaId}" w16cid:durableId="${c.durableId}"/>`);
+        extensible.push(`<w16cex:commentExtensible w16cex:durableId="${c.durableId}" w16cex:dateUtc="${utcDate(c.date)}"/>`);
+      }
+    }
+    const person = personFor(c.author, original?.people ?? []);
+    if (!authors.has(authorName(c))) authors.set(authorName(c), { id: person.id, name: authorName(c) });
+  }
+  for (const thread of shown) {
     const list: string[] = [];
     let rootParaId = '';
     thread.comments.forEach((c, i) => {
-      const wordId = String(next++);
-      list.push(wordId);
       const kept = originals.get(c.id);
+      const wordId = kept?.wordId ?? newWordId();
+      list.push(wordId);
       let written: WrittenComment;
-      if (kept && kept.text === c.text && kept.lastParaId && kept.author === c.authorName) {
-        comments.push(kept.xml.replace(/(<w:comment\b[^>]*?\bw:id=")[^"]*(")/, `$1${wordId}$2`));
+      if (kept && kept.text === c.text && kept.lastParaId && authorName(kept) === c.authorName) {
+        comments.push(kept.xml);
         written = { wordId, paraId: kept.lastParaId, durableId: kept.durableId ?? freshIds(c.id, taken).durableId };
       } else {
         const { paraId, durableId } = kept?.lastParaId
@@ -439,7 +474,7 @@ export function planCommentParts(
     wordIds.set(thread.id, list);
   }
   const people = [...authors.values()].map(person => {
-    const kept = original?.people.find(p => p.author === person.name);
+    const kept = original?.people.find(p => (p.author || 'Unknown') === person.name);
     if (kept) return kept.xml;
     const userId = person.id.startsWith('user:') ? person.id.slice('user:'.length) : null;
     const presence = userId

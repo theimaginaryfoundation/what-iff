@@ -367,6 +367,24 @@ describe('FileWorkspaceComponent', () => {
       expect(await ws.saveComments(editor)).toBe('failed');
     });
 
+    it('opens the editor on what a running comment save stores, not on the bytes it replaces', async () => {
+      await show(file());
+      const ws = fixture.componentInstance;
+      const landing = new Subject<FileAttachment>();
+      replaceContent.mockReturnValueOnce(landing);
+      const saving = ws.saveComments(viewer().editor);
+      const editing = ws.startEdit();
+      await new Promise(resolve => setTimeout(resolve));
+      expect(ws['editorRef']).toBeNull();
+      landing.next(file({ content_version: 2 }));
+      landing.complete();
+      expect(await saving).toBe('saved');
+      await editing;
+      await fixture.whenStable();
+      const editor = ws['editorRef']!.instance as FakeEditorComponent;
+      expect(await editor.blob().text()).toBe('with comment');
+    });
+
     it('lets the user comment on a file no editor can write, but writes none into it', async () => {
       await show(file({ name: 'loop.gif', file_type: 'image/gif' }));
       const ws = fixture.componentInstance;

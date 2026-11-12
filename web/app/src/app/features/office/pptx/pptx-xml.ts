@@ -1,4 +1,4 @@
-import { NS, attr, child, children, elementChildren, escapeXml, num } from '../shared/ooxml';
+import { NS, attr, child, children, elementChildren, escapeXml, num, xmlSafe } from '../shared/ooxml';
 import { Border, Fill, ImageElement, LineElement, Paragraph, Run, ShapeElement, SlideElement, TextBody } from './deck-model';
 
 /**
@@ -258,7 +258,7 @@ export function patchParagraphs(txBody: Element, paragraphs: Paragraph[], import
         if (piece === '' && pieces.length > 1) return;
         const r = p.appendChild(doc.createElementNS(A, 'a:r'));
         r.appendChild(runProperties(doc, base, run, ctx));
-        r.appendChild(doc.createElementNS(A, 'a:t')).textContent = piece;
+        r.appendChild(doc.createElementNS(A, 'a:t')).textContent = xmlSafe(piece);
       });
     });
     if (endRPr) p.appendChild(endRPr.cloneNode(true));

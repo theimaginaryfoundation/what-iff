@@ -321,6 +321,28 @@ export interface CommentedSlide {
 
 const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n';
 
+/**
+ * The threads with their text anchors moved to where their words are in the shape's text now:
+ * nothing keeps a range on the words while the text is edited, so a save finds them again, at the
+ * place nearest the old one. A range whose words are gone puts its thread on the shape.
+ */
+export function carryTextAnchors(threads: readonly SlideCommentThread[], slide: Slide): SlideCommentThread[] {
+  return threads.map(t => {
+    const range = t.anchor.text;
+    const element = range && t.anchor.elementId ? slide.elements.find(e => e.id === t.anchor.elementId) : undefined;
+    if (!range || !element) return t;
+    const text = elementText(element);
+    const words = t.quote?.trim();
+    const at = text.slice(range.start, range.start + range.length);
+    if (!words || at.trim() === words) return t;
+    let best = -1;
+    for (let i = text.indexOf(words); i >= 0; i = text.indexOf(words, i + 1))
+      if (best < 0 || Math.abs(i - range.start) < Math.abs(best - range.start)) best = i;
+    const { text: _gone, ...onShape } = t.anchor;
+    return best < 0 ? { ...t, anchor: onShape } : { ...t, anchor: { ...t.anchor, text: { start: best, length: words.length } } };
+  });
+}
+
 /** The parts of a thread a save has to keep, in a form that compares. */
 function shapeOf(threads: readonly SlideCommentThread[]): string {
   return JSON.stringify(
@@ -377,10 +399,12 @@ export async function writePptxComments(
   original: PptxComments | null,
 ): Promise<void> {
   const changed: CommentedSlide[] = [];
-  for (const s of slides) {
+  for (const given of slides) {
+    const s = { ...given, threads: carryTextAnchors(given.threads, given.slide) };
     const differs = s.before === null ? s.threads.length > 0 : shapeOf(s.threads) !== shapeOf(s.before);
-    // A text anchor written without its context (by an earlier save here) is written again with one.
-    if (differs || (s.before?.some(t => t.anchor.text) && (await lacksTextContext(pkg, s.path)))) changed.push(s);
+    // A text anchor is written again when the shape's text changed: PowerPoint checks its context
+    // (the text's length and hash) and moves a comment whose context differs onto the shape.
+    if (differs || (s.threads.some(t => t.anchor.text) && (await staleTextContext(pkg, s)))) changed.push(s);
   }
   if (!changed.length) return;
   const authors = new AuthorList(original?.authors ?? []);
@@ -397,11 +421,26 @@ export async function writePptxComments(
   }
 }
 
-/** Whether a slide's comment part has a text anchor with no context, which PowerPoint does not place on text. */
-async function lacksTextContext(pkg: CommentPackage, slidePath: string): Promise<boolean> {
-  const rel = (await pkg.rels(slidePath)).find(r => r.type === REL_MODERN_COMMENTS && !r.external);
-  const text = rel ? await pkg.text(resolveTarget(slidePath, rel.target)) : null;
-  return !!text && /<ac:txMk\b(?:[^>]*\/>|[^>]*>\s*<\/ac:txMk>)/.test(text);
+/** Whether a text anchor in a slide's comment part is not as it would be written now: no context (as an earlier save here wrote it), or another range or text. */
+async function staleTextContext(pkg: CommentPackage, s: CommentedSlide): Promise<boolean> {
+  const rel = (await pkg.rels(s.path)).find(r => r.type === REL_MODERN_COMMENTS && !r.external);
+  const anchors = keptAnchors(rel ? await pkg.text(resolveTarget(s.path, rel.target)) : null);
+  return s.threads.some(t => {
+    const kept = anchors.get(t.id.toUpperCase());
+    return !!kept && kept.includes('<ac:txMk') && keptTextAnchor(kept, t, s.slide) === undefined;
+  });
+}
+
+/**
+ * A kept text anchor while it still says what the thread does: the same range, and the context of
+ * the shape's text as it is now. A shape or slide anchor is kept as it is.
+ */
+function keptTextAnchor(kept: string | undefined, thread: SlideCommentThread, slide: Slide): string | undefined {
+  if (!kept || !kept.includes('<ac:txMk')) return kept;
+  const range = thread.anchor.text;
+  const element = thread.anchor.elementId ? slide.elements.find(e => e.id === thread.anchor.elementId) : undefined;
+  if (!range || !element) return undefined;
+  return kept.includes(`cp="${range.start}" len="${range.length}"`) && kept.includes(textContext(element)) ? kept : undefined;
 }
 
 class AuthorList {
@@ -476,8 +515,8 @@ async function writeSlide(pkg: CommentPackage, item: CommentedSlide, authors: Au
         : undefined;
     const element = thread.anchor.elementId ? item.slide.elements.find(e => e.id === thread.anchor.elementId) : undefined;
     // A thread about a shape names it (ac:deMkLst) by its id and creation id, as PowerPoint does.
-    // A text anchor without its context (as an earlier save here wrote it) is written again, with one.
-    let anchor = kept && kept.includes('<ac:txMk') && !kept.includes('<ac:context') ? undefined : kept;
+    // A text anchor is written again unless its range and the shape's text are as written.
+    let anchor = keptTextAnchor(kept, thread, item.slide);
     if (!anchor && element) {
       const shapeId = item.shapeIdOf?.(element.id);
       const moniker = shapeId ? shapeMoniker(slideDoc, shapeId) : null;

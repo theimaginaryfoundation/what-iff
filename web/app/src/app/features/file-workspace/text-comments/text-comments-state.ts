@@ -39,6 +39,50 @@ function quoteOf(text: string): string {
   return flat.length > 160 ? `${flat.slice(0, 157)}…` : flat;
 }
 
+/**
+ * Three-way merge of a file's threads: `mine` and `theirs` both changed from `base`. Threads and
+ * comments added on either side are kept, those removed on either side go, and a comment or
+ * resolved state changed here wins over the other side's. Anchors are theirs (the server has
+ * carried them onto the file as it is), except for threads only this side has.
+ */
+export function mergeThreads(
+  base: readonly TextCommentThread[],
+  mine: readonly TextCommentThread[],
+  theirs: readonly TextCommentThread[],
+): TextCommentThread[] {
+  const baseById = new Map(base.map(t => [t.id, t]));
+  const mineById = new Map(mine.map(t => [t.id, t]));
+  const out: TextCommentThread[] = [];
+  for (const t of theirs) {
+    const was = baseById.get(t.id);
+    const now = mineById.get(t.id);
+    if (was && !now) continue; // removed here
+    if (!was || !now) {
+      out.push(t);
+      continue;
+    }
+    const wasComments = new Map(was.comments.map(c => [c.id, c]));
+    const nowComments = new Map(now.comments.map(c => [c.id, c]));
+    const comments = t.comments
+      .filter(c => !(wasComments.has(c.id) && !nowComments.has(c.id)))
+      .map(c => {
+        const mineC = nowComments.get(c.id);
+        const baseC = wasComments.get(c.id);
+        return mineC && baseC && mineC.text !== baseC.text ? mineC : c;
+      });
+    const theirIds = new Set(t.comments.map(c => c.id));
+    for (const c of now.comments) if (!wasComments.has(c.id) && !theirIds.has(c.id)) comments.push(c);
+    const resolved = !!now.resolved !== !!was.resolved ? now.resolved : t.resolved;
+    const merged: TextCommentThread = { ...t, comments };
+    if (resolved) merged.resolved = true;
+    else delete merged.resolved;
+    if (comments.length) out.push(merged);
+  }
+  const theirIds = new Set(theirs.map(t => t.id));
+  for (const t of mine) if (!baseById.has(t.id) && !theirIds.has(t.id)) out.push(t);
+  return out;
+}
+
 let nextId = 0;
 function newThreadId(): string {
   const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${(nextId++).toString(36)}`;
@@ -56,6 +100,8 @@ export class TextCommentsState {
   /** The thread being started: on a range of the text, or (range null) on the whole file. */
   readonly draft = signal<{ range: Range | null; quote: string } | null>(null);
   readonly status = signal<CommentSaveStatus>('idle');
+  /** Whether the file's comments loaded: the server keeps none for a file that is not text (or too large). */
+  readonly available = signal(false);
   /** Where each thread is, as last read from the surface. */
   readonly positions = signal<ReadonlyMap<string, Range | null>>(new Map());
   /** The content the server has the anchors placed on, and the revision a write sends back. */
@@ -63,12 +109,16 @@ export class TextCommentsState {
   private revision = 0;
   private surface: TextCommentSurface | null = null;
   private fileId: string | null = null;
+  /** The threads as the server last had them, which a merge after a conflict starts from. */
+  private synced: TextCommentThread[] = [];
 
   constructor(
     private readonly api: TextCommentsService,
     private readonly me: Signal<CommentPerson>,
     /** Called after every change a save has to write. */
     private readonly changed: () => void,
+    /** Called when a save finds the file's content changed elsewhere: the host shows it as it is now. */
+    private readonly contentChanged?: () => void,
   ) {}
 
   /**
@@ -111,8 +161,11 @@ export class TextCommentsState {
   /** Loads a file's threads; they are placed on the surface once it is attached. */
   async load(fileId: string): Promise<void> {
     this.fileId = fileId;
+    this.available.set(false);
     const got = await firstValueFrom(this.api.get(fileId));
+    if (this.fileId !== fileId) return;
     this.adopt(got);
+    this.available.set(true);
   }
 
   /** The surface the threads are shown on (null while there is none). */
@@ -129,6 +182,7 @@ export class TextCommentsState {
   private adopt(got: TextComments): void {
     this.contentVersion = got.contentVersion;
     this.revision = got.revision;
+    this.synced = got.threads;
     this.threads.set(got.threads);
     if (!got.threads.some(t => t.id === this.activeId())) this.activeId.set(null);
     this.placeAll();
@@ -156,20 +210,71 @@ export class TextCommentsState {
     });
   }
 
-  /** Writes the threads placed on contentVersion (what a save just stored, or what is shown). */
+  /**
+   * Writes the threads placed on contentVersion (what a save just stored, or what is shown). When
+   * the comments changed elsewhere since they were read (an agent's reply), the two are merged and
+   * written again. When the file's content changed, the comments are read again and the host shows
+   * the file as it is now; the status says so.
+   */
   async save(contentVersion: number, threads: TextCommentThread[] = this.snapshot()): Promise<void> {
-    if (!this.fileId) return;
+    const fileId = this.fileId;
+    if (!fileId) return;
     this.status.set('saving');
-    try {
-      const got = await firstValueFrom(this.api.put(this.fileId, threads, contentVersion, this.revision));
-      this.contentVersion = got.contentVersion;
-      this.revision = got.revision;
-      this.status.set('saved');
-    } catch (error) {
-      const status = (error as { status?: number }).status;
-      this.status.set(status === 409 || status === 412 ? 'conflict' : 'failed');
-      throw error;
+    let sent = threads;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const got = await firstValueFrom(this.api.put(fileId, sent, contentVersion, this.revision));
+        this.contentVersion = got.contentVersion;
+        this.revision = got.revision;
+        if (sent !== threads) this.takeMerged(threads, got.threads);
+        this.synced = got.threads;
+        this.status.set('saved');
+        return;
+      } catch (error) {
+        const status = (error as { status?: number }).status;
+        if (status === 409 && attempt === 0) {
+          const theirs = await this.reread(fileId);
+          if (theirs) {
+            sent = mergeThreads(this.synced, threads, theirs.threads);
+            this.synced = theirs.threads;
+            continue;
+          }
+        }
+        if (status === 412) {
+          await this.reread(fileId);
+          this.contentChanged?.();
+        }
+        this.status.set(status === 409 || status === 412 ? 'conflict' : 'failed');
+        throw error;
+      }
     }
+  }
+
+  /** Whether there are changes here a save has not stored: comments, replies, resolved state (anchors aside, which move as the text is typed). */
+  unsaved(): boolean {
+    const shape = (threads: readonly TextCommentThread[]) =>
+      JSON.stringify(threads.map(t => [t.id, !!t.resolved, t.comments.map(c => [c.id, c.text])]));
+    return shape(this.threads()) !== shape(this.synced);
+  }
+
+  /** The server's comments now, taking their revision; null when they cannot be read. */
+  private async reread(fileId: string): Promise<TextComments | null> {
+    try {
+      const got = await firstValueFrom(this.api.get(fileId));
+      this.revision = got.revision;
+      this.contentVersion = got.contentVersion;
+      return got;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Shows what a merged save stored, keeping changes made here while it ran. */
+  private takeMerged(sent: readonly TextCommentThread[], stored: readonly TextCommentThread[]): void {
+    const before = new Set(this.threads().map(t => t.id));
+    this.threads.set(mergeThreads(sent, this.threads(), stored));
+    for (const t of this.threads()) if (!before.has(t.id)) this.surface?.place(t.id, t.anchor);
+    this.refresh();
   }
 
   private saving = false;

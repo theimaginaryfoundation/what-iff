@@ -40,6 +40,8 @@ export interface DocxImportResult {
   report: FidelityReport;
   /** The comment threads, in the order they appear in the text (ADR 0x045). */
   comments: DocxCommentThread[];
+  /** Threads the file has that have no place in the text shown (a footnote's, a text box's): a save keeps them as they are. */
+  unplacedComments: string[];
 }
 
 /**
@@ -245,8 +247,8 @@ export async function packageToDocument(pkg: OoxmlPackage, opts: DocxImportOptio
     document.resources = [{ name: RESOURCE_DOC_DRAWINGS, data: JSON.stringify({ data: drawings, order: drawingsOrder }) }];
   }
   const { threads: comments, unplaced } = anchorThreads(document, await readWordComments(pkg, mainPath, rels));
-  if (unplaced) fidelity.drop('Comments without a place in the text', 'Comments');
-  return { document, report: fidelity.report(), comments };
+  if (unplaced.length) fidelity.warn('Comments without a place in the text are kept but not shown', 'Comments');
+  return { document, report: fidelity.report(), comments, unplacedComments: unplaced };
 }
 
 /** Paragraph styles that carry numbering (w:style/w:pPr/w:numPr), walking basedOn. */

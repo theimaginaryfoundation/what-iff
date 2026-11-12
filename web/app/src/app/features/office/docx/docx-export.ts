@@ -65,6 +65,8 @@ export interface DocxExportOptions {
    * Left out, the file's own comments are kept as they were.
    */
   comments?: readonly DocxCommentThread[];
+  /** Threads of the file's that are not shown, kept as they are (DocxImportResult.unplacedComments). */
+  keepComments?: readonly string[];
 }
 
 export interface DocxExportResult {
@@ -88,7 +90,7 @@ export async function documentToDocx(
   const fidelity = new FidelityCollector();
   const source = original ? await PatchSource.open(original) : null;
   const pkg = source ? source.pkg : OoxmlPackage.empty();
-  const writer = new DocxWriter(document, fidelity, source, opts.comments);
+  const writer = new DocxWriter(document, fidelity, source, opts.comments, opts.keepComments);
   await writer.write(pkg);
   return { bytes: await pkg.save(DOCX_MIME), report: fidelity.report() };
 }
@@ -122,6 +124,7 @@ class DocxWriter {
     private readonly fidelity: FidelityCollector,
     private readonly source: PatchSource | null,
     private readonly comments?: readonly DocxCommentThread[],
+    private readonly keepComments?: readonly string[],
   ) {
     const defaults = defaultNamedStyles();
     this.styles = { ...defaults, ...(doc.styles ?? {}) };
@@ -239,7 +242,10 @@ class DocxWriter {
     const plan = planCommentParts(
       threads.filter(t => marked.has(t.id)),
       original,
-      { styles: { commentText: !!this.styles['CommentText'], commentReference: !!this.styles['CommentReference'] } },
+      {
+        styles: { commentText: !!this.styles['CommentText'], commentReference: !!this.styles['CommentReference'] },
+        keep: this.keepComments,
+      },
     );
     this.commentWordIds = plan.wordIds;
     return { ...plan, paths: original?.paths ?? {} };

@@ -6,15 +6,17 @@
       </button>
     }
     <span class="code-editor__end">
-      <button
-        type="button"
-        class="code-editor__toggle"
-        title="Comment on the selected text or the word at the cursor (Ctrl+Alt+M)"
-        (mousedown)="$event.preventDefault()"
-        (click)="startComment()"
-      >
-        Comment
-      </button>
+      @if (canStartComment()) {
+        <button
+          type="button"
+          class="code-editor__toggle"
+          title="Comment on the selected text or the word at the cursor (Ctrl+Alt+M)"
+          (mousedown)="$event.preventDefault()"
+          (click)="startComment()"
+        >
+          Comment
+        </button>
+      }
       <button
         type="button"
         class="code-editor__toggle code-editor__comments-toggle"
