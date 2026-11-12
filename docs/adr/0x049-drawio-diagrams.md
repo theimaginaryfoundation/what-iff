@@ -75,6 +75,14 @@ A thread is on one element, or on the whole diagram:
 - Viewing, clicking an element and then Comment starts a thread on it (with none chosen, on the whole diagram), and comments are written as they are made; editing, they are written once a save has stored the diagram, so a thread on a new element finds it there.
 - Agents comment with `file_comments`, giving the element's id (`cell`, with `page`); `list` says which element each thread is on.
 
+### 7. Uploads, and Visio
+
+- `.drawio` files are uploaded wherever files are: to a conversation, to the gallery (whose Import takes any file a conversation does) and to a personality.
+- A Visio drawing (`.vsdx`) is converted as it is uploaded: draw.io's own importer runs in a hidden editor (our plugin of §6 calls it, as offline draw.io never loads the importer itself), the result is loaded and exported as plain XML, and that is uploaded as a `.drawio` of the same name.
+  The Visio file is not stored, and the server does not take one.
+- Visio's older binary formats (`.vsd`) are refused with a hint to save as `.vsdx`: draw.io converts them only with a server.
+- Where the app has no diagram editor, a Visio file is refused.
+
 ## Consequences
 
 - Users draw and edit diagrams in the workspace, and agents change the same files as text.

@@ -1,4 +1,3 @@
-
 // Scroll behavior constants
 export const SCROLL_BUTTON_THRESHOLD_PX = 20;
 /** When within this many px of the top of the thread, fetch the next older page of messages. */
@@ -58,13 +57,14 @@ export const ALLOWED_FILE_TYPES = [
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ] as const;
 
-export type AllowedFileType = typeof ALLOWED_FILE_TYPES[number];
+export type AllowedFileType = (typeof ALLOWED_FILE_TYPES)[number];
 
 /**
- * Extensions accepted by the API (`internal/utils/fileutils.go` fileTypes map).
+ * Extensions accepted by the API (`internal/utils/fileutils.go` fileTypes map), plus `.vsdx`: a
+ * Visio drawing is converted to a .drawio diagram before it is uploaded (DiagramUploads, ADR 0x049 §7).
  * Browsers often omit or misreport `File.type`; we fall back to the filename suffix.
  */
 export const ALLOWED_UPLOAD_EXTENSIONS = [
@@ -75,6 +75,7 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
   '.csv',
   '.doc',
   '.docx',
+  '.drawio',
   '.gif',
   '.go',
   '.html',
@@ -84,6 +85,8 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
   '.js',
   '.json',
   '.md',
+  '.mermaid',
+  '.mmd',
   '.pdf',
   '.php',
   '.png',
@@ -97,10 +100,11 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
   '.tgz',
   '.ts',
   '.txt',
+  '.vsdx',
   '.webp',
   '.xlsx',
   '.xml',
-  '.zip'
+  '.zip',
 ] as const;
 
 const ALLOWED_UPLOAD_EXT_SET = new Set<string>(ALLOWED_UPLOAD_EXTENSIONS);
@@ -128,4 +132,3 @@ export function isMimeOrExtensionAllowedForChatUpload(file: File): boolean {
   }
   return isExtensionAllowedForChatUpload(file.name);
 }
-

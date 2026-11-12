@@ -7,6 +7,7 @@ import { AvatarComponent } from '../../../shared/ui/avatar/avatar.component';
 import { PersonaAccentScopeComponent } from '../../personality/picker/persona-accent-scope.component';
 import { AuthImagePipe } from '../../../core/pipes/auth-image.pipe';
 import { AsyncPipe } from '@angular/common';
+import { ALLOWED_UPLOAD_EXTENSIONS, isMimeOrExtensionAllowedForChatUpload } from '../../chat/chat.constants';
 
 export interface GalleryImportPersonalityOption {
   id: string;
@@ -52,6 +53,8 @@ export class GalleryImportModalComponent {
   readonly scope = signal<'global' | 'personality'>('global');
   readonly error = signal<string | null>(null);
   readonly fileInput = viewChild<ElementRef<HTMLInputElement>>('fileInput');
+  /** Images and every file the chat upload takes: diagrams too, with Visio converted to .drawio. */
+  readonly accept = ['image/*', ...ALLOWED_UPLOAD_EXTENSIONS].join(',');
 
   constructor() {
     effect(() => {
@@ -63,12 +66,7 @@ export class GalleryImportModalComponent {
 
   onFileInput(event: Event): void {
     const target = event.target as HTMLInputElement | null;
-    const file = target?.files?.[0] ?? null;
-    this.selectedFile.set(file);
-    if (file) {
-      this.title.set(file.name);
-      this.error.set(null);
-    }
+    this.choose(target?.files?.[0] ?? null);
   }
 
   onDragOver(event: DragEvent): void {
@@ -78,8 +76,17 @@ export class GalleryImportModalComponent {
   onDrop(event: DragEvent): void {
     event.preventDefault();
     const file = event.dataTransfer?.files?.[0] ?? null;
+    if (file) this.choose(file);
+  }
+
+  private choose(file: File | null): void {
+    if (file && !isMimeOrExtensionAllowedForChatUpload(file)) {
+      this.selectedFile.set(null);
+      this.error.set(`"${file.name}" is not a supported file type.`);
+      return;
+    }
+    this.selectedFile.set(file);
     if (file) {
-      this.selectedFile.set(file);
       this.title.set(file.name);
       this.error.set(null);
     }
@@ -105,7 +112,7 @@ export class GalleryImportModalComponent {
     const scope = this.scope();
     const personalityId = this.personalityId().trim() || null;
     if (!file || !title) {
-      this.error.set('Choose an image and provide a title.');
+      this.error.set('Choose a file and provide a title.');
       return;
     }
     if (scope === 'personality' && !personalityId) {

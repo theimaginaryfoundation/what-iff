@@ -1,9 +1,10 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable, map, switchMap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { FileAttachment, FileAttachmentFilters, ChatContextFilesResponse } from '../models/file-attachment.model';
 import { PaginatedResponse } from '../models/common.model';
+import { DiagramUploads, titleFor } from '../../features/diagrams/diagram-uploads';
 
 @Injectable({
   providedIn: 'root',
@@ -11,6 +12,8 @@ import { PaginatedResponse } from '../models/common.model';
 export class FileAttachmentService {
   private http = inject(HttpClient);
   private apiUrl = `${environment.apiUrl}`;
+  /** A Visio drawing is uploaded as the .drawio diagram it converts to (ADR 0x049 §7). */
+  private diagramUploads = inject(DiagramUploads);
 
   /**
    * Upload a file attachment to a specific chat
@@ -19,6 +22,10 @@ export class FileAttachmentService {
    * @returns Observable of the created file attachment
    */
   uploadChatFileAttachment(chatId: string, file: File, folder?: string, description?: string): Observable<FileAttachment> {
+    return this.diagramUploads.prepare(file).pipe(switchMap(prepared => this.postChatFile(chatId, prepared, folder, description)));
+  }
+
+  private postChatFile(chatId: string, file: File, folder?: string, description?: string): Observable<FileAttachment> {
     const formData = new FormData();
     formData.append('attachment', file);
     if (folder?.trim()) {
@@ -89,6 +96,20 @@ export class FileAttachmentService {
    * @returns Observable of the created file attachment
    */
   uploadPersonalityFileAttachment(
+    personalityId: string,
+    file: File,
+    metadata?: { title?: string; description?: string },
+  ): Observable<FileAttachment> {
+    return this.diagramUploads
+      .prepare(file)
+      .pipe(
+        switchMap(prepared =>
+          this.postPersonalityFile(personalityId, prepared, metadata && { ...metadata, title: titleFor(metadata.title, prepared) }),
+        ),
+      );
+  }
+
+  private postPersonalityFile(
     personalityId: string,
     file: File,
     metadata?: { title?: string; description?: string },

@@ -1,13 +1,4 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  inject,
-  input,
-  OnChanges,
-  signal,
-  SimpleChanges,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, OnChanges, signal, SimpleChanges } from '@angular/core';
 
 import { RouterLink } from '@angular/router';
 
@@ -18,9 +9,31 @@ import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.compon
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
 const SUPPORTED_FILE_TYPES = [
-  '.c', '.cpp', '.cs', '.css', '.doc', '.docx', '.go', '.html',
-  '.java', '.js', '.json', '.md', '.pdf', '.php', '.py',
-  '.rb', '.sh', '.tex', '.ts', '.txt',
+  '.c',
+  '.cpp',
+  '.cs',
+  '.css',
+  '.doc',
+  '.docx',
+  '.go',
+  '.html',
+  '.java',
+  '.js',
+  '.json',
+  '.md',
+  '.pdf',
+  '.php',
+  '.py',
+  '.rb',
+  '.sh',
+  '.tex',
+  '.ts',
+  '.txt',
+  // Diagrams (ADR 0x048, 0x049); a Visio drawing is uploaded as a .drawio.
+  '.mmd',
+  '.mermaid',
+  '.drawio',
+  '.vsdx',
 ];
 const MAX_FILES = 40;
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -35,10 +48,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
   standalone: true,
   imports: [RouterLink, HelpHintComponent, TooltipDirective],
   template: `
-    <section
-      [class]="containerClass()"
-      aria-label="Personality attachments"
-    >
+    <section [class]="containerClass()" aria-label="Personality attachments">
       <header class="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 class="inline-flex items-center gap-1 text-base font-semibold text-(--color-text-primary)">
@@ -63,18 +73,24 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
             class="rounded-lg bg-(--color-accent) px-3 py-1.5 text-sm font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
             [disabled]="!canAddMoreFiles()"
             (click)="fileInput.click()"
-          >Upload</button>
+          >
+            Upload
+          </button>
         </div>
       </header>
 
       @if (errorMessage()) {
-        <p class="rounded-md border border-red-500 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300" role="alert">{{ errorMessage() }}</p>
+        <p class="rounded-md border border-red-500 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300" role="alert">
+          {{ errorMessage() }}
+        </p>
       }
 
       @if (isLoading()) {
         <p class="text-sm text-(--color-text-secondary)" role="status">Loading attachments…</p>
       } @else if (attachments().length === 0 && pending().length === 0) {
-        <p class="rounded-lg border border-dashed border-border-base bg-(--color-surface-elevated) p-6 text-center text-sm text-(--color-text-secondary)">
+        <p
+          class="rounded-lg border border-dashed border-border-base bg-(--color-surface-elevated) p-6 text-center text-sm text-(--color-text-secondary)"
+        >
           No files attached yet. Upload reference docs to give this personality more context.
         </p>
       } @else {
@@ -88,7 +104,9 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
                   [uiTooltip]="attachment.name"
                   truncatedOnly
                   [truncationTarget]="attachmentName"
-                >{{ attachment.name }}</p>
+                >
+                  {{ attachment.name }}
+                </p>
                 <p class="text-xs text-(--color-text-secondary)">{{ attachment.file_type || 'file' }}</p>
               </div>
               <div class="flex shrink-0 items-center gap-1">
@@ -98,21 +116,26 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
                   [queryParams]="{ file: attachment.id }"
                   [attr.aria-label]="'View ' + attachment.name"
                   uiTooltip="Read this file in the gallery"
-                >View</a>
+                  >View</a
+                >
                 <button
                   type="button"
                   class="rounded-lg p-1.5 text-(--color-text-secondary) outline-none hover:bg-red-500/10 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-red-500"
                   [attr.aria-label]="'Delete ' + attachment.name"
                   uiTooltip="Delete this file"
                   (click)="onDelete(attachment)"
-                >✕</button>
+                >
+                  ✕
+                </button>
               </div>
             </li>
           }
           @for (item of pending(); track $index) {
             <li class="flex items-center justify-between gap-3 py-2">
               <div class="min-w-0">
-                <p class="truncate text-sm text-(--color-text-primary)" [title]="$safeNavigationMigration(item.file?.name)">{{ item.file?.name }}</p>
+                <p class="truncate text-sm text-(--color-text-primary)" [title]="$safeNavigationMigration(item.file?.name)">
+                  {{ item.file?.name }}
+                </p>
                 <p class="text-xs text-(--color-text-secondary)">
                   @if (item.uploadError) {
                     <span class="text-red-500">{{ item.uploadError }}</span>
@@ -127,13 +150,17 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
                     type="button"
                     class="rounded-lg border border-border-base px-2 py-1 text-xs text-(--color-text-primary) hover:bg-(--color-surface-elevated)"
                     (click)="onRetry($index)"
-                  >Retry</button>
+                  >
+                    Retry
+                  </button>
                   <button
                     type="button"
                     class="rounded-lg p-1.5 text-(--color-text-secondary) hover:text-red-600"
                     [attr.aria-label]="'Discard ' + item.file?.name"
                     (click)="onRemovePending($index)"
-                  >✕</button>
+                  >
+                    ✕
+                  </button>
                 </div>
               }
             </li>
@@ -245,9 +272,7 @@ export class PersonalityAttachmentsListComponent implements OnChanges {
     if (!personalityId) return;
     const item = this.pending()[index];
     if (!item || !item.file || item.isUploading) return;
-    this.pending.update(current =>
-      current.map((p, i) => (i === index ? { ...p, isUploading: true, uploadError: undefined } : p)),
-    );
+    this.pending.update(current => current.map((p, i) => (i === index ? { ...p, isUploading: true, uploadError: undefined } : p)));
     this.uploadFile(personalityId, item.file, index);
   }
 

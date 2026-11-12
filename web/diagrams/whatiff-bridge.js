@@ -6,9 +6,10 @@
  * messages, under names of its own (`whatiff-…`):
  *
  * - to the app: `whatiff-page` (the page shown), `whatiff-selection` (the selected elements, with
- *   their labels), `whatiff-click` (an element, or its comment mark, clicked), `whatiff-menu` (a right-click item);
+ *   their labels), `whatiff-click` (an element, or its comment mark, clicked), `whatiff-menu` (a right-click item),
+ *   `whatiff-imported` / `whatiff-import-failed` (a Visio file converted, or not);
  * - from the app: `whatiff-marks` (which elements have threads, and which is active),
- *   `whatiff-reveal` (select and show an element).
+ *   `whatiff-reveal` (select and show an element), `whatiff-import-visio` (convert a .vsdx).
  *
  * It uses draw.io's own graph API only (selection, overlays, popup menu), so it stays small and is
  * checked again whenever the pinned release changes.
@@ -173,8 +174,38 @@
           graph.setSelectionCell(cell);
           graph.scrollCellToVisible(cell, true);
         }
+      } else if (message.action === 'whatiff-import-visio') {
+        importVisio(message.data, message.name);
       }
     });
+
+    // A Visio file (.vsdx, as base64) converted with draw.io's own importer, which is in
+    // extensions.min.js: offline, draw.io never loads that file itself, so it is loaded here.
+    function importVisio(data, name) {
+      var failed = function (error) {
+        post({ event: 'whatiff-import-failed', message: (error && error.message) || String(error || 'unknown error') });
+      };
+      var run = function () {
+        try {
+          var bin = atob(data || '');
+          var bytes = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          var blob = new Blob([bytes], { type: 'application/vnd.ms-visio.drawing' });
+          ui.importVisio(
+            blob,
+            function (xml) {
+              post({ event: 'whatiff-imported', xml: xml });
+            },
+            failed,
+            name || 'diagram.vsdx',
+          );
+        } catch (e) {
+          failed(e);
+        }
+      };
+      if (ui.doImportVisio) run();
+      else mxscript('js/extensions.min.js', run, null, null, null, failed);
+    }
 
     post({ event: 'whatiff-page', page: pageId() });
   });

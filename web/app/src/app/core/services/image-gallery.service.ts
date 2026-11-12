@@ -1,10 +1,11 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable, map, switchMap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { FileAttachment } from '../models/file-attachment.model';
 import { PaginatedResponse } from '../models/common.model';
 import { GalleryFolder } from '../../features/gallery/helpers/gallery-folder.helpers';
+import { DiagramUploads, titleFor } from '../../features/diagrams/diagram-uploads';
 
 /** Which gallery files to list: images (the server's default), every other file, or both. */
 export type GalleryKind = 'images' | 'files' | 'all';
@@ -20,20 +21,19 @@ export interface GalleryDeleteResult {
 }
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class ImageGalleryService {
   private http = inject(HttpClient);
   private apiUrl = `${environment.apiUrl}`;
+  private diagramUploads = inject(DiagramUploads);
 
   listImages(
     page: number = 1,
     limit: number = 20,
     filters?: { name?: string; personalityId?: string; globalOnly?: boolean; folder?: string; kind?: GalleryKind },
   ): Observable<PaginatedResponse<FileAttachment>> {
-    let params = new HttpParams()
-      .set('page', page.toString())
-      .set('limit', limit.toString());
+    let params = new HttpParams().set('page', page.toString()).set('limit', limit.toString());
     if (filters?.name?.trim()) {
       params = params.set('name', filters.name.trim());
     }
@@ -73,7 +73,14 @@ export class ImageGalleryService {
     return this.http.post<GalleryDeleteResult>(`${this.apiUrl}/image-gallery/delete`, { ids });
   }
 
+  /** Imports any file the chat upload takes; a Visio drawing arrives as the .drawio diagram it converts to (ADR 0x049 §7). */
   importImage(file: File, metadata?: { title?: string; description?: string; folder?: string }): Observable<FileAttachment> {
+    return this.diagramUploads
+      .prepare(file)
+      .pipe(switchMap(prepared => this.postImport(prepared, metadata && { ...metadata, title: titleFor(metadata.title, prepared) })));
+  }
+
+  private postImport(file: File, metadata?: { title?: string; description?: string; folder?: string }): Observable<FileAttachment> {
     const formData = new FormData();
     formData.append('attachment', file);
     if (metadata?.title?.trim()) {
@@ -107,9 +114,7 @@ export class ImageGalleryService {
 
   /** Files images or other files in a folder ("" is the top level); resolves with how many were moved. */
   moveImages(ids: readonly string[], folder: string): Observable<number> {
-    return this.http
-      .post<{ moved: number }>(`${this.apiUrl}/image-gallery/move`, { ids, folder })
-      .pipe(map(response => response.moved));
+    return this.http.post<{ moved: number }>(`${this.apiUrl}/image-gallery/move`, { ids, folder }).pipe(map(response => response.moved));
   }
 
   /** Renames a folder, carrying everything beneath it; resolves with how many images moved. */

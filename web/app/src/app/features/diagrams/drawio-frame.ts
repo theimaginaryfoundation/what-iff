@@ -17,13 +17,17 @@ export interface BridgeCell {
 
 /**
  * What our plugin in the editor (web/diagrams/whatiff-bridge.js) reports, for comments on elements:
- * the page shown, the selection, an element clicked, a right-click menu item chosen.
+ * the page shown, the selection, an element clicked, a right-click menu item chosen; and a Visio
+ * file converted.
  */
 export type BridgeEvent =
   | { event: 'whatiff-page'; page: string | null }
   | { event: 'whatiff-selection'; page: string | null; cells: BridgeCell[] }
   | { event: 'whatiff-click'; page: string | null; cell: string; label?: string }
-  | { event: 'whatiff-menu'; page: string | null; item: 'new' | 'reply' | 'delete'; cell: string; label?: string };
+  | { event: 'whatiff-menu'; page: string | null; item: 'new' | 'reply' | 'delete'; cell: string; label?: string }
+  // A Visio file converted (draw.io's XML, possibly compressed), or why not.
+  | { event: 'whatiff-imported'; xml: string }
+  | { event: 'whatiff-import-failed'; message: string };
 
 export type DrawioEvent =
   | BridgeEvent
@@ -38,11 +42,13 @@ export type DrawioEvent =
 export type DrawioAction =
   | { action: 'load'; xml: string; autosave?: 1; title?: string; noExitBtn?: 1 }
   | { action: 'load'; descriptor: { format: 'mermaid'; data: string }; autosave?: 1; title?: string }
-  | { action: 'export'; format: 'png' | 'svg' | 'xmlpng' | 'xmlsvg'; scale?: number; background?: string; requestId?: string }
+  | { action: 'export'; format: 'png' | 'svg' | 'xmlpng' | 'xmlsvg' | 'xml'; scale?: number; background?: string; requestId?: string }
   | { action: 'configure'; config: Record<string, unknown> }
   // Our plugin: which elements on a page have threads (and which is active), and showing one.
   | { action: 'whatiff-marks'; page: string | null; marks: Record<string, 'open' | 'active'> }
-  | { action: 'whatiff-reveal'; cell: string; page?: string };
+  | { action: 'whatiff-reveal'; cell: string; page?: string }
+  // Our plugin: convert a Visio file (base64 .vsdx) with draw.io's importer.
+  | { action: 'whatiff-import-visio'; data: string; name: string };
 
 /** The editor's URL: embed mode, our JSON protocol, the app's theme, and read-only when viewing. */
 export function drawioUrl(site: string, opts: { readOnly: boolean; dark: boolean }): string {
