@@ -99,6 +99,49 @@ describe('TextCommentsState', () => {
     expect(state.status()).toBe('saved');
   });
 
+  it('keeps comments written elsewhere across repeated conflicts, and after giving up', async () => {
+    const api = fakeTextComments();
+    const state = new TextCommentsState(api as unknown as TextCommentsService, me, () => undefined);
+    state.attach(surface().s);
+    await state.load('f-1');
+    state.startOnFile();
+    state.create({ text: 'Rename this?', mentions: [] });
+    await state.save(1);
+    const id = state.threads()[0].id;
+    const reply = (rid: string) => ({
+      id: rid,
+      authorId: 'personality:p',
+      authorName: 'Vix',
+      createdAt: '2026-11-12T10:00:00Z',
+      text: rid,
+    });
+    // The agent writes a reply before each of this side's writes lands.
+    const agentWrites = (rid: string) => {
+      api.state.stored = {
+        ...api.state.stored,
+        revision: api.state.stored.revision + 1,
+        threads: api.state.stored.threads.map(t => ({ ...t, comments: [...t.comments, reply(rid)] })),
+      };
+    };
+    const put = api.put;
+    const races = ['r1', 'r2', 'r3'];
+    api.put = (...args: Parameters<typeof put>) => {
+      const next = races.shift();
+      if (next) agentWrites(next);
+      return put(...args);
+    };
+
+    state.resolve({ threadId: id, resolved: true });
+    await expect(state.save(1)).rejects.toEqual({ status: 409 }); // three conflicts in a row
+    expect(state.status()).toBe('conflict');
+    // What is shown has their replies so far, so the next save does not read them as removed.
+    expect(state.threads()[0].comments.map(c => c.id)).toEqual([id, 'r1', 'r2']);
+
+    await state.save(1);
+    expect(api.state.stored.threads[0].comments.map(c => c.id)).toEqual([id, 'r1', 'r2', 'r3']);
+    expect(api.state.stored.threads[0].resolved).toBe(true);
+  });
+
   it('reads the comments again and asks for the file when its content changed', async () => {
     const api = fakeTextComments();
     const contentChanged = vi.fn();

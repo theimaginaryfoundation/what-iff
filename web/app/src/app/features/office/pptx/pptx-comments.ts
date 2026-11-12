@@ -332,14 +332,17 @@ export function carryTextAnchors(threads: readonly SlideCommentThread[], slide: 
     const element = range && t.anchor.elementId ? slide.elements.find(e => e.id === t.anchor.elementId) : undefined;
     if (!range || !element) return t;
     const text = elementText(element);
-    const words = t.quote?.trim();
+    // The quote is the words as the panel shows them, whitespace (a line or paragraph break)
+    // collapsed to one space; the shape's text has the breaks.
+    const words = t.quote?.trim().split(/\s+/).filter(Boolean);
     const at = text.slice(range.start, range.start + range.length);
-    if (!words || at.trim() === words) return t;
-    let best = -1;
-    for (let i = text.indexOf(words); i >= 0; i = text.indexOf(words, i + 1))
-      if (best < 0 || Math.abs(i - range.start) < Math.abs(best - range.start)) best = i;
+    if (!words?.length || at.trim().split(/\s+/).join(' ') === words.join(' ')) return t;
+    const pattern = new RegExp(words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'), 'g');
+    let best: { start: number; length: number } | null = null;
+    for (const m of text.matchAll(pattern))
+      if (!best || Math.abs(m.index - range.start) < Math.abs(best.start - range.start)) best = { start: m.index, length: m[0].length };
     const { text: _gone, ...onShape } = t.anchor;
-    return best < 0 ? { ...t, anchor: onShape } : { ...t, anchor: { ...t.anchor, text: { start: best, length: words.length } } };
+    return best ? { ...t, anchor: { ...t.anchor, text: best } } : { ...t, anchor: onShape };
   });
 }
 
