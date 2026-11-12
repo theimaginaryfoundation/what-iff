@@ -124,7 +124,7 @@ func (p *pkg) rels(part string) ([]rel, error) {
 	}
 	root, err := parseXML(data)
 	if err != nil {
-		return nil, officecomments.ErrNotOffice
+		return nil, officecomments.NotOffice(err)
 	}
 	var out []rel
 	for _, r := range root.children {
@@ -178,7 +178,7 @@ func (p *pkg) addRel(part, typ, target string) error {
 	}
 	root, err := parseXML(data)
 	if err != nil {
-		return officecomments.ErrNotOffice
+		return officecomments.NotOffice(err)
 	}
 	used := map[string]bool{}
 	for _, r := range root.children {
@@ -202,7 +202,7 @@ func (p *pkg) addOverride(part, contentType string) error {
 	}
 	root, err := parseXML(data)
 	if err != nil {
-		return officecomments.ErrNotOffice
+		return officecomments.NotOffice(err)
 	}
 	name := "/" + part
 	for _, o := range root.children {

@@ -3,6 +3,7 @@ package xlsx
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -62,7 +63,16 @@ func (p *pkg) has(part string) bool {
 	return ok
 }
 
+// readLarge is read for a part that may be over officecomments.MaxPartBytes (a worksheet).
+func (p *pkg) readLarge(part string) ([]byte, bool) {
+	return p.readWith(part, p.budget.ReadLarge)
+}
+
 func (p *pkg) read(part string) ([]byte, bool) {
+	return p.readWith(part, p.budget.Read)
+}
+
+func (p *pkg) readWith(part string, read func(*zip.File) ([]byte, error)) ([]byte, bool) {
 	name, ok := p.actual(part)
 	if !ok {
 		return nil, false
@@ -70,14 +80,25 @@ func (p *pkg) read(part string) ([]byte, bool) {
 	if data, ok := p.changed[name]; ok {
 		return data, true
 	}
-	data, err := p.budget.Read(p.files[strings.ToLower(name)])
+	data, err := read(p.files[strings.ToLower(name)])
 	if err != nil {
-		if p.err == nil {
-			p.err = fmt.Errorf("xlsx: read %s: %w", name, err)
-		}
+		p.fail(name, err)
 		return nil, false
 	}
 	return data, true
+}
+
+// fail records the first part that could not be read or parsed: the change is not saved (save
+// returns it), so a broken or oversized part is never taken for a missing or empty one and
+// written over. A depth refusal stays ErrTooLarge; anything else is ErrNotOffice.
+func (p *pkg) fail(part string, err error) {
+	if p.err != nil {
+		return
+	}
+	if !errors.Is(err, officecomments.ErrTooLarge) && !errors.Is(err, officecomments.ErrNotOffice) {
+		err = fmt.Errorf("%w: %s: %v", officecomments.ErrNotOffice, part, err)
+	}
+	p.err = fmt.Errorf("xlsx: %s: %w", part, err)
 }
 
 func (p *pkg) put(part string, data []byte) {
@@ -158,6 +179,7 @@ func (p *pkg) rels(part string) []rel {
 	}
 	root, err := scan(data, 1)
 	if err != nil {
+		p.fail(relsPath(part), err)
 		return nil
 	}
 	var out []rel
@@ -229,7 +251,12 @@ func (p *pkg) addRel(part, typ, target string) string {
 	data, ok := p.read(relsPath(part))
 	var root *node
 	if ok {
-		root, _ = scan(data, 0)
+		var err error
+		if root, err = scan(data, 0); err != nil {
+			// Not written over with one relationship: the change fails (see fail).
+			p.fail(relsPath(part), err)
+			return id
+		}
 	}
 	if root == nil {
 		p.put(relsPath(part), []byte(xmlHead+`<Relationships xmlns="`+nsRels+`">`+entry+`</Relationships>`))
@@ -258,6 +285,7 @@ func (p *pkg) addType(marker, entry string) {
 	}
 	root, err := scan(data, 0)
 	if err != nil {
+		p.fail(contentTypesPath, err)
 		return
 	}
 	p.put(contentTypesPath, apply(data, []edit{appendChild(data, root, entry)}))

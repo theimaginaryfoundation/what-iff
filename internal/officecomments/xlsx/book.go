@@ -51,10 +51,16 @@ func load(data []byte) (*book, error) {
 	}
 	wb, ok := p.read(b.wbPath)
 	if !ok {
+		if p.err != nil {
+			return nil, p.err
+		}
 		return nil, officecomments.ErrNotOffice
 	}
 	root, err := scan(wb, 2)
-	if err != nil || root.name.Local != "workbook" {
+	if err != nil {
+		return nil, officecomments.NotOffice(err)
+	}
+	if root.name.Local != "workbook" {
 		return nil, officecomments.ErrNotOffice
 	}
 	rels := p.rels(b.wbPath)
@@ -69,7 +75,9 @@ func load(data []byte) (*book, error) {
 	}
 	b.personsPath = p.relOf(b.wbPath, relPerson)
 	if data, ok := p.read(b.personsPath); ok && b.personsPath != "" {
-		if root, err := scan(data, 1); err == nil {
+		if root, err := scan(data, 1); err != nil {
+			p.fail(b.personsPath, err)
+		} else {
 			for _, n := range root.kids("person") {
 				if id := n.get("id"); id != "" {
 					b.persons = append(b.persons, person{id: id, name: n.get("displayName"), userID: n.get("userId"), provider: n.get("providerId")})
@@ -143,10 +151,13 @@ func personXML(pfx string, pr person) string {
 func (b *book) addPerson(pr person) {
 	b.persons = append(b.persons, pr)
 	if data, ok := b.p.read(b.personsPath); ok && b.personsPath != "" {
-		if root, err := scan(data, 0); err == nil {
-			b.p.put(b.personsPath, apply(data, []edit{appendChild(data, root, personXML(prefix(data, root), pr))}))
+		root, err := scan(data, 0)
+		if err != nil {
+			b.p.fail(b.personsPath, err)
 			return
 		}
+		b.p.put(b.personsPath, apply(data, []edit{appendChild(data, root, personXML(prefix(data, root), pr))}))
+		return
 	}
 	// The browser's persons part, at its path beside the workbook.
 	b.personsPath = path.Join(path.Dir(b.wbPath), "persons/person.xml")
@@ -214,6 +225,8 @@ func (b *book) threaded(s sheet) *threaded {
 	}
 	root, err := scan(data, 2)
 	if err != nil {
+		// Its threads are not taken for none, which the next Add would write over.
+		b.p.fail(t.path, err)
 		return t
 	}
 	t.data, t.root = data, root

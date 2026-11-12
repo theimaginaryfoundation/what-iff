@@ -32,7 +32,16 @@ func NewBudget() *Budget { return &Budget{left: MaxReadBytes} }
 // Read inflates f, refusing a part past MaxPartBytes or past what is left of the budget, whatever
 // size its header claims.
 func (b *Budget) Read(f *zip.File) ([]byte, error) {
-	limit := min(int64(MaxPartBytes), b.left)
+	return b.read(f, min(int64(MaxPartBytes), b.left))
+}
+
+// ReadLarge is Read for a part that may be larger than MaxPartBytes (a worksheet, which a note
+// has to be linked from): it is held only to what is left of the whole budget.
+func (b *Budget) ReadLarge(f *zip.File) ([]byte, error) {
+	return b.read(f, b.left)
+}
+
+func (b *Budget) read(f *zip.File, limit int64) ([]byte, error) {
 	if f.UncompressedSize64 > uint64(limit) {
 		return nil, ErrTooLarge
 	}
@@ -63,4 +72,14 @@ func XMLText(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// NotOffice is the error a format reports for a part it could not parse: ErrTooLarge when that is
+// why (so the caller is told the file is too large, not that it is not an Office file), else
+// ErrNotOffice.
+func NotOffice(err error) error {
+	if errors.Is(err, ErrTooLarge) {
+		return ErrTooLarge
+	}
+	return ErrNotOffice
 }

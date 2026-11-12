@@ -27,12 +27,14 @@ type pkg struct {
 	budget *officecomments.Budget
 	// err is the first part that could not be read or parsed: a change is not saved over it, so a
 	// broken or oversized part is never taken for a missing one and written again beside it.
-	err     error
-	files   []*zip.File
-	byName  map[string]*zip.File
-	changed map[string][]byte
-	added   []string
-	removed map[string]bool
+	err error
+	// read holds each part as first read, so reading it again costs nothing against the budget.
+	readCache map[string][]byte
+	files     []*zip.File
+	byName    map[string]*zip.File
+	changed   map[string][]byte
+	added     []string
+	removed   map[string]bool
 }
 
 func openPkg(data []byte) (*pkg, error) {
@@ -70,11 +72,18 @@ func (p *pkg) read(name string) []byte {
 	if f == nil {
 		return nil
 	}
+	if b, ok := p.readCache[name]; ok {
+		return b
+	}
 	b, err := p.budget.Read(f)
 	if err != nil {
 		p.fail(fmt.Errorf("pptx: read %s: %w", name, err))
 		return nil
 	}
+	if p.readCache == nil {
+		p.readCache = map[string][]byte{}
+	}
+	p.readCache[name] = b
 	return b
 }
 

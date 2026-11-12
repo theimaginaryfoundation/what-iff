@@ -107,7 +107,7 @@ func readComments(p *pkg) (*comments, error) {
 		}
 		n, err := parseXML(data)
 		if err != nil {
-			return nil, officecomments.ErrNotOffice
+			return nil, officecomments.NotOffice(err)
 		}
 		return n, nil
 	}

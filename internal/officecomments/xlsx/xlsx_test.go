@@ -361,3 +361,34 @@ func TestSheetNamedTakesAQuotedName(t *testing.T) {
 		}
 	}
 }
+
+func TestABrokenPartFailsTheChangeRatherThanBeingWrittenOver(t *testing.T) {
+	broken := func(name, body string) []byte {
+		entries := commentedBook()
+		for i := range entries {
+			if entries[i].name == name {
+				entries[i].body = body
+			}
+		}
+		return build(t, entries)
+	}
+	note := officecomments.Comment{AuthorID: "user:u-1", AuthorName: "Ann B", CreatedAt: when, Text: "New"}
+	deep := `<?xml version="1.0"?><ThreadedComments xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments">` +
+		strings.Repeat("<a>", officecomments.MaxXMLDepth) + strings.Repeat("</a>", officecomments.MaxXMLDepth) + `</ThreadedComments>`
+	for _, c := range []struct {
+		name, part, body string
+		want             error
+	}{
+		{"unparsable threads", "xl/threadedComments/threadedComment1.xml", "<ThreadedComments><oops></ThreadedComments>", officecomments.ErrNotOffice},
+		{"threads nested too deep", "xl/threadedComments/threadedComment1.xml", deep, officecomments.ErrTooLarge},
+		{"unparsable sheet relationships", "xl/worksheets/_rels/sheet1.xml.rels", "<Relationships><", officecomments.ErrNotOffice},
+	} {
+		data := broken(c.part, c.body)
+		if _, _, err := New().Add(data, officecomments.Anchor{Sheet: "Sheet1", Cell: "D4"}, note); !errors.Is(err, c.want) {
+			t.Errorf("%s: add: %v", c.name, err)
+		}
+		if _, err := New().List(data); !errors.Is(err, c.want) {
+			t.Errorf("%s: list: %v", c.name, err)
+		}
+	}
+}

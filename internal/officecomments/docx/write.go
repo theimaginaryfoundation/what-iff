@@ -224,7 +224,7 @@ func (c *comments) appendTo(key, entries string) error {
 	}
 	root, err := parseXML(data)
 	if err != nil {
-		return officecomments.ErrNotOffice
+		return officecomments.NotOffice(err)
 	}
 	edits := withNamespaces(data, root, rootNamespaces[key])
 	edits = append(edits, appendChildren(data, root, entries))
@@ -246,7 +246,7 @@ func (c *comments) setDone(t *thread, resolved bool) error {
 	}
 	root, err := parseXML(data)
 	if err != nil {
-		return officecomments.ErrNotOffice
+		return officecomments.NotOffice(err)
 	}
 	byPara := map[string]*node{}
 	for _, el := range root.all(nsW15, "commentEx") {

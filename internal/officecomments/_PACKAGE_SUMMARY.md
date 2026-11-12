@@ -9,6 +9,8 @@ Each format works on the file's bytes, writes what the browser writes, and leave
 
 - **`officecomments`** — the shared `Format` interface (`List`, `Add`, `Reply`, `Resolve` over a file's bytes), `Thread`, `Comment`, `Anchor`, the errors the agent's tool turns into refusals, and how people are named in files (`PersonID`, `ProviderUserID`).
   `limits.go`: `Budget` reads zip entries within `MaxPartBytes` each and `MaxReadBytes` together, `MaxXMLDepth` caps nesting (`ErrTooLarge`), and `XMLText` drops the characters XML cannot hold, which every format's escaper applies.
+  `Budget.ReadLarge` reads a part past `MaxPartBytes` within the total (an xlsx worksheet a note is linked from); `NotOffice` keeps a depth refusal `ErrTooLarge`.
+  The pptx and xlsx packages record the first part they could not read or parse and fail the change on it (`pkg.err`), never taking it for a missing part; pptx caches the parts it read.
   `officecommentstest.WellFormed` checks a package's parts with a strict parser, for the formats' tests.
 - **`docx`** — Word comments: comments.xml with commentsExtended, commentsIds, commentsExtensible and people.xml.
   Thread and comment ids are Word's durable ids, as the browser reads them.

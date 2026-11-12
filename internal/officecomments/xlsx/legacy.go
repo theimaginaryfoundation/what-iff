@@ -62,6 +62,7 @@ func (b *book) hasNote(s sheet, ref string) bool {
 	}
 	root, err := scan(data, 2)
 	if err != nil {
+		b.p.fail(b.legacyPath(s), err)
 		return false
 	}
 	if list := root.kid("commentList"); list != nil {
@@ -90,6 +91,7 @@ func (b *book) putLegacy(s sheet, ref, threadID, text string) {
 	}
 	root, err := scan(data, 3)
 	if err != nil {
+		b.p.fail(commentsPath, err)
 		return
 	}
 	pfx := prefix(data, root)
@@ -179,12 +181,13 @@ func (b *book) putShape(s sheet, ref string) {
 	if !ok {
 		return
 	}
-	sheetXML, ok := b.p.read(s.path)
+	sheetXML, ok := b.p.readLarge(s.path)
 	if !ok {
 		return
 	}
 	root, err := scan(sheetXML, 1)
 	if err != nil {
+		b.p.fail(s.path, err)
 		return
 	}
 	vmlPath := ""

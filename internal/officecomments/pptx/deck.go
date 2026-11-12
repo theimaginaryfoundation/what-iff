@@ -74,6 +74,9 @@ func openDeck(data []byte) (*deck, error) {
 	}
 	d := &deck{p: p, presPath: p.relTarget("", relOfficeDoc), legacyNames: map[string]string{}}
 	pres, _ := p.xml(d.presPath)
+	if p.err != nil {
+		return nil, p.err
+	}
 	if d.presPath == "" || !pres.is(nsP, "presentation") {
 		return nil, officecomments.ErrNotOffice
 	}
