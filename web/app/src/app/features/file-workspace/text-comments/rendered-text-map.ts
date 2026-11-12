@@ -10,6 +10,16 @@ import { CommentTextMap } from './text-dom-map';
 
 const WORD = /[\p{L}\p{N}_]+/gu;
 
+/**
+ * What is drawn rather than shown as text: a diagram (its SVG labels and its hidden source) and a
+ * formula (KaTeX's glyphs, or the TeX of a placeholder not drawn yet). Their text is left out of the
+ * map, so a thread is never placed on it; one on its source falls back to the raw view.
+ */
+const DRAWN = '.mermaid-diagram, .katex, .latex-math';
+
+/** Mermaid fences in the source, which are drawn (see DRAWN). */
+const MERMAID_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*mermaid\b[^\n]*\n[\s\S]*?^ {0,3}\1[ \t]*$/gim;
+
 interface Piece {
   node: Text;
   /** Where the node's text starts in the joined text. */
@@ -46,9 +56,12 @@ export class RenderedTextMap implements CommentTextMap {
     this.source = source
       .replace(/\]\([^)]*\)/g, m => `]${' '.repeat(m.length - 1)}`)
       .replace(/^\s*\[[^\]]+\]:\s*\S+.*$/gm, m => ' '.repeat(m.length))
-      .replace(/<[^>\n]+>/g, m => ' '.repeat(m.length));
+      .replace(/<[^>\n]+>/g, m => ' '.repeat(m.length))
+      .replace(MERMAID_FENCE, m => m.replace(/[^\n]/g, ' '));
     let joined = '';
-    const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: node => (node.parentElement?.closest(DRAWN) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
     for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
       this.pieces.push({ node, at: joined.length });
       joined += node.data;

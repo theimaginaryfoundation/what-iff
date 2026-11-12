@@ -9,6 +9,7 @@ import { fakeTextComments } from '../text-comments/fake-text-comments.spec-helpe
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { latexMathExtension } from '../../../core/utils/latex-math.helpers';
+import { mermaidExtension } from '../../../core/utils/mermaid.helpers';
 import { fakeMonaco } from '../editors/fake-monaco.spec-helper';
 import { MONACO_LOADER } from '../editors/monaco/monaco-loader';
 import { TextViewerComponent } from './text-viewer.component';
@@ -33,7 +34,12 @@ describe('TextViewerComponent', () => {
       imports: [TextViewerComponent],
       providers: [
         provideZonelessChangeDetection(),
-        provideMarkdown({ markedExtensions: [{ provide: MARKED_EXTENSIONS, useFactory: latexMathExtension, multi: true }] }),
+        provideMarkdown({
+          markedExtensions: [
+            { provide: MARKED_EXTENSIONS, useFactory: latexMathExtension, multi: true },
+            { provide: MARKED_EXTENSIONS, useFactory: mermaidExtension, multi: true },
+          ],
+        }),
         { provide: MONACO_LOADER, useValue: () => Promise.resolve(fake.monaco) },
         { provide: CommentPeopleService, useValue: { me: signal({ id: 'user:u-1', name: 'Pat Lee' }) } },
         { provide: TextCommentsService, useValue: textComments },
@@ -86,6 +92,20 @@ describe('TextViewerComponent', () => {
     const el = await show(file({ name: 'notes.md', file_type: 'text/markdown' }), 'Norm: $\\lVert x \\rVert$\n\n$$\nx_i^2\n$$');
     await vi.waitFor(() => expect(el.querySelectorAll('.katex')).toHaveLength(2));
     expect(el.querySelectorAll('.katex-display')).toHaveLength(1);
+  });
+
+  it('draws a Mermaid file, with its source a click away', async () => {
+    const source = 'flowchart LR\n  A --> B\n';
+    const el = await show(file({ name: 'flow.mmd', file_type: 'text/vnd.mermaid' }), source);
+    expect(button(el, 'Diagram')).toBeDefined();
+    await vi.waitFor(() =>
+      expect(el.querySelector('.mermaid-diagram .mermaid-diagram__source')?.textContent).toBe('flowchart LR\n  A --> B'),
+    );
+
+    button(el, 'Raw')!.click();
+    fixture.detectChanges();
+    expect(el.querySelector('.mermaid-diagram')).toBeNull();
+    expect(el.querySelector('pre.text-viewer__text')?.textContent).toBe(source);
   });
 
   it('shows a CSV as a table with its header row', async () => {

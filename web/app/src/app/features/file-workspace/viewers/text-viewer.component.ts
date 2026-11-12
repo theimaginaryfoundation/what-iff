@@ -16,6 +16,7 @@ import { MarkdownModule } from 'ngx-markdown';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { renderLatexMath } from '../../../core/utils/latex-math.helpers';
+import { asMermaidMarkdown, renderMermaid } from '../../../core/utils/mermaid.helpers';
 import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 import { CommentAgentService } from '../../office/comments/comment-agent.service';
 import { CommentPeopleService } from '../../office/comments/comment-people.service';
@@ -37,6 +38,7 @@ import {
   MAX_MARKDOWN_RENDER_CHARS,
   parseCsv,
   previewKindFor,
+  rendersAsMarkdown,
 } from '../../gallery/helpers/file-preview.helpers';
 
 /** Code longer than this is shown plain: tokenizing it would stall the viewer. */
@@ -79,7 +81,10 @@ export class TextViewerComponent {
   readonly highlighted = signal<string | null>(null);
   readonly markdownTooBig = computed(() => this.text().length > MAX_MARKDOWN_RENDER_CHARS);
   readonly csv = computed(() => (this.kind() === 'csv' && this.decoded() ? parseCsv(this.text(), csvDelimiterFor(this.file())) : null));
-  readonly canRender = computed(() => this.kind() === 'csv' || (this.kind() === 'markdown' && !this.markdownTooBig()));
+  readonly canRender = computed(() => this.kind() === 'csv' || (rendersAsMarkdown(this.kind()) && !this.markdownTooBig()));
+  /** What the formatted view renders: the text, or a Mermaid file's source as a diagram fence. */
+  readonly markdown = computed(() => (this.kind() === 'mermaid' ? asMermaidMarkdown(this.text()) : this.text()));
+  readonly asMarkdown = computed(() => rendersAsMarkdown(this.kind()));
   readonly showRendered = computed(() => this.canRender() && this.rendered());
 
   private generation = 0;
@@ -98,7 +103,7 @@ export class TextViewerComponent {
   /** Text and Markdown carry comments; a file shown only in part (over 1 MB) does not. */
   readonly hasComments = computed(() => {
     const data = this.decoded();
-    return (this.kind() === 'text' || this.kind() === 'markdown') && !!data && !data.binary && !data.truncated;
+    return (this.kind() === 'text' || rendersAsMarkdown(this.kind())) && !!data && !data.binary && !data.truncated;
   });
   /** Whether comments can be written here (the user may change the file), or only read. */
   /** Comments are shown once they have loaded: the server keeps none for some files it is shown (over 4 MB). */
@@ -160,6 +165,7 @@ export class TextViewerComponent {
 
   onMarkdownReady(): void {
     void renderLatexMath(this.host.nativeElement);
+    void renderMermaid(this.host.nativeElement);
     // Comment anchors over the formatted text, found by their words.
     const markdown = this.host.nativeElement.querySelector<HTMLElement>('.text-viewer__markdown');
     if (markdown && this.hasComments() && this.showRendered()) {

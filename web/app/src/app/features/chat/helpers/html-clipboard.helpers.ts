@@ -8,6 +8,7 @@
 import DOMPurify from 'dompurify';
 
 import { replaceRenderedMathWithTex } from '../../../core/utils/latex-math.helpers';
+import { replaceRenderedDiagramsWithSource } from '../../../core/utils/mermaid.helpers';
 
 export function buildClipboardPayload(doc: Document, selection: Selection): { plainText: string; html: string } {
   if (selection.rangeCount < 1) {
@@ -25,6 +26,7 @@ export function buildClipboardPayload(doc: Document, selection: Selection): { pl
 
 export function sanitizeClipboardContainer(container: HTMLElement): void {
   replaceRenderedMathWithTex(container);
+  replaceRenderedDiagramsWithSource(container);
   replaceTaskCheckboxInputs(container);
   for (const element of containerElementsBottomUp(container)) {
     sanitizeClipboardElement(container, element);

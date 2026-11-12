@@ -18,7 +18,8 @@ import { MarkdownModule } from 'ngx-markdown';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { renderLatexMath } from '../../../core/utils/latex-math.helpers';
-import { previewKindFor } from '../../gallery/helpers/file-preview.helpers';
+import { asMermaidMarkdown, renderMermaid } from '../../../core/utils/mermaid.helpers';
+import { previewKindFor, rendersAsMarkdown } from '../../gallery/helpers/file-preview.helpers';
 import { FileEditor } from './file-editor';
 import { CommentAgentService } from '../../office/comments/comment-agent.service';
 import { CommentPeopleService } from '../../office/comments/comment-people.service';
@@ -64,7 +65,8 @@ export class CodeEditorComponent implements FileEditor {
   readonly dirty = signal(false);
   readonly state = signal<'loading' | 'ready' | 'error'>('loading');
   readonly language = signal('plaintext');
-  readonly isMarkdown = computed(() => previewKindFor(this.file()) === 'markdown');
+  /** Markdown, or a Mermaid file (drawn as a ```mermaid fence): both have a live preview. */
+  readonly isMarkdown = computed(() => rendersAsMarkdown(previewKindFor(this.file())));
   readonly showPreview = signal(true);
 
   // --- comments (ADR 0x045): kept beside the file, written once a save has stored the text ---------
@@ -93,6 +95,10 @@ export class CodeEditorComponent implements FileEditor {
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private onCommentKey: import('monaco-editor').editor.IContextKey<boolean> | null = null;
   readonly previewText = signal('');
+  /** What the preview renders: the text, or a Mermaid file's source as a diagram fence. */
+  readonly previewMarkdown = computed(() =>
+    previewKindFor(this.file()) === 'mermaid' ? asMermaidMarkdown(this.previewText()) : this.previewText(),
+  );
 
   private monaco: Monaco | null = null;
   private editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null;
@@ -274,6 +280,7 @@ export class CodeEditorComponent implements FileEditor {
 
   onMarkdownReady(): void {
     void renderLatexMath(this.host.nativeElement);
+    void renderMermaid(this.host.nativeElement);
     this.paintPreview();
   }
 

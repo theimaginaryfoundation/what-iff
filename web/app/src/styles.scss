@@ -101,6 +101,60 @@ html:has(.app-layout) body {
   overflow-y: hidden;
 }
 
+/* Mermaid diagrams in markdown (see core/utils/mermaid.helpers.ts): drawn in place of the code
+   block, with a small toolbar; a wide diagram scrolls on its own, as display math does. */
+.mermaid-diagram {
+  margin: 0.75rem 0;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-card);
+  padding: 0.5rem;
+}
+
+.mermaid-diagram__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.mermaid-diagram__button {
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0.25rem 0.5rem;
+}
+
+.mermaid-diagram__button:hover,
+.mermaid-diagram__button[aria-pressed="true"] {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.mermaid-diagram__figure {
+  overflow-x: auto;
+  text-align: center;
+}
+
+.mermaid-diagram__figure svg {
+  height: auto;
+  max-width: 100%;
+}
+
+.mermaid-diagram .mermaid-diagram__source {
+  margin: 0;
+}
+
+.mermaid-diagram__error {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  margin: 0.25rem 0 0;
+}
+
 // Commented text on a slide (ADR 0x045), painted with the CSS Custom Highlight API by the slide
 // canvas; highlights are document-wide, so their styles are global.
 ::highlight(whatiff-comment) {

@@ -6,6 +6,7 @@ import { FileAttachment, isImageAttachment } from '../../../../core/models/file-
 import { FileAttachmentService } from '../../../../core/services/file-attachment.service';
 import { saveBlobAsFile } from '../../../../core/utils/download.helpers';
 import { renderLatexMath } from '../../../../core/utils/latex-math.helpers';
+import { renderMermaid } from '../../../../core/utils/mermaid.helpers';
 import { FileWorkspaceService } from '../../../file-workspace/file-workspace.service';
 import { DownloadIconComponent } from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
@@ -163,6 +164,7 @@ export class MessageContentComponent {
 
   onMarkdownReady(): void {
     void renderLatexMath(this.host.nativeElement);
+    void renderMermaid(this.host.nativeElement);
   }
 
   onCopy(event: ClipboardEvent): void {

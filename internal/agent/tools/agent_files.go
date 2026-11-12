@@ -38,6 +38,7 @@ const (
 // without an extension gets ".md".
 var agentFileTypes = map[string]string{
 	".md":    "text/markdown",
+	".mmd":   "text/vnd.mermaid",
 	".txt":   "text/plain",
 	".json":  "application/json",
 	".jsonl": "application/jsonl",

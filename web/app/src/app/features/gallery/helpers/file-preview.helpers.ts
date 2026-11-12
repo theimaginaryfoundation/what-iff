@@ -3,6 +3,7 @@ import { FileAttachment, isImageAttachment } from '../../../core/models/file-att
 /**
  * How the in-tab file viewer shows a file. Everything is read-only.
  * - markdown / csv: rendered, with a toggle back to the raw text.
+ * - mermaid: a Mermaid diagram's source (.mmd), drawn, with a toggle back to the raw text.
  * - text: plain text or source code, never interpreted (HTML and SVG source included).
  * - pdf: the browser's own PDF viewer, where it has one.
  * - image: the bytes as an image (only reached by a direct ?file= link; the grid opens images in the image popup).
@@ -10,7 +11,8 @@ import { FileAttachment, isImageAttachment } from '../../../core/models/file-att
  * - notebook: Jupyter notebooks, our own cells (ADR 0x043 §11).
  * - none: no preview (archives, unknown binaries); download only.
  */
-export type FilePreviewKind = 'markdown' | 'csv' | 'text' | 'pdf' | 'image' | 'spreadsheet' | 'document' | 'slides' | 'notebook' | 'none';
+export type FilePreviewKind =
+  'markdown' | 'mermaid' | 'csv' | 'text' | 'pdf' | 'image' | 'spreadsheet' | 'document' | 'slides' | 'notebook' | 'none';
 
 /** Text bigger than this is cut off in the viewer (download for the rest). */
 export const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024;
@@ -20,6 +22,8 @@ export const MAX_MARKDOWN_RENDER_CHARS = 300_000;
 export const MAX_CSV_TABLE_ROWS = 2_000;
 
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown', '.mdx']);
+const MERMAID_EXTENSIONS = new Set(['.mmd', '.mermaid']);
+const MERMAID_MIME_TYPES = new Set(['text/vnd.mermaid', 'text/x-mermaid', 'application/vnd.mermaid']);
 const SPREADSHEET_EXTENSIONS = new Set(['.xlsx', '.xlsm']);
 const DOCUMENT_EXTENSIONS = new Set(['.docx']);
 const SLIDES_EXTENSIONS = new Set(['.pptx']);
@@ -128,6 +132,7 @@ export function previewKindFor(file: Pick<FileAttachment, 'name' | 'file_type'>)
   const mime = mimeOf(file);
   const ext = fileExtension(file.name);
   if (MARKDOWN_EXTENSIONS.has(ext) || mime === 'text/markdown' || mime === 'text/x-markdown') return 'markdown';
+  if (MERMAID_EXTENSIONS.has(ext) || MERMAID_MIME_TYPES.has(mime)) return 'mermaid';
   if (CSV_EXTENSIONS.has(ext) || mime === 'text/csv' || mime === 'text/tab-separated-values') return 'csv';
   if (mime === 'application/pdf' || ext === '.pdf') return 'pdf';
   if (ext === '.ipynb' || mime === 'application/x-ipynb+json') return 'notebook';
@@ -139,6 +144,11 @@ export function previewKindFor(file: Pick<FileAttachment, 'name' | 'file_type'>)
   if (isImageAttachment(file)) return 'image';
   if (TEXT_EXTENSIONS.has(ext) || mime.startsWith('text/') || TEXT_MIME_TYPES.has(mime)) return 'text';
   return 'none';
+}
+
+/** Whether the kind is shown through markdown (a Mermaid file as a ```mermaid fence). */
+export function rendersAsMarkdown(kind: FilePreviewKind): boolean {
+  return kind === 'markdown' || kind === 'mermaid';
 }
 
 /** The delimiter a CSV-like file uses: tab for .tsv / text/tab-separated-values, else comma. */
@@ -160,6 +170,8 @@ export function fileTypeLabel(file: Pick<FileAttachment, 'name' | 'file_type'>):
   switch (previewKindFor(file)) {
     case 'markdown':
       return 'Markdown';
+    case 'mermaid':
+      return 'Mermaid diagram';
     case 'csv':
       return csvDelimiterFor(file) === '\t' ? 'TSV table' : 'CSV table';
     case 'pdf':
