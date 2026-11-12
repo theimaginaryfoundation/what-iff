@@ -5,7 +5,8 @@
 # Downloads one pinned draw.io release (draw.war from jgraph/drawio), checks its SHA-256, unpacks
 # its static web app into web/diagrams/dist, drops what a static embed does not use (the Java
 # servlets, source maps, cloud integrations), and writes our settings (web/diagrams/PreConfig.js)
-# over the release's own. The site is served from an origin other than the app's.
+# over the release's own, and appends our bridge plugin (web/diagrams/whatiff-bridge.js) to its
+# PostConfig.js. The site is served from an origin other than the app's.
 #
 # Usage: scripts/build-diagrams-site.sh <version> <sha256>   (the Makefile passes the pinned pair)
 set -euo pipefail
@@ -42,6 +43,8 @@ rm -rf "$DIST/WEB-INF" "$DIST/META-INF" "$DIST/connect" "$DIST/js/onedrive" \
   "$DIST/teams.html" "$DIST/onedrive3.html" "$DIST/monday-app-association.json"
 find "$DIST" -name '*.map' -delete
 cp "$DIR/PreConfig.js" "$DIST/js/PreConfig.js"
+# Our bridge (comments on elements) runs as a draw.io plugin, loaded with the release's PostConfig.
+{ printf '\n'; cat "$DIR/whatiff-bridge.js"; } >> "$DIST/js/PostConfig.js"
 cp "$CACHE/LICENSE-$VERSION" "$DIST/LICENSE"
 cat > "$DIST/NOTICE" <<NOTICE
 This site is draw.io $VERSION (https://github.com/jgraph/drawio), Apache License 2.0 (see LICENSE),
