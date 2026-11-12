@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -60,6 +62,26 @@ func TestTakeSteering_KeepsTheDocumentCommentAMessageWasSentFrom(t *testing.T) {
 	store := &queuedSteerStore{queued: []datastore.SteerMessage{{Message: "@Iris tighten this", FileComments: []string{"A comment on plan.md, on: \"major features\""}}}}
 	texts := steerTestAgent(store).takeSteering(context.Background(), promptTestChatCtx())
 	assert.Equal(t, []string{"@Iris tighten this\n\nA comment on plan.md, on: \"major features\""}, texts)
+}
+
+func TestSteering_ALongThreadDoesNotPushOutTheUsersWords(t *testing.T) {
+	thread := "A comment on plan.md, on \"major features\".\n" + strings.Repeat("- Pat: an earlier comment\n", 3000) + "- Pat: the latest"
+	store := &queuedSteerStore{queued: []datastore.SteerMessage{{Message: "@Iris tighten this", FileComments: []string{thread}}}}
+	texts := steerTestAgent(store).takeSteering(context.Background(), promptTestChatCtx())
+	for _, note := range []string{steerUserTurn(texts), steerToolNote(texts)} {
+		assert.LessOrEqual(t, utf8.RuneCountInString(note), maxSteerNoteChars)
+		assert.Contains(t, note, "@Iris tighten this", "the user's words")
+		assert.Contains(t, note, "on plan.md", "what the comment is on")
+		assert.Contains(t, note, "the latest", "the latest comment")
+	}
+	assert.True(t, strings.HasPrefix(steerUserTurn(texts), steerMidRunTag), "the mid-run tag")
+	assert.Contains(t, steerToolNote(texts), "comes from them, not from a tool")
+
+	// Many long messages: the framing stays, the oldest go.
+	long := []string{strings.Repeat("a", 6000), strings.Repeat("b", 6000)}
+	assert.True(t, strings.HasPrefix(steerUserTurn(long), steerMidRunTag))
+	assert.True(t, strings.HasPrefix(steerToolNote(long), "[The user sent these 2 messages"))
+	assert.True(t, strings.HasSuffix(steerToolNote(long), "answer it in your reply."))
 }
 
 func TestTakeSteering_OnlyOnInteractiveTurnsAndSurvivesErrors(t *testing.T) {
