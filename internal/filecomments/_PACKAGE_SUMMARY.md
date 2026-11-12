@@ -15,7 +15,7 @@ Keeps the comments on text, code and image files (ADR 0x045), which have no plac
   A chat copy of a file reads and writes the original's set (`CommentFileID`), so a comment made in a chat shows in the gallery and the other way round.
 - **`Update`** (`agent.go`, ADR 0x046) reads a file's threads with the text they are on, applies a change and writes it, again once when the file or comments changed in between; **`AnchorOn`** places a thread by quoting the text (`ErrQuoteNotFound`, `ErrQuoteAmbiguous`) and **`Lines`** names a range's lines.
 - **`Office`** (`office.go`, ADR 0x046) reads and changes the comments inside Word, PowerPoint and Excel files through the `internal/officecomments` formats, by extension.
-  A change is a new version of the file, saved through `filesave.Service.Replace` over the version read and started again once when someone saved meanwhile (`ErrStaleContent` after that).
+  A change replaces the file's content (no earlier version is kept, ADR 0x043), saved through `filesave.Service.Replace` over the version read and started again once when someone saved meanwhile (`ErrStaleContent` after that).
 - **`MentionContext`** (`mention.go`, ADR 0x046) renders the context a comment that mentions the agent sends with its message: the file, what the thread is on and the thread before the comment, bounded in length; `ShortQuote` is the quote a link to the thread shows.
 - **Images:** every thread is on the whole file (`anchor` null, no quote); no text is read and an edit leaves the threads as they are.
 - **Refusals:** `ErrNotText` for content that is neither an image nor UTF-8 text, or text over `MaxTextBytes` (4 MB).

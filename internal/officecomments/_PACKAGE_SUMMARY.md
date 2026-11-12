@@ -24,9 +24,11 @@ Each format works on the file's bytes, writes what the browser writes, and leave
 
 ## Non-obvious decisions
 
-- **Edits, not rewrites.** XML parts are edited as text at offsets an `encoding/xml` Decoder finds; nothing is marshalled back, which would change namespace prefixes.
+- **Edits, not rewrites.**
+  XML parts are edited as text at offsets an `encoding/xml` Decoder finds; nothing is marshalled back, which would change namespace prefixes.
   Untouched zip entries are copied raw in their original order.
-- **People.** A WhatIff user or agent is a person with the provider `WhatIff` and the user's id, or an agent's whole `agent:<id>`, as its user id; the browser maps them the same way.
+- **People.**
+  A WhatIff user or agent is a person with the provider `WhatIff` and the user's id, or an agent's whole `agent:<id>`, as its user id; the browser maps them the same way.
 - **Known differences from a browser save** (meaning the same, bytes not identical):
   - Word renumbers `w:id` from the highest one rather than from 0.
   - PowerPoint edits a slide's comment part in place rather than regenerating it.

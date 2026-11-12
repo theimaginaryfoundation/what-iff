@@ -44,7 +44,7 @@ Every format has the same right-click items: *New comment* on content that has n
 ### 3. Commenting while viewing
 
 A user who may change a file can comment on it without entering edit mode.
-For Word, PowerPoint and Excel the comment is part of the file, so each comment is saved as a new version of the file as soon as it is made (`CommentSaver`, provided by the workspace).
+For Word, PowerPoint and Excel the comment is part of the file, so the file is saved with each comment as soon as it is made (`CommentSaver`, provided by the workspace); like every save, it replaces the file's content and keeps no earlier version (ADR 0x043).
 A save that would lose content asks first, once per file; a version written elsewhere in the meantime reloads the file rather than overwrite it.
 
 ### 4. Text, code and images: comments kept beside the file
@@ -82,11 +82,11 @@ Deleting an original hands its copies, and its comments, to the earliest copy le
 
 - Comments made here open in Word, PowerPoint and Excel where they were made, and theirs open here.
 - Text and code comments survive edits made anywhere, including by an agent's file tools, without those tools changing.
-- Every comment made while viewing an Office file is a new version of the file.
+- Every comment made while viewing an Office file saves the file again, with no earlier version kept.
 - A file's comments are the same wherever it is opened.
 
 ## Later
 
-- **Agents and comments.** Mentioning the agent in a comment sends the agent a message with the comment as context, and agents reply to and add comments, which show beside their messages and link to the comment in the file.
-  Whether an agent may then edit a user's own file (ADR 0x034 limits it to its own files) is decided with that step.
+Agents taking part in comments, and editing a file they are mentioned on, are ADR 0x046.
+
 - **Regions of an image.** A box drawn on an image would be a separate field of the thread, in fractions of the image's width and height so it does not depend on the image's size; an edit that changes the image's geometry (a crop, a rotation) would move it or put the thread on the whole image, which the stored-object baseline already tells a read about.
