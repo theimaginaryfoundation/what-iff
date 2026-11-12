@@ -99,20 +99,29 @@ describe('file-preview.helpers', () => {
     it('splits the header from the rows', () => {
       expect(parseCsv('name,age\nAda,36\nAlan,41\n')).toEqual({
         header: ['name', 'age'],
-        rows: [['Ada', '36'], ['Alan', '41']],
+        rows: [
+          ['Ada', '36'],
+          ['Alan', '41'],
+        ],
         truncated: false,
       });
     });
 
     it('handles quotes, doubled quotes, delimiters and line breaks inside quotes, and CRLF', () => {
       const table = parseCsv('a,b\r\n"x, y","say ""hi"""\r\n"multi\nline",z');
-      expect(table.rows).toEqual([['x, y', 'say "hi"'], ['multi\nline', 'z']]);
+      expect(table.rows).toEqual([
+        ['x, y', 'say "hi"'],
+        ['multi\nline', 'z'],
+      ]);
     });
 
     it('pads ragged rows and skips blank lines', () => {
       const table = parseCsv('a,b,c\n1\n\n2,3\n');
       expect(table.header).toEqual(['a', 'b', 'c']);
-      expect(table.rows).toEqual([['1', '', ''], ['2', '3', '']]);
+      expect(table.rows).toEqual([
+        ['1', '', ''],
+        ['2', '3', ''],
+      ]);
     });
 
     it('splits on tabs for TSV', () => {

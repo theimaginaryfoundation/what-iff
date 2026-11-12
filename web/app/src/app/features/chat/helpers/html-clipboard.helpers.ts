@@ -196,9 +196,7 @@ function restoreTaskCheckboxMarkers(container: HTMLElement): void {
   while (node) {
     const text = node.textContent ?? '';
     if (text.includes(CHECKED_TASK_MARKER_TOKEN) || text.includes(UNCHECKED_TASK_MARKER_TOKEN)) {
-      node.textContent = text
-        .replaceAll(CHECKED_TASK_MARKER_TOKEN, '[x]')
-        .replaceAll(UNCHECKED_TASK_MARKER_TOKEN, '[ ]');
+      node.textContent = text.replaceAll(CHECKED_TASK_MARKER_TOKEN, '[x]').replaceAll(UNCHECKED_TASK_MARKER_TOKEN, '[ ]');
     }
     node = walker.nextNode();
   }
@@ -232,7 +230,10 @@ function containerElementsBottomUp(root: HTMLElement): HTMLElement[] {
 
 function containerToPlainText(container: HTMLElement): string {
   const raw = renderPlainNodes(Array.from(container.childNodes), 0, false);
-  return raw.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trimEnd();
+  return raw
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd();
 }
 
 function renderPlainNodes(nodes: Node[], depth: number, inPre: boolean): string {
@@ -272,11 +273,9 @@ function renderPlainNodes(nodes: Node[], depth: number, inPre: boolean): string 
   return out;
 }
 
-
 function renderPlainList(list: HTMLElement): string {
   return collectPlainListLines(list, 0).join('\n');
 }
-
 
 function listIndent(depth: number): string {
   return '  '.repeat(depth);
@@ -308,7 +307,6 @@ function collectPlainListLines(list: HTMLElement, depth: number): string[] {
   return lines;
 }
 
-
 function plainListItemLines(item: HTMLElement, marker: string, depth: number): string[] {
   const lines: string[] = [];
   const inlineParts: Node[] = [];
@@ -331,14 +329,12 @@ function plainListItemLines(item: HTMLElement, marker: string, depth: number): s
   return lines;
 }
 
-
 function flushPlainListInline(nodes: Node[], marker: string, depth: number, lines: string[]): void {
   const inline = renderPlainNodes(nodes, 0, false).replace(/\n+/g, ' ').trim();
   if (inline) {
     lines.push(prefixListLine(depth, marker, inline));
   }
 }
-
 
 function listStartIndex(list: HTMLElement): number {
   if (list.tagName !== 'OL') {
@@ -393,4 +389,3 @@ function isBlockTag(tag: string): boolean {
     tag === 'TR'
   );
 }
-

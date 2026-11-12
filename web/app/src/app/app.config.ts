@@ -45,5 +45,5 @@ export const appConfig: ApplicationConfig = {
       deps: [RemoteSyncWakeService],
       useFactory: (wake: RemoteSyncWakeService) => () => wake.start(),
     },
-  ]
+  ],
 };
