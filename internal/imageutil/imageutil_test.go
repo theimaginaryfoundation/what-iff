@@ -107,7 +107,7 @@ func TestNormalizeForUploadKeepsJPEGAsJPEG(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "jpeg", format)
 	require.Equal(t, [2]int{300, 200}, [2]int{cfg.Width, cfg.Height})
-	require.Less(t, output.Len(), inputLen*2, "about the size it came in at, not a PNG's")
+	require.LessOrEqual(t, output.Len(), inputLen*3/2, "about the size it came in at, not a PNG's")
 }
 
 // Few-colour images (masks, sketches, screenshots) are stored with an exact palette:

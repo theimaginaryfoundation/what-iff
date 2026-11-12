@@ -43,16 +43,20 @@ func NormalizeForUpload(input io.Reader, output io.Writer, fileName string, maxP
 		maxPx = DefaultUploadImageMaxPx
 	}
 
-	data, err := io.ReadAll(input)
-	if err != nil {
+	// Only a JPEG's EXIF header is needed as bytes, and it sits at the start of the
+	// file, so the head is kept and the rest is decoded as it streams.
+	head := make([]byte, exifHeadBytes)
+	n, err := io.ReadFull(input, head)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
 		return "", "", fmt.Errorf("read image for upload: %w", err)
 	}
-	src, format, err := image.Decode(bytes.NewReader(data))
+	head = head[:n]
+	src, format, err := image.Decode(io.MultiReader(bytes.NewReader(head), input))
 	if err != nil {
 		return "", "", fmt.Errorf("decode image for upload: %w", err)
 	}
 	if format == "jpeg" {
-		src = applyOrientation(src, jpegOrientation(data))
+		src = applyOrientation(src, jpegOrientation(head))
 	}
 
 	bounds := src.Bounds()

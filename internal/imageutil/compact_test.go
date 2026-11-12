@@ -142,8 +142,13 @@ func TestCompactPNGLeavesOtherFormatsAndBiggerResultsAlone(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, tiny, out)
 
-	_, err = CompactPNG([]byte("not an image"))
-	require.Error(t, err)
+	garbage := []byte("not an image")
+	out, err = CompactPNG(garbage)
+	require.NoError(t, err)
+	require.Equal(t, garbage, out, "not a PNG: returned without decoding")
+
+	_, err = CompactPNG(append([]byte(pngSignature), "truncated"...))
+	require.Error(t, err, "a broken PNG is an error")
 }
 
 func TestCompactPNGForStorageNeverFails(t *testing.T) {

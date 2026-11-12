@@ -21,16 +21,20 @@ import (
 //     see quantizeResiduals. On a 2 MB OpenAI image it saved 63% at 43 dB PSNR,
 //     against 9–14% for the best lossless optimizers.
 
+// pngSignature starts every PNG file.
+const pngSignature = "\x89PNG\r\n\x1a\n"
+
 // CompactPNG re-encodes a PNG as a compact one (see encodeCompactPNG), keeping its
-// dimensions. It returns data unchanged when it is not a PNG, or when the result
-// would not be smaller. Ancillary chunks (text, EXIF, C2PA provenance) are dropped.
+// dimensions. It is a no-op for anything that is not a PNG (checked by signature,
+// before any decoding), and returns data unchanged when the result would not be
+// smaller. Ancillary chunks (text, EXIF, C2PA provenance) are dropped.
 func CompactPNG(data []byte) ([]byte, error) {
-	img, format, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("decode image: %w", err)
-	}
-	if format != "png" {
+	if !bytes.HasPrefix(data, []byte(pngSignature)) {
 		return data, nil
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("decode PNG: %w", err)
 	}
 	var out bytes.Buffer
 	if err := encodeCompactPNG(&out, img); err != nil {

@@ -111,3 +111,19 @@ func TestNormalizeForUploadTurnsAPhoneJPEGUpright(t *testing.T) {
 	r, _, b, _ = img.At(16, 56).RGBA()
 	require.Greater(t, b, r, "bottom is blue")
 }
+
+// A JPEG larger than the head kept for EXIF decodes whole, and still turns upright.
+func TestNormalizeForUploadDecodesPastTheEXIFHead(t *testing.T) {
+	t.Parallel()
+	var big bytes.Buffer
+	require.NoError(t, jpeg.Encode(&big, photoLike(900, 600, nil), &jpeg.Options{Quality: 100}))
+	input := withOrientation(t, big.Bytes(), 6, binary.LittleEndian)
+	require.Greater(t, len(input), exifHeadBytes, "the test needs an image larger than the head")
+
+	var output bytes.Buffer
+	_, _, err := NormalizeForUpload(bytes.NewReader(input), &output, "big.jpg", DefaultUploadImageMaxPx)
+	require.NoError(t, err)
+	cfg, err := jpeg.DecodeConfig(&output)
+	require.NoError(t, err)
+	require.Equal(t, [2]int{600, 900}, [2]int{cfg.Width, cfg.Height})
+}

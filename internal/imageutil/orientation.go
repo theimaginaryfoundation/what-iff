@@ -8,6 +8,14 @@ import (
 // A JPEG's EXIF orientation says how to turn its stored pixels for display. Uploads
 // are re-encoded without metadata, so the turn is applied to the pixels first:
 // otherwise a portrait phone photo would be stored on its side.
+//
+// Only the one tag is read, so this is a minimal parser rather than an EXIF
+// dependency; every offset is bounds-checked and anything unexpected reads as
+// upright, which is what the image did before.
+
+// exifHeadBytes is how much of a JPEG is read for its EXIF: the APP0 and APP1
+// segments come first and an APP1 segment is at most 64 KB.
+const exifHeadBytes = 128 << 10
 
 // jpegOrientation reads the EXIF orientation (1–8) from a JPEG's APP1 segment. It
 // returns 1, upright, when there is none or it cannot be read.
