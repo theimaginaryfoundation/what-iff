@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
 
@@ -59,7 +60,12 @@ func (a *Agent) takeSteering(ctx context.Context, chatCtx *chatContext) []string
 	texts := make([]string, 0, len(msgs))
 	for _, m := range msgs {
 		if t := strings.TrimSpace(m.Message); t != "" {
-			texts = append(texts, t)
+			// A comment sent mid-run keeps what it is about (ADR 0x046), as its own turn would.
+			comments := make([]models.AdditionalContextItem, 0, len(m.FileComments))
+			for _, c := range m.FileComments {
+				comments = append(comments, models.AdditionalContextItem{Type: models.AdditionalContextTypeFileComment, Content: c})
+			}
+			texts = append(texts, withFileCommentContext(t, &models.ChatMessage{AdditionalContext: comments}))
 		}
 	}
 	a.logger.Info("running turn took in follow-up messages",

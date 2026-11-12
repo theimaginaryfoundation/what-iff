@@ -56,6 +56,12 @@ func TestTakeSteering_FramesClaimedMessages(t *testing.T) {
 	assert.Empty(t, a.takeSteering(context.Background(), chatCtx), "claimed once")
 }
 
+func TestTakeSteering_KeepsTheDocumentCommentAMessageWasSentFrom(t *testing.T) {
+	store := &queuedSteerStore{queued: []datastore.SteerMessage{{Message: "@Iris tighten this", FileComments: []string{"A comment on plan.md, on: \"major features\""}}}}
+	texts := steerTestAgent(store).takeSteering(context.Background(), promptTestChatCtx())
+	assert.Equal(t, []string{"@Iris tighten this\n\nA comment on plan.md, on: \"major features\""}, texts)
+}
+
 func TestTakeSteering_OnlyOnInteractiveTurnsAndSurvivesErrors(t *testing.T) {
 	store := &queuedSteerStore{queued: []datastore.SteerMessage{{Message: "hi"}}}
 	a := steerTestAgent(store)
