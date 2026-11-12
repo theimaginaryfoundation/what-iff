@@ -149,7 +149,7 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
               (click)="openComment(ref)"
               [attr.aria-label]="'Open the comment on ' + ref.file_name"
             >
-              <span class="bubble__comment-file">on {{ ref.file_name }}</span>
+              <span class="bubble__comment-file">{{ message().origin === 'Assistant' ? 'Comment on' : 'on' }} {{ ref.file_name }}</span>
               @if (ref.quote) {
                 <span class="bubble__comment-quote">“{{ ref.quote }}”</span>
               }
@@ -395,6 +395,24 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
 
       .bubble__comments--assistant {
         align-items: flex-start;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 0.375rem;
+        margin-top: 0.5rem;
+
+        // The agent's comments, like the files it attaches: a pill each.
+        .bubble__comment-ref {
+          align-items: center;
+          background: var(--color-surface-muted);
+          border: 1px solid var(--color-border-base);
+          border-radius: 9999px;
+          max-width: 22rem;
+          padding: 0.25rem 0.7rem;
+
+          &:hover {
+            border-color: var(--color-accent);
+          }
+        }
       }
 
       .bubble__comment-ref {

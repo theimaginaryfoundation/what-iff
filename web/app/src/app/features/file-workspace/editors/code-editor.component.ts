@@ -73,6 +73,16 @@ export class CodeEditorComponent implements FileEditor {
     () => this.commentsChanged(),
     inject(CommentAgentService).hooks(() => this.file()),
   );
+  /**
+   * Comments the agent makes on this file appear once its reply lands (ADR 0x046), unless there
+   * are unsaved changes: the server's anchors are placed on the saved text, not on what is typed.
+   */
+  private readonly agentCommentsReload = inject(CommentAgentService).watchAgentComments(
+    () => this.file(),
+    () => {
+      if (!this.dirty()) void this.comments.load(this.file().id).catch(() => undefined);
+    },
+  );
   private readonly panel = inject(CommentsPanelState);
   /** The panel opens by itself on a file with open threads, until the user opens or closes it. */
   readonly commentsOpen = computed(() => this.panel.open() ?? this.comments.openCount() > 0);

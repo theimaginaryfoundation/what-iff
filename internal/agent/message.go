@@ -119,8 +119,10 @@ type Agent struct {
 	moveFilesTool  *tools.MoveFilesTool
 	entityTool     *tools.EntityTool
 	agentFileTool  *tools.AgentFileTool
-	chunkPipeline  *filechunker.FileChunkPipeline
-	fileStore      storage.FileStore
+	// fileCommentsTool reads and writes comments on the user's files (ADR 0x046).
+	fileCommentsTool *tools.FileCommentsTool
+	chunkPipeline    *filechunker.FileChunkPipeline
+	fileStore        storage.FileStore
 	// expressionPortraitThumbCache caches thumbnails loaded for expression continuity in message context (bounded).
 	expressionPortraitThumbCache *expressionPortraitThumbCache
 	// tokenCounter is shared for segment token estimates and is safe for concurrent use (stateless tokenizer).
@@ -308,6 +310,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		moveFilesTool:                tools.NewMoveFilesTool(ds, logger),
 		entityTool:                   tools.NewEntityTool(ds, logger),
 		agentFileTool:                tools.NewAgentFileTool(ds, fileStore, logger),
+		fileCommentsTool:             tools.NewFileCommentsTool(ds, fileStore, logger),
 		mcpClient:                    mcpclient.New(nil, logger),
 		chunkPipeline:                newChunkPipelineForMode(cfg.LLMBackend != "vendor", &oaiClient, ds, logger),
 		fileStore:                    fileStore,
@@ -2785,6 +2788,8 @@ func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID,
 		GenerationPersonality: generationPersonality,
 		GenerationMoodID:      generationMoodID,
 		ToolCalls:             toolCalls,
+		// The comments the reply made on the user's files, shown as links (ADR 0x046).
+		CommentRefs: tools.CommentRefsFromCalls(toolCalls),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create chat message: %w", err)

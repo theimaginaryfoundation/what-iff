@@ -237,6 +237,23 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     inject(DestroyRef).onDestroy(unregister);
     return unregister;
   })();
+
+  /** Replies seen so far, so only a new one that commented on files refreshes their comments. */
+  private readonly seenReplies = new Set<string>();
+  private readonly agentCommentsWatch = effect(() => {
+    const messages = this.session.messages();
+    untracked(() => {
+      const first = this.seenReplies.size === 0;
+      const files: string[] = [];
+      for (const m of messages) {
+        if (m.origin !== 'Assistant' || this.seenReplies.has(m.id)) continue;
+        this.seenReplies.add(m.id);
+        if (!first) for (const ref of m.comment_refs ?? []) files.push(ref.file_id);
+      }
+      this.commentAgent.agentCommented(files);
+    });
+  });
+  private readonly commentAgent = inject(CommentAgentService);
   readonly selectedPersonalityAccentColor = computed<string | null>(() => {
     const personality = this.selectedPersonality();
     if (personality) {

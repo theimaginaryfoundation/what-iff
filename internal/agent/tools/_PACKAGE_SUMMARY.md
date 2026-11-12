@@ -22,6 +22,9 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   - `move_files` — files gallery files (images, documents, any upload) in a folder or back at the top level (`move_files.go`; tests in `move_files_test.go`).
     A personality's documents stay attached to it; only the folder label changes.
   - `AgentFileTool` — `agent_file_write` and `agent_file_read` (ADR 0x034): loadable tools for an agent's own text files, stored as ordinary file attachments under `users/{uid}/agent/` and never chunked (`agent_files.go`, `agent_files_write.go`, `agent_files_read.go`, `agent_files_patch.go`; tests beside them).
+  - `FileCommentsTool` — `file_comments` (ADR 0x046, `file_comments.go`): lists, replies to, adds and resolves comment threads on any of the user's text, code and image files through `filecomments.Service.Update`.
+    It writes as `agent:<personality id>` (`AgentCommentAuthor`) and places a new thread by quoting the file's text.
+    Each write returns a `comment_ref`; `CommentRefsFromCalls` turns a turn's calls into the reply's `comment_refs`, one per thread.
     An agent may change only files its personality created (with no personality, its conversation); user uploads are read-only and can be copied.
     The top-level `skills/` folder is reserved for skill bundles; agents cannot write into it.
   - Shared file helpers (`user_files.go`): `ResolveUserFile` (an id or `folder/name` path, with one set of refusals), `ReadFileText`, `ReadableAsText`, `FilePath`, `SplitFilePath`, and `FileRefusal` / `AsFileRefusal` for refusals meant for the model.

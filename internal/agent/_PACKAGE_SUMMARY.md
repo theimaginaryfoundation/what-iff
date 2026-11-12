@@ -193,6 +193,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   It is a no-op when none is linked, runs detached on the lifecycle context, and fires on success only.
 - **Model context rules** (segment ordering, caching prefix, when **not** to hand-build `ResponseNewParams`) are documented in [architecture summary](../../docs/ARCHITECTURE_SUMMARY.md) under **Model context and providers** and **When to build `ResponseNewParams` by hand**.
 - **`messageContextBuilder.build`** requires non-nil telemetry with a non-nil logger (see architecture doc).
+- **Agent comments** (ADR 0x046): `saveAgentResponse` sets the reply's `comment_refs` from its `file_comments` calls (`tools.CommentRefsFromCalls`).
 - **Document comment context** (ADR 0x046, `comment_context.go`): a `FILE_COMMENT` item is rendered in its own user turn, after the message text (`withFileCommentContext`, current turn and history), not merged by `appendMergedAdditionalContext`.
   The after-inference rewrite of a message's context in `job_phase.go` keeps it (`sentWithMessage`) and replaces only the memories.
 - **Prefetched memories** for a user turn are persisted on that user message (`additional_context` with type `MEMORY`) in **`persistInferencePhase`** (`job_phase.go`) so later turns can merge them with history; **`mergeAdditionalContextItems`** dedupes by type+scope+identity and **`appendMergedAdditionalContext`** emits `SegmentKindMemoryContext` (and `SegmentKindDeveloperContext` for other types).

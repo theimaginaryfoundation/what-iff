@@ -74,4 +74,21 @@ describe('CommentAgentService', () => {
       },
     ]);
   });
+
+  it('reloads an open file the agent commented on, once per reply', () => {
+    const reload = vi.fn();
+    const file = signal<{ id: string } | null>({ id: 'f-1' });
+    TestBed.runInInjectionContext(() => service.watchAgentComments(file, reload));
+    TestBed.tick();
+    expect(reload).not.toHaveBeenCalled();
+    service.agentCommented(['f-2']);
+    TestBed.tick();
+    expect(reload).not.toHaveBeenCalled();
+    service.agentCommented(['f-1', 'f-2']);
+    TestBed.tick();
+    expect(reload).toHaveBeenCalledTimes(1);
+    service.agentCommented([]);
+    TestBed.tick();
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
 });

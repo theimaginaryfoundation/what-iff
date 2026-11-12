@@ -1,4 +1,4 @@
-import { Injectable, Signal, computed, inject, signal } from '@angular/core';
+import { Injectable, Signal, computed, effect, inject, signal, untracked } from '@angular/core';
 
 import { CommentMessage, CommentRef } from '../../../core/models/message.model';
 import { FileWorkspaceService } from '../../file-workspace/file-workspace.service';
@@ -46,6 +46,26 @@ export class CommentAgentService {
     const chatId = this.workspace.chatId();
     return host && chatId && host.chatId() === chatId ? host.agent() : null;
   });
+
+  /** The files the agent's last reply commented on, and a count that changes with every reply. */
+  private readonly agentComments = signal<{ fileIds: ReadonlySet<string>; n: number }>({ fileIds: new Set(), n: 0 });
+
+  /** The agent's reply commented on these files: an open one shows its comments again. */
+  agentCommented(fileIds: readonly string[]): void {
+    if (fileIds.length) this.agentComments.update(c => ({ fileIds: new Set(fileIds), n: c.n + 1 }));
+  }
+
+  /**
+   * Calls reload whenever the agent comments on the file (call in an injection context). The
+   * comments panel of a file open while the agent replies shows what it wrote once the reply lands.
+   */
+  watchAgentComments(file: () => { id: string } | null | undefined, reload: () => void): void {
+    effect(() => {
+      const { fileIds, n } = this.agentComments();
+      const id = untracked(file)?.id;
+      if (n && id && fileIds.has(id)) untracked(reload);
+    });
+  }
 
   /** Registers the chat shown now; the returned function unregisters it. */
   register(host: CommentAgentHost): () => void {

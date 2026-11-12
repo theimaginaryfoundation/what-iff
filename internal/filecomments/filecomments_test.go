@@ -231,3 +231,57 @@ func TestAnImagesThreadsAreOnTheWholeFileAndOutliveAnEdit(t *testing.T) {
 		t.Fatalf("stale: %v", err)
 	}
 }
+
+func TestAnchorOnAQuote(t *testing.T) {
+	text := "🙂 ship it\nship it again\n"
+	if _, err := AnchorOn(text, "ship it", 0); !errors.Is(err, ErrQuoteAmbiguous) {
+		t.Fatalf("ambiguous: %v", err)
+	}
+	at, err := AnchorOn(text, "ship it", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// UTF-16 offsets: the emoji is two units, "🙂 ship it\n" is 11.
+	if at.Start != 11 || at.End != 18 {
+		t.Fatalf("second at %+v", at)
+	}
+	if first, last := Lines(text, *at); first != 2 || last != 2 {
+		t.Fatalf("lines %d-%d", first, last)
+	}
+	if at, err := AnchorOn(text, "again", 0); err != nil || at.Start != 19 {
+		t.Fatalf("unique %+v %v", at, err)
+	}
+	if _, err := AnchorOn(text, "nope", 0); !errors.Is(err, ErrQuoteNotFound) {
+		t.Fatalf("missing: %v", err)
+	}
+	if _, err := AnchorOn(text, "ship it", 3); !errors.Is(err, ErrQuoteNotFound) {
+		t.Fatalf("occurrence past the end: %v", err)
+	}
+}
+
+func TestUpdateWritesAChangeOnTheCurrentText(t *testing.T) {
+	svc, store, _ := setup(line)
+	ctx := context.Background()
+	got, err := svc.Update(ctx, uuid.New(), store.file.ID, func(cur *Current) ([]models.FileCommentThread, error) {
+		if cur.Text != line || cur.Image || len(cur.Threads) != 0 {
+			t.Fatalf("current %+v", cur)
+		}
+		at, err := AnchorOn(cur.Text, "inline comment", 0)
+		if err != nil {
+			return nil, err
+		}
+		return append(cur.Threads, models.FileCommentThread{ID: "a1", Anchor: at, Comments: []models.FileComment{{ID: "a1", Text: "Agent here"}}}), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Threads) != 1 || got.Threads[0].Quote != "inline comment" || got.Revision != 1 {
+		t.Fatalf("got %+v", got)
+	}
+	// A change that fails writes nothing.
+	if _, err := svc.Update(ctx, uuid.New(), store.file.ID, func(*Current) ([]models.FileCommentThread, error) {
+		return nil, ErrQuoteNotFound
+	}); !errors.Is(err, ErrQuoteNotFound) || store.puts != 1 {
+		t.Fatalf("failed change: %v, %d puts", err, store.puts)
+	}
+}
