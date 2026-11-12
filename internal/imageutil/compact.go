@@ -42,6 +42,18 @@ func CompactPNG(data []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// CompactPNGForStorage is CompactPNG for code about to store an image: it returns
+// the compact PNG, or data unchanged when data is not a PNG, would not shrink, or
+// cannot be decoded (the caller stores what it has rather than nothing). Every path
+// that stores a generated image goes through it (ADR 0x047 §9).
+func CompactPNGForStorage(data []byte) []byte {
+	compact, err := CompactPNG(data)
+	if err != nil {
+		return data
+	}
+	return compact
+}
+
 // encodeCompactPNG writes img as a compact PNG at the default zlib level (the best
 // level saved under 1% for twice the time).
 func encodeCompactPNG(w io.Writer, img image.Image) error {

@@ -127,7 +127,9 @@ Uploads and generated images keep a widely supported format, and are stored as s
   - an exact palette when the image has at most 256 colours (masks, sketches, diagrams, most screenshots), which is lossless and several times smaller;
   - otherwise, near-lossless **residual quantization**: each colour channel is rebuilt as the pixel above it plus the original difference rounded to a multiple of 6 (ties towards zero), so PNG's Up filter sees long runs of a few values. No channel moves more than 3 of 255, alpha is kept exactly, and the file is a plain 8-bit PNG.
 
-Generated images are stored through `CompactPNG` too (`Agent.compactGeneratedImage`): vendors write large PNGs, and OpenAI's are compressed at zlib's fastest level.
+Generated images are stored through `CompactPNG` too (`imageutil.CompactPNGForStorage`): vendors write large PNGs, and OpenAI's are compressed at zlib's fastest level.
+Every path that stores one does so: the shared save of tool images with their message (`generate_image`, MCP tools and any other tool), OpenAI's built-in `image_generation` tool, personality portraits and expression-grid cells.
+A save from the image editor is stored as written, since what it edits was already compacted.
 Measured on a 1536 × 1024 OpenAI image (2,005 KB):
 
 | Encoding (all PNG) | Size | PSNR |

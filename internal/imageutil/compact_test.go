@@ -145,3 +145,11 @@ func TestCompactPNGLeavesOtherFormatsAndBiggerResultsAlone(t *testing.T) {
 	_, err = CompactPNG([]byte("not an image"))
 	require.Error(t, err)
 }
+
+func TestCompactPNGForStorageNeverFails(t *testing.T) {
+	t.Parallel()
+	original := encodePNG(t, photoLike(256, 192, nil))
+	require.Less(t, len(CompactPNGForStorage(original)), len(original))
+	garbage := []byte("not an image")
+	require.Equal(t, garbage, CompactPNGForStorage(garbage), "stored as it came rather than lost")
+}

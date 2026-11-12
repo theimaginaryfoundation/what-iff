@@ -336,6 +336,8 @@ func (a *Agent) uploadExpressionCellAttachment(ctx context.Context, userID, pers
 	if len(pngBytes) == 0 {
 		return uuid.Nil, fmt.Errorf("empty cell png")
 	}
+	// Stored compact, like every generated image (ADR 0x047 §9).
+	pngBytes = imageutil.CompactPNGForStorage(pngBytes)
 	name := fmt.Sprintf("expression-%s.png", expressionKey)
 
 	created, err := a.ds.CreateFileAttachment(ctx, userID, models.FileAttachment{

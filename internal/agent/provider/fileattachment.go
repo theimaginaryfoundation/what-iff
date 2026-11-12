@@ -61,6 +61,8 @@ func (a *OpenAIProvider) saveImageAttachment(ctx context.Context, userID, chatMe
 		return
 	}
 
+	// Stored compact, like every generated image (ADR 0x047 §9).
+	rawBytes = imageutil.CompactPNGForStorage(rawBytes)
 	imgKey := storage.FileKeyForImage(userID, created.ID, imageName)
 	if err := a.fileStore.UploadFile(ctx, imgKey, rawBytes, "image/png"); err != nil {
 		a.zapLog().Error("failed to upload generated image to S3; image will not be available in the gallery",

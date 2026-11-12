@@ -3,20 +3,19 @@ package agent
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
+	"database/sql/driver"
 	"image"
 	"image/color"
 	"image/png"
 	"math/rand"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
-	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 )
 
 // noisyPNG is a photo-like PNG (gradients plus noise) as an image vendor would write it.
@@ -35,42 +34,30 @@ func noisyPNG(t *testing.T, w, h int) []byte {
 	return buf.Bytes()
 }
 
-func TestCompactGeneratedImage(t *testing.T) {
+// An expression cell (a generated image) is stored as a compact PNG, with its thumbnail.
+func TestUploadExpressionCellAttachment_StoresACompactPNG(t *testing.T) {
 	t.Parallel()
-	a := &Agent{logger: zap.NewNop()}
-	raw := noisyPNG(t, 256, 192)
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
 
-	out := a.compactGeneratedImage(provider.GeneratedImage{Base64: base64.StdEncoding.EncodeToString(raw), MIMEType: "image/png"})
-	compact, err := base64.StdEncoding.DecodeString(out.Base64)
+	uid, pid, attID := uuid.New(), uuid.New(), uuid.New()
+	any := sqlmock.AnyArg()
+	expectCreatePersonalityAttachmentWithInsert(mock, uid, pid, attID,
+		[]driver.Value{"expression-calm.png", "image/png", "expressions/aster", false, any, "user", any, any, any, any})
+	mock.ExpectExec("UPDATE `file_attachments`").WillReturnResult(sqlmock.NewResult(0, 1))
+
+	store := newRecordingFileStore()
+	a := &Agent{ds: ds, logger: zap.NewNop(), fileStore: store}
+	raw := noisyPNG(t, 256, 192)
+	_, err := a.uploadExpressionCellAttachment(context.Background(), uid, pid, "expressions/aster", "calm", raw)
 	require.NoError(t, err)
-	require.Less(t, len(compact), len(raw))
-	img, err := png.Decode(bytes.NewReader(compact))
+
+	stored := store.objects[storage.FileKeyForPersonality(uid, pid, attID, "expression-calm.png")]
+	require.NotEmpty(t, stored)
+	require.Less(t, len(stored), len(raw))
+	img, err := png.Decode(bytes.NewReader(stored))
 	require.NoError(t, err)
 	require.Equal(t, image.Rect(0, 0, 256, 192), img.Bounds())
-	require.Equal(t, "image/png", out.MIMEType)
-
-	jpeg := provider.GeneratedImage{Base64: "/9j/4AAQ", MIMEType: "image/jpeg"}
-	require.Equal(t, jpeg, a.compactGeneratedImage(jpeg), "another format is kept as sent")
-	broken := provider.GeneratedImage{Base64: base64.StdEncoding.EncodeToString([]byte("not a png")), MIMEType: "image/png"}
-	require.Equal(t, broken, a.compactGeneratedImage(broken), "what cannot be decoded is kept as sent")
-}
-
-// The attachment the tool returns, which is what gets stored, is the compact PNG.
-func TestGenerateImageTool_StoresGeneratedPNGsCompacted(t *testing.T) {
-	t.Parallel()
-	raw := noisyPNG(t, 256, 192)
-	gen := &fakeImageGenerator{provider: models.ModelProviderOpenAI, image: provider.GeneratedImage{Base64: base64.StdEncoding.EncodeToString(raw), MIMEType: "image/png"}}
-	a := &Agent{logger: zap.NewNop(), imageGenerators: map[models.ModelProvider]provider.ImageGenerator{models.ModelProviderOpenAI: gen}}
-
-	args, err := json.Marshal(map[string]any{"prompt": "a gradient", "count": 2})
-	require.NoError(t, err)
-	_, atts, err := a.generateImageTool(context.Background(), &models.Chat{ID: uuid.New(), UserID: uuid.New()}, args)
-	require.NoError(t, err)
-	require.Len(t, atts, 2)
-	for _, att := range atts {
-		stored, err := base64.StdEncoding.DecodeString(att.FileContent)
-		require.NoError(t, err)
-		require.Less(t, len(stored), len(raw))
-		require.Equal(t, "image/png", att.FileType)
-	}
+	require.Contains(t, store.objects, storage.FileKeyForImageThumbnail(uid, attID))
+	require.NoError(t, mock.ExpectationsWereMet())
 }
