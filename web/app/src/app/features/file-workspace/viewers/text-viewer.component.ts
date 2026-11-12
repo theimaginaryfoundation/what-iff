@@ -93,11 +93,6 @@ export class TextViewerComponent {
     () => this.comments.autosave(),
     inject(CommentAgentService).hooks(() => this.file()),
   );
-  /** Comments the agent makes on this file while it is shown appear once its reply lands (ADR 0x046). */
-  private readonly agentCommentsReload = inject(CommentAgentService).watchAgentComments(
-    () => this.file(),
-    () => void this.comments.load(this.file().id).catch(() => undefined),
-  );
   private readonly panel = inject(CommentsPanelState);
   /** Text and Markdown carry comments; a file shown only in part (over 1 MB) does not. */
   readonly hasComments = computed(() => {

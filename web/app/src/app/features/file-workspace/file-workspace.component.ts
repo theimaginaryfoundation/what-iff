@@ -396,14 +396,14 @@ export class FileWorkspaceComponent implements CommentSaver {
   }
 
   /**
-   * Comments the agent writes into a Word, PowerPoint or Excel file make a new version of it (ADR
-   * 0x046): the file shown is reloaded once the reply lands, unless there is unsaved work in it.
+   * The agent's reply changed the file shown (ADR 0x046): it commented on it (in an Office file,
+   * a new version of it) or edited it. The file is shown as stored now, and its comments with it,
+   * unless there is unsaved work in it.
    */
   private readonly agentCommentsReload = inject(CommentAgentService).watchAgentComments(
     () => this.file(),
     () => {
-      const kind = this.kind();
-      if ((kind === 'document' || kind === 'slides' || kind === 'spreadsheet') && !this.holdsWork()) this.reloadContent();
+      if (!this.holdsWork()) this.reloadContent();
     },
   );
 

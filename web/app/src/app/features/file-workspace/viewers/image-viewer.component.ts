@@ -46,11 +46,6 @@ export class ImageViewerComponent {
     () => this.comments.autosave(),
     inject(CommentAgentService).hooks(() => this.file()),
   );
-  /** Comments the agent makes on this file while it is shown appear once its reply lands (ADR 0x046). */
-  private readonly agentCommentsReload = inject(CommentAgentService).watchAgentComments(
-    () => this.file(),
-    () => void this.comments.load(this.file().id).catch(() => undefined),
-  );
   private readonly panel = inject(CommentsPanelState);
   /** Whether the server keeps comments for this image (set once they have loaded). */
   readonly hasComments = signal(false);
