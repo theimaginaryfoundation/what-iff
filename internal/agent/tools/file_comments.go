@@ -13,6 +13,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/filecomments"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
+	"github.com/theimaginaryfoundation/what-iff/internal/officecomments"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
 )
@@ -29,12 +30,12 @@ const fileCommentsToolName = "file_comments"
 const fileCommentMaxText = 8000
 
 // FileCommentsDescription is the agent-facing description of file_comments.
-const FileCommentsDescription = `Read and write the comment threads on a file: remarks people leave on parts of it, as in a word processor, with replies. Works on text and code files and images (an image's threads are on the whole image).
+const FileCommentsDescription = `Read and write the comment threads on a file: remarks people leave on parts of it, as in a word processor, with replies. Works on text and code files, images (an image's threads are on the whole image), and Word, PowerPoint and Excel files (their comments are saved in the file, as a new version of it).
 
 action:
 - "list": the file's threads: each one's id, what it is on (the quoted text with its lines, or the whole file), whether it is resolved, and its comments.
 - "reply": add text to the thread thread_id.
-- "add": start a thread with text. quote is the exact text of the file the thread is about, copied from the file (a few words or a line, enough to be unique); when the same text appears more than once, occurrence picks one (1 = first). Leave quote empty for a thread on the whole file.
+- "add": start a thread with text. quote is the exact text of the file the thread is about, copied from the file (a few words or a line, enough to be unique); when the same text appears more than once, occurrence picks one (1 = first). Leave quote empty for a thread on the whole file (not in Word, where a comment needs text). PowerPoint: quote is text in a shape, and slide (1-based) limits it to one slide; slide alone puts the thread on the slide. Excel: cell (e.g. "B3") on sheet (its name; empty for the first), one thread per cell (reply to an existing one instead).
 - "resolve": mark thread_id resolved (resolved=true), or open it again (resolved=false).
 
 Comments are plain text, shown as written: no Markdown (no **bold**, lists or headings). Keep them short, like a reviewer's note.
@@ -55,6 +56,9 @@ var FileCommentsToolSpec = FunctionToolSpec{
 		"quote":      map[string]interface{}{"type": "string", "description": "Exact text of the file the new thread is on (add). Empty for the whole file."},
 		"occurrence": map[string]interface{}{"type": "integer", "minimum": 1, "description": "Which appearance of quote, when it appears more than once (add). 1 = first."},
 		"resolved":   map[string]interface{}{"type": "boolean", "description": "Resolve (true) or reopen (false) the thread (resolve)."},
+		"slide":      map[string]interface{}{"type": "integer", "minimum": 1, "description": "PowerPoint (add): the slide, 1-based."},
+		"sheet":      map[string]interface{}{"type": "string", "description": "Excel (add): the sheet's name; empty for the first sheet."},
+		"cell":       map[string]interface{}{"type": "string", "description": "Excel (add): the cell, e.g. 'B3'."},
 	},
 	Required: []string{"action", "file"},
 }
@@ -67,6 +71,9 @@ type fileCommentsArgs struct {
 	Quote      string `json:"quote"`
 	Occurrence int    `json:"occurrence"`
 	Resolved   *bool  `json:"resolved"`
+	Slide      int    `json:"slide"`
+	Sheet      string `json:"sheet"`
+	Cell       string `json:"cell"`
 }
 
 type fileCommentView struct {
@@ -78,7 +85,9 @@ type fileCommentView struct {
 type fileThreadView struct {
 	ID string `json:"id"`
 	// On is what the thread is on: the quoted text, or "the whole file".
-	On        string            `json:"on"`
+	On string `json:"on"`
+	// Where is where that is in an Office file ("slide 2", "sheet Sheet1, cell B3").
+	Where     string            `json:"where,omitempty"`
 	FirstLine int               `json:"first_line,omitempty"`
 	LastLine  int               `json:"last_line,omitempty"`
 	Resolved  bool              `json:"resolved,omitempty"`
@@ -104,8 +113,24 @@ type fileCommentsService interface {
 type FileCommentsTool struct {
 	files    UserFileLookup
 	comments fileCommentsService
-	logger   *zap.Logger
-	now      func() time.Time
+	// office reads and writes the comments inside Word, PowerPoint and Excel files; nil leaves
+	// them unsupported.
+	office officeComments
+	logger *zap.Logger
+	now    func() time.Time
+}
+
+// officeComments is the part of filecomments.Office the tool uses.
+type officeComments interface {
+	FormatOf(file *models.FileAttachment) officecomments.Format
+	List(ctx context.Context, userID, id uuid.UUID) ([]officecomments.Thread, error)
+	Change(ctx context.Context, userID uuid.UUID, chatID *uuid.UUID, id uuid.UUID, change func(officecomments.Format, []byte) ([]byte, string, error)) (string, error)
+}
+
+// WithOffice sets how the tool reads and writes comments in Office files.
+func (t *FileCommentsTool) WithOffice(office officeComments) *FileCommentsTool {
+	t.office = office
+	return t
 }
 
 // NewFileCommentsTool constructs a FileCommentsTool over the datastore and object store.
@@ -142,6 +167,17 @@ func (t *FileCommentsTool) Run(ctx context.Context, chat *models.Chat, input []b
 	}
 	ref := &agentFileRef{ID: att.ID.String(), Path: FilePath(att)}
 	var res fileCommentsResult
+	if t.office != nil && t.office.FormatOf(att) != nil {
+		res, err = t.runOffice(ctx, chat, att, args)
+		if msg, ok := refusalOf(err); ok {
+			return t.refuse(msg)
+		}
+		if err != nil {
+			return "", err
+		}
+		res.File = ref
+		return marshalToolResult(res, fileCommentsToolName)
+	}
 	switch args.Action {
 	case "list":
 		res, err = t.list(ctx, chat, att)
@@ -178,6 +214,16 @@ func refusalOf(err error) (string, bool) {
 		return err.Error() + "; copy the quote exactly from the file (read it with agent_file_read)", true
 	case errors.Is(err, filecomments.ErrQuoteAmbiguous):
 		return err.Error() + "; quote more of the text, or give occurrence", true
+	case errors.Is(err, officecomments.ErrNoThread):
+		return "no thread with that id on this file; list its threads first", true
+	case errors.Is(err, officecomments.ErrQuoteNotFound):
+		return err.Error() + "; copy the quote exactly from the file", true
+	case errors.Is(err, officecomments.ErrQuoteAmbiguous):
+		return err.Error() + "; quote more of the text, or give occurrence", true
+	case errors.Is(err, officecomments.ErrBadAnchor):
+		return err.Error() + "; check the quote, slide, sheet or cell (Word needs a quote; Excel a cell without a thread)", true
+	case errors.Is(err, officecomments.ErrNotOffice):
+		return "the file could not be read as an Office file", true
 	case errors.Is(err, filecomments.ErrRevision), errors.Is(err, filecomments.ErrStaleContent):
 		return "the file or its comments are changing right now; try again", true
 	}
@@ -320,4 +366,82 @@ func CommentRefsFromCalls(calls []*models.ToolCall) []modeltypes.CommentRef {
 		out = append(out, *res.CommentRef)
 	}
 	return out
+}
+
+// runOffice handles a call on a Word, PowerPoint or Excel file, whose comments are in the file.
+func (t *FileCommentsTool) runOffice(ctx context.Context, chat *models.Chat, att *models.FileAttachment, args fileCommentsArgs) (fileCommentsResult, error) {
+	if args.Action == "list" {
+		threads, err := t.office.List(ctx, chat.UserID, att.ID)
+		if err != nil {
+			return fileCommentsResult{}, err
+		}
+		res := fileCommentsResult{Threads: make([]fileThreadView, 0, len(threads))}
+		for _, th := range threads {
+			res.Threads = append(res.Threads, officeThreadView(th))
+		}
+		return res, nil
+	}
+	text := strings.TrimSpace(args.Text)
+	switch args.Action {
+	case "reply", "add":
+		if text == "" {
+			return fileCommentsResult{}, fileRefusalf("text is required")
+		}
+		if len(text) > fileCommentMaxText {
+			return fileCommentsResult{}, fileRefusalf("a comment can be at most %d characters", fileCommentMaxText)
+		}
+	case "resolve":
+		if args.Resolved == nil {
+			return fileCommentsResult{}, fileRefusalf("resolved is required: true to resolve, false to reopen")
+		}
+	default:
+		return fileCommentsResult{}, fileRefusalf(`action must be "list", "reply", "add" or "resolve"`)
+	}
+	authorID, authorName := AgentCommentAuthor(chat)
+	comment := officecomments.Comment{AuthorID: authorID, AuthorName: authorName, CreatedAt: t.now().UTC(), Text: text}
+	chatID := chat.ID
+	threadID, err := t.office.Change(ctx, chat.UserID, &chatID, att.ID, func(f officecomments.Format, data []byte) ([]byte, string, error) {
+		switch args.Action {
+		case "add":
+			at := officecomments.Anchor{Quote: args.Quote, Occurrence: args.Occurrence, Slide: args.Slide, Sheet: args.Sheet, Cell: args.Cell}
+			return f.Add(data, at, comment)
+		case "reply":
+			out, err := f.Reply(data, args.ThreadID, comment)
+			return out, args.ThreadID, err
+		default:
+			out, err := f.Resolve(data, args.ThreadID, *args.Resolved)
+			return out, args.ThreadID, err
+		}
+	})
+	if err != nil {
+		return fileCommentsResult{}, err
+	}
+	// Read back what was written, for the result and the reply's link.
+	threads, err := t.office.List(ctx, chat.UserID, att.ID)
+	if err != nil {
+		return fileCommentsResult{}, err
+	}
+	for _, th := range threads {
+		if th.ID != threadID {
+			continue
+		}
+		view := officeThreadView(th)
+		commentID := th.ID
+		if args.Action == "reply" && len(th.Comments) > 0 {
+			commentID = th.Comments[len(th.Comments)-1].ID
+		}
+		return fileCommentsResult{
+			Thread:     &view,
+			CommentRef: &modeltypes.CommentRef{FileID: att.ID, FileName: att.Name, ThreadID: th.ID, CommentID: commentID, Quote: filecomments.ShortQuote(th.On)},
+		}, nil
+	}
+	return fileCommentsResult{}, fmt.Errorf("thread %s missing after write", threadID)
+}
+
+func officeThreadView(th officecomments.Thread) fileThreadView {
+	v := fileThreadView{ID: th.ID, On: th.On, Where: th.Where, Resolved: th.Resolved}
+	for _, c := range th.Comments {
+		v.Comments = append(v.Comments, fileCommentView{ID: c.ID, Author: c.AuthorName, Text: c.Text})
+	}
+	return v
 }

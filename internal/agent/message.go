@@ -20,6 +20,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/filecomments"
 	"github.com/theimaginaryfoundation/what-iff/internal/filesave"
 	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
@@ -328,8 +329,11 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		localLLM:                     cfg.LLMBackend == "local",
 		localLLMModel:                cfg.LocalLLMModel,
 	}
-	// The agent changes a user's file it was granted the way the file workspace saves it (ADR 0x046).
-	a.agentFileTool.WithUserFileSaver(filesave.New(ds, fileStore, a.chunkPipeline, logger))
+	// The agent changes a user's file it was granted, and the comments inside Office files, the way
+	// the file workspace saves a file (ADR 0x046).
+	fileSaver := filesave.New(ds, fileStore, a.chunkPipeline, logger)
+	a.agentFileTool.WithUserFileSaver(fileSaver)
+	a.fileCommentsTool.WithOffice(filecomments.NewOffice(ds, fileStore, fileSaver, officeCommentFormats()))
 	a.listTool.SetMCPDiscoverer(a.mcpClient)
 	if a.lifecycleCtx == nil {
 		a.lifecycleCtx = context.Background()

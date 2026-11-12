@@ -25,6 +25,7 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
     A user's file the user mentioned the agent in a comment on (`HasFileEditGrant`, ADR 0x046) can have its content changed too (`resolveChangeable`), saved through `filesave.Service.Replace` over the version read; delete, move and rename stay limited to the agent's own files (`resolveOwned`).
   - `FileCommentsTool` — `file_comments` (ADR 0x046, `file_comments.go`): lists, replies to, adds and resolves comment threads on any of the user's text, code and image files through `filecomments.Service.Update`.
     It writes as `agent:<personality id>` (`AgentCommentAuthor`) and places a new thread by quoting the file's text.
+    On Word, PowerPoint and Excel files it goes through `filecomments.Office` (`WithOffice`) instead, with Office anchors (`slide`, `sheet`, `cell`), and each change saves a new version of the file.
     Each write returns a `comment_ref`; `CommentRefsFromCalls` turns a turn's calls into the reply's `comment_refs`, one per thread.
     An agent may change only files its personality created (with no personality, its conversation); user uploads are read-only and can be copied.
     The top-level `skills/` folder is reserved for skill bundles; agents cannot write into it.

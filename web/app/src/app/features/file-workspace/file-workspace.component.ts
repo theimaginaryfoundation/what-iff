@@ -34,6 +34,7 @@ import {
 } from '../../shared/ui/icons/icons';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
+import { CommentAgentService } from '../office/comments/comment-agent.service';
 import { COMMENT_SAVER, CommentSaveResult, CommentSaver, FileEditor } from './editors/file-editor';
 import { galleryDisplayBaseName, galleryFilenameFromBaseName } from '../gallery/helpers/gallery-filename.helpers';
 import { FilePreviewKind, fileTypeLabel, previewKindFor } from '../gallery/helpers/file-preview.helpers';
@@ -393,6 +394,18 @@ export class FileWorkspaceComponent implements CommentSaver {
         .subscribe({ next: resolve, error: reject }),
     );
   }
+
+  /**
+   * Comments the agent writes into a Word, PowerPoint or Excel file make a new version of it (ADR
+   * 0x046): the file shown is reloaded once the reply lands, unless there is unsaved work in it.
+   */
+  private readonly agentCommentsReload = inject(CommentAgentService).watchAgentComments(
+    () => this.file(),
+    () => {
+      const kind = this.kind();
+      if ((kind === 'document' || kind === 'slides' || kind === 'spreadsheet') && !this.holdsWork()) this.reloadContent();
+    },
+  );
 
   /** Shows the file as stored now, dropping what the viewer holds. */
   private reloadContent(): void {

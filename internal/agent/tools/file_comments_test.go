@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/filecomments"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
+	"github.com/theimaginaryfoundation/what-iff/internal/officecomments"
 	"go.uber.org/zap"
 )
 
@@ -127,4 +129,93 @@ func TestCommentRefsFromCalls(t *testing.T) {
 	require.Len(t, refs, 2)
 	require.Equal(t, "c3", refs[0].CommentID, "one link per thread, to its last comment")
 	require.Equal(t, "t2", refs[1].ThreadID)
+}
+
+// fakeOffice is an in-memory Office service: threads per file, changed through a fake format.
+type fakeOffice struct {
+	threads  []officecomments.Thread
+	adds     []officecomments.Anchor
+	chatIDs  []uuid.UUID
+	resolved map[string]bool
+}
+
+func (f *fakeOffice) FormatOf(file *models.FileAttachment) officecomments.Format {
+	if strings.HasSuffix(file.Name, ".docx") {
+		return fakeFormat{f}
+	}
+	return nil
+}
+func (f *fakeOffice) List(context.Context, uuid.UUID, uuid.UUID) ([]officecomments.Thread, error) {
+	return f.threads, nil
+}
+func (f *fakeOffice) Change(_ context.Context, _ uuid.UUID, chatID *uuid.UUID, _ uuid.UUID, change func(officecomments.Format, []byte) ([]byte, string, error)) (string, error) {
+	f.chatIDs = append(f.chatIDs, *chatID)
+	_, id, err := change(fakeFormat{f}, nil)
+	return id, err
+}
+
+type fakeFormat struct{ f *fakeOffice }
+
+func (fakeFormat) List([]byte) ([]officecomments.Thread, error) { return nil, nil }
+func (ff fakeFormat) Add(_ []byte, at officecomments.Anchor, c officecomments.Comment) ([]byte, string, error) {
+	if at.Quote == "" {
+		return nil, "", officecomments.ErrBadAnchor
+	}
+	ff.f.adds = append(ff.f.adds, at)
+	c.ID = "w2"
+	ff.f.threads = append(ff.f.threads, officecomments.Thread{ID: "w2", On: at.Quote, Where: "paragraph 3", Comments: []officecomments.Comment{c}})
+	return nil, "w2", nil
+}
+func (ff fakeFormat) Reply(_ []byte, id string, c officecomments.Comment) ([]byte, error) {
+	for i := range ff.f.threads {
+		if ff.f.threads[i].ID == id {
+			c.ID = "w9"
+			ff.f.threads[i].Comments = append(ff.f.threads[i].Comments, c)
+			return nil, nil
+		}
+	}
+	return nil, officecomments.ErrNoThread
+}
+func (ff fakeFormat) Resolve(_ []byte, id string, resolved bool) ([]byte, error) {
+	for i := range ff.f.threads {
+		if ff.f.threads[i].ID == id {
+			ff.f.threads[i].Resolved = resolved
+			return nil, nil
+		}
+	}
+	return nil, officecomments.ErrNoThread
+}
+
+func TestFileCommentsTool_OfficeFiles(t *testing.T) {
+	userID := uuid.New()
+	store := &fakeAgentFileStore{userID: userID, rows: map[uuid.UUID]*models.FileAttachment{}}
+	doc, _ := store.CreateFileAttachment(context.Background(), userID, models.FileAttachment{Name: "brief.docx", FileType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"})
+	office := &fakeOffice{threads: []officecomments.Thread{{ID: "w1", On: "ship it", Where: "paragraph 2",
+		Comments: []officecomments.Comment{{ID: "w1", AuthorName: "Pat", Text: "@Iris when?"}}}}}
+	tool := (&FileCommentsTool{files: store, logger: zap.NewNop(), now: time.Now}).WithOffice(office)
+	chat := &models.Chat{ID: uuid.New(), UserID: userID, PersonalityID: uuid.New(), PersonalityName: "Iris"}
+
+	res := runComments(t, tool, chat, map[string]any{"action": "list", "file": "brief.docx"})
+	require.Equal(t, []fileThreadView{{ID: "w1", On: "ship it", Where: "paragraph 2", Comments: []fileCommentView{{ID: "w1", Author: "Pat", Text: "@Iris when?"}}}}, res.Threads)
+
+	res = runComments(t, tool, chat, map[string]any{"action": "reply", "file": "brief.docx", "thread_id": "w1", "text": "Friday."})
+	require.Empty(t, res.Error)
+	require.Equal(t, "Iris", office.threads[0].Comments[1].AuthorName)
+	require.Equal(t, "agent:"+chat.PersonalityID.String(), office.threads[0].Comments[1].AuthorID)
+	require.Equal(t, "w9", res.CommentRef.CommentID)
+	require.Equal(t, "ship it", res.CommentRef.Quote)
+	require.Equal(t, chat.ID, office.chatIDs[0], "saved from this chat")
+
+	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": "brief.docx", "quote": "the plan", "text": "Which plan?"})
+	require.Empty(t, res.Error)
+	require.Equal(t, "w2", res.CommentRef.ThreadID)
+	require.Equal(t, "paragraph 3", res.Thread.Where)
+	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": "brief.docx", "text": "On the file"})
+	require.Contains(t, res.Error, "Word needs a quote")
+	res = runComments(t, tool, chat, map[string]any{"action": "resolve", "file": "brief.docx", "thread_id": "nope", "resolved": true})
+	require.Contains(t, res.Error, "no thread")
+	res = runComments(t, tool, chat, map[string]any{"action": "resolve", "file": "brief.docx", "thread_id": "w1", "resolved": true})
+	require.Empty(t, res.Error)
+	require.True(t, office.threads[0].Resolved)
+	_ = doc
 }
