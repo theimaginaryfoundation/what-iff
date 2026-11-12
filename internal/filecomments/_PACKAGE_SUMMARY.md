@@ -13,6 +13,7 @@ Keeps the comments on text, code and image files (ADR 0x045), which have no plac
 - **`Place`** checks anchors against the text and sets each thread's quote; **`Carry`** moves anchors to new text.
 - **One set per file, whichever row it is read through.**
   A chat copy of a file reads and writes the original's set (`CommentFileID`), so a comment made in a chat shows in the gallery and the other way round.
+- **`MentionContext`** (`mention.go`, ADR 0x046) renders the context a comment that mentions the agent sends with its message: the file, what the thread is on and the thread before the comment, bounded in length; `ShortQuote` is the quote a link to the thread shows.
 - **Images:** every thread is on the whole file (`anchor` null, no quote); no text is read and an edit leaves the threads as they are.
 - **Refusals:** `ErrNotText` for content that is neither an image nor UTF-8 text, or text over `MaxTextBytes` (4 MB).
 

@@ -1,6 +1,8 @@
 import { DOCUMENT } from '@angular/common';
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
+
+import { CommentsPanelState } from '../office/comments/comments-panel-state.service';
 import { Subscription } from 'rxjs';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
@@ -41,6 +43,7 @@ interface StoredState {
 @Injectable({ providedIn: 'root' })
 export class FileWorkspaceService {
   private readonly router = inject(Router);
+  private readonly panel = inject(CommentsPanelState);
   private readonly gallery = inject(ImageGalleryService);
   private readonly document = inject(DOCUMENT);
 
@@ -78,7 +81,9 @@ export class FileWorkspaceService {
   /** Editors are offered on tablets and larger; a phone is view only (ADR 0x043 §1). */
   readonly canEdit = computed(() => this._band() !== 'phone');
   readonly dockedOpen = computed(() => this.open() && this.layout() === 'docked');
-  readonly floatingOpen = computed(() => this.open() && (this.layout() === 'overlay' || this.layout() === 'full' || this.layout() === 'phone'));
+  readonly floatingOpen = computed(
+    () => this.open() && (this.layout() === 'overlay' || this.layout() === 'full' || this.layout() === 'phone'),
+  );
 
   constructor() {
     this.document.defaultView?.addEventListener('resize', () => {
@@ -129,14 +134,38 @@ export class FileWorkspaceService {
     if (this._fileId() === file.id) this._file.update(current => ({ ...current, ...file, chat_id: file.chat_id ?? current?.chat_id }));
   }
 
-  /** Opens fileId on the current page by setting `?file=`; the page's host does the rest. */
-  requestOpen(fileId: string, opts: { replaceUrl?: boolean } = {}): void {
-    void this.router.navigate([], { queryParams: { file: fileId }, queryParamsHandling: 'merge', replaceUrl: opts.replaceUrl ?? false });
+  /**
+   * Opens fileId on the current page by setting `?file=`; the page's host does the rest. With
+   * `comment`, at that thread (`?comment=`, ADR 0x046), even when the file is open already.
+   */
+  requestOpen(fileId: string, opts: { replaceUrl?: boolean; comment?: string } = {}): void {
+    if (opts.comment) {
+      this.panel.focusThread(opts.comment);
+      this.followedLink = `${fileId}#${opts.comment}`;
+    }
+    void this.router.navigate([], {
+      queryParams: { file: fileId, comment: opts.comment ?? null },
+      queryParamsHandling: 'merge',
+      replaceUrl: opts.replaceUrl ?? false,
+    });
+  }
+
+  /** The `?comment=` link followed last, so it is followed once. */
+  private followedLink: string | null = null;
+
+  /**
+   * A page's `?file=` and `?comment=` (ADR 0x046): a link to a comment opens the comments panel at
+   * its thread, once per link, so a later change of the page's query leaves the panel alone.
+   */
+  followCommentLink(fileId: string | null, comment: string | null): void {
+    const link = fileId && comment ? `${fileId}#${comment}` : null;
+    if (link && link !== this.followedLink) this.panel.focusThread(comment!);
+    this.followedLink = link;
   }
 
   /** Closes the workspace on the current page by clearing `?file=`. */
   requestClose(): void {
-    void this.router.navigate([], { queryParams: { file: null }, queryParamsHandling: 'merge' });
+    void this.router.navigate([], { queryParams: { file: null, comment: null }, queryParamsHandling: 'merge' });
   }
 
   setUnsaved(unsaved: boolean): void {

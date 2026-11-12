@@ -2614,7 +2614,7 @@ func (a *Agent) prepareUserMessage(ctx context.Context, _ uuid.UUID, chatMessage
 	if sentAt.IsZero() {
 		sentAt = time.Now()
 	}
-	return formatUserMessageWithTime(sentAt, normalizedTZ, chatMessage.Message), nil
+	return withFileCommentContext(formatUserMessageWithTime(sentAt, normalizedTZ, chatMessage.Message), chatMessage), nil
 }
 
 var tzLocationCache sync.Map // map[string]*time.Location

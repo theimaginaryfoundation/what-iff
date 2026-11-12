@@ -44,6 +44,12 @@ const AdditionalContextTypeMemory = "MEMORY"
 // decide that something is the name line.
 const AdditionalContextTypeUserName = "USER_NAME"
 
+// AdditionalContextTypeFileComment tags the document comment a user's message was sent from (ADR
+// 0x046): the file, what the thread is on and the thread so far. It belongs to that message, so it
+// is rendered in the message's own turn rather than merged with the rest of the context, and the
+// rewrite of a message's context after inference keeps it.
+const AdditionalContextTypeFileComment = "FILE_COMMENT"
+
 // AdditionalContextItem is a typed snippet (e.g. semantic-search memories) attached to a
 // message so later turns can rehydrate the same model context.
 type AdditionalContextItem struct {
@@ -86,6 +92,9 @@ type ChatMessage struct {
 	Rituals                       []*Ritual               `json:"rituals,omitempty"`
 	ToolCalls                     []*ToolCall             `json:"tool_calls,omitempty"`
 	AdditionalContext             []AdditionalContextItem `json:"-"`
+	// CommentRefs are the document comments the message is about (ADR 0x046): on a user's message
+	// the comment it was sent from, on the agent's the comments it made or replied to.
+	CommentRefs []modeltypes.CommentRef `json:"comment_refs,omitempty"`
 	// ContextBreakdown is a snapshot of the model context assembled for this assistant turn
 	// (segment-by-segment token estimates + budget). Set on assistant messages when captured
 	// at generation time; nil on user messages and older assistant messages.

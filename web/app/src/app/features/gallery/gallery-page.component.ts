@@ -30,7 +30,9 @@ import { environment } from '../../../environments/environment';
 import { GalleryFilters, toGalleryTileVm } from './helpers/gallery-vm.helpers';
 import { AssignAsExpressionFlowComponent } from './components/assign-as-expression-flow.component';
 import {
-  GalleryFileImportRequest, GalleryImportModalComponent, GalleryImportPersonalityOption,
+  GalleryFileImportRequest,
+  GalleryImportModalComponent,
+  GalleryImportPersonalityOption,
 } from './components/gallery-import-modal.component';
 import { GalleryPersonalityOption } from './components/gallery-filter-bar.component';
 import { GalleryFolderToolsComponent } from './components/gallery-folder-tools.component';
@@ -113,7 +115,7 @@ export class GalleryPageComponent implements OnInit {
 
   readonly personalities = signal<Personality[]>([]);
   readonly mode = signal<GalleryMode>('gallery');
-  readonly pageTitle = computed(() => this.mode() === 'gallery' ? 'Gallery' : 'Expression Manager');
+  readonly pageTitle = computed(() => (this.mode() === 'gallery' ? 'Gallery' : 'Expression Manager'));
   readonly sort = signal<GallerySort>('created');
   readonly sortDescending = signal(true);
   readonly expressionsByPersonality = signal<Record<string, readonly PersonalityExpression[]>>({});
@@ -138,9 +140,7 @@ export class GalleryPageComponent implements OnInit {
   });
   readonly sortedImages = computed(() => {
     const direction = this.sortDescending() ? -1 : 1;
-    return [...this.view.filteredImages()].sort(
-      (a, b) => (Date.parse(a.created_at) - Date.parse(b.created_at)) * direction,
-    );
+    return [...this.view.filteredImages()].sort((a, b) => (Date.parse(a.created_at) - Date.parse(b.created_at)) * direction);
   });
   /** What an empty grid says: a new folder is a prompt to fill it, not a failed search. */
   readonly emptyMessage = computed(() => {
@@ -160,9 +160,7 @@ export class GalleryPageComponent implements OnInit {
   });
   readonly tiles = computed(() => {
     const namesById = this.personalityNames();
-    return this.sortedImages().map(image =>
-      toGalleryTileVm(image, this.galleryService.getImageUrl.bind(this.galleryService), namesById),
-    );
+    return this.sortedImages().map(image => toGalleryTileVm(image, this.galleryService.getImageUrl.bind(this.galleryService), namesById));
   });
   readonly selectedTile = computed(() => {
     const selected = this.view.selectedImage();
@@ -201,11 +199,7 @@ export class GalleryPageComponent implements OnInit {
       id: personality.id,
       name: personality.name,
       accentColor: personality.accent_color ?? null,
-      coverImageUrl: personalityCoverUrl(
-        personality,
-        [],
-        this.galleryService.getImageUrl.bind(this.galleryService),
-      ),
+      coverImageUrl: personalityCoverUrl(personality, [], this.galleryService.getImageUrl.bind(this.galleryService)),
       thumbnailCircle: personality.thumbnail_circle ?? null,
     })),
   );
@@ -235,26 +229,25 @@ export class GalleryPageComponent implements OnInit {
     this.view.loadFolders();
     this.loadPersonalities();
     this.refreshWhenImageJobsFinish();
-    this.route.queryParamMap
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(params => {
-        const mode = params.get('mode');
-        if (mode === 'gallery' || mode === 'expressions') {
-          this.setMode(mode);
-        }
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(params => {
+      const mode = params.get('mode');
+      if (mode === 'gallery' || mode === 'expressions') {
+        this.setMode(mode);
+      }
 
-        const personalityId = params.get('personality_id') || params.get('personalityId');
-        if (personalityId) {
-          this.view.setSelectedPersonalityIds([personalityId]);
-        }
+      const personalityId = params.get('personality_id') || params.get('personalityId');
+      if (personalityId) {
+        this.view.setSelectedPersonalityIds([personalityId]);
+        this.workspace.followCommentLink(params.get('file'), params.get('comment'));
+      }
 
-        const imageId = params.get('image');
-        if (imageId) {
-          this.view.openDetail(imageId);
-        }
+      const imageId = params.get('image');
+      if (imageId) {
+        this.view.openDetail(imageId);
+      }
 
-        this.showFile(params.get('file'));
-      });
+      this.showFile(params.get('file'));
+    });
   }
 
   onFilterChange(partial: Partial<GalleryFilters>): void {
@@ -311,21 +304,15 @@ export class GalleryPageComponent implements OnInit {
     if (personality.expressions_enabled === enabled) return;
     this.setExpressionsToggleUpdating(personality.id, true);
     const previous = personality;
-    this.personalities.update(rows =>
-      rows.map(row => row.id === personality.id ? { ...row, expressions_enabled: enabled } : row),
-    );
+    this.personalities.update(rows => rows.map(row => (row.id === personality.id ? { ...row, expressions_enabled: enabled } : row)));
     const request = buildPersonalityUpdateRequest(personality, { expressions_enabled: enabled });
     this.personalityService.updatePersonality(personality.id, request).subscribe({
       next: updated => {
-        this.personalities.update(rows =>
-          rows.map(row => row.id === updated.id ? updated : row),
-        );
+        this.personalities.update(rows => rows.map(row => (row.id === updated.id ? updated : row)));
         this.setExpressionsToggleUpdating(personality.id, false);
       },
       error: async () => {
-        this.personalities.update(rows =>
-          rows.map(row => row.id === personality.id ? previous : row),
-        );
+        this.personalities.update(rows => rows.map(row => (row.id === personality.id ? previous : row)));
         this.setExpressionsToggleUpdating(personality.id, false);
         await this.confirmationService.alert({
           title: 'Update failed',
@@ -462,7 +449,7 @@ export class GalleryPageComponent implements OnInit {
 
   async onDeleteFile(file: FileAttachment): Promise<void> {
     const personality = file.personality_id
-      ? this.personalityNames()[file.personality_id] ?? file.personalities?.[0]?.name ?? 'its personality'
+      ? (this.personalityNames()[file.personality_id] ?? file.personalities?.[0]?.name ?? 'its personality')
       : null;
     const confirmed = await this.confirmationService.confirm({
       title: 'Delete file',
@@ -499,7 +486,9 @@ export class GalleryPageComponent implements OnInit {
     if (this.view.images().some(row => row.id === file.id)) {
       this.view.upsertImage(file);
     }
-    this.openFile.update(current => (current?.id === file.id ? { ...current, ...file, chat_id: file.chat_id ?? current.chat_id } : current));
+    this.openFile.update(current =>
+      current?.id === file.id ? { ...current, ...file, chat_id: file.chat_id ?? current.chat_id } : current,
+    );
   }
 
   /** Save As from the gallery: an import into the chosen folder, then the new file opens. */
@@ -512,7 +501,11 @@ export class GalleryPageComponent implements OnInit {
         this.router.navigate([], { queryParams: { file: created.id }, queryParamsHandling: 'merge' });
       },
       error: async () => {
-        await this.confirmationService.alert({ title: 'Save failed', message: 'Could not save the new file. Please try again.', type: 'danger' });
+        await this.confirmationService.alert({
+          title: 'Save failed',
+          message: 'Could not save the new file. Please try again.',
+          type: 'danger',
+        });
       },
     });
   }
@@ -615,20 +608,20 @@ export class GalleryPageComponent implements OnInit {
 
   onImportFile(request: GalleryFileImportRequest): void {
     this.importSubmitting.set(true);
-    const import$ = request.scope === 'global'
-      ? this.galleryService.importImage(request.file, {
-          title: request.title,
-          description: request.description,
-          // An import lands in the folder being viewed, so it is where you expect it.
-          folder: this.view.browsingFolders() ? this.view.currentFolder() : '',
-        })
-      : request.personalityId
-        ? this.fileAttachmentService.uploadPersonalityFileAttachment(
-            request.personalityId,
-            request.file,
-            { title: request.title, description: request.description },
-          )
-        : null;
+    const import$ =
+      request.scope === 'global'
+        ? this.galleryService.importImage(request.file, {
+            title: request.title,
+            description: request.description,
+            // An import lands in the folder being viewed, so it is where you expect it.
+            folder: this.view.browsingFolders() ? this.view.currentFolder() : '',
+          })
+        : request.personalityId
+          ? this.fileAttachmentService.uploadPersonalityFileAttachment(request.personalityId, request.file, {
+              title: request.title,
+              description: request.description,
+            })
+          : null;
     if (!import$) {
       this.importSubmitting.set(false);
       void this.confirmationService.alert({
@@ -700,9 +693,7 @@ export class GalleryPageComponent implements OnInit {
         const rows = response.results ?? [];
         this.personalities.set(rows);
         const knownIds = new Set(rows.map(row => row.id));
-        this.expressionsByPersonality.update(current =>
-          Object.fromEntries(Object.entries(current).filter(([id]) => knownIds.has(id))),
-        );
+        this.expressionsByPersonality.update(current => Object.fromEntries(Object.entries(current).filter(([id]) => knownIds.has(id))));
         this.expressionLoadingByPersonality.update(current =>
           Object.fromEntries(Object.entries(current).filter(([id]) => knownIds.has(id))),
         );
@@ -743,13 +734,8 @@ export class GalleryPageComponent implements OnInit {
   }
 
   expressionAvatarFor(personality: Personality): string | null {
-    return personalityCoverUrl(
-      personality,
-      [],
-      this.galleryService.getImageUrl.bind(this.galleryService),
-    );
+    return personalityCoverUrl(personality, [], this.galleryService.getImageUrl.bind(this.galleryService));
   }
-
 }
 
 /** The nearest ancestor that scrolls (the app's main pane), else the document's own scroller. */

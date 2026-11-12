@@ -10672,6 +10672,7 @@ export interface paths {
                         /** @description Rituals associated with this message */
                         rituals?: components["schemas"]["Ritual"][];
                         origin: components["schemas"]["MessageOrigin"];
+                        comment?: components["schemas"]["CommentMessage"];
                     };
                 };
             };
@@ -15817,6 +15818,8 @@ export interface components {
             rituals?: components["schemas"]["Ritual"][];
             /** @description Tool calls associated with this message */
             tool_calls?: components["schemas"]["ToolCall"][];
+            /** @description Document comments the message is about (ADR 0x046): on a user message the comment that sent it to the agent, on an assistant message the comments it made or replied to. */
+            comment_refs?: components["schemas"]["CommentRef"][];
             generation_model?: string;
             generation_personality?: string;
             /** Format: uuid */
@@ -16368,6 +16371,31 @@ export interface components {
             resolved: boolean;
             /** @description The first comment, then the replies. */
             comments: components["schemas"]["FileComment"][];
+        };
+        /** @description The document comment a message is sent from (ADR 0x046): a comment that mentioned the agent, whose text is the message. The chat shows a link to the thread; what the thread is on and the thread before the comment reach the agent with the message but are not shown. 404 when the file is not the user's, 400 without a thread. */
+        CommentMessage: {
+            /** Format: uuid */
+            file_id: string;
+            thread_id: string;
+            /** @description The comment within the thread (the thread's id for its first comment) */
+            comment_id?: string;
+            /** @description What the thread is on, as the comments panel shows it; empty for the whole file */
+            quote?: string;
+            /** @description The thread before this comment, oldest first */
+            earlier?: {
+                author_name?: string;
+                text?: string;
+            }[];
+        };
+        /** @description A document comment a chat message is about (ADR 0x046), shown as a link that opens the file at the thread. */
+        CommentRef: {
+            /** Format: uuid */
+            file_id: string;
+            file_name: string;
+            thread_id: string;
+            comment_id?: string;
+            /** @description What the thread is on, short; empty for the whole file */
+            quote?: string;
         };
         FileComments: {
             threads: components["schemas"]["FileCommentThread"][];

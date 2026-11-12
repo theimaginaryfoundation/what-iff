@@ -20,6 +20,7 @@ import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { renderLatexMath } from '../../../core/utils/latex-math.helpers';
 import { previewKindFor } from '../../gallery/helpers/file-preview.helpers';
 import { FileEditor } from './file-editor';
+import { CommentAgentService } from '../../office/comments/comment-agent.service';
 import { CommentPeopleService } from '../../office/comments/comment-people.service';
 import { CommentsPanelComponent } from '../../office/comments/comments-panel.component';
 import { CommentsPanelState } from '../../office/comments/comments-panel-state.service';
@@ -66,7 +67,12 @@ export class CodeEditorComponent implements FileEditor {
 
   // --- comments (ADR 0x045): kept beside the file, written once a save has stored the text ---------
   readonly me = inject(CommentPeopleService).me;
-  readonly comments = new TextCommentsState(inject(TextCommentsService), this.me, () => this.commentsChanged());
+  readonly comments = new TextCommentsState(
+    inject(TextCommentsService),
+    this.me,
+    () => this.commentsChanged(),
+    inject(CommentAgentService).hooks(() => this.file()),
+  );
   private readonly panel = inject(CommentsPanelState);
   /** The panel opens by itself on a file with open threads, until the user opens or closes it. */
   readonly commentsOpen = computed(() => this.panel.open() ?? this.comments.openCount() > 0);

@@ -11,6 +11,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/filecomments"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
@@ -31,6 +32,19 @@ type createChatMessageRequest struct {
 	// Steer: sent while a turn in the chat is still running, for that turn to take in at its next
 	// step (ADR 0x042); it runs as its own turn if the running one finishes first.
 	Steer bool `json:"steer,omitempty"`
+	// Comment: the message is a document comment that mentioned the agent (ADR 0x046); Message
+	// is the comment's text.
+	Comment *commentMessageRequest `json:"comment,omitempty"`
+}
+
+// commentMessageRequest is the document comment a message was sent from: where it is, and the
+// thread before it as the comments panel shows it.
+type commentMessageRequest struct {
+	FileID    uuid.UUID                     `json:"file_id"`
+	ThreadID  string                        `json:"thread_id"`
+	CommentID string                        `json:"comment_id"`
+	Quote     string                        `json:"quote"`
+	Earlier   []filecomments.MentionComment `json:"earlier"`
 }
 
 // CreateChatMessage creates a new chat message from the user and initiates the agent processing
@@ -74,6 +88,12 @@ func (h *Handler) CreateChatMessage(w http.ResponseWriter, r *http.Request) {
 		Attachments: req.Attachments,
 		Rituals:     req.Rituals,
 		Steer:       req.Steer,
+	}
+	if req.Comment != nil {
+		if status, err := h.attachComment(r.Context(), &msg, req.Comment); err != nil {
+			handlerutils.RespondWithError(w, h.logger, status, handlerutils.CodeNotSet, err.Error(), nil)
+			return
+		}
 	}
 
 	// Call the agent to handle the message. Prefer client timezone when provided.

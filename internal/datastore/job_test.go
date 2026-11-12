@@ -1190,6 +1190,7 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 			last_error_code text,
 			checkpoint_completed_at datetime,
 			context_breakdown json,
+			comment_refs json,
 			bookmarked boolean NOT NULL DEFAULT false,
 			chat_messages uuid NOT NULL,
 			chat_message_generation_mood uuid,

@@ -2,6 +2,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { CommentThread, newComment } from './comment-threads';
+import { CommentsPanelState } from './comments-panel-state.service';
 import { CommentsPanelComponent } from './comments-panel.component';
 
 const ME = { id: 'user:u-1', name: 'Pat Lee' };
@@ -103,5 +104,20 @@ describe('CommentsPanelComponent', () => {
     type(textarea, 'Sounds good');
     key(textarea, 'Enter');
     expect(replied).toHaveBeenCalledWith({ threadId: 't1', draft: { text: 'Sounds good', mentions: [] } });
+  });
+
+  it('selects the thread a link to a comment asks for, once it has it', async () => {
+    await render();
+    const selected = vi.fn();
+    fixture.componentInstance.select.subscribe(selected);
+    const state = TestBed.inject(CommentsPanelState);
+    state.focusThread('elsewhere');
+    fixture.detectChanges();
+    expect(selected).not.toHaveBeenCalled();
+    state.focusThread('t1');
+    fixture.detectChanges();
+    expect(selected).toHaveBeenCalledWith('t1');
+    expect(state.focus()).toBeNull();
+    expect(state.open()).toBe(true);
   });
 });

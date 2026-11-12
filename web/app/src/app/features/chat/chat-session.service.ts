@@ -12,7 +12,7 @@ import { JobService } from '../../core/services/job.service';
 import { MessageService } from '../../core/services/message.service';
 import { Chat, DEFAULT_THREAD_NAME, PatchChatRequest } from '../../core/models/chat.model';
 import { FileAttachment, PendingFileAttachment } from '../../core/models/file-attachment.model';
-import { ChatMessage } from '../../core/models/message.model';
+import { ChatMessage, CommentMessage, CommentRef } from '../../core/models/message.model';
 import { Model } from '../../core/models/model.model';
 import { Ritual } from '../../core/models/ritual.model';
 import { AgentLoop, ReasoningEffort, TurnSettingValues, TurnSettingsPatch } from '../../core/models/turn-settings.model';
@@ -149,9 +149,7 @@ export class ChatSessionService implements OnDestroy {
       codeBlockChunkSize: CODE_BLOCK_CHUNK_SIZE,
     });
 
-    this.subscriptions.add(
-      this.messageService.messages$.subscribe(() => this.maybeBumpCheckpointToken()),
-    );
+    this.subscriptions.add(this.messageService.messages$.subscribe(() => this.maybeBumpCheckpointToken()));
 
     effect(() => {
       const chatId = this.activeThreadId;
@@ -432,11 +430,13 @@ export class ChatSessionService implements OnDestroy {
   }
 
   async createThread(opts: { personalityId?: string; modelId?: string } = {}): Promise<Chat> {
-    const chat = await firstValueFrom(this.chatService.createChat({
-      name: DEFAULT_THREAD_NAME,
-      personality_id: opts.personalityId,
-      model_id: opts.modelId,
-    }));
+    const chat = await firstValueFrom(
+      this.chatService.createChat({
+        name: DEFAULT_THREAD_NAME,
+        personality_id: opts.personalityId,
+        model_id: opts.modelId,
+      }),
+    );
     this.chatService.setLastChatId(chat.id);
     return chat;
   }
@@ -473,18 +473,18 @@ export class ChatSessionService implements OnDestroy {
 
     let response;
     try {
-      response = await firstValueFrom(this.messageService.sendMessage(chat.id, {
-        message: `${options.contextPrefix ?? ''}${message}`,
-        origin: 'User',
-        attachments: toUploadedAttachments(attachments),
-        rituals: ritualPayload,
-      }));
+      response = await firstValueFrom(
+        this.messageService.sendMessage(chat.id, {
+          message: `${options.contextPrefix ?? ''}${message}`,
+          origin: 'User',
+          attachments: toUploadedAttachments(attachments),
+          rituals: ritualPayload,
+        }),
+      );
     } catch (error) {
       // The composer stays editable while the POST is in flight, so the user may have started
       // the next message already; put the failed text back in front of it rather than over it.
-      const typedAhead = this.isActiveThread(chat.id)
-        ? this.draft()
-        : (this.draftService.getDraft(chat.id)?.message ?? '');
+      const typedAhead = this.isActiveThread(chat.id) ? this.draft() : (this.draftService.getDraft(chat.id)?.message ?? '');
       const restored = restoreFailedSend(message, typedAhead);
       this.draftService.saveDraft(chat.id, restored);
       if (!isHttpErrorResponse(error)) {
@@ -512,6 +512,33 @@ export class ChatSessionService implements OnDestroy {
   }
 
   /**
+   * Sends a document comment that mentioned the agent as a message (ADR 0x046): its text is the
+   * comment's, and the composer's draft is left as it is. While a turn runs it is a follow-up to it.
+   */
+  async sendComment(text: string, comment: CommentMessage, ref: CommentRef): Promise<ChatSendMessageResult> {
+    const chat = this._thread();
+    const message = text.trim();
+    if (!chat || !this.isActiveThread(chat.id) || !message) return { status: 'skipped' };
+    const steer = this.isGenerating();
+    if (!steer) this.turn.beginSend();
+    let response;
+    try {
+      response = await firstValueFrom(
+        this.messageService.sendMessage(chat.id, { message, origin: 'User', comment, ...(steer ? { steer: true } : {}) }, ref),
+      );
+    } catch (error) {
+      if (!this.isActiveThread(chat.id)) return { status: 'failed', error };
+      if (!steer) this.turn.sendFailed();
+      this._error.set(apiErrorMessage(error, 'Could not send the comment to the agent'));
+      return { status: 'failed', error };
+    }
+    if (!this.isActiveThread(chat.id)) return { status: 'sent' };
+    this._error.set(null);
+    if (!steer) this.turn.sendAccepted(chat.id, response.id, response.job_id);
+    return { status: 'sent' };
+  }
+
+  /**
    * Sends a follow-up while the user's turn runs (ADR 0x042). It is saved and shown like any
    * message; the running turn reads it at its next step, or, if that turn finishes first, it runs
    * as the next turn (picked up by the active-turn watch). The running turn stays the one followed.
@@ -520,11 +547,13 @@ export class ChatSessionService implements OnDestroy {
     this.draft.set('');
     this.draftService.clearDraft(chatId);
     try {
-      await firstValueFrom(this.messageService.sendMessage(chatId, {
-        message: `${options.contextPrefix ?? ''}${message}`,
-        origin: 'User',
-        steer: true,
-      }));
+      await firstValueFrom(
+        this.messageService.sendMessage(chatId, {
+          message: `${options.contextPrefix ?? ''}${message}`,
+          origin: 'User',
+          steer: true,
+        }),
+      );
     } catch (error) {
       const typedAhead = this.isActiveThread(chatId) ? this.draft() : (this.draftService.getDraft(chatId)?.message ?? '');
       const restored = restoreFailedSend(message, typedAhead);
@@ -578,33 +607,39 @@ export class ChatSessionService implements OnDestroy {
     if (!threadId) return;
     this.turn.markPromptAnswered(promptId, true);
     this.subscriptions.add(
-      this.messageService.answerPrompt(threadId, promptId, response).pipe(take(1)).subscribe({
-        error: err => {
-          if (!this.isActiveThread(threadId)) return;
-          if (err?.status === 409) {
-            this._error.set('That question is no longer waiting for an answer.');
-            return;
-          }
-          this.turn.markPromptAnswered(promptId, false);
-          this._error.set(apiErrorMessage(err, 'Failed to send your answer'));
-        },
-      }),
+      this.messageService
+        .answerPrompt(threadId, promptId, response)
+        .pipe(take(1))
+        .subscribe({
+          error: err => {
+            if (!this.isActiveThread(threadId)) return;
+            if (err?.status === 409) {
+              this._error.set('That question is no longer waiting for an answer.');
+              return;
+            }
+            this.turn.markPromptAnswered(promptId, false);
+            this._error.set(apiErrorMessage(err, 'Failed to send your answer'));
+          },
+        }),
     );
   }
 
   /** Refetches the active thread's metadata (name, model, personality) without touching messages. */
   private refreshThread(threadId: string): void {
     this.subscriptions.add(
-      this.chatService.getChat(threadId).pipe(take(1)).subscribe({
-        next: chat => {
-          if (!this.isActiveThread(threadId)) return;
-          this._thread.set(chat);
-          this.threadList.rememberOpenedThread(chat);
-        },
-        error: () => {
-          // Best-effort: the next focus sync catches up.
-        },
-      }),
+      this.chatService
+        .getChat(threadId)
+        .pipe(take(1))
+        .subscribe({
+          next: chat => {
+            if (!this.isActiveThread(threadId)) return;
+            this._thread.set(chat);
+            this.threadList.rememberOpenedThread(chat);
+          },
+          error: () => {
+            // Best-effort: the next focus sync catches up.
+          },
+        }),
     );
   }
 
@@ -635,27 +670,30 @@ export class ChatSessionService implements OnDestroy {
       model_name: model.name,
     });
     this.subscriptions.add(
-      this.chatService.patchChat(chat.id, { model_id: model.id }).pipe(take(1)).subscribe({
-        next: updated => {
-          if (this._thread()?.id !== requestChatId || this._model()?.id !== requestModelId) {
-            return;
-          }
-          this._thread.set({
-            ...updated,
-            model_id: updated.model_id ?? model.id,
-            model_name: updated.model_name ?? model.name,
-          });
-          this._model.set(null);
-        },
-        error: (error: unknown) => {
-          if (this._thread()?.id !== requestChatId || this._model()?.id !== requestModelId) {
-            return;
-          }
-          this._thread.set(previousThread);
-          this._model.set(previousModel);
-          this._error.set('Failed to update model. Please try again.');
-        },
-      }),
+      this.chatService
+        .patchChat(chat.id, { model_id: model.id })
+        .pipe(take(1))
+        .subscribe({
+          next: updated => {
+            if (this._thread()?.id !== requestChatId || this._model()?.id !== requestModelId) {
+              return;
+            }
+            this._thread.set({
+              ...updated,
+              model_id: updated.model_id ?? model.id,
+              model_name: updated.model_name ?? model.name,
+            });
+            this._model.set(null);
+          },
+          error: (error: unknown) => {
+            if (this._thread()?.id !== requestChatId || this._model()?.id !== requestModelId) {
+              return;
+            }
+            this._thread.set(previousThread);
+            this._model.set(previousModel);
+            this._error.set('Failed to update model. Please try again.');
+          },
+        }),
     );
   }
 
@@ -704,25 +742,28 @@ export class ChatSessionService implements OnDestroy {
     }
     this._thread.set(optimistic);
     this.subscriptions.add(
-      this.chatService.patchChat(chat.id, patch).pipe(take(1)).subscribe({
-        next: updated => {
-          const current = this._thread();
-          if (!current || current.id !== chat.id) return;
-          this._thread.set({ ...updated, reasoning_effort: current.reasoning_effort ?? null, agent_loop: current.agent_loop ?? null });
-        },
-        error: (err: unknown) => {
-          const current = this._thread();
-          if (!current || current.id !== chat.id) return;
-          const reverted: Chat = { ...current };
-          for (const key of keys) {
-            if ((current[key] ?? null) !== (optimistic[key] ?? null)) continue;
-            if (key === 'reasoning_effort') reverted.reasoning_effort = previous.reasoning_effort;
-            else reverted.agent_loop = previous.agent_loop;
-          }
-          this._thread.set(reverted);
-          this._error.set(apiErrorMessage(err, 'Failed to update thread settings. Please try again.'));
-        },
-      }),
+      this.chatService
+        .patchChat(chat.id, patch)
+        .pipe(take(1))
+        .subscribe({
+          next: updated => {
+            const current = this._thread();
+            if (!current || current.id !== chat.id) return;
+            this._thread.set({ ...updated, reasoning_effort: current.reasoning_effort ?? null, agent_loop: current.agent_loop ?? null });
+          },
+          error: (err: unknown) => {
+            const current = this._thread();
+            if (!current || current.id !== chat.id) return;
+            const reverted: Chat = { ...current };
+            for (const key of keys) {
+              if ((current[key] ?? null) !== (optimistic[key] ?? null)) continue;
+              if (key === 'reasoning_effort') reverted.reasoning_effort = previous.reasoning_effort;
+              else reverted.agent_loop = previous.agent_loop;
+            }
+            this._thread.set(reverted);
+            this._error.set(apiErrorMessage(err, 'Failed to update thread settings. Please try again.'));
+          },
+        }),
     );
   }
 
@@ -756,10 +797,7 @@ export class ChatSessionService implements OnDestroy {
   setActiveMood(moodId: string | null): void {
     const chat = this._thread();
     if (!chat || !this.isActiveThread(chat.id)) return;
-    const patch =
-      moodId === null
-        ? { clear_active_mood: true }
-        : { active_mood_id: moodId, is_auto_mood: false };
+    const patch = moodId === null ? { clear_active_mood: true } : { active_mood_id: moodId, is_auto_mood: false };
     this.subscriptions.add(
       this.chatService.patchChat(chat.id, patch).subscribe({
         next: updated => {
@@ -825,9 +863,7 @@ export class ChatSessionService implements OnDestroy {
 }
 
 function toUploadedAttachments(attachments: readonly PendingFileAttachment[]): FileAttachment[] | undefined {
-  const uploaded = attachments
-    .map(item => item.attachment)
-    .filter((attachment): attachment is FileAttachment => attachment !== undefined);
+  const uploaded = attachments.map(item => item.attachment).filter((attachment): attachment is FileAttachment => attachment !== undefined);
   return uploaded.length ? uploaded : undefined;
 }
 

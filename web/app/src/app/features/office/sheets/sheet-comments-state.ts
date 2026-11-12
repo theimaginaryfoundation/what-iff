@@ -10,6 +10,7 @@ import {
   removeComment,
   setResolved,
 } from '../comments/comment-threads';
+import { CommentAgentHooks } from '../comments/comment-agent.service';
 import { EditEvent, ReplyEvent } from '../comments/comments-panel.component';
 import { newCommentGuid } from '../pptx/pptx-comments';
 import { cellA1 } from '../shared/a1';
@@ -38,6 +39,7 @@ export class SheetCommentsState {
     private readonly me: Signal<CommentPerson>,
     /** Called after every change a save has to write. */
     private readonly changed: () => void,
+    private readonly agent: CommentAgentHooks | null = null,
   ) {}
 
   /** Threads with a cell; a thread whose cell was deleted goes with it. */
@@ -59,7 +61,8 @@ export class SheetCommentsState {
   readonly openCount = computed(() => this.placed().filter(t => !t.resolved).length);
   readonly people = computed<CommentPerson[]>(() => {
     const me = this.me();
-    return [me, ...commentAuthors(this.threads()).filter(p => p.id !== me.id)];
+    const people = [me, ...commentAuthors(this.threads()).filter(p => p.id !== me.id)];
+    return this.agent ? this.agent.people(people) : people;
   });
 
   load(threads: SheetCommentThread[]): void {
@@ -118,6 +121,15 @@ export class SheetCommentsState {
     this.activeId.set(id);
     this.refresh();
     this.changed();
+    this.notifyAgent(id, id);
+  }
+
+  /** Hands a posted comment to the agent hooks, with the cell its thread is on. */
+  private notifyAgent(threadId: string, commentId: string): void {
+    const thread = this.threads().find(t => t.id === threadId);
+    if (!this.agent || !thread) return;
+    const at = this.cells().get(threadId);
+    this.agent.posted(thread, commentId, at ? `Cell ${cellA1(at.row, at.col)}` : '');
   }
 
   /** Chooses a thread: it becomes active, and its cell is shown. */
@@ -129,8 +141,10 @@ export class SheetCommentsState {
   }
 
   reply(event: ReplyEvent): void {
-    this.threads.update(threads => addReply(threads, event.threadId, newComment(newCommentGuid(), this.me(), event.draft)));
+    const comment = newComment(newCommentGuid(), this.me(), event.draft);
+    this.threads.update(threads => addReply(threads, event.threadId, comment));
     this.changed();
+    this.notifyAgent(event.threadId, comment.id);
   }
 
   edit(event: EditEvent): void {

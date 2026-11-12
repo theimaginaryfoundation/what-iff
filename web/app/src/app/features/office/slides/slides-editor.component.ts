@@ -54,6 +54,7 @@ import { textOffset } from './comment-text';
 import { COMMENT_SAVER } from '../../file-workspace/editors/file-editor';
 import { CommentAutosave } from '../comments/comment-autosave';
 import { CommentPeopleService } from '../comments/comment-people.service';
+import { CommentAgentService } from '../comments/comment-agent.service';
 import { CommentsPanelComponent } from '../comments/comments-panel.component';
 import { CommentsPanelState } from '../comments/comments-panel-state.service';
 import { PptxComments, SlideCommentThread } from '../pptx/pptx-comments';
@@ -164,7 +165,13 @@ export class SlidesEditorComponent implements FileEditor {
 
   // --- comments (ADR 0x045) ------------------------------------------------------------------------
   readonly me = inject(CommentPeopleService).me;
-  readonly comments = new SlideComments(this.deck, this.slide, this.me, () => this.commentsChanged());
+  readonly comments = new SlideComments(
+    this.deck,
+    this.slide,
+    this.me,
+    () => this.commentsChanged(),
+    inject(CommentAgentService).hooks(() => this.file()),
+  );
   /** Comments can be written: while editing, or while viewing a file the user may change (saved as they are made). */
   private readonly autosave = new CommentAutosave(inject(COMMENT_SAVER, { optional: true }), this);
   readonly commentable = computed(() => !this.readOnly() || this.autosave.available());

@@ -8,4 +8,15 @@ import { Injectable, signal } from '@angular/core';
 @Injectable({ providedIn: 'root' })
 export class CommentsPanelState {
   readonly open = signal<boolean | null>(null);
+  /**
+   * A thread to show, from a link to a comment (ADR 0x046): the panel selects it once it has it,
+   * which makes it active in the file, and clears this.
+   */
+  readonly focus = signal<string | null>(null);
+
+  /** Opens the panel at a thread. */
+  focusThread(threadId: string): void {
+    this.open.set(true);
+    this.focus.set(threadId);
+  }
 }

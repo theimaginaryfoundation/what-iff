@@ -67,4 +67,31 @@ describe('TextCommentsState', () => {
       }),
     );
   });
+
+  it('offers the agent hooks its people, and hands them each posted comment with its quote', async () => {
+    const api = fakeTextComments();
+    const posted = vi.fn();
+    const iris = { id: 'agent:p-1', name: 'Iris' };
+    const state = new TextCommentsState(api as unknown as TextCommentsService, me, () => undefined, {
+      people: people => [...people, iris],
+      posted,
+    });
+    const { s } = surface();
+    state.attach(s);
+    await state.load('f-1');
+    expect(state.people()).toEqual([me(), iris]);
+
+    state.start({ start: 11, end: 25 });
+    state.create({ text: '@Iris rename?', mentions: [{ id: iris.id, name: 'Iris' }] });
+    const thread = state.threads()[0];
+    expect(posted).toHaveBeenLastCalledWith(thread, thread.id, 'inline comment');
+
+    state.reply({ threadId: thread.id, draft: { text: 'Or keep it', mentions: [] } });
+    const reply = state.threads()[0].comments[1];
+    expect(posted).toHaveBeenLastCalledWith(state.threads()[0], reply.id, 'inline comment');
+
+    state.startOnFile();
+    state.create({ text: 'On the file', mentions: [] });
+    expect(posted).toHaveBeenLastCalledWith(state.threads()[1], state.threads()[1].id, '');
+  });
 });
