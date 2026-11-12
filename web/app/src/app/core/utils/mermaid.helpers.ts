@@ -1,4 +1,5 @@
 import type { MarkedExtension, Tokens } from 'marked';
+import { saveBlobAsFile } from './download.helpers';
 
 /**
  * Mermaid diagrams in rendered markdown, drawn the way LaTeX math is (latex-math.helpers.ts).
@@ -265,11 +266,11 @@ function showDiagram(element: HTMLElement, svg: string, source: string): void {
     button(document, 'Copy', 'Copy the Mermaid source', () => void document.defaultView?.navigator.clipboard?.writeText(source)),
     button(document, 'SVG', 'Download as SVG', () => {
       const el = figure.querySelector('svg');
-      if (el) download(document, new Blob([serializeSvg(el)], { type: 'image/svg+xml' }), 'diagram.svg');
+      if (el) saveBlobAsFile(new Blob([serializeSvg(el)], { type: 'image/svg+xml' }), 'diagram.svg');
     }),
     button(document, 'PNG', 'Download as PNG', () => {
       const el = figure.querySelector('svg');
-      if (el) void svgToPng(document, el).then(blob => blob && download(document, blob, 'diagram.png'));
+      if (el) void svgToPng(document, el).then(blob => blob && saveBlobAsFile(blob, 'diagram.png'));
     }),
   );
   if (pre) pre.hidden = true;
@@ -357,15 +358,6 @@ async function svgToPng(document: Document, svg: SVGSVGElement): Promise<Blob | 
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
   return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-}
-
-function download(document: Document, blob: Blob, name: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 /**
