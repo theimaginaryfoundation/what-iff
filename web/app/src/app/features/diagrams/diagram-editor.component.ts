@@ -16,11 +16,17 @@ import {
 import { DomSanitizer } from '@angular/platform-browser';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
+import { saveBlobAsFile } from '../../core/utils/download.helpers';
+import { ButtonComponent } from '../../shared/ui/button/button.component';
 import { FileEditor } from '../file-workspace/editors/file-editor';
 import { DIAGRAMS_URL } from './diagram-site.config';
-import { DrawioAction, drawioUrl, readDrawioMessage } from './drawio-frame';
+import { DrawioAction, dataUrlToBlob, drawioUrl, exportName, readDrawioMessage } from './drawio-frame';
 
 const DIAGRAM_MIME = 'application/vnd.jgraph.mxfile';
+/** How long an image export may take before it is given up on. */
+const EXPORT_TIMEOUT_MS = 30_000;
+
+type ImageFormat = 'png' | 'svg';
 
 /**
  * A draw.io diagram (.drawio) in the file workspace (ADR 0x049): the draw.io editor, from its own
@@ -33,11 +39,25 @@ const DIAGRAM_MIME = 'application/vnd.jgraph.mxfile';
 @Component({
   selector: 'app-diagram-editor',
   standalone: true,
+  imports: [ButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (frameUrl(); as url) {
       @if (state() === 'loading') {
         <div class="diagram-editor__status" role="status">Opening the diagram…</div>
+      } @else {
+        <div class="diagram-editor__bar" role="toolbar" aria-label="Diagram">
+          <span class="diagram-editor__bar-label">Download</span>
+          <ui-button size="xs" variant="ghost" [loading]="exporting() === 'png'" [disabled]="!!exporting()" (activate)="download('png')"
+            >PNG</ui-button
+          >
+          <ui-button size="xs" variant="ghost" [loading]="exporting() === 'svg'" [disabled]="!!exporting()" (activate)="download('svg')"
+            >SVG</ui-button
+          >
+          @if (exportFailed()) {
+            <span class="diagram-editor__bar-error" role="alert">Couldn't make the image.</span>
+          }
+        </div>
       }
       <iframe
         #frame
@@ -61,6 +81,28 @@ const DIAGRAM_MIME = 'application/vnd.jgraph.mxfile';
         height: 100%;
         min-height: 0;
         position: relative;
+      }
+
+      .diagram-editor__bar {
+        align-items: center;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        flex: 0 0 auto;
+        gap: 0.25rem;
+        justify-content: flex-end;
+        padding: 0.25rem 0.5rem;
+      }
+
+      .diagram-editor__bar-label {
+        color: var(--text-secondary);
+        font-size: 0.75rem;
+        margin-right: 0.25rem;
+      }
+
+      .diagram-editor__bar-error {
+        color: var(--danger);
+        font-size: 0.75rem;
+        margin-left: 0.5rem;
       }
 
       .diagram-editor__frame {
@@ -95,6 +137,9 @@ export class DiagramEditorComponent implements FileEditor {
 
   readonly dirty = signal(false);
   readonly state = signal<'loading' | 'ready'>('loading');
+  /** The image being made for a download, if any. */
+  readonly exporting = signal<ImageFormat | null>(null);
+  readonly exportFailed = signal(false);
 
   private readonly document = inject(DOCUMENT);
   private readonly site = inject(DIAGRAMS_URL);
@@ -121,6 +166,9 @@ export class DiagramEditorComponent implements FileEditor {
   private haveBytes = false;
   /** What each blob content() handed out holds, so markSaved knows what was saved. */
   private readonly handedOut = new WeakMap<Blob, string>();
+  /** Exports asked for, by request id, waiting for the editor's answer. */
+  private readonly exports = new Map<string, (data: string | null) => void>();
+  private nextExport = 0;
 
   constructor() {
     effect(() => {
@@ -129,7 +177,46 @@ export class DiagramEditorComponent implements FileEditor {
     });
     const onMessage = (event: MessageEvent) => this.onMessage(event);
     this.document.defaultView?.addEventListener('message', onMessage);
-    inject(DestroyRef).onDestroy(() => this.document.defaultView?.removeEventListener('message', onMessage));
+    inject(DestroyRef).onDestroy(() => {
+      this.document.defaultView?.removeEventListener('message', onMessage);
+      for (const resolve of this.exports.values()) resolve(null);
+    });
+  }
+
+  /**
+   * Downloads the diagram as it is shown now as an image, made by the editor. PNG and SVG both
+   * carry the diagram itself, so draw.io opens either one again as an editable diagram.
+   */
+  async download(format: ImageFormat): Promise<void> {
+    if (this.exporting()) return;
+    this.exporting.set(format);
+    this.exportFailed.set(false);
+    try {
+      const data = await this.requestExport(format);
+      const blob = data ? dataUrlToBlob(data) : null;
+      if (blob) saveBlobAsFile(blob, exportName(this.file().name, format));
+      else this.exportFailed.set(true);
+    } finally {
+      this.exporting.set(null);
+    }
+  }
+
+  private requestExport(format: ImageFormat): Promise<string | null> {
+    const requestId = `whatiff-export-${++this.nextExport}`;
+    return new Promise(resolve => {
+      const timer = setTimeout(() => finish(null), EXPORT_TIMEOUT_MS);
+      const finish = (data: string | null) => {
+        clearTimeout(timer);
+        this.exports.delete(requestId);
+        resolve(data);
+      };
+      this.exports.set(requestId, finish);
+      this.send(
+        format === 'png'
+          ? { action: 'export', format: 'xmlpng', scale: 2, background: '#ffffff', requestId }
+          : { action: 'export', format: 'xmlsvg', background: '#ffffff', requestId },
+      );
+    });
   }
 
   async content(): Promise<Blob> {
@@ -194,6 +281,11 @@ export class DiagramEditorComponent implements FileEditor {
         this.setDirty(this.latest !== this.baseline);
         this.saveRequested.emit();
         break;
+      case 'export': {
+        const requestId = message.message?.requestId;
+        if (requestId) this.exports.get(requestId)?.(message.data || null);
+        break;
+      }
     }
   }
 

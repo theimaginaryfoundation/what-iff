@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { drawioUrl, readDrawioMessage } from './drawio-frame';
+import { dataUrlToBlob, drawioUrl, exportName, readDrawioMessage } from './drawio-frame';
 
 describe('drawio-frame', () => {
   it('opens the editor in embed mode with our JSON protocol and theme', () => {
@@ -27,5 +27,21 @@ describe('drawio-frame', () => {
     expect(msg(JSON.stringify({ event: 'init' }), undefined, {})).toBeNull();
     expect(msg('not json')).toBeNull();
     expect(msg({ event: 'init' })).toBeNull();
+  });
+
+  it('turns an export into bytes', async () => {
+    const png = dataUrlToBlob('data:image/png;base64,iVBORw==');
+    expect(png?.type).toBe('image/png');
+    expect([...new Uint8Array(await png!.arrayBuffer())]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    const svg = dataUrlToBlob('data:image/svg+xml,%3Csvg%2F%3E');
+    expect(svg?.type).toBe('image/svg+xml');
+    expect(await svg!.text()).toBe('<svg/>');
+    expect(dataUrlToBlob('<svg/>')).toBeNull();
+  });
+
+  it('names a download after the diagram', () => {
+    expect(exportName('flow.drawio', 'png')).toBe('flow.png');
+    expect(exportName('Flow.drawio.xml', 'svg')).toBe('Flow.svg');
+    expect(exportName('.drawio', 'png')).toBe('diagram.png');
   });
 });

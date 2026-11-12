@@ -65,6 +65,33 @@ describe('DiagramEditorComponent', () => {
     expect(fixture.componentInstance.dirty()).toBe(false);
   });
 
+  it('downloads the diagram as an image the editor makes', async () => {
+    const saved: { blob: Blob; name: string }[] = [];
+    let blob: Blob | null = null;
+    const createUrl = vi.spyOn(URL, 'createObjectURL').mockImplementation(b => ((blob = b as Blob), 'blob:x'));
+    const revokeUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push({ blob: blob!, name: this.download });
+    });
+    await open(true);
+    await fromEditor({ event: 'init' });
+    await fromEditor({ event: 'load', xml: XML });
+    posted.length = 0;
+    const done = fixture.componentInstance.download('png');
+    expect(fixture.componentInstance.exporting()).toBe('png');
+    const request = posted[0].message;
+    expect(request).toMatchObject({ action: 'export', format: 'xmlpng', scale: 2 });
+    // Another request's answer is not this one's.
+    await fromEditor({ event: 'export', format: 'xmlpng', data: 'data:image/png;base64,AAAA', message: { requestId: 'other' } });
+    expect(saved).toEqual([]);
+    await fromEditor({ event: 'export', format: 'xmlpng', data: 'data:image/png;base64,iVBORw==', message: request });
+    await done;
+    expect(saved.map(d => [d.name, d.blob.type])).toEqual([['flow.png', 'image/png']]);
+    expect(fixture.componentInstance.exporting()).toBeNull();
+    expect(fixture.componentInstance.exportFailed()).toBe(false);
+    for (const spy of [createUrl, revokeUrl, click]) spy.mockRestore();
+  });
+
   it('tracks changes while editing, hands out the latest XML, and is clean once saved', async () => {
     const iframe = await open(false);
     expect(iframe.getAttribute('src')).not.toContain('chrome=0');

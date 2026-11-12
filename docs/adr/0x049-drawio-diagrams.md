@@ -43,6 +43,12 @@ It is not indexed for search: the XML is mostly geometry and style.
 
 draw.io's `load` takes Mermaid (`descriptor: { format: 'mermaid', data }`) and draws it as native, editable shapes, so a Mermaid diagram can become a `.drawio` file.
 
+### 5. Downloads
+
+Above the diagram, viewed or edited, Download PNG and SVG save the diagram as the editor draws it (its `export`, at twice its size for PNG, on white).
+Both images carry the diagram itself, as draw.io's own exports do, so draw.io opens either again as an editable diagram.
+The file itself downloads as every file does.
+
 ## Consequences
 
 - Users draw and edit diagrams in the workspace, and agents change the same files as text.
@@ -52,7 +58,7 @@ draw.io's `load` takes Mermaid (`descriptor: { format: 'mermaid', data }`) and d
 ## Later
 
 - **Comments on diagrams and on single elements**: threads beside the file (ADR 0x045 §4) anchored on an element's id, through a small plugin in the editor.
-- **Downloads** as PNG, SVG and PDF from the workspace, and a preview image saved with each diagram for the gallery and for agents to look at.
+- **A preview image** saved with each diagram, for the gallery and for agents to look at; and PDF, which draw.io makes only with an export server.
 - **Open as editable diagram** wherever a Mermaid diagram is drawn (§4).
 - **A `diagram` tool** for agents that changes diagrams by element, and the c4a tooling around it.
 - **Hosting**: the deployed site's bucket, distribution and `frame-ancestors`, and the deploy workflow's build.

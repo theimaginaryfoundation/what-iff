@@ -60,3 +60,21 @@ export function readDrawioMessage(event: MessageEvent, origin: string, frame: Wi
 
 /** An empty diagram, for a new or empty .drawio file. */
 export const EMPTY_DIAGRAM = '';
+
+/** The bytes of an export's `data:` URL (base64 or percent-encoded), or null if it is not one. */
+export function dataUrlToBlob(url: string): Blob | null {
+  const match = /^data:([^;,]+)((?:;[^;,]+)*),(.*)$/s.exec(url);
+  if (!match) return null;
+  const [, type, params, payload] = match;
+  if (!params.split(';').includes('base64')) return new Blob([decodeURIComponent(payload)], { type });
+  const binary = atob(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type });
+}
+
+/** A download's name: the diagram's file name with the image's extension in place of .drawio. */
+export function exportName(fileName: string, format: 'png' | 'svg'): string {
+  const base = fileName.replace(/\.drawio(\.xml)?$/i, '').replace(/\.xml$/i, '') || 'diagram';
+  return `${base}.${format}`;
+}
