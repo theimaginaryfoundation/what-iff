@@ -93,4 +93,28 @@ describe('MemoryMergeHistoryPageComponent', () => {
     expect(confirmation.confirm).not.toHaveBeenCalled();
     expect(memoryService.undoMergeEvent).toHaveBeenCalledWith('e-1');
   });
+
+  it('shows an agent archive with its reason and restores it without a confirmation', async () => {
+    await setup([
+      makeEvent({
+        merge_type: 'archive',
+        content: 'Lives in Berlin',
+        duplicates_folded: 0,
+        source_members: [{ content: 'Lives in Berlin', scope: 'User', memory_id: 'm-1', is_new: false }],
+        archival: { chat_id: 'c-1', reason: 'moved to Lisbon' },
+      }),
+    ]);
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.querySelector('.merge-history-item__type')?.textContent?.trim()).toBe('Archived by an agent');
+    expect(host.querySelector('.merge-history-item__reason')?.textContent?.trim()).toBe('Reason: moved to Lisbon');
+
+    fixture.componentInstance.toggleExpanded(fixture.componentInstance.events()[0]);
+    fixture.detectChanges();
+    expect(host.querySelector('.merge-history-item__sources-title')?.textContent?.trim()).toBe('Archived memory');
+    expect(host.querySelector('.merge-history-item__result-label')).toBeNull();
+
+    await fixture.componentInstance.undo(fixture.componentInstance.events()[0]);
+    expect(confirmation.confirm).not.toHaveBeenCalled();
+    expect(memoryService.undoMergeEvent).toHaveBeenCalledWith('e-1');
+  });
 });
