@@ -39,10 +39,11 @@ const NV_PROPS = ['nvSpPr', 'nvPicPr', 'nvCxnSpPr', 'nvGrpSpPr', 'nvGraphicFrame
 /** The `p:cNvPr@id` of a shape tree child, looking through `mc:AlternateContent`. */
 export function nodeId(node: Element): string | null {
   if (node.namespaceURI === MC && node.localName === 'AlternateContent') {
-    for (const branch of elementChildren(node)) for (const inner of elementChildren(branch)) {
-      const id = nodeId(inner);
-      if (id) return id;
-    }
+    for (const branch of elementChildren(node))
+      for (const inner of elementChildren(branch)) {
+        const id = nodeId(inner);
+        if (id) return id;
+      }
     return null;
   }
   if (node.namespaceURI !== P) return null;
@@ -73,10 +74,80 @@ export function allShapeIds(root: Element): number[] {
 
 // --- children in schema order -------------------------------------------------------------------
 
-const SP_PR_ORDER = ['xfrm', 'custGeom', 'prstGeom', 'noFill', 'solidFill', 'gradFill', 'blipFill', 'pattFill', 'grpFill', 'ln', 'effectLst', 'effectDag', 'scene3d', 'sp3d', 'extLst'];
-const R_PR_ORDER = ['ln', 'noFill', 'solidFill', 'gradFill', 'blipFill', 'pattFill', 'grpFill', 'effectLst', 'effectDag', 'highlight', 'uLnTx', 'uLn', 'uFillTx', 'uFill', 'latin', 'ea', 'cs', 'sym', 'hlinkClick', 'hlinkMouseOver', 'rtl', 'extLst'];
-const P_PR_ORDER = ['lnSpc', 'spcBef', 'spcAft', 'buClrTx', 'buClr', 'buSzTx', 'buSzPct', 'buSzPts', 'buFontTx', 'buFont', 'buNone', 'buAutoNum', 'buChar', 'buBlip', 'tabLst', 'defRPr', 'extLst'];
-const LN_ORDER = ['noFill', 'solidFill', 'gradFill', 'pattFill', 'prstDash', 'custDash', 'round', 'bevel', 'miter', 'headEnd', 'tailEnd', 'extLst'];
+const SP_PR_ORDER = [
+  'xfrm',
+  'custGeom',
+  'prstGeom',
+  'noFill',
+  'solidFill',
+  'gradFill',
+  'blipFill',
+  'pattFill',
+  'grpFill',
+  'ln',
+  'effectLst',
+  'effectDag',
+  'scene3d',
+  'sp3d',
+  'extLst',
+];
+const R_PR_ORDER = [
+  'ln',
+  'noFill',
+  'solidFill',
+  'gradFill',
+  'blipFill',
+  'pattFill',
+  'grpFill',
+  'effectLst',
+  'effectDag',
+  'highlight',
+  'uLnTx',
+  'uLn',
+  'uFillTx',
+  'uFill',
+  'latin',
+  'ea',
+  'cs',
+  'sym',
+  'hlinkClick',
+  'hlinkMouseOver',
+  'rtl',
+  'extLst',
+];
+const P_PR_ORDER = [
+  'lnSpc',
+  'spcBef',
+  'spcAft',
+  'buClrTx',
+  'buClr',
+  'buSzTx',
+  'buSzPct',
+  'buSzPts',
+  'buFontTx',
+  'buFont',
+  'buNone',
+  'buAutoNum',
+  'buChar',
+  'buBlip',
+  'tabLst',
+  'defRPr',
+  'extLst',
+];
+const LN_ORDER = [
+  'noFill',
+  'solidFill',
+  'gradFill',
+  'pattFill',
+  'prstDash',
+  'custDash',
+  'round',
+  'bevel',
+  'miter',
+  'headEnd',
+  'tailEnd',
+  'extLst',
+];
 const FILLS = ['noFill', 'solidFill', 'gradFill', 'blipFill', 'pattFill', 'grpFill'];
 export const TC_PR_ORDER = ['lnL', 'lnR', 'lnT', 'lnB', 'lnTlToBr', 'lnBlToTr', 'cell3D', ...FILLS, 'headers', 'extLst'];
 
