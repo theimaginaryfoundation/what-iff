@@ -14,6 +14,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/filechange"
 	"github.com/theimaginaryfoundation/what-iff/internal/filesave"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -192,11 +193,14 @@ func (fx *agentFileFixture) userUpload(folder, name, content string) *models.Fil
 	return att
 }
 
+// appTurn is the context of a turn the user started in the app, where file edit grants apply.
+var appTurn = metering.WithTurnSource(context.Background(), metering.TurnSourceApp)
+
 func callJSON(t *testing.T, fn func(context.Context, *models.Chat, []byte) (string, error), chat *models.Chat, args map[string]any) map[string]any {
 	t.Helper()
 	raw, err := json.Marshal(args)
 	require.NoError(t, err)
-	out, err := fn(context.Background(), chat, raw)
+	out, err := fn(appTurn, chat, raw)
 	require.NoError(t, err)
 	var res map[string]any
 	require.NoError(t, json.Unmarshal([]byte(out), &res))
@@ -338,6 +342,14 @@ func TestAgentFiles_AUserFileTheUserGrantedCanBeChangedNotDeleted(t *testing.T) 
 	// Another chat's agent was not granted the file.
 	other := fx.chat(chat.PersonalityID)
 	requireRefused(t, callJSON(t, fx.tool.Write, other, map[string]any{"action": "append", "file": "docs/brief.md", "content": "x"}), "mentioning you in a comment")
+
+	// Nor is a turn the user did not start in the app: a job, a webhook, a relayed message.
+	for _, source := range []string{"", metering.TurnSourceWebhook, "discord"} {
+		raw, _ := json.Marshal(map[string]any{"action": "append", "file": "docs/brief.md", "content": "x"})
+		out, err := fx.tool.Write(metering.WithTurnSource(context.Background(), source), chat, raw)
+		require.NoError(t, err)
+		require.Contains(t, out, "mentioning you in a comment", "turn source %q", source)
+	}
 }
 
 func TestAgentFiles_NoPersonalityOwnsPerConversation(t *testing.T) {
@@ -553,4 +565,24 @@ func TestAgentFiles_ChangeEventDescribesTheNewContent(t *testing.T) {
 	sum := sha256.Sum256(fx.objects.objs[row.S3Key])
 	require.Equal(t, hex.EncodeToString(sum[:]), ev.File.ContentSHA256, "the hash is of the new bytes")
 	require.Equal(t, int64(len(fx.objects.objs[row.S3Key])), *ev.File.SizeBytes)
+}
+
+func TestAgentFiles_AGrantedEditKeepsWhitespaceAndWorksOnAnEmptyFile(t *testing.T) {
+	fx := newAgentFileFixture()
+	saver := &fakeSaver{store: fx.store, objects: fx.objects}
+	fx.tool.WithUserFileSaver(saver)
+	chat := fx.chat(uuid.New())
+	code := fx.userUpload("src", "main.py", "\n\ndef main():\n    pass\n")
+	empty := fx.userUpload("docs", "draft.md", "")
+	fx.store.grants = map[[2]uuid.UUID]bool{{chat.ID, code.ID}: true, {chat.ID, empty.ID}: true}
+
+	requireOK(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "append", "file": "src/main.py", "content": "# end\n"}))
+	require.Equal(t, "\n\ndef main():\n    pass\n# end\n", string(saver.saves[0].Content), "leading blank lines, indentation and the newline kept")
+
+	requireOK(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "append", "file": "docs/draft.md", "content": "# Draft\n"}))
+	require.Equal(t, "# Draft\n", string(saver.saves[1].Content), "an empty file is text too")
+
+	// An object that is gone is refused, not read as empty.
+	delete(fx.objects.objs, fx.store.rows[code.ID].S3Key)
+	requireRefused(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "append", "file": "src/main.py", "content": "x"}), "missing")
 }

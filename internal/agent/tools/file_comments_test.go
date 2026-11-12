@@ -45,7 +45,7 @@ func (m *memComments) Update(ctx context.Context, userID, id uuid.UUID, change f
 func runComments(t *testing.T, tool *FileCommentsTool, chat *models.Chat, args map[string]any) fileCommentsResult {
 	t.Helper()
 	in, _ := json.Marshal(args)
-	out, err := tool.Run(context.Background(), chat, in)
+	out, err := tool.Run(appTurn, chat, in)
 	require.NoError(t, err)
 	var res fileCommentsResult
 	require.NoError(t, json.Unmarshal([]byte(out), &res))
@@ -192,11 +192,17 @@ func TestFileCommentsTool_OfficeFiles(t *testing.T) {
 	doc, _ := store.CreateFileAttachment(context.Background(), userID, models.FileAttachment{Name: "brief.docx", FileType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"})
 	office := &fakeOffice{threads: []officecomments.Thread{{ID: "w1", On: "ship it", Where: "paragraph 2",
 		Comments: []officecomments.Comment{{ID: "w1", AuthorName: "Pat", Text: "@Iris when?"}}}}}
-	tool := (&FileCommentsTool{files: store, logger: zap.NewNop(), now: time.Now}).WithOffice(office)
+	tool := (&FileCommentsTool{files: store, grants: store, logger: zap.NewNop(), now: time.Now}).WithOffice(office)
 	chat := &models.Chat{ID: uuid.New(), UserID: userID, PersonalityID: uuid.New(), PersonalityName: "Iris"}
 
 	res := runComments(t, tool, chat, map[string]any{"action": "list", "file": "brief.docx"})
 	require.Equal(t, []fileThreadView{{ID: "w1", On: "ship it", Where: "paragraph 2", Comments: []fileCommentView{{ID: "w1", Author: "Pat", Text: "@Iris when?"}}}}, res.Threads)
+
+	// Changing an Office file's comments rewrites the file: it takes the grant a mention gives.
+	res = runComments(t, tool, chat, map[string]any{"action": "reply", "file": "brief.docx", "thread_id": "w1", "text": "Friday."})
+	require.Contains(t, res.Error, "only after the user mentions you")
+	require.Empty(t, office.chatIDs, "nothing written")
+	store.grants = map[[2]uuid.UUID]bool{{chat.ID, doc.ID}: true}
 
 	res = runComments(t, tool, chat, map[string]any{"action": "reply", "file": "brief.docx", "thread_id": "w1", "text": "Friday."})
 	require.Empty(t, res.Error)

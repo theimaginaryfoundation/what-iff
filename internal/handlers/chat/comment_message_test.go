@@ -3,6 +3,7 @@ package chat
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -79,4 +80,51 @@ func TestCreateChatMessage_FromADocumentComment(t *testing.T) {
 	rec = postMessage(t, h, userID, chatID, `{"message":"x","origin":"user","comment":{"file_id":"`+fileID.String()+`","thread_id":" "}}`)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Nil(t, ag.got)
+}
+
+type failingAgent struct{ retryAgentStub }
+
+func (*failingAgent) HandleUserMessage(context.Context, models.ChatMessage) (*models.ChatMessageResponse, error) {
+	return nil, errors.New("provider down")
+}
+
+func TestCreateChatMessage_ACommentThatFailsToSendGrantsNothing(t *testing.T) {
+	userID, chatID, fileID := uuid.New(), uuid.New(), uuid.New()
+	store := &fakeStore{getFileAttachmentFn: func(context.Context, uuid.UUID, uuid.UUID) (*models.FileAttachment, error) {
+		return &models.FileAttachment{ID: fileID, Name: "plan.md"}, nil
+	}}
+	h := &Handler{ds: store, logger: zap.NewNop(), messageAgent: &failingAgent{}}
+	rec := postMessage(t, h, userID, chatID, `{"message":"@Iris fix it","origin":"user","comment":{"file_id":"`+fileID.String()+`","thread_id":"t1"}}`)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	require.Empty(t, store.grants, "the grant made for the send is taken back")
+}
+
+func TestFileEditGrants_ListAndRevoke(t *testing.T) {
+	userID, chatID, fileID := uuid.New(), uuid.New(), uuid.New()
+	store := &fakeStore{grants: [][2]uuid.UUID{{chatID, fileID}}}
+	h := &Handler{ds: store, logger: zap.NewNop()}
+	call := func(method, path string, vars map[string]string, fn http.HandlerFunc) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		req = mux.SetURLVars(req, vars)
+		req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, userID))
+		rec := httptest.NewRecorder()
+		fn(rec, req)
+		return rec
+	}
+	rec := call(http.MethodGet, "/chat/x/file-edit-grants", map[string]string{"chatId": chatID.String()}, h.ListFileEditGrants)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), fileID.String())
+
+	rec = call(http.MethodGet, "/chat/x/file-edit-grants/y", map[string]string{"chatId": chatID.String(), "fileId": fileID.String()}, h.GetFileEditGrant)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"granted":true}`, rec.Body.String())
+
+	rec = call(http.MethodDelete, "/chat/x/file-edit-grants/y", map[string]string{"chatId": chatID.String(), "fileId": fileID.String()}, h.RevokeFileEditGrant)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Empty(t, store.grants)
+	rec = call(http.MethodGet, "/chat/x/file-edit-grants/y", map[string]string{"chatId": chatID.String(), "fileId": fileID.String()}, h.GetFileEditGrant)
+	require.JSONEq(t, `{"granted":false}`, rec.Body.String())
+
+	rec = call(http.MethodDelete, "/chat/x/file-edit-grants/y", map[string]string{"chatId": chatID.String(), "fileId": "nope"}, h.RevokeFileEditGrant)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }

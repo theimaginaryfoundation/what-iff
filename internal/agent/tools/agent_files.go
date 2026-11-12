@@ -10,6 +10,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/filedelete"
 	"github.com/theimaginaryfoundation/what-iff/internal/filesave"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
@@ -126,15 +127,31 @@ func ownsAgentFile(chat *models.Chat, att *models.FileAttachment) bool {
 	return att.CreatedByPersonalityID == nil && att.CreatedByChatID != nil && *att.CreatedByChatID == chat.ID
 }
 
-// granted reports whether the user granted chat's agent att (ADR 0x046): a comment on the file
-// that mentions the agent. Skill files stay with the skill editor.
+// granted reports whether the user granted chat's agent att (ADR 0x046); see hasEditGrant.
 func (t *AgentFileTool) granted(ctx context.Context, chat *models.Chat, att *models.FileAttachment) bool {
+	return hasEditGrant(ctx, t.store, t.logger, chat, att)
+}
+
+// fileEditGrants reads file edit grants (ADR 0x046).
+type fileEditGrants interface {
+	HasFileEditGrant(ctx context.Context, userID, chatID, fileID uuid.UUID) (bool, error)
+}
+
+// hasEditGrant reports whether chat's agent may change the user's file att: the user mentioned it
+// in a comment on the file from this chat (with the personality it has now), and this turn is one
+// the user started in the app. A job, a webhook or a relayed message (a Discord thread) runs in the
+// same chat but is not the user asking, so it cannot use the grant: a prompt injected there could
+// otherwise rewrite the user's files. Skill files stay with the skill editor.
+func hasEditGrant(ctx context.Context, store fileEditGrants, logger *zap.Logger, chat *models.Chat, att *models.FileAttachment) bool {
 	if att == nil || att.IsSkillFile() || chat.ID == uuid.Nil {
 		return false
 	}
-	ok, err := t.store.HasFileEditGrant(ctx, chat.UserID, chat.ID, att.ID)
+	if metering.TurnSourceFromContext(ctx) != metering.TurnSourceApp {
+		return false
+	}
+	ok, err := store.HasFileEditGrant(ctx, chat.UserID, chat.ID, att.ID)
 	if err != nil {
-		t.logger.Warn("agent file tools: could not read a file edit grant", zap.String("file_attachment_id", att.ID.String()), zap.Error(err))
+		logger.Warn("agent file tools: could not read a file edit grant", zap.String("file_attachment_id", att.ID.String()), zap.Error(err))
 		return false
 	}
 	return ok

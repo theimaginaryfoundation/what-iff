@@ -10563,6 +10563,147 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/{chatId}/file-edit-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the files the chat's agent may change
+         * @description The user's files the chat's agent may change because the user mentioned it in a comment on them from this chat (ADR 0x046), newest first. A grant is for the personality the chat had when it was made, and is used only in turns the user starts in the app.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The grants */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            grants: components["schemas"]["FileEditGrant"][];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{chatId}/file-edit-grants/{fileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chatId: string;
+                /** @description Any row of the file (a chat copy answers for its original) */
+                fileId: string;
+            };
+            cookie?: never;
+        };
+        /** Whether the chat's agent may change a file */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                    /** @description Any row of the file (a chat copy answers for its original) */
+                    fileId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Whether the agent of the chat (with its personality now) holds a grant on the file */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            granted: boolean;
+                        };
+                    };
+                };
+                /** @description File attachment not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Take back the chat agent's grant on a file
+         * @description The chat's agent may no longer change the file. Revoking a grant that is not there succeeds.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                    /** @description Any row of the file (a chat copy answers for its original) */
+                    fileId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Revoked */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description File attachment not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/{chatId}/chat-message": {
         parameters: {
             query?: never;
@@ -14887,6 +15028,17 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description One of the user's files the agent of a chat may change (ADR 0x046) */
+        FileEditGrant: {
+            /**
+             * Format: uuid
+             * @description The file's original row
+             */
+            file_id: string;
+            file_name: string;
+            /** Format: date-time */
+            created_at: string;
+        };
         /**
          * @example {
          *       "status": "healthy",

@@ -89,11 +89,14 @@ func (h *Handler) CreateChatMessage(w http.ResponseWriter, r *http.Request) {
 		Rituals:     req.Rituals,
 		Steer:       req.Steer,
 	}
+	undoComment := func() {}
 	if req.Comment != nil {
-		if status, err := h.attachComment(r.Context(), &msg, req.Comment); err != nil {
+		undo, status, err := h.attachComment(r.Context(), &msg, req.Comment)
+		if err != nil {
 			handlerutils.RespondWithError(w, h.logger, status, handlerutils.CodeNotSet, err.Error(), nil)
 			return
 		}
+		undoComment = undo
 	}
 
 	// Call the agent to handle the message. Prefer client timezone when provided.
@@ -103,12 +106,15 @@ func (h *Handler) CreateChatMessage(w http.ResponseWriter, r *http.Request) {
 		ctx = context.WithValue(ctx, middleware.ClientTimezoneKey, req.ClientTimezone)
 	}
 	if h.messageAgent == nil {
+		undoComment()
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Message agent not configured", nil)
 		return
 	}
 
 	response, err := h.messageAgent.HandleUserMessage(metering.WithTurnSource(ctx, metering.TurnSourceApp), msg)
 	if err != nil {
+		// The comment was not sent, so the agent was not asked to change its file.
+		undoComment()
 		if errors.Is(err, agent.ErrQuotaExceeded) {
 			handlerutils.RespondWithError(w, h.logger, http.StatusTooManyRequests, models.ErrCodeQuotaExceeded,
 				"You've used all of your free trial credits. Please subscribe to continue chatting.", nil)

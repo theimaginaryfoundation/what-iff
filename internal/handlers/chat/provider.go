@@ -36,8 +36,12 @@ type Store interface {
 	CreateFileAttachment(ctx context.Context, userID uuid.UUID, fileAttachment models.FileAttachment) (*models.FileAttachment, error)
 	// GetFileAttachment finds the file a document comment sent to the agent is on (ADR 0x046).
 	GetFileAttachment(ctx context.Context, userID, id uuid.UUID) (*models.FileAttachment, error)
-	// GrantFileEdit lets the chat's agent change the file a comment mentioning it is on (ADR 0x046).
-	GrantFileEdit(ctx context.Context, userID, chatID, fileID uuid.UUID) error
+	// GrantFileEdit lets the chat's agent change the file a comment mentioning it is on (ADR 0x046);
+	// created says the grant is new, so a send that fails can take it back (RevokeFileEdit).
+	GrantFileEdit(ctx context.Context, userID, chatID, fileID uuid.UUID) (created bool, err error)
+	ListFileEditGrants(ctx context.Context, userID, chatID uuid.UUID) ([]models.FileEditGrant, error)
+	HasFileEditGrant(ctx context.Context, userID, chatID, fileID uuid.UUID) (bool, error)
+	RevokeFileEdit(ctx context.Context, userID, chatID, fileID uuid.UUID) error
 	DeleteFileAttachment(ctx context.Context, userID, id uuid.UUID) error
 	SetFileAttachmentS3Key(ctx context.Context, userID, id uuid.UUID, s3Key string) error
 	GetAvailableRituals(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.RitualFilters) (*models.PaginatedResponse, error)

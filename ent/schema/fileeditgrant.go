@@ -28,6 +28,11 @@ func (FileEditGrant) Fields() []ent.Field {
 			Immutable(),
 		field.UUID("chat_id", uuid.UUID{}).
 			Immutable(),
+		// The chat's personality when the grant was made: switching the chat to another
+		// personality does not pass the grant on (nil for a chat with none).
+		field.UUID("personality_id", uuid.UUID{}).
+			Optional().
+			Nillable(),
 		field.Time("created_at").
 			Default(time.Now).
 			Immutable(),

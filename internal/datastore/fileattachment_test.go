@@ -65,6 +65,7 @@ func createFileAttachmentTestSchema(t *testing.T, db *sql.DB) {
 			id uuid PRIMARY KEY,
 			file_attachment_id uuid NOT NULL,
 			chat_id uuid NOT NULL,
+			personality_id uuid NULL,
 			created_at datetime NOT NULL,
 			UNIQUE (file_attachment_id, chat_id)
 		)`,

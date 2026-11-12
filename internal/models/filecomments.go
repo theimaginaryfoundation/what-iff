@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // Comments on text and code files (ADR 0x045), kept beside the file (ent FileCommentSet). The
 // shapes match the comment panel's: a thread is its first comment and its replies, on a range of
@@ -52,4 +56,12 @@ type FileCommentSet struct {
 	// BaselineKey is the stored object the baseline is: a different key is changed content.
 	BaselineKey string
 	Revision    int
+}
+
+// FileEditGrant is one of the user's files the agent of a chat may change, because the user
+// mentioned it in a comment on the file from that chat (ADR 0x046).
+type FileEditGrant struct {
+	FileID    uuid.UUID `json:"file_id"`
+	FileName  string    `json:"file_name"`
+	CreatedAt time.Time `json:"created_at"`
 }

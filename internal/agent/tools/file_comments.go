@@ -111,7 +111,9 @@ type fileCommentsService interface {
 
 // FileCommentsTool implements file_comments.
 type FileCommentsTool struct {
-	files    UserFileLookup
+	files UserFileLookup
+	// grants says whether the agent may rewrite an Office file to change its comments (ADR 0x046).
+	grants   fileEditGrants
 	comments fileCommentsService
 	// office reads and writes the comments inside Word, PowerPoint and Excel files; nil leaves
 	// them unsupported.
@@ -135,7 +137,7 @@ func (t *FileCommentsTool) WithOffice(office officeComments) *FileCommentsTool {
 
 // NewFileCommentsTool constructs a FileCommentsTool over the datastore and object store.
 func NewFileCommentsTool(ds *datastore.Datastore, files storage.FileStore, logger *zap.Logger) *FileCommentsTool {
-	return &FileCommentsTool{files: ds, comments: filecomments.New(ds, files), logger: logger, now: time.Now}
+	return &FileCommentsTool{files: ds, grants: ds, comments: filecomments.New(ds, files), logger: logger, now: time.Now}
 }
 
 // AgentCommentAuthor is who the agent in chat writes comments as.
@@ -157,6 +159,10 @@ func (t *FileCommentsTool) Run(ctx context.Context, chat *models.Chat, input []b
 	if err := json.Unmarshal(input, &args); err != nil {
 		return t.refuse(fmt.Sprintf("invalid arguments: %v", err))
 	}
+	// Comments are on the owner's account-wide files, outside any sandbox.
+	if chat.IsSandboxed() {
+		return t.refuse(sandboxedNote("File comments"))
+	}
 	att, err := ResolveUserFile(ctx, t.files, chat.UserID, args.File, nil)
 	if err != nil {
 		var refusal FileRefusal
@@ -168,6 +174,11 @@ func (t *FileCommentsTool) Run(ctx context.Context, chat *models.Chat, input []b
 	ref := &agentFileRef{ID: att.ID.String(), Path: FilePath(att)}
 	var res fileCommentsResult
 	if t.office != nil && t.office.FormatOf(att) != nil {
+		// A comment in an Office file is part of the file: changing one writes a new version of
+		// it, which takes the same grant as changing its text.
+		if args.Action != "list" && (t.grants == nil || !hasEditGrant(ctx, t.grants, t.logger, chat, att)) {
+			return t.refuse("changing the comments of a Word, PowerPoint or Excel file rewrites the file, which you may do only after the user mentions you in a comment on it from this chat; you can still list them")
+		}
 		res, err = t.runOffice(ctx, chat, att, args)
 		if msg, ok := refusalOf(err); ok {
 			return t.refuse(msg)
@@ -222,6 +233,10 @@ func refusalOf(err error) (string, bool) {
 		return err.Error() + "; quote more of the text, or give occurrence", true
 	case errors.Is(err, officecomments.ErrBadAnchor):
 		return err.Error() + "; check the quote, slide, sheet or cell (Word needs a quote; Excel a cell without a thread)", true
+	case errors.Is(err, officecomments.ErrOldComment):
+		return err.Error() + "; start a new thread instead", true
+	case errors.Is(err, officecomments.ErrTooLarge):
+		return "the file is too large to read its comments here", true
 	case errors.Is(err, officecomments.ErrNotOffice):
 		return "the file could not be read as an Office file", true
 	case errors.Is(err, filecomments.ErrRevision), errors.Is(err, filecomments.ErrStaleContent):

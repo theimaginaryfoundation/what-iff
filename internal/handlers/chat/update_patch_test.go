@@ -117,8 +117,35 @@ func (f *fakeStore) GetFileAttachment(ctx context.Context, userID, id uuid.UUID)
 	}
 	return nil, errors.New("not implemented")
 }
-func (f *fakeStore) GrantFileEdit(_ context.Context, _, chatID, fileID uuid.UUID) error {
+func (f *fakeStore) GrantFileEdit(_ context.Context, _, chatID, fileID uuid.UUID) (bool, error) {
 	f.grants = append(f.grants, [2]uuid.UUID{chatID, fileID})
+	return true, nil
+}
+func (f *fakeStore) ListFileEditGrants(_ context.Context, _, chatID uuid.UUID) ([]models.FileEditGrant, error) {
+	var out []models.FileEditGrant
+	for _, g := range f.grants {
+		if g[0] == chatID {
+			out = append(out, models.FileEditGrant{FileID: g[1]})
+		}
+	}
+	return out, nil
+}
+func (f *fakeStore) HasFileEditGrant(_ context.Context, _, chatID, fileID uuid.UUID) (bool, error) {
+	for _, g := range f.grants {
+		if g == [2]uuid.UUID{chatID, fileID} {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+func (f *fakeStore) RevokeFileEdit(_ context.Context, _, chatID, fileID uuid.UUID) error {
+	kept := f.grants[:0]
+	for _, g := range f.grants {
+		if g != [2]uuid.UUID{chatID, fileID} {
+			kept = append(kept, g)
+		}
+	}
+	f.grants = kept
 	return nil
 }
 func (f *fakeStore) DeleteFileAttachment(ctx context.Context, userID, id uuid.UUID) error {

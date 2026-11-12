@@ -23,13 +23,15 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
     A personality's documents stay attached to it; only the folder label changes.
   - `AgentFileTool` — `agent_file_write` and `agent_file_read` (ADR 0x034): loadable tools for an agent's own text files, stored as ordinary file attachments under `users/{uid}/agent/` and never chunked (`agent_files.go`, `agent_files_write.go`, `agent_files_read.go`, `agent_files_patch.go`; tests beside them).
     A user's file the user mentioned the agent in a comment on (`HasFileEditGrant`, ADR 0x046) can have its content changed too (`resolveChangeable`), saved through `filesave.Service.Replace` over the version read, with no earlier version kept; delete, move and rename stay limited to the agent's own files (`resolveOwned`).
-  - `FileCommentsTool` — `file_comments` (ADR 0x046, `file_comments.go`): lists, replies to, adds and resolves comment threads on any of the user's text, code and image files through `filecomments.Service.Update`.
+    A grant counts only in a turn the user started in the app (`hasEditGrant` checks `metering.TurnSourceApp`): a job, a webhook or a relayed message in the same chat cannot use it.
+  - `FileCommentsTool` — `file_comments` (ADR 0x046, `file_comments.go`): lists, replies to, adds and resolves comment threads on any of the user's text, code and image files through `filecomments.Service.Update`, outside sandboxed chats.
+    In a Word, PowerPoint or Excel file a change rewrites the file, so it needs the same grant as an edit (`hasEditGrant`); listing does not.
     It writes as `agent:<personality id>` (`AgentCommentAuthor`) and places a new thread by quoting the file's text.
     On Word, PowerPoint and Excel files it goes through `filecomments.Office` (`WithOffice`) instead, with Office anchors (`slide`, `sheet`, `cell`), and each change saves the file, replacing its content (no version history).
     Each write returns a `comment_ref`; `CommentRefsFromCalls` turns a turn's calls into the reply's `comment_refs`, one per thread.
     An agent may change only files its personality created (with no personality, its conversation); user uploads are read-only and can be copied.
     The top-level `skills/` folder is reserved for skill bundles; agents cannot write into it.
-  - Shared file helpers (`user_files.go`): `ResolveUserFile` (an id or `folder/name` path, with one set of refusals), `ReadFileText`, `ReadableAsText`, `FilePath`, `SplitFilePath`, and `FileRefusal` / `AsFileRefusal` for refusals meant for the model.
+  - Shared file helpers (`user_files.go`): `ResolveUserFile` (an id or `folder/name` path, with one set of refusals), `ReadFileText` (exactly the object the row names, an empty file as empty; legacy rows with no key through the old resolver), `ReadableAsText`, `FilePath`, `SplitFilePath`, and `FileRefusal` / `AsFileRefusal` for refusals meant for the model.
     Exported so other tools that take a user's file (the private build's `load_file_to_container`) do not copy them.
   - `EntityTool` — `entity_write` and `entity_get` (ADR 0x034): the entity wiki, exact lookup by normalized name, wiki-style `[[links]]` (`entity.go`; tests in `entity_test.go`).
     `entity_get` also lists names by `prefix` (metadata only); `entity_write` action `delete` is exact-name and archives the page (the user can restore it).
