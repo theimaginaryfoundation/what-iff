@@ -36,6 +36,7 @@ import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { CommentAgentService } from '../office/comments/comment-agent.service';
 import { COMMENT_SAVER, CommentSaveResult, CommentSaver, FileEditor } from './editors/file-editor';
+import { ImageMarkupComponent, MarkupResult } from './markup/image-markup.component';
 import { galleryDisplayBaseName, galleryFilenameFromBaseName } from '../gallery/helpers/gallery-filename.helpers';
 import { FilePreviewKind, fileTypeLabel, previewKindFor } from '../gallery/helpers/file-preview.helpers';
 import { folderLabel, folderPathError, normalizeFolderPath } from '../gallery/helpers/gallery-folder.helpers';
@@ -44,6 +45,9 @@ import { FileWorkspaceService } from './file-workspace.service';
 import { EDITOR_LOADER, VIEWER_LOADER, hasEditor, viewerFor } from './viewers/registry';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
+
+/** The image types markup can draw on: what browsers decode and image vendors accept (ADR 0x047). */
+const MARKUP_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
 
 /**
  * The file workspace (ADR 0x043 §1): one file's toolbar (name, type, where it is, what can be done
@@ -67,6 +71,7 @@ type LoadState = 'idle' | 'loading' | 'ready' | 'error';
     ExpandIconComponent,
     XIconComponent,
     ModalComponent,
+    ImageMarkupComponent,
   ],
   templateUrl: './file-workspace.component.html',
   styleUrl: './file-workspace.component.scss',
@@ -103,6 +108,10 @@ export class FileWorkspaceComponent implements CommentSaver {
   readonly canEdit = input(true);
   /** The conversation a save is made from, carried on the save so its container is updated. */
   readonly chatId = input<string | null>(null);
+  /** Whether "Mark up" is offered: the host can add the result to a message (the chat; ADR 0x047). */
+  readonly markupAvailable = input(false);
+  /** A warning for the markup surface, such as an image vendor that cannot edit. */
+  readonly markupNotice = input<string | null>(null);
 
   readonly close = output<void>();
   readonly previous = output<void>();
@@ -115,6 +124,8 @@ export class FileWorkspaceComponent implements CommentSaver {
   readonly fileChanged = output<FileAttachment>();
   /** Save As: the host creates the file where the user chose and opens it. */
   readonly saveAs = output<{ name: string; folder: string; blob: Blob }>();
+  /** Markup to add to the next message; the host calls finishMarkup when it has. */
+  readonly markupSubmit = output<{ file: FileAttachment; result: MarkupResult }>();
 
   readonly kind = computed<FilePreviewKind>(() => previewKindFor(this.file()));
   readonly typeLabel = computed(() => fileTypeLabel(this.file()));
@@ -143,14 +154,14 @@ export class FileWorkspaceComponent implements CommentSaver {
   readonly isRenaming = signal(false);
   readonly renameDraft = signal('');
 
-  // Editing (ADR 0x043 §3).
-  readonly mode = signal<'view' | 'edit'>('view');
+  // Editing (ADR 0x043 §3) and markup (ADR 0x047).
+  readonly mode = signal<'view' | 'edit' | 'markup'>('view');
   readonly editable = computed(() => this.canEdit() && hasEditor(this.kind(), this.file().file_type) && this.state() === 'ready');
   readonly editorDirty = signal(false);
   /** The editor holds work beyond its content (a running notebook) that closing it would discard. */
   readonly editorBusy = signal(false);
-  /** Leaving edit mode would lose something: unsaved changes, or work in progress. */
-  readonly holdsWork = computed(() => this.editorDirty() || this.editorBusy());
+  /** Leaving edit or markup mode would lose something: unsaved changes, work in progress, a drawing. */
+  readonly holdsWork = computed(() => this.editorDirty() || this.editorBusy() || this.markupDirty());
   /**
    * Comments can be written while viewing a file the user may change (ADR 0x045). Kept beside the
    * file (text, images) that is all they need; written into it (saveComments), the file needs an editor too.
@@ -158,6 +169,15 @@ export class FileWorkspaceComponent implements CommentSaver {
   readonly canComment = computed(() => this.canEdit() && this.state() === 'ready' && this.mode() === 'view');
   /** The file whose lossy save the user accepted for comments, so they are asked once, not per comment. */
   private lossyCommentsAccepted: string | null = null;
+  readonly canMarkup = computed(
+    () =>
+      this.markupAvailable() &&
+      this.kind() === 'image' &&
+      MARKUP_TYPES.has((this.file().file_type || '').toLowerCase()) &&
+      this.state() === 'ready',
+  );
+  readonly markupDirty = signal(false);
+  readonly markupSending = signal(false);
   readonly saving = signal(false);
   readonly saveError = signal<string | null>(null);
   /** The current version the server reported on a 412; the conflict dialog is open while set. */
@@ -225,12 +245,12 @@ export class FileWorkspaceComponent implements CommentSaver {
     });
     // Route changes, resizes across a breakpoint and closing the tab all ask this.
     effect(() => {
-      const unsaved = this.mode() === 'edit' && this.holdsWork();
+      const unsaved = this.mode() !== 'view' && this.holdsWork();
       untracked(() => this.workspace.setUnsaved(unsaved));
     });
     const view = this.document.defaultView;
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (this.mode() === 'edit' && this.holdsWork()) event.preventDefault();
+      if (this.mode() !== 'view' && this.holdsWork()) event.preventDefault();
     };
     view?.addEventListener('beforeunload', warnBeforeUnload);
     inject(DestroyRef).onDestroy(() => {
@@ -245,6 +265,12 @@ export class FileWorkspaceComponent implements CommentSaver {
 
   async startEdit(): Promise<void> {
     if (!this.editable() || this.mode() === 'edit') return;
+    // A comment save running in the viewer replaces the bytes (or reloads them on a conflict) when
+    // it lands: the editor opens on what it leaves, or that would replace what is typed.
+    if (this.commentSave) {
+      await this.commentSave;
+      if (this.mode() !== 'view' || this.state() !== 'ready') return;
+    }
     const load = this.loadEditor(this.kind());
     const outlet = this.editorOutlet();
     const blob = this.blob();
@@ -268,13 +294,50 @@ export class FileWorkspaceComponent implements CommentSaver {
     this.editorRef = ref;
   }
 
-  /** Leaves edit mode, asking first when there are unsaved changes. */
+  /** Leaves edit or markup mode, asking first when there are unsaved changes or a drawing. */
   async stopEdit(): Promise<boolean> {
+    if (this.mode() === 'markup') return this.stopMarkup();
     if (this.mode() !== 'edit') return true;
     if (this.holdsWork() && !(await this.confirmationService.confirmDiscardChanges())) return false;
     this.destroyEditor();
     this.mode.set('view');
     return true;
+  }
+
+  // --- markup (ADR 0x047) -------------------------------------------------------------------------
+
+  startMarkup(): void {
+    if (!this.canMarkup() || this.mode() !== 'view') return;
+    this.saveError.set(null);
+    this.markupDirty.set(false);
+    this.mode.set('markup');
+  }
+
+  async stopMarkup(): Promise<boolean> {
+    if (this.mode() !== 'markup') return true;
+    if (this.markupSending()) return false;
+    if (this.markupDirty() && !(await this.confirmationService.confirmDiscardChanges())) return false;
+    this.markupDirty.set(false);
+    this.mode.set('view');
+    return true;
+  }
+
+  onMarkupSubmitted(result: MarkupResult): void {
+    if (this.markupSending()) return;
+    this.markupSending.set(true);
+    this.saveError.set(null);
+    this.markupSubmit.emit({ file: this.file(), result });
+  }
+
+  /** The host added the markup to the message (back to the image) or could not (the drawing stays). */
+  finishMarkup(added: boolean, message = 'Could not add the markup to your message. Please try again.'): void {
+    this.markupSending.set(false);
+    if (!added) {
+      this.saveError.set(message);
+      return;
+    }
+    this.markupDirty.set(false);
+    if (this.mode() === 'markup') this.mode.set('view');
   }
 
   async requestClose(): Promise<void> {
@@ -354,6 +417,19 @@ export class FileWorkspaceComponent implements CommentSaver {
    * the file as it is, without the comment.
    */
   async saveComments(editor: Pick<FileEditor, 'content' | 'markSaved' | 'losses'>): Promise<CommentSaveResult> {
+    const running = this.writeComments(editor);
+    this.commentSave = running;
+    try {
+      return await running;
+    } finally {
+      if (this.commentSave === running) this.commentSave = null;
+    }
+  }
+
+  /** A comment save running in the viewer (saveComments), which startEdit waits for. */
+  private commentSave: Promise<CommentSaveResult> | null = null;
+
+  private async writeComments(editor: Pick<FileEditor, 'content' | 'markSaved' | 'losses'>): Promise<CommentSaveResult> {
     const file = this.file();
     if (!this.canComment() || !this.editable()) return 'failed';
     let content: Blob;
@@ -393,6 +469,11 @@ export class FileWorkspaceComponent implements CommentSaver {
         .pipe(take(1))
         .subscribe({ next: resolve, error: reject }),
     );
+  }
+
+  /** CommentSaver: a viewer found the file changed elsewhere. Only a viewer asks, so no edits are lost. */
+  showCurrentContent(): void {
+    if (this.mode() === 'view') this.reloadContent();
   }
 
   /**
@@ -554,6 +635,8 @@ export class FileWorkspaceComponent implements CommentSaver {
     this.generation += 1;
     this.destroyEditor();
     this.mode.set('view');
+    this.markupDirty.set(false);
+    this.markupSending.set(false);
     this.conflictVersion.set(null);
     this.saveAsOpen.set(false);
     this.saveError.set(null);

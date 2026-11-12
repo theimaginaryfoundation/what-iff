@@ -75,6 +75,35 @@ func (g openAIImageGenerator) GenerateImage(ctx context.Context, prompt string, 
 	return GeneratedImage{Base64: b64, MIMEType: "image/png"}, nil
 }
 
+// PrepareEdit checks req and turns its mask into OpenAI's form (transparent where the base may
+// change, at the base's size).
+func (g openAIImageGenerator) PrepareEdit(req ImageEditRequest) (ImageEditRequest, error) {
+	return req.prepared("openai", func(r ImageEditRequest) ([]byte, error) {
+		w, h, err := imageSize(r.Images[0].Data)
+		if err != nil {
+			return nil, fmt.Errorf("base image: %w", err)
+		}
+		return alphaMaskPNG(r.Mask, w, h)
+	})
+}
+
+// EditImage is the Images API edit endpoint with every input image, and the mask as OpenAI wants it.
+// gpt-image treats the mask as strong guidance rather than a hard stencil, so the instructions
+// repeat it.
+func (g openAIImageGenerator) EditImage(ctx context.Context, req ImageEditRequest) (GeneratedImage, error) {
+	req, err := g.PrepareEdit(req)
+	if err != nil {
+		return GeneratedImage{}, err
+	}
+	mask := req.vendorMask
+	prompt := editInstructions(req.Images, 0, mask != nil, req.Prompt)
+	b64, err := g.p.editImage(ctx, buildImageEditRequestParams(prompt, req.Quality, req.editAspectRatio(), req.Images, mask))
+	if err != nil {
+		return GeneratedImage{}, err
+	}
+	return GeneratedImage{Base64: b64, MIMEType: "image/png"}, nil
+}
+
 // maxDownloadedImageBytes caps an image fetched from a vendor's result URL.
 const maxDownloadedImageBytes = 32 << 20
 

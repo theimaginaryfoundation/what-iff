@@ -52,7 +52,7 @@ func (s *Service) Update(ctx context.Context, userID, id uuid.UUID, change func(
 		if err != nil {
 			return nil, err
 		}
-		out, err := s.Write(ctx, userID, id, threads, got.ContentVersion, got.Revision)
+		out, err := s.write(ctx, userID, id, threads, got.ContentVersion, got.Revision, false)
 		if (errors.Is(err, ErrRevision) || errors.Is(err, ErrStaleContent)) && attempt == 0 {
 			continue
 		}

@@ -295,7 +295,7 @@ describe('DocsEditorComponent', () => {
 
     it('while viewing, with a saver: comments can be written, and each is saved as it is made', async () => {
       const saveComments = vi.fn().mockResolvedValue('saved');
-      testSaver = { canComment: signal(true), saveComments };
+      testSaver = { canComment: signal(true), saveComments, showCurrentContent: vi.fn() };
       const el = await open(attachment(), await commentedBlob());
       await vi.waitFor(() => expect(fake.state.painted.length).toBeGreaterThan(0));
       fixture.detectChanges();

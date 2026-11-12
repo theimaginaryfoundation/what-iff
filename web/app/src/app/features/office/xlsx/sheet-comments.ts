@@ -74,15 +74,26 @@ export function takeSheetComments(workbook: UniverWorkbook, persons: readonly Th
   return threads;
 }
 
-/** Where each thread's cell is now, by thread id: the first cell tagged with it. */
-export function commentCells(workbook: UniverWorkbook): Map<string, { sheetId: string; row: number; col: number }> {
+/**
+ * Where each thread's cell is now, by thread id. Where a copied cell carries the tag too, the cell
+ * the thread names (its quote: the cell's A1 reference, on its sheet) wins, else the first.
+ */
+export function commentCells(
+  workbook: UniverWorkbook,
+  threads: readonly SheetCommentThread[] = [],
+): Map<string, { sheetId: string; row: number; col: number }> {
+  const named = new Map(threads.map(t => [t.id, t]));
   const out = new Map<string, { sheetId: string; row: number; col: number }>();
   for (const sheetId of workbook.sheetOrder) {
     const cells = workbook.sheets[sheetId]?.cellData ?? {};
     for (const [r, row] of Object.entries(cells)) {
       for (const [c, cell] of Object.entries(row ?? {})) {
         const id = cell?.custom?.[COMMENT_CELL_KEY];
-        if (typeof id === 'string' && !out.has(id)) out.set(id, { sheetId, row: Number(r), col: Number(c) });
+        if (typeof id !== 'string') continue;
+        const at = { sheetId, row: Number(r), col: Number(c) };
+        const thread = named.get(id);
+        const isNamed = !!thread && thread.anchor.sheetId === sheetId && thread.quote === cellA1(at.row, at.col);
+        if (!out.has(id) || isNamed) out.set(id, at);
       }
     }
   }
@@ -95,7 +106,7 @@ export function commentCells(workbook: UniverWorkbook): Map<string, { sheetId: s
  * is not written.
  */
 export function putSheetComments(workbook: UniverWorkbook, threads: readonly SheetCommentThread[]): void {
-  const cells = commentCells(workbook);
+  const cells = commentCells(workbook, threads);
   const bySheet: Record<string, UniverComment[]> = {};
   for (const thread of threads) {
     const at = cells.get(thread.id);

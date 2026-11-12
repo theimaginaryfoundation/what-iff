@@ -81,6 +81,8 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
   /** The chat's agent, when the document is open in a chat: mentionable, and sent comments that mention it (ADR 0x046). */
   private readonly agentHooks = inject(CommentAgentService).hooks(() => this.file());
   readonly threads = signal<DocxCommentThread[]>([]);
+  /** The file's threads with no place in the text shown, which a save keeps as they are. */
+  private unplacedComments: string[] = [];
   readonly activeThreadId = signal<string | null>(null);
   private readonly panel = inject(CommentsPanelState);
   /** The panel opens by itself on a document with open threads, until the user opens or closes it. */
@@ -203,6 +205,7 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
     const result = await docxToDocument(bytes, { id: `doc-${file.id}`, name: file.name });
     this.original = bytes;
     this.threads.set(result.comments);
+    this.unplacedComments = result.unplacedComments;
     this.draft.set(null);
     if (!result.comments.some(t => t.id === this.activeThreadId())) this.activeThreadId.set(null);
     return { data: result.document, report: result.report };
@@ -255,7 +258,10 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
   }
 
   protected async serialize(data: DocDocument): Promise<Blob> {
-    const { bytes, report } = await documentToDocx(data, this.original ?? undefined, { comments: this.threads() });
+    const { bytes, report } = await documentToDocx(data, this.original ?? undefined, {
+      comments: this.threads(),
+      keepComments: this.unplacedComments,
+    });
     this.exportReport.set(report);
     return new Blob([bytes as BlobPart], { type: DOCX_MIME });
   }

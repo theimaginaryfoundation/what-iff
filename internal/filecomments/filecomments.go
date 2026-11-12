@@ -9,8 +9,8 @@ package filecomments
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -32,6 +32,9 @@ var (
 	// ErrNotText means the file is neither UTF-8 text of at most MaxTextBytes nor an image, which
 	// comments can be placed on.
 	ErrNotText = errors.New("comments can be placed only on images and on UTF-8 text files of at most 4 MB")
+	// ErrContentMissing means the file's stored object could not be found: a save or an agent edit
+	// replaced it after the row was read, or it is gone. Its text is not known, so no anchor is moved.
+	ErrContentMissing = errors.New("the file's content could not be found")
 )
 
 // Store is what the service needs of the datastore.
@@ -53,13 +56,14 @@ func New(store Store, files storage.FileStore) *Service {
 	return &Service{store: store, files: files}
 }
 
-// contentKey names the content a row holds: its stored object, which every save replaces. A row
-// stored before keys were recorded is named by itself and its version.
-func contentKey(file *models.FileAttachment) string {
+// contentKey names the content a row holds: its stored object, which every save replaces (with a
+// new key). A row stored before keys were recorded is named by the object it is read from, which is
+// also the key its chat copies were given, so reading through either does not carry the comments.
+func contentKey(userID uuid.UUID, file *models.FileAttachment) string {
 	if file.S3Key != "" {
 		return file.S3Key
 	}
-	return fmt.Sprintf("row:%s:%d", file.ID, file.ContentVersion)
+	return storage.FileKeyForAttachment(userID, file.ID, file.Name, file.FileType, file.ChatID, file.PersonalityID)
 }
 
 // isImage reports whether the file is an image, whose threads are on the whole file.
@@ -107,19 +111,28 @@ func (s *Service) Read(ctx context.Context, userID, id uuid.UUID) (*models.FileC
 			return &models.FileComments{Threads: []models.FileCommentThread{}, ContentVersion: file.ContentVersion}, nil
 		}
 		// An image's threads are on the whole file, which an edit does not move.
-		if set.BaselineKey == contentKey(file) || isImage(file) {
+		if set.BaselineKey == contentKey(userID, file) || isImage(file) {
 			return &models.FileComments{Threads: set.Threads, ContentVersion: file.ContentVersion, Revision: set.Revision}, nil
 		}
 		text, err := s.text(ctx, userID, file)
+		// The row moved on to a new object while this read: read it again.
+		if errors.Is(err, ErrContentMissing) && attempt < 2 {
+			continue
+		}
+		// The file is no longer text comments can be placed on (it grew past MaxTextBytes, or is
+		// not UTF-8): its comments stay readable, on the whole file, and nothing is stored.
+		if errors.Is(err, ErrNotText) {
+			return &models.FileComments{Threads: onFile(set.Threads), ContentVersion: file.ContentVersion, Revision: set.Revision}, nil
+		}
 		if err != nil {
 			return nil, err
 		}
 		threads := Carry(set.Threads, set.BaselineText, text)
 		revision, err := s.store.PutFileCommentSet(ctx, userID, key, models.FileCommentSet{
-			Threads: threads, BaselineText: text, BaselineKey: contentKey(file),
+			Threads: threads, BaselineText: text, BaselineKey: contentKey(userID, file),
 		}, set.Revision)
 		// Another read carried them first: read what it stored.
-		if errors.Is(err, ErrRevision) && attempt == 0 {
+		if errors.Is(err, ErrRevision) && attempt < 2 {
 			continue
 		}
 		if err != nil {
@@ -132,7 +145,15 @@ func (s *Service) Read(ctx context.Context, userID, id uuid.UUID) (*models.FileC
 // Write stores the threads of the file id is a row of, placed on the content of id at
 // contentVersion, which must be what it holds now, over the comments at revision (0 for a file
 // with none yet).
+//
+// The threads come from the client, so authorship is set here (keepAuthorship).
 func (s *Service) Write(ctx context.Context, userID, id uuid.UUID, threads []models.FileCommentThread, contentVersion, revision int) (*models.FileComments, error) {
+	return s.write(ctx, userID, id, threads, contentVersion, revision, true)
+}
+
+// write is Write; fromClient sets authorship from what is stored rather than from the threads
+// given, which a server-side change (an agent's comment tool, Update) sets itself.
+func (s *Service) write(ctx context.Context, userID, id uuid.UUID, threads []models.FileCommentThread, contentVersion, revision int, fromClient bool) (*models.FileComments, error) {
 	file, err := s.store.GetFileAttachment(ctx, userID, id)
 	if err != nil {
 		return nil, err
@@ -144,17 +165,24 @@ func (s *Service) Write(ctx context.Context, userID, id uuid.UUID, threads []mod
 	if err != nil {
 		return nil, err
 	}
+	if fromClient {
+		prev, err := s.store.GetFileCommentSet(ctx, userID, key)
+		if err != nil {
+			return nil, err
+		}
+		threads = keepAuthorship(threads, prev, userID, time.Now().UTC())
+	}
 	var text string
 	if isImage(file) {
 		threads = onFile(threads)
 	} else {
 		if text, err = s.text(ctx, userID, file); err != nil {
-			return nil, err
+			return nil, s.missingIfStale(ctx, userID, id, contentVersion, err)
 		}
 		threads = Place(threads, text)
 	}
 	next, err := s.store.PutFileCommentSet(ctx, userID, key, models.FileCommentSet{
-		Threads: threads, BaselineText: text, BaselineKey: contentKey(file),
+		Threads: threads, BaselineText: text, BaselineKey: contentKey(userID, file),
 	}, revision)
 	if err != nil {
 		return nil, err
@@ -162,18 +190,84 @@ func (s *Service) Write(ctx context.Context, userID, id uuid.UUID, threads []mod
 	return &models.FileComments{Threads: threads, ContentVersion: file.ContentVersion, Revision: next}, nil
 }
 
+// text is the file's content, read from the object the row names. A row naming an object that is
+// not there is ErrContentMissing, not empty text: a carry onto "" would put every anchor nowhere
+// and store that as the baseline.
 func (s *Service) text(ctx context.Context, userID uuid.UUID, file *models.FileAttachment) (string, error) {
-	data, err := storage.ReadAttachment(ctx, s.files, storage.AttachmentObject{
-		UserID: userID, ID: file.ID, S3Key: file.S3Key, Name: file.Name, FileType: file.FileType,
-		ChatID: file.ChatID, PersonalityID: file.PersonalityID,
-	})
+	if file.SizeBytes != nil && *file.SizeBytes > MaxTextBytes {
+		return "", ErrNotText
+	}
+	var data []byte
+	var err error
+	if file.S3Key != "" {
+		// Only the object the row names: another key could hold an older version.
+		data, err = s.files.DownloadFile(ctx, file.S3Key)
+	} else {
+		data, err = storage.ReadAttachment(ctx, s.files, storage.AttachmentObject{
+			UserID: userID, ID: file.ID, S3Key: file.S3Key, Name: file.Name, FileType: file.FileType,
+			ChatID: file.ChatID, PersonalityID: file.PersonalityID,
+		})
+	}
 	if err != nil {
 		return "", err
+	}
+	// DownloadFile is (nil, nil) for a missing object and non-nil for an empty one.
+	if data == nil {
+		return "", ErrContentMissing
 	}
 	if len(data) > MaxTextBytes || !utf8.Valid(data) {
 		return "", ErrNotText
 	}
 	return string(data), nil
+}
+
+// missingIfStale turns a write's ErrContentMissing into ErrStaleContent when the row has moved on
+// from contentVersion since it was read, so the caller re-reads rather than failing.
+func (s *Service) missingIfStale(ctx context.Context, userID, id uuid.UUID, contentVersion int, err error) error {
+	if !errors.Is(err, ErrContentMissing) {
+		return err
+	}
+	if now, gerr := s.store.GetFileAttachment(ctx, userID, id); gerr == nil && now.ContentVersion != contentVersion {
+		return ErrStaleContent
+	}
+	return err
+}
+
+// keepAuthorship sets who wrote each comment from what the server knows, not from the client: a
+// comment already stored keeps its author and time (an agent's stays the agent's, and its text
+// too: the user may remove it, not reword it), and a new one is the user's, dated now when the
+// client's time is missing or ahead of the server's.
+func keepAuthorship(threads []models.FileCommentThread, prev *models.FileCommentSet, userID uuid.UUID, now time.Time) []models.FileCommentThread {
+	stored := map[string]models.FileComment{}
+	if prev != nil {
+		for _, t := range prev.Threads {
+			for _, c := range t.Comments {
+				stored[c.ID] = c
+			}
+		}
+	}
+	me := "user:" + userID.String()
+	out := make([]models.FileCommentThread, len(threads))
+	for i, t := range threads {
+		comments := make([]models.FileComment, len(t.Comments))
+		for j, c := range t.Comments {
+			if was, ok := stored[c.ID]; ok {
+				c.AuthorID, c.AuthorName, c.CreatedAt = was.AuthorID, was.AuthorName, was.CreatedAt
+				if was.AuthorID != me {
+					c.Text, c.Mentions = was.Text, was.Mentions
+				}
+			} else {
+				c.AuthorID = me
+				if c.CreatedAt.IsZero() || c.CreatedAt.After(now.Add(time.Minute)) {
+					c.CreatedAt = now
+				}
+			}
+			comments[j] = c
+		}
+		t.Comments = comments
+		out[i] = t
+	}
+	return out
 }
 
 // Place checks each thread's anchor against text and quotes the text it is on; an anchor outside

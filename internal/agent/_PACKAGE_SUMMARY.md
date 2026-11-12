@@ -95,6 +95,11 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
 - **Image vendor (`image_generators.go`):** `NewAgent` builds a `provider.ImageGenerator` for each image vendor with a credential.
   `imageGeneratorForUser` picks the user's `image_generation_provider` for the `generate_image` tool, among the vendors the caller holds a key for (asked per request, since keys can belong to accounts), falling back to the first of those (OpenAI first).
   The tool records the vendor on each image's usage as `metering.Usage.ImageProvider` (plus `engine`/`provider` metadata) so a metering implementation can price vendors separately.
+- **Reference images and masks (`image_references.go`, ADR [0x047](../../docs/adr/0x047-image-markup-and-reference-edits.md)):** `generate_image` takes optional `reference_images` (each with a role: base, markup, sketch or reference) and `mask_image`.
+  Names resolve to images generated earlier in the turn (`chatContext.turnImages`), then the conversation's context files, then the user's files by id; an unknown name is refused with the images that are there.
+  The request goes to the user's chosen vendor only (`imageEditorForUser`, via `pickImageGenerator` in strict mode): when that vendor has no key, or does not implement `provider.ImageEditor`, the tool refuses with a message the agent passes on, and never moves the request to another vendor.
+  Inputs are resolved and the request prepared (`ImageEditor.PrepareEdit`, which checks the mask) before the quota gate, so a request that cannot run is refused without counting against it.
+  Edits are metered with `path: tool_edit`.
   Portrait and expression-grid generation stay on `OpenAIProvider` because they need the edit-with-reference endpoint.
 - **Jobs:** Running scheduled/async agent work (`agentjob_run.go`, `agentjob_schedule.go`) and tools that create jobs.
 - **Thread rehydration (`thread_rehydration.go`):** Lazy summarization of **imported** threads.
@@ -205,6 +210,8 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - **Expression images are filed in a folder:** `uploadExpressionCellAttachment` saves each generated expression cell (the default grid and the custom candidates) in `models.ExpressionFolder(personality name)`, so they land in `expressions/<name>` rather than the top level of the gallery.
   Personalities that share a name share a folder, and the folder is only a label; assigning an existing gallery image to an expression does not move it.
 - **Tool-generated attachments** are saved with their message in `message.go`, and carry the `Folder` the tool chose (`generate_image`'s optional `folder`), so generated images can land in a gallery folder.
+  A PNG among them is stored compacted (`imageutil.CompactPNGForStorage`, ADR 0x047 §9): near-lossless, about a third of a vendor's size; other formats are kept as sent.
+  Personality portraits and expression-grid cells are stored the same way.
 - **Default expression grid:** `GenerateDefaultExpressionGrid` (`expression_grid_generation.go`) — nano likeness from `SystemPrompt` + one medium `gpt-image-2.5-flare` 3×3 grid, splice **nine** cells (`SlicePNGGrid3x3`: after outer trim, width/height need not be multiples of 3; remainder pixels go on the last column/row so cells may differ by 1px), gallery upload + `UpsertPersonalityExpression` for `ExpressionGridKeys`.
   When the personality has a cover image, it is the direct reference for both the likeness pass and the image model (edit endpoint), as on the candidates path; without one the grid is prompt-only.
   Not quota-metered.

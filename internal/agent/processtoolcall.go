@@ -143,7 +143,9 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			return out, nil, err
 		},
 		tools.GenerateImageToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
-			return a.generateImageTool(ctx, chatCtx.chat, input)
+			out, atts, err := a.generateImageTool(ctx, chatCtx.chat, input)
+			chatCtx.rememberTurnImages(atts)
+			return out, atts, err
 		},
 		tools.WebSearchFunctionToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			out, err := a.webSearchTool(ctx, input)

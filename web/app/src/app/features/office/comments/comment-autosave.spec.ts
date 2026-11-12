@@ -12,6 +12,7 @@ describe('CommentAutosave', () => {
     const calls = { n: 0 };
     const s: CommentSaver = {
       canComment: signal(true),
+      showCurrentContent: () => undefined,
       saveComments: () => {
         calls.n += 1;
         const result = results.shift() ?? 'saved';

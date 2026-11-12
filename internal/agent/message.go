@@ -992,6 +992,10 @@ type chatContext struct {
 	steerNotes []string
 	// mcpSessions stores MCP session ids for this single conversation turn.
 	mcpSessions map[string]string
+	// turnImages are the images generate_image made earlier in this turn, which are not saved yet,
+	// so a later call can use them as reference images (ADR 0x047). See rememberTurnImages.
+	turnImagesMu sync.Mutex
+	turnImages   []*models.FileAttachment
 }
 
 func (c *chatContext) setMCPServerCache(servers []*models.MCPServer, loadedByServer map[uuid.UUID][]string) {
@@ -2863,6 +2867,12 @@ func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID,
 
 		var s3Key string
 		if strings.HasPrefix(fileType, models.ImageMIMEPrefix) {
+			// Every tool image (generate_image, MCP tools, …) is stored as a compact PNG
+			// when it is one (ADR 0x047 §9). The thumbnail the tool made is kept: it was
+			// what the model saw, and looks the same.
+			if fileType == "image/png" {
+				rawBytes = imageutil.CompactPNGForStorage(rawBytes)
+			}
 			// Keep generated images on the canonical gallery path (full-size + thumb).
 			imageutil.UploadBytesToGalleryPath(ctx, a.fileStore, a.logger, userID, created.ID, name, fileType, rawBytes, a0.Thumbnail)
 			s3Key = storage.FileKeyForImage(userID, created.ID, name)

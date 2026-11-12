@@ -735,7 +735,7 @@ func (d *Datastore) DeleteFileAttachment(ctx context.Context, userID, id uuid.UU
 		return ErrFileAttachmentNotFound
 	}
 
-	if err := handOverCopies(ctx, tx, userID, id); err != nil {
+	if err := handOverCopies(ctx, tx, userID, id, nil); err != nil {
 		d.logger.Error("failed to hand a file's copies to a new original", zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))

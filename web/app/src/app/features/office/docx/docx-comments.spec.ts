@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { addReply, newComment, setResolved } from '../comments/comment-threads';
 import { OoxmlPackage } from '../shared/ooxml';
 import { COMMENTS_XML, EXTENDED_XML, PEOPLE_XML, commentedDocx as fixture } from './docx-comments.spec-helper';
-import { DocxCommentThread, newWordCommentId } from './docx-comments';
+import { DocxCommentThread, WordComment, WordComments, newWordCommentId, planCommentParts } from './docx-comments';
 import { documentToDocx } from './docx-export';
 import { docxToDocument } from './docx-import';
 import { CUSTOM_DECORATION_COMMENT, DocDocument } from './univer-doc-types';
@@ -107,5 +107,60 @@ describe('docx comments', () => {
     expect(reread.comments.map(t => t.id)).toEqual(['5D3E2F01']);
     const xml = (await (await OoxmlPackage.open(bytes)).text('word/comments.xml'))!;
     expect(xml).not.toContain('Finance signed');
+  });
+
+  describe('planCommentParts', () => {
+    const word = (wordId: string, id: string, author: string, text: string): WordComment => ({
+      wordId,
+      id,
+      author,
+      date: '2026-11-02T17:15:00.000Z',
+      text,
+      lastParaId: id,
+      durableId: id,
+      done: false,
+      xml: `<w:comment w:id="${wordId}" w:author="${author}"><w:p w14:paraId="${id}"><w:r><w:t>${text}</w:t></w:r></w:p></w:comment>`,
+    });
+    const original: WordComments = {
+      comments: [word('3', '0000000A', 'Dana', 'On the body'), word('7', '0000000B', '', 'In a text box')],
+      people: [],
+      paths: {},
+    };
+    const onBody: DocxCommentThread = {
+      id: '0000000A',
+      anchor: { segmentId: '' },
+      comments: [
+        { id: '0000000A', authorId: 'author:Dana', authorName: 'Dana', createdAt: '2026-11-02T17:15:00.000Z', text: 'On the body' },
+      ],
+    };
+
+    it("keeps each comment's w:id and numbers new ones above the file's", () => {
+      const added: DocxCommentThread = {
+        id: '0000000C',
+        anchor: { segmentId: '' },
+        comments: [newComment('0000000C', ME, { text: 'New', mentions: [] })],
+      };
+      const plan = planCommentParts([onBody, added], original, { keep: ['0000000B'] });
+      expect(plan.wordIds.get('0000000A')).toEqual(['3']);
+      expect(plan.wordIds.get('0000000C')).toEqual(['8']);
+      // The comment with no place in the text is written as the file has it, id and all.
+      expect(plan.parts?.comments).toContain(original.comments[1].xml);
+      expect(plan.parts?.comments).toContain(original.comments[0].xml);
+    });
+
+    it('leaves the parts alone when only comments with no place in the text are left out of the threads', () => {
+      expect(planCommentParts([onBody], original, { keep: ['0000000B'] }).parts).toBeNull();
+    });
+
+    it('does not rewrite a comment whose author is empty', () => {
+      const unnamed: DocxCommentThread = {
+        id: '0000000B',
+        anchor: { segmentId: '' },
+        comments: [
+          { id: '0000000B', authorId: 'author:', authorName: 'Unknown', createdAt: '2026-11-02T17:15:00.000Z', text: 'In a text box' },
+        ],
+      };
+      expect(planCommentParts([onBody, unnamed], original).parts).toBeNull();
+    });
   });
 });

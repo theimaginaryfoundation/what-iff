@@ -55,6 +55,8 @@ export class CodeEditorComponent implements FileEditor {
   readonly file = input.required<FileAttachment>();
   readonly blob = input.required<Blob>();
   readonly readOnly = input(false);
+  /** Comments can be started where the text can be changed and the server keeps comments for the file. */
+  readonly canStartComment = computed(() => !this.readOnly() && this.comments.available());
 
   readonly dirtyChange = output<boolean>();
   readonly saveRequested = output<void>();
@@ -71,6 +73,7 @@ export class CodeEditorComponent implements FileEditor {
     inject(TextCommentsService),
     this.me,
     () => this.commentsChanged(),
+    undefined,
     inject(CommentAgentService).hooks(() => this.file()),
   );
   private readonly panel = inject(CommentsPanelState);
@@ -154,11 +157,10 @@ export class CodeEditorComponent implements FileEditor {
     const threads = this.handedOutComments.get(content) ?? this.comments.snapshot();
     // A file that never had comments has nothing to write.
     if (!threads.length && !this.hadComments) return;
-    const changedSince = this.comments.snapshot();
     await this.comments.save(file.content_version ?? this.comments.placedOn, threads);
     this.hadComments = threads.length > 0;
-    // Comments changed during the save are still unsaved.
-    if (JSON.stringify(changedSince) === JSON.stringify(threads)) this.commentsDirty = false;
+    // Comments changed while the save ran (a reply posted meanwhile) are still unsaved.
+    this.commentsDirty = this.comments.unsaved();
     this.setDirty((this.model?.getValue() ?? this.baseline) !== this.baseline || this.commentsDirty);
   }
 
@@ -172,6 +174,7 @@ export class CodeEditorComponent implements FileEditor {
 
   /** Starts a thread on the selection (in the editor or the preview), or on the word at the caret. */
   startComment(): void {
+    if (!this.canStartComment()) return;
     const range = this.previewSelection() ?? this.surface?.selectionOrWord();
     if (!range) return;
     this.comments.start(range);

@@ -6,7 +6,7 @@ import { addReply, newComment, setResolved } from '../comments/comment-threads';
 import { OoxmlPackage } from '../shared/ooxml';
 import { addElement, newTextBox } from '../slides/deck-commands';
 import { blankDeck } from './deck-model';
-import { SlideCommentThread, newCommentGuid, officeArtHash } from './pptx-comments';
+import { SlideCommentThread, carryTextAnchors, newCommentGuid, officeArtHash } from './pptx-comments';
 import { deckToPptx, normalizePackage } from './pptx-export';
 import { pptxToDeck } from './pptx-import';
 
@@ -312,6 +312,54 @@ describe('pptx comments', () => {
     expect(await saved.text('ppt/comments/modernComment_100_0.xml')).toContain(
       `<ac:context len="15" hash="${officeArtHash('Quarterly plan\r')}"/>`,
     );
+  });
+
+  it("moves a text anchor with its words and rewrites its context when the shape's text is edited", async () => {
+    const { bytes } = await commentedDeck();
+    const { deck, comments } = await read(bytes);
+    const title = deck.slides[0].elements[0];
+    const id = newCommentGuid();
+    const threads: SlideCommentThread[] = [
+      ...comments.threads,
+      {
+        id,
+        anchor: { slideId: deck.slides[0].id, x: title.left, y: title.top, elementId: title.id, text: { start: 10, length: 4 } },
+        quote: 'plan',
+        comments: [newComment(id, ME, { text: 'Which plan?', mentions: [] })],
+      },
+    ];
+    const first = (await deckToPptx(deck, { original: bytes, imported: deck, comments: threads, importedComments: comments })).bytes;
+
+    // Typing "Big " at the start of the title, with no comment changed.
+    const opened = await read(first);
+    const edited = structuredClone(opened.deck);
+    const shape = edited.slides[0].elements[0];
+    if (shape.kind !== 'shape' || !shape.text) throw new Error('the title is a shape with text');
+    shape.text.paragraphs[0].runs[0].text = 'Big ' + shape.text.paragraphs[0].runs[0].text;
+    const saved = await OoxmlPackage.open(
+      (
+        await deckToPptx(edited, {
+          original: first,
+          imported: opened.deck,
+          comments: opened.comments.threads,
+          importedComments: opened.comments,
+        })
+      ).bytes,
+    );
+    const xml = (await saved.text('ppt/comments/modernComment_100_0.xml'))!;
+    expect(xml).toContain(`<ac:txMk cp="14" len="4"><ac:context len="19" hash="${officeArtHash('Big Quarterly plan\r')}"/></ac:txMk>`);
+
+    // Words that are gone put the thread on the shape.
+    const gone = structuredClone(opened.deck);
+    const shape2 = gone.slides[0].elements[0];
+    if (shape2.kind !== 'shape' || !shape2.text) throw new Error('the title is a shape with text');
+    shape2.text.paragraphs[0].runs = [{ ...shape2.text.paragraphs[0].runs[0], text: 'Roadmap' }];
+    const [moved] = carryTextAnchors(
+      opened.comments.threads.filter(t => t.id === id),
+      gone.slides[0],
+    );
+    expect(moved.anchor.text).toBeUndefined();
+    expect(moved.anchor.elementId).toBe(shape2.id);
   });
 
   it('hashes text as PowerPoint does (the context it wrote for "Churn 3.1%")', () => {

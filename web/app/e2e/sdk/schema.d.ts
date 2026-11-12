@@ -13371,6 +13371,8 @@ export interface paths {
                         attachment: string;
                         /** @description Optional gallery folder to file the upload in (a path such as `charts/oura`; omitted or empty is the top level). Used by Save As from the chat-hosted file workspace (ADR 0x043). The reserved `skills/` folder is refused. */
                         folder?: string;
+                        /** @description Optional description stored with the file and shown to the agent beside its name. The image markup tool uses it to say what a derived file is, such as a mask (ADR 0x047). */
+                        description?: string;
                     };
                 };
             };
@@ -13710,8 +13712,17 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The file is neither an image nor text (or is text over 4 MB) */
+                /** @description The file is neither an image nor text (a file with comments that grew past 4 MB returns them on the whole file instead) */
                 415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file's stored content could not be found */
+                503: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -13795,8 +13806,26 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description The body is over 4 MB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description The file is neither an image nor text (or is text over 4 MB) */
                 415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file's stored content could not be found */
+                503: {
                     headers: {
                         [name: string]: unknown;
                     };

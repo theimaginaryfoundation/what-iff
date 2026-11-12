@@ -44,6 +44,7 @@ export class ImageViewerComponent {
     inject(TextCommentsService),
     this.me,
     () => this.comments.autosave(),
+    () => this.saver?.showCurrentContent(),
     inject(CommentAgentService).hooks(() => this.file()),
   );
   private readonly panel = inject(CommentsPanelState);

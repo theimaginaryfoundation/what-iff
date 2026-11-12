@@ -304,7 +304,7 @@ describe('SlidesEditorComponent', () => {
 
     it('while viewing, with a saver: a comment on the slide is saved as it is made', async () => {
       const saveComments = vi.fn().mockResolvedValue('saved');
-      testSaver = { canComment: signal(true), saveComments };
+      testSaver = { canComment: signal(true), saveComments, showCurrentContent: vi.fn() };
       const el = await open(await samplePptx());
       const c = fixture.componentInstance;
       expect(c.commentable()).toBe(true);

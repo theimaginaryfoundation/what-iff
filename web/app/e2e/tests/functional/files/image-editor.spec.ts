@@ -19,8 +19,8 @@ test('an image opens in the image editor, and an edit saves', async ({ isMobile,
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
 
-  // Opaque, so the upload stores it as JPEG (imageutil.NormalizeForUpload). Smaller than the editor's
-  // canvas, so Filerobot scales it up to fit: the case where opening on the crop tool saved a
+  // Uploads are stored as PNG (imageutil.NormalizeForUpload), and a save keeps the file's type.
+  // Smaller than the editor's canvas, so Filerobot scales it up to fit: the case where opening on the crop tool saved a
   // 400x300 image as 321x240.
   const width = 400;
   const height = 300;
@@ -60,7 +60,7 @@ test('an image opens in the image editor, and an edit saves', async ({ isMobile,
   await expect(save).toBeDisabled();
   await expect(page.getByRole('alert')).toHaveCount(0);
   const bytesAfter = await contentOf(apiClient, id);
-  expect(jpegSize(bytesAfter), 'the whole image was saved, not a crop of it').toStrictEqual({ width, height });
+  expect(pngSize(bytesAfter), 'the whole image was saved, not a crop of it').toStrictEqual({ width, height });
 
   expect(errors).toStrictEqual([]);
 });
@@ -108,16 +108,8 @@ function crc32(bytes: Buffer): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-/** A baseline or progressive JPEG's dimensions, from its start-of-frame marker. */
-function jpegSize(jpeg: Buffer): { width: number; height: number } {
-  if (jpeg[0] !== 0xff || jpeg[1] !== 0xd8) throw new Error('not a JPEG');
-  let at = 2;
-  while (at + 9 <= jpeg.length && jpeg[at] === 0xff) {
-    const marker = jpeg[at + 1];
-    const length = jpeg.readUInt16BE(at + 2);
-    if (marker === 0xc0 || marker === 0xc2) return { height: jpeg.readUInt16BE(at + 5), width: jpeg.readUInt16BE(at + 7) };
-    if (length < 2) break;
-    at += 2 + length;
-  }
-  throw new Error('not a JPEG with a start-of-frame marker');
+/** A PNG's dimensions, from its IHDR chunk (always the first, right after the signature). */
+function pngSize(png: Buffer): { width: number; height: number } {
+  if (png.readUInt32BE(0) !== 0x89504e47 || png.toString('ascii', 12, 16) !== 'IHDR') throw new Error('not a PNG');
+  return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
 }

@@ -1,8 +1,10 @@
 package textanchor
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // anchored is the text a range of the old text is on once the text is new.
@@ -74,5 +76,26 @@ func TestRemapCodeEdits(t *testing.T) {
 	newText := "package main\n\nfunc main() {\n\tlog.Println(\"hello, world\")\n\treturn\n}\n"
 	if got := anchored(t, oldText, "fmt.Println(\"hello\")", newText); got != ".Println(\"hello, world\")" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestRemapOfALargeRepetitiveFileIsBounded(t *testing.T) {
+	// 4 MB of words, a few of each repeated, edited all through within MaxEdits: the diff's worst case.
+	words := make([]string, 800_000)
+	for i := range words {
+		words[i] = "w" + strconv.Itoa(i%7)
+	}
+	oldText := strings.Join(words, " ")
+	for i := 0; i < len(words); i += 1100 {
+		words[i] = "edit"
+	}
+	newText := strings.Join(words, " ")
+	start := time.Now()
+	got := Remap(oldText, newText, []Range{{Start: 10, End: 14}})
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("took %v", elapsed)
+	}
+	if got[0] == nil {
+		t.Fatal("the range was lost")
 	}
 }

@@ -91,6 +91,7 @@ export class TextViewerComponent {
     inject(TextCommentsService),
     this.me,
     () => this.comments.autosave(),
+    () => this.saver?.showCurrentContent(),
     inject(CommentAgentService).hooks(() => this.file()),
   );
   private readonly panel = inject(CommentsPanelState);
@@ -100,8 +101,10 @@ export class TextViewerComponent {
     return (this.kind() === 'text' || this.kind() === 'markdown') && !!data && !data.binary && !data.truncated;
   });
   /** Whether comments can be written here (the user may change the file), or only read. */
-  readonly canComment = computed(() => this.hasComments() && !!this.saver?.canComment());
-  readonly commentsOpen = computed(() => this.hasComments() && (this.panel.open() ?? this.comments.openCount() > 0));
+  /** Comments are shown once they have loaded: the server keeps none for some files it is shown (over 4 MB). */
+  readonly showsComments = computed(() => this.hasComments() && this.comments.available());
+  readonly canComment = computed(() => this.showsComments() && !!this.saver?.canComment());
+  readonly commentsOpen = computed(() => this.showsComments() && (this.panel.open() ?? this.comments.openCount() > 0));
   readonly replyRequest = signal<{ threadId: string } | null>(null);
   /** The right-click menu over the text: where it opened, and on what. */
   readonly contextMenu = signal<{

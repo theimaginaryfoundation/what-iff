@@ -28,9 +28,20 @@ func serveFileAttachment(t *testing.T, chatID string, userID *uuid.UUID, fileNam
 
 func serveFileAttachmentWith(t *testing.T, h *Handler, chatID string, userID *uuid.UUID, fileName string) *httptest.ResponseRecorder {
 	t.Helper()
+	return serveFileAttachmentForm(t, h, chatID, userID, fileName, nil)
+}
+
+// serveFileAttachmentForm is serveFileAttachmentWith with extra form fields.
+func serveFileAttachmentForm(t *testing.T, h *Handler, chatID string, userID *uuid.UUID, fileName string, fields map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
+	for k, v := range fields {
+		if err := writer.WriteField(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
 	part, err := writer.CreateFormFile("attachment", fileName)
 	if err != nil {
 		t.Fatal(err)
@@ -118,6 +129,30 @@ func TestCreateFileAttachment_StoresTheUploadAndReturnsTheRecord(t *testing.T) {
 	}
 	if got.ID != attachmentID {
 		t.Fatalf("expected attachment %s, got %s", attachmentID, got.ID)
+	}
+}
+
+func TestCreateFileAttachment_StoresADescription(t *testing.T) {
+	userID, chatID := uuid.New(), uuid.New()
+	var stored *string
+	store := &fakeStore{createFileAttachmentFn: func(_ context.Context, _ uuid.UUID, fa models.FileAttachment) (*models.FileAttachment, error) {
+		stored = fa.Description
+		fa.ID = uuid.New()
+		return &fa, nil
+	}}
+	h := NewHandler(store, zap.NewNop(), &agent.Agent{}, HandlerConfig{})
+
+	w := serveFileAttachmentForm(t, h, chatID.String(), &userID, "table.csv", map[string]string{"description": "  Mask for photo.png  "})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+	if stored == nil || *stored != "Mask for photo.png" {
+		t.Fatalf("expected the trimmed description to be stored, got %v", stored)
+	}
+
+	w = serveFileAttachmentForm(t, h, chatID.String(), &userID, "table.csv", map[string]string{"description": strings.Repeat("x", 501)})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected a too-long description to be refused, got %d", w.Code)
 	}
 }
 

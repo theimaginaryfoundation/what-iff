@@ -15,6 +15,7 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // Range is [Start, End) in UTF-16 code units.
@@ -27,9 +28,29 @@ type Range struct {
 // its words alone (nearest to where it was), which a rewrite of the whole file comes down to.
 const MaxEdits = 1000
 
+// maxSteps bounds the diff's work (words compared, diagonals tried): a large file with many edits
+// is otherwise seconds of CPU on a request. Past it a range is found by its words alone, as past
+// MaxEdits.
+const maxSteps = 20_000_000
+
+// token is a word or a single other character of the text, at [start, end) in UTF-16 units. id
+// names its value, the same for equal values across the texts compared (see vocabulary).
 type token struct {
 	start, end int
-	value      string
+	id         int32
+}
+
+// vocabulary numbers the values of the tokens of the texts compared, so they are compared as
+// numbers and each value is held once.
+type vocabulary map[string]int32
+
+func (v vocabulary) id(value []byte) int32 {
+	if id, ok := v[string(value)]; ok {
+		return id
+	}
+	id := int32(len(v))
+	v[string(value)] = id
+	return id
 }
 
 // Units is the text as UTF-16 code units, without a leading byte order mark.
@@ -47,9 +68,10 @@ func Slice(units []uint16, r Range) string {
 
 func isWord(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' }
 
-func tokenize(units []uint16) []token {
+func tokenize(units []uint16, words vocabulary) []token {
 	runes := utf16.Decode(units)
 	var tokens []token
+	var value []byte
 	at := 0
 	for i := 0; i < len(runes); {
 		r := runes[i]
@@ -63,9 +85,9 @@ func tokenize(units []uint16) []token {
 			i++
 		case isWord(r):
 			start := at
-			var b strings.Builder
+			value = value[:0]
 			for i < len(runes) && isWord(runes[i]) {
-				b.WriteRune(runes[i])
+				value = utf8.AppendRune(value, runes[i])
 				w := utf16.RuneLen(runes[i])
 				if w < 0 {
 					w = 1
@@ -73,9 +95,10 @@ func tokenize(units []uint16) []token {
 				at += w
 				i++
 			}
-			tokens = append(tokens, token{start: start, end: at, value: b.String()})
+			tokens = append(tokens, token{start: start, end: at, id: words.id(value)})
 		default:
-			tokens = append(tokens, token{start: at, end: at + width, value: string(r)})
+			value = utf8.AppendRune(value[:0], r)
+			tokens = append(tokens, token{start: at, end: at + width, id: words.id(value)})
 			at += width
 			i++
 		}
@@ -92,12 +115,12 @@ func match(old, new []token) (out []int, ok bool) {
 	}
 	// The common head and tail need no search.
 	head := 0
-	for head < len(old) && head < len(new) && old[head].value == new[head].value {
+	for head < len(old) && head < len(new) && old[head].id == new[head].id {
 		out[head] = head
 		head++
 	}
 	tail := 0
-	for tail < len(old)-head && tail < len(new)-head && old[len(old)-1-tail].value == new[len(new)-1-tail].value {
+	for tail < len(old)-head && tail < len(new)-head && old[len(old)-1-tail].id == new[len(new)-1-tail].id {
 		out[len(old)-1-tail] = len(new) - 1 - tail
 		tail++
 	}
@@ -110,7 +133,8 @@ func match(old, new []token) (out []int, ok bool) {
 	return out, ok
 }
 
-// myers is the longest common subsequence of a and b as index pairs (Myers' O(ND) diff).
+// myers is the longest common subsequence of a and b as index pairs (Myers' O(ND) diff); false
+// past MaxEdits or maxSteps.
 func myers(a, b []token) ([][2]int, bool) {
 	n, m := len(a), len(b)
 	if n == 0 || m == 0 {
@@ -123,12 +147,16 @@ func myers(a, b []token) ([][2]int, bool) {
 	offset := max + 1
 	v := make([]int, 2*max+3)
 	var trace [][]int
+	steps := 0
 	for d := 0; d <= max; d++ {
 		// Only diagonals -(d+1)..d+1 are read back at this step, so only they are kept.
 		snapshot := make([]int, 2*d+3)
 		copy(snapshot, v[offset-d-1:offset+d+2])
 		trace = append(trace, snapshot)
 		for k := -d; k <= d; k += 2 {
+			if steps++; steps > maxSteps {
+				return nil, false
+			}
 			var x int
 			if k == -d || (k != d && v[offset+k-1] < v[offset+k+1]) {
 				x = v[offset+k+1]
@@ -136,9 +164,10 @@ func myers(a, b []token) ([][2]int, bool) {
 				x = v[offset+k-1] + 1
 			}
 			y := x - k
-			for x < n && y < m && a[x].value == b[y].value {
+			for x < n && y < m && a[x].id == b[y].id {
 				x++
 				y++
+				steps++
 			}
 			v[offset+k] = x
 			if x >= n && y >= m {
@@ -192,7 +221,8 @@ func Remap(oldText, newText string, ranges []Range) []*Range {
 		}
 		return out
 	}
-	oldTokens, newTokens := tokenize(oldUnits), tokenize(newUnits)
+	words := vocabulary{}
+	oldTokens, newTokens := tokenize(oldUnits, words), tokenize(newUnits, words)
 	matched, ok := match(oldTokens, newTokens)
 	for i, r := range ranges {
 		if ok {

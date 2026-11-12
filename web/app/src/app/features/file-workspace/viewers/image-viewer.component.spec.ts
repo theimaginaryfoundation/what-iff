@@ -28,7 +28,10 @@ describe('ImageViewerComponent', () => {
         provideZonelessChangeDetection(),
         { provide: CommentPeopleService, useValue: { me: signal({ id: 'user:u-1', name: 'Pat Lee' }) } },
         { provide: TextCommentsService, useValue: textComments },
-        { provide: COMMENT_SAVER, useValue: { canComment, saveComments: () => Promise.resolve('saved') } },
+        {
+          provide: COMMENT_SAVER,
+          useValue: { canComment, saveComments: () => Promise.resolve('saved'), showCurrentContent: () => undefined },
+        },
       ],
     });
   });

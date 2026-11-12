@@ -39,7 +39,7 @@ export interface SheetCommentCells {
   paint(state: { activeId: string | null; hidden: ReadonlySet<string> }): void;
   /** Tags a cell with a thread (or clears it with null). */
   tag(sheetId: string, row: number, col: number, threadId: string | null): Promise<boolean>;
-  /** Where each thread's cell is now, by thread id: the first cell tagged with it. */
+  /** Where each thread's cell is now, by thread id: where it was last found, else the first cell tagged with it; copies of the tag are cleared. */
   locate(): Map<string, { sheetId: string; row: number; col: number }>;
   /** The thread a cell is tagged with. */
   at(sheetId: string, row: number, col: number): string | null;
@@ -296,32 +296,45 @@ export function loadUniverSheets(document: Document): Promise<UniverSheetsKit> {
         const repaint = () => injector.get(core.IRenderManagerService).getRenderUnitById(unitId)?.mainComponent?.makeForceDirty?.(true);
         const fWorkbook = () => (univerAPI as unknown as { getWorkbook(id: string): SheetFacadeWorkbook | null }).getWorkbook(unitId);
         void render;
+        const tagCell = async (sheetId: string, row: number, col: number, threadId: string | null): Promise<boolean> => {
+          const sheet = workbook()?.getSheetBySheetId(sheetId);
+          if (!sheet) return false;
+          const custom = { ...(sheet.getCellRaw(row, col)?.custom ?? {}), [SHEET_COMMENT_KEY]: threadId };
+          // A mutation, not a command: comments are written while viewing, when the sheet is locked.
+          const done = await injector.get(presets.ICommandService).executeCommand(SHEET_SET_RANGE_VALUES_MUTATION, {
+            unitId,
+            subUnitId: sheetId,
+            cellValue: { [row]: { [col]: { custom } } },
+          });
+          repaint();
+          return done;
+        };
+        /** Where each thread's cell was last found, which a copied tag does not take over. */
+        let located = new Map<string, { sheetId: string; row: number; col: number }>();
         return {
           paint: next => {
             state = next;
             repaint();
           },
-          tag: async (sheetId, row, col, threadId) => {
-            const sheet = workbook()?.getSheetBySheetId(sheetId);
-            if (!sheet) return false;
-            const custom = { ...(sheet.getCellRaw(row, col)?.custom ?? {}), [SHEET_COMMENT_KEY]: threadId };
-            // A mutation, not a command: comments are written while viewing, when the sheet is locked.
-            const done = await injector.get(presets.ICommandService).executeCommand(SHEET_SET_RANGE_VALUES_MUTATION, {
-              unitId,
-              subUnitId: sheetId,
-              cellValue: { [row]: { [col]: { custom } } },
-            });
-            repaint();
-            return done;
-          },
+          tag: tagCell,
           locate: () => {
-            const out = new Map<string, { sheetId: string; row: number; col: number }>();
+            const found = new Map<string, { sheetId: string; row: number; col: number }[]>();
             for (const sheet of workbook()?.getSheets() ?? []) {
               sheet.getCellMatrix().forValue((row, col, cell) => {
                 const id = idOf(cell);
-                if (id && !out.has(id)) out.set(id, { sheetId: sheet.getSheetId(), row, col });
+                if (id) found.set(id, [...(found.get(id) ?? []), { sheetId: sheet.getSheetId(), row, col }]);
               });
             }
+            const out = new Map<string, { sheetId: string; row: number; col: number }>();
+            for (const [id, cells] of found) {
+              // Copying a commented cell copies its tag. The thread stays on the cell it was on; the
+              // copies lose the tag.
+              const was = located.get(id);
+              const keep = cells.find(c => was && c.sheetId === was.sheetId && c.row === was.row && c.col === was.col) ?? cells[0];
+              out.set(id, keep);
+              for (const c of cells) if (c !== keep) void tagCell(c.sheetId, c.row, c.col, null);
+            }
+            located = out;
             return out;
           },
           at: (sheetId, row, col) => idOf(workbook()?.getSheetBySheetId(sheetId)?.getCellRaw(row, col)),

@@ -43,6 +43,8 @@ export interface CommentSaver {
    * that would lose content), `conflict` (the file changed elsewhere and was reloaded), `failed`.
    */
   saveComments(editor: Pick<FileEditor, 'content' | 'markSaved' | 'losses'>): Promise<CommentSaveResult>;
+  /** The file changed elsewhere (comments kept beside it found it so): show it as it is stored now. */
+  showCurrentContent(): void;
 }
 
 export type CommentSaveResult = 'saved' | 'cancelled' | 'conflict' | 'failed';
