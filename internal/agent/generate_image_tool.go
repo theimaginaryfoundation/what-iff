@@ -301,7 +301,7 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 				errs[i] = err
 				return
 			}
-			images[i] = img
+			images[i] = a.compactGeneratedImage(img)
 		}()
 	}
 	wg.Wait()

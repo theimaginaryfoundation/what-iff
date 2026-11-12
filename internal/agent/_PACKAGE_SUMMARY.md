@@ -206,6 +206,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - **Expression images are filed in a folder:** `uploadExpressionCellAttachment` saves each generated expression cell (the default grid and the custom candidates) in `models.ExpressionFolder(personality name)`, so they land in `expressions/<name>` rather than the top level of the gallery.
   Personalities that share a name share a folder, and the folder is only a label; assigning an existing gallery image to an expression does not move it.
 - **Tool-generated attachments** are saved with their message in `message.go`, and carry the `Folder` the tool chose (`generate_image`'s optional `folder`), so generated images can land in a gallery folder.
+  A generated PNG is compacted first (`compactGeneratedImage` → `imageutil.CompactPNG`, ADR 0x047 §9): near-lossless, about a third of the vendor's size; other formats are kept as sent.
 - **Default expression grid:** `GenerateDefaultExpressionGrid` (`expression_grid_generation.go`) — nano likeness from `SystemPrompt` + one medium `gpt-image-2.5-flare` 3×3 grid, splice **nine** cells (`SlicePNGGrid3x3`: after outer trim, width/height need not be multiples of 3; remainder pixels go on the last column/row so cells may differ by 1px), gallery upload + `UpsertPersonalityExpression` for `ExpressionGridKeys`.
   When the personality has a cover image, it is the direct reference for both the likeness pass and the image model (edit endpoint), as on the candidates path; without one the grid is prompt-only.
   Not quota-metered.

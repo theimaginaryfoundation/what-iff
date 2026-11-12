@@ -2,13 +2,16 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -128,6 +131,30 @@ func (a *Agent) imageGenerationPreference(ctx context.Context, userID uuid.UUID)
 		return "", err
 	}
 	return models.ModelProvider(prefs.ImageGenerationProvider), nil
+}
+
+// compactGeneratedImage stores a vendor's PNG as a compact one (imageutil.CompactPNG, ADR
+// 0x047 §9): image vendors write large PNGs (about 2 MB for 1536×1024 from OpenAI), and a
+// near-lossless copy is a third of that or less. Other formats, and anything that fails,
+// are kept as the vendor sent them.
+func (a *Agent) compactGeneratedImage(img provider.GeneratedImage) provider.GeneratedImage {
+	if img.MIMEType != "" && img.MIMEType != "image/png" {
+		return img
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(img.Base64))
+	if err != nil || len(raw) == 0 {
+		return img
+	}
+	compact, err := imageutil.CompactPNG(raw)
+	if err != nil {
+		a.logger.Warn("generate_image: could not compact a generated image; keeping it as sent", zap.Error(err))
+		return img
+	}
+	if len(compact) < len(raw) {
+		img.Base64 = base64.StdEncoding.EncodeToString(compact)
+		img.MIMEType = "image/png"
+	}
+	return img
 }
 
 // imageSafetyProvider maps an image vendor to the provider recorded on a
