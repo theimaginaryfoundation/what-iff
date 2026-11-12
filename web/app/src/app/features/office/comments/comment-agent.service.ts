@@ -60,6 +60,8 @@ export class CommentAgentService {
    * comments panel of a file open while the agent replies shows what it wrote once the reply lands.
    */
   watchAgentComments(file: () => { id: string } | null | undefined, reload: () => void): void {
+    // `n` counts the replies that commented on any file, so the effect runs again for each one
+    // (0 means none yet); `fileIds` is the files the latest of them touched.
     effect(() => {
       const { fileIds, n } = this.agentComments();
       const id = untracked(file)?.id;

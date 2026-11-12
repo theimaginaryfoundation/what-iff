@@ -209,7 +209,7 @@ func refusalOf(err error) (string, bool) {
 	case errors.As(err, &refusal):
 		return refusal.Error(), true
 	case errors.Is(err, filecomments.ErrNotText):
-		return "comments can be read and written here only on text, code and image files", true
+		return "comments can be read and written here only on images and on UTF-8 text and code files of at most 4 MB", true
 	case errors.Is(err, filecomments.ErrQuoteNotFound):
 		return err.Error() + "; copy the quote exactly from the file (read it with agent_file_read)", true
 	case errors.Is(err, filecomments.ErrQuoteAmbiguous):

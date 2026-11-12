@@ -124,6 +124,17 @@ func TestFileEditGrants_ForTheChatAndTheWholeFile(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok, "another chat's agent")
 
+	// A chat holds grants on several files, and a file is granted to several chats.
+	second, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "notes.md", FileType: "text/markdown", S3Key: "users/u/notes.md"})
+	require.NoError(t, err)
+	require.NoError(t, ds.GrantFileEdit(ctx, userID, chat.ID, second.ID))
+	require.NoError(t, ds.GrantFileEdit(ctx, userID, otherChat.ID, file.ID))
+	for _, g := range []struct{ chat, file uuid.UUID }{{chat.ID, file.ID}, {chat.ID, second.ID}, {otherChat.ID, file.ID}} {
+		ok, err := ds.HasFileEditGrant(ctx, userID, g.chat, g.file)
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+
 	require.ErrorIs(t, ds.GrantFileEdit(ctx, userID, foreign.ID, file.ID), ErrChatNotFound)
 	_, err = ds.HasFileEditGrant(ctx, other, chat.ID, file.ID)
 	require.ErrorIs(t, err, ErrFileAttachmentNotFound, "someone else's file")
