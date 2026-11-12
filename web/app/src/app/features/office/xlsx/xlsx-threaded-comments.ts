@@ -1,3 +1,4 @@
+import { providerUserIdOf } from '../comments/comment-threads';
 import { parseCellA1 } from '../shared/a1';
 import { escapeXml, serializeXml } from '../shared/ooxml';
 
@@ -186,8 +187,8 @@ export interface ThreadedWriteState {
 function personGuid(comment: UniverComment, state: ThreadedWriteState): string {
   // People named by the editor (sheet-comments.ts): a WhatIff user by id, anyone else by name.
   const name = comment.authorName || FALLBACK_AUTHOR;
-  if (comment.personId.startsWith('user:')) {
-    const userId = comment.personId.slice('user:'.length);
+  const userId = providerUserIdOf(comment.personId);
+  if (userId) {
     const known = [...state.persons.values()].find(p => p.providerId === 'WhatIff' && p.userId === userId);
     if (known) return known.id;
     const id = state.ids.guid(comment.personId);

@@ -9,6 +9,8 @@ import {
   newComment,
   removeComment,
   setResolved,
+  personIdFromProvider,
+  providerUserIdOf,
 } from './comment-threads';
 
 const ME = { id: 'user:u-1', name: 'Pat Lee' };
@@ -58,5 +60,10 @@ describe('comment threads', () => {
       newComment('c3', SAM, { text: 'b', mentions: [] }),
     );
     expect(commentAuthors(threads)).toEqual([SAM, ME]);
+  });
+
+  it('names WhatIff users and agents in files by an id that comes back the same (ADR 0x046)', () => {
+    for (const id of ['user:u-1', 'agent:p-1']) expect(personIdFromProvider(providerUserIdOf(id)!)).toBe(id);
+    expect(providerUserIdOf('author:Pat')).toBeNull();
   });
 });

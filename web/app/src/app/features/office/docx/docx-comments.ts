@@ -1,4 +1,11 @@
-import { CommentPerson, CommentThread, DocComment, authorPersonId, userPersonId } from '../comments/comment-threads';
+import {
+  CommentPerson,
+  CommentThread,
+  DocComment,
+  authorPersonId,
+  personIdFromProvider,
+  providerUserIdOf,
+} from '../comments/comment-threads';
 import { NS, OoxmlPackage, Relationship, attr, escapeXml, resolveTarget, serializeXml } from '../shared/ooxml';
 import { CUSTOM_DECORATION_COMMENT, CUSTOM_RANGE, DocBody, DocDocument } from './univer-doc-types';
 
@@ -222,7 +229,7 @@ function wordDate(value: string | null): string {
 /** A comment author as the editor knows them: a WhatIff user by id, anyone else by name. */
 export function personFor(author: string, people: readonly WordPerson[]): CommentPerson {
   const person = people.find(p => p.author === author);
-  if (person?.providerId === WHATIFF_PROVIDER && person.userId) return { id: userPersonId(person.userId), name: author };
+  if (person?.providerId === WHATIFF_PROVIDER && person.userId) return { id: personIdFromProvider(person.userId), name: author };
   return { id: authorPersonId(author), name: author };
 }
 
@@ -441,7 +448,7 @@ export function planCommentParts(
   const people = [...authors.values()].map(person => {
     const kept = original?.people.find(p => p.author === person.name);
     if (kept) return kept.xml;
-    const userId = person.id.startsWith('user:') ? person.id.slice('user:'.length) : null;
+    const userId = providerUserIdOf(person.id);
     const presence = userId
       ? `<w15:presenceInfo w15:providerId="${WHATIFF_PROVIDER}" w15:userId="${escapeXml(userId)}"/>`
       : `<w15:presenceInfo w15:providerId="None" w15:userId="${escapeXml(person.name)}"/>`;

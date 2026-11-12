@@ -1,4 +1,4 @@
-import { CommentPerson, CommentThread, DocComment, authorPersonId, userPersonId } from '../comments/comment-threads';
+import { CommentPerson, CommentThread, DocComment, authorPersonId, personIdFromProvider } from '../comments/comment-threads';
 import { cellA1, parseCellA1 } from '../shared/a1';
 import { UniverWorkbook, readResource, writeResource } from './univer-sheet-types';
 import { RESOURCE_THREAD_COMMENTS, ThreadPerson, UniverComment, bodyOf, cellThreads, textOf } from './xlsx-threaded-comments';
@@ -23,7 +23,8 @@ export const COMMENT_CELL_KEY = 'whatiffCommentThread';
 export const WHATIFF_PROVIDER = 'WhatIff';
 
 function personOf(person: ThreadPerson | undefined, fallbackName: string): CommentPerson {
-  if (person?.providerId === WHATIFF_PROVIDER && person.userId) return { id: userPersonId(person.userId), name: person.displayName };
+  if (person?.providerId === WHATIFF_PROVIDER && person.userId)
+    return { id: personIdFromProvider(person.userId), name: person.displayName };
   const name = person?.displayName || fallbackName || 'Unknown';
   return { id: authorPersonId(name), name };
 }
