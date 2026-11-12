@@ -16,7 +16,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
-// Reference images for generate_image (ADR 0x045): the model names images it can see in the
+// Reference images for generate_image (ADR 0x047): the model names images it can see in the
 // conversation, and the tool hands their bytes, with what each is for, to a vendor that edits.
 
 // maxReferenceImageBytes caps one input image. Uploads are normalized to 2048px, so this only
@@ -174,7 +174,7 @@ func (r *imageResolver) resolve(name string) (resolvedImage, error) {
 		if att := chatCtx.turnImage(name); att != nil {
 			raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(att.FileContent))
 			if err == nil && len(raw) > 0 {
-				return checkedImage(att.Name, raw, att.FileType)
+				return checkedImage(att.Name, raw)
 			}
 		}
 	}
@@ -217,15 +217,16 @@ func (r *imageResolver) contextFiles() []ContextFile {
 }
 
 func (r *imageResolver) load(att *models.FileAttachment) (resolvedImage, error) {
-	raw, mime, _ := resolveImageBytes(r.ctx, r.a.logger, r.a.fileStore, r.chat.UserID, r.chat.ID, att, false)
+	raw, _, _ := resolveImageBytes(r.ctx, r.a.logger, r.a.fileStore, r.chat.UserID, r.chat.ID, att, false)
 	if len(raw) == 0 {
 		return resolvedImage{}, fmt.Errorf("could not read %s", att.Name)
 	}
-	return checkedImage(att.Name, raw, mime)
+	return checkedImage(att.Name, raw)
 }
 
-// checkedImage refuses what is not an image or too large to send, and types it by its bytes.
-func checkedImage(name string, raw []byte, declared string) (resolvedImage, error) {
+// checkedImage refuses what is not an image or too large to send, and types it by its bytes: the
+// stored type can be wrong, and vendors check the bytes.
+func checkedImage(name string, raw []byte) (resolvedImage, error) {
 	if len(raw) > maxReferenceImageBytes {
 		return resolvedImage{}, fmt.Errorf("%s is too large to use as a reference (over %d MB)", name, maxReferenceImageBytes>>20)
 	}
@@ -234,7 +235,7 @@ func checkedImage(name string, raw []byte, declared string) (resolvedImage, erro
 		return resolvedImage{}, fmt.Errorf("%s is not an image", name)
 	}
 	if mime != "image/png" && mime != "image/jpeg" && mime != "image/webp" {
-		return resolvedImage{}, fmt.Errorf("%s is %s; reference images must be PNG, JPEG or WebP", name, declared)
+		return resolvedImage{}, fmt.Errorf("%s is %s; reference images must be PNG, JPEG or WebP", name, mime)
 	}
 	return resolvedImage{name: name, data: raw, mime: mime}, nil
 }
@@ -297,18 +298,29 @@ func (c *chatContext) turnImageNames() []string {
 }
 
 // imageEditorForUser returns the user's image vendor as an editor. A request with input images
-// never moves to another vendor (ADR 0x045 §5): that could cost more than the user chose, or send
-// their images somewhere they did not expect. A vendor that cannot edit is refused with
-// noImageEditorError, which the agent passes on.
+// never moves to another vendor (ADR 0x047 §5): that could cost more than the user chose, or send
+// their images somewhere they did not expect. A chosen vendor with no key, or one that cannot
+// edit, is refused with an error the agent passes on to the model.
 func (a *Agent) imageEditorForUser(ctx context.Context, userID uuid.UUID) (provider.ImageEditor, error) {
-	gen, err := a.imageGeneratorForUser(ctx, userID)
+	gen, chosen, err := a.pickImageGenerator(ctx, userID, true)
 	if err != nil {
 		return nil, err
+	}
+	if chosen != "" && gen.Provider() != chosen {
+		return nil, chosenImageVendorUnavailableError(chosen)
 	}
 	if ed, ok := gen.(provider.ImageEditor); ok {
 		return ed, nil
 	}
 	return nil, noImageEditorError(gen.Provider())
+}
+
+// chosenImageVendorUnavailableError tells the model the user's chosen vendor has no key, and that
+// their images are not sent to another vendor instead.
+func chosenImageVendorUnavailableError(p models.ModelProvider) error {
+	return fmt.Errorf("the image generation provider selected in Settings (%s) has no API key available, "+
+		"and requests with reference images or masks are never sent to a different provider. "+
+		"Tell the user to add a %s key, or to choose another provider under Settings → Image generation", imageProviderName(p), imageProviderName(p))
 }
 
 // noImageEditorError tells the model the user's vendor cannot take input images, and what the user

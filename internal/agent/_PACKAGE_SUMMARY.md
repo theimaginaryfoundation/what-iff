@@ -95,9 +95,10 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
 - **Image vendor (`image_generators.go`):** `NewAgent` builds a `provider.ImageGenerator` for each image vendor with a credential.
   `imageGeneratorForUser` picks the user's `image_generation_provider` for the `generate_image` tool, among the vendors the caller holds a key for (asked per request, since keys can belong to accounts), falling back to the first of those (OpenAI first).
   The tool records the vendor on each image's usage as `metering.Usage.ImageProvider` (plus `engine`/`provider` metadata) so a metering implementation can price vendors separately.
-- **Reference images and masks (`image_references.go`, ADR [0x045](../../docs/adr/0x045-image-markup-and-reference-edits.md)):** `generate_image` takes optional `reference_images` (each with a role: base, markup, sketch or reference) and `mask_image`.
+- **Reference images and masks (`image_references.go`, ADR [0x047](../../docs/adr/0x047-image-markup-and-reference-edits.md)):** `generate_image` takes optional `reference_images` (each with a role: base, markup, sketch or reference) and `mask_image`.
   Names resolve to images generated earlier in the turn (`chatContext.turnImages`), then the conversation's context files, then the user's files by id; an unknown name is refused with the images that are there.
-  The request goes to the user's chosen vendor only: when it does not implement `provider.ImageEditor`, the tool refuses with a message the agent passes on, and never moves the request to another vendor.
+  The request goes to the user's chosen vendor only (`imageEditorForUser`, via `pickImageGenerator` in strict mode): when that vendor has no key, or does not implement `provider.ImageEditor`, the tool refuses with a message the agent passes on, and never moves the request to another vendor.
+  Inputs are resolved and the request prepared (`ImageEditor.PrepareEdit`, which checks the mask) before the quota gate, so a request that cannot run is refused without counting against it.
   Edits are metered with `path: tool_edit`.
   Portrait and expression-grid generation stay on `OpenAIProvider` because they need the edit-with-reference endpoint.
 - **Jobs:** Running scheduled/async agent work (`agentjob_run.go`, `agentjob_schedule.go`) and tools that create jobs.

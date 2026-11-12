@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -24,6 +26,14 @@ type fakeImageEditor struct {
 	fakeImageGenerator
 	mu       sync.Mutex
 	requests []provider.ImageEditRequest
+	// prepareErr is what PrepareEdit refuses the request with; prepared counts its calls.
+	prepareErr error
+	prepared   atomic.Int32
+}
+
+func (f *fakeImageEditor) PrepareEdit(req provider.ImageEditRequest) (provider.ImageEditRequest, error) {
+	f.prepared.Add(1)
+	return req, f.prepareErr
 }
 
 func (f *fakeImageEditor) EditImage(_ context.Context, req provider.ImageEditRequest) (provider.GeneratedImage, error) {
@@ -123,7 +133,7 @@ func TestGenerateImageTool_EditsWithTheChosenVendor(t *testing.T) {
 	require.Equal(t, "google", meter.records[0].ImageProvider)
 }
 
-// A vendor that cannot edit is refused, never swapped for one that can (ADR 0x045 §5).
+// A vendor that cannot edit is refused, never swapped for one that can (ADR 0x047 §5).
 func TestGenerateImageTool_EditRefusedWhenTheChosenVendorCannotEdit(t *testing.T) {
 	t.Parallel()
 	meter := &recordingMeter{allow: true}
@@ -147,6 +157,62 @@ func TestGenerateImageTool_EditRefusedWhenTheChosenVendorCannotEdit(t *testing.T
 	require.Contains(t, result.Error, "Z.ai")
 	require.Contains(t, result.Error, "Settings")
 	require.Zero(t, zai.calls.Load())
+	require.Empty(t, openAI.requests)
+	require.Empty(t, meter.records)
+}
+
+// A chosen vendor with no key is refused, never swapped for the one that has a key (ADR 0x047 §5).
+func TestGenerateImageTool_EditRefusedWhenTheChosenVendorHasNoKey(t *testing.T) {
+	t.Parallel()
+	meter := &recordingMeter{allow: true}
+	openAI := &fakeImageEditor{fakeImageGenerator: fakeImageGenerator{provider: models.ModelProviderOpenAI}}
+	// Only OpenAI is usable: a single vendor still has the user's pick read for an edit.
+	a := &Agent{logger: zap.NewNop(), meter: meter, imageGenerators: map[models.ModelProvider]provider.ImageGenerator{
+		models.ModelProviderOpenAI: openAI,
+	}}
+	a.testHooks.ImageGenerationPreference = preferring(models.ModelProviderGoogle)
+
+	ctx := withTurnImages(turnImageAttachment("photo.png", testPNG(t, 2, 2, color.White)))
+	out, atts, err := a.generateImageTool(ctx, &models.Chat{ID: uuid.New(), UserID: uuid.New()}, editArgs(t, map[string]any{
+		"prompt": "add a hat", "reference_images": []any{"photo.png"},
+	}))
+	require.NoError(t, err)
+	require.Empty(t, atts)
+	var result generateImageToolResult
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.False(t, result.Success)
+	require.Contains(t, result.Error, "Google")
+	require.Contains(t, result.Error, "no API key")
+	require.Empty(t, openAI.requests)
+	require.Empty(t, meter.records)
+}
+
+// A request the vendor cannot prepare (a mask that marks nothing) is refused before the quota gate
+// and never sent; it is prepared once however many images were asked for.
+func TestGenerateImageTool_EditRefusedWhenPrepareFails(t *testing.T) {
+	t.Parallel()
+	meter := &recordingMeter{allow: true}
+	openAI := &fakeImageEditor{
+		fakeImageGenerator: fakeImageGenerator{provider: models.ModelProviderOpenAI},
+		prepareErr:         errors.New("mask marks no area to change (paint the area white)"),
+	}
+	a := &Agent{logger: zap.NewNop(), meter: meter, imageGenerators: map[models.ModelProvider]provider.ImageGenerator{models.ModelProviderOpenAI: openAI}}
+
+	ctx := withTurnImages(
+		turnImageAttachment("photo.png", testPNG(t, 2, 2, color.White)),
+		turnImageAttachment("photo-mask.png", testPNG(t, 2, 2, color.Black)),
+	)
+	out, atts, err := a.generateImageTool(ctx, &models.Chat{ID: uuid.New(), UserID: uuid.New()}, editArgs(t, map[string]any{
+		"prompt": "add a hat", "count": 3, "reference_images": []any{"photo.png"}, "mask_image": "photo-mask.png",
+	}))
+	require.NoError(t, err)
+	require.Empty(t, atts)
+	var result generateImageToolResult
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.False(t, result.Success)
+	require.Contains(t, result.Error, "mask marks no area")
+	require.Contains(t, result.Error, "photo-mask.png")
+	require.Equal(t, int32(1), openAI.prepared.Load())
 	require.Empty(t, openAI.requests)
 	require.Empty(t, meter.records)
 }
