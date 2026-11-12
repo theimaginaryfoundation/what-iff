@@ -28,7 +28,7 @@ export class ContextPanelService {
   private readonly _composerInsert = signal<string | null>(null);
   // Files waiting to be attached to the next message (an upload from the Files tab, a gallery pick, a
   // Save As or markup from the file workspace), consumed by the chat page into the composer's
-  // pending attachments. A queue: markup adds several at once (ADR 0x045).
+  // pending attachments. A queue: markup adds several at once (ADR 0x047).
   private readonly _composerAttachments = signal<readonly FileAttachment[]>([]);
   // The files attached to the message being composed, published by the chat page so the Files tab
   // can show them as "next message" before they are sent.
@@ -37,7 +37,7 @@ export class ContextPanelService {
   private readonly _filesVersion = signal(0);
   // Bumped when the Files tab asks the composer to open its gallery picker.
   private readonly _galleryPickerRequests = signal(0);
-  // Bumped when the Files tab asks for a blank canvas to sketch on (ADR 0x045 §7).
+  // Bumped when the Files tab asks for a blank canvas to sketch on (ADR 0x047 §7).
   private readonly _sketchRequests = signal(0);
   private readonly _composerThreadReferences = signal<Chat[]>([]);
   private readonly _toolCalls = signal<readonly ToolCall[]>([]);
@@ -162,12 +162,12 @@ export class ContextPanelService {
     this._filesVersion.update(n => n + 1);
   }
 
-  /** Asks the composer to open its "Add from gallery" picker. */
   /** Asks the chat page to open a blank canvas to sketch on. */
   requestSketch(): void {
     this._sketchRequests.update(n => n + 1);
   }
 
+  /** Asks the composer to open its "Add from gallery" picker. */
   requestGalleryPicker(): void {
     this._galleryPickerRequests.update(n => n + 1);
   }

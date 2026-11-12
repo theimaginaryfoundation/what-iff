@@ -1,9 +1,11 @@
 import { inject } from '@angular/core';
-import { Observable, firstValueFrom } from 'rxjs';
+import { Observable, firstValueFrom, tap } from 'rxjs';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { FileAttachmentService } from '../../../core/services/file-attachment.service';
 import { ImageGalleryService } from '../../../core/services/image-gallery.service';
+import { LoggerService } from '../../../core/services/logger.service';
+import { ContextPanelService } from '../../chat/services/context-panel.service';
 import { MarkupResult } from './image-markup.component';
 import { markupStem } from './markup-strokes';
 
@@ -26,73 +28,120 @@ export type ChatUpload = (chatId: string, file: File, folder?: string, descripti
 export type ReferenceFile = (id: string) => Observable<FileAttachment>;
 
 /**
- * Turns markup into the files for the next message (ADR 0x045 §6–7): new uploads for the mask, the
+ * What deletes a file made here when a later step fails; FileAttachmentService.deleteFileAttachment.
+ * A reference copy's stored object is the original's, which deleting the copy leaves in place.
+ */
+export type RemoveFile = (id: string) => Observable<unknown>;
+
+/** The file operations uploadMarkup uses. */
+export interface MarkupFileOps {
+  upload: ChatUpload;
+  reference: ReferenceFile;
+  remove: RemoveFile;
+}
+
+export interface UploadMarkupOptions {
+  /** Attach a reference copy of the image drawn on. False when it is already on the message. */
+  attachSource?: boolean;
+  now?: Date;
+}
+
+/**
+ * Turns markup into the files for the next message (ADR 0x047 §6–7): new uploads for the mask, the
  * markup copy or the sketch, each described so the agent knows what it is, after the image they
  * were drawn on (attached as a reference copy, never changed). Returns them in the order to attach.
+ *
+ * All or nothing: when a step fails, the files already made are deleted before the error is
+ * rethrown, so trying again does not leave duplicates in the thread.
  */
 export async function uploadMarkup(
-  upload: ChatUpload,
-  reference: ReferenceFile,
+  ops: MarkupFileOps,
   chatId: string,
   source: FileAttachment | null,
   result: MarkupResult,
-  now = new Date(),
+  { attachSource = true, now = new Date() }: UploadMarkupOptions = {},
 ): Promise<FileAttachment[]> {
   const attachments: FileAttachment[] = [];
-  if (!source) {
-    if (!result.markup) return attachments;
-    const name = `sketch-${timestamp(now)}.png`;
-    attachments.push(
-      await send(
-        upload,
-        chatId,
-        result.markup,
-        name,
-        'A rough sketch by the user to base an image on. Follow its composition; it is not the finished style.',
-        SKETCH_FOLDER,
-      ),
-    );
+  try {
+    if (!source) {
+      if (result.markup) {
+        attachments.push(
+          await send(
+            ops.upload,
+            chatId,
+            result.markup,
+            `sketch-${timestamp(now)}.png`,
+            'A rough sketch by the user to base an image on. Follow its composition; it is not the finished style.',
+            SKETCH_FOLDER,
+          ),
+        );
+      }
+      return attachments;
+    }
+    if (attachSource) attachments.push(await firstValueFrom(ops.reference(source.id)));
+    const stem = markupStem(source.name);
+    if (result.mask) {
+      attachments.push(
+        await send(
+          ops.upload,
+          chatId,
+          result.mask,
+          `${stem}-mask.png`,
+          `Mask for ${source.name}: white marks the area the user wants changed, black the area to keep. Pass ${source.name} as the base image and this file as mask_image.`,
+        ),
+      );
+    }
+    if (result.markup) {
+      attachments.push(
+        await send(
+          ops.upload,
+          chatId,
+          result.markup,
+          `${stem}-markup.png`,
+          `${source.name} with the user's markup drawn on it: the marks show where and what to change, and are instructions, not content.`,
+        ),
+      );
+    }
     return attachments;
+  } catch (error) {
+    await Promise.allSettled(attachments.map(made => firstValueFrom(ops.remove(made.id))));
+    throw error;
   }
-  attachments.push(await firstValueFrom(reference(source.id)));
-  const stem = markupStem(source.name);
-  if (result.mask) {
-    attachments.push(
-      await send(
-        upload,
-        chatId,
-        result.mask,
-        `${stem}-mask.png`,
-        `Mask for ${source.name}: white marks the area the user wants changed, black the area to keep. Pass ${source.name} as the base image and this file as mask_image.`,
-      ),
-    );
-  }
-  if (result.markup) {
-    attachments.push(
-      await send(
-        upload,
-        chatId,
-        result.markup,
-        `${stem}-markup.png`,
-        `${source.name} with the user's markup drawn on it: the marks show where and what to change, and are instructions, not content.`,
-      ),
-    );
-  }
-  return attachments;
 }
 
-/** uploadMarkup wired to the app's services. Call it in an injection context (a field initializer). */
-export function injectMarkupUploader(): (chatId: string, source: FileAttachment | null, result: MarkupResult) => Promise<FileAttachment[]> {
+/**
+ * Whether pending (the files on the message being written) already holds source: the file itself,
+ * or a reference copy of it from an earlier markup, which shares its stored object.
+ */
+export function holdsFile(pending: readonly FileAttachment[], source: FileAttachment): boolean {
+  return pending.some(file => file.id === source.id || (!!source.s3_key && file.s3_key === source.s3_key));
+}
+
+/**
+ * Markup wired to the app: uploads it (uploadMarkup) and adds the files to the message being
+ * written, with the image drawn on unless the message already has it. Used by the file workspace
+ * and the sketch canvas alike. Call it in an injection context (a field initializer).
+ */
+export function injectMarkupSender(): (chatId: string, source: FileAttachment | null, result: MarkupResult) => Promise<void> {
   const files = inject(FileAttachmentService);
   const gallery = inject(ImageGalleryService);
-  return (chatId, source, result) =>
-    uploadMarkup(
-      (...args) => files.uploadChatFileAttachment(...args),
-      id => gallery.referenceImage(id),
-      chatId,
-      source,
-      result,
-    );
+  const contextPanel = inject(ContextPanelService);
+  const logger = inject(LoggerService);
+  const ops: MarkupFileOps = {
+    upload: (...args) => files.uploadChatFileAttachment(...args),
+    reference: id => gallery.referenceImage(id),
+    // A failed rollback leaves a stray file in the thread; the upload's own error is what the person
+    // sees, so this is only logged.
+    remove: id =>
+      files.deleteFileAttachment(id).pipe(tap({ error: error => logger.error(`Could not remove partial markup upload ${id}`, error) })),
+  };
+  return async (chatId, source, result) => {
+    const onMessage = [...contextPanel.composerPending(), ...contextPanel.composerAttachments()];
+    const attachSource = !!source && !holdsFile(onMessage, source);
+    const attachments = await uploadMarkup(ops, chatId, source, result, { attachSource });
+    for (const attachment of attachments) contextPanel.requestComposerAttachment(attachment);
+    contextPanel.refreshFiles();
+  };
 }
 
 function send(

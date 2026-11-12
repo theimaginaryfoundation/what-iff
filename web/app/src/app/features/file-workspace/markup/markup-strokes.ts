@@ -1,5 +1,5 @@
 /**
- * The marks a person draws on an image to steer image generation (ADR 0x045), and how they become
+ * The marks a person draws on an image to steer image generation (ADR 0x047), and how they become
  * files: a mask (white where the image may change) from the area brush, and a markup copy (the image
  * with the pen strokes on it) from the pen. Strokes are kept in the image's own pixels, so the view
  * can resize without losing them and exports are full resolution.

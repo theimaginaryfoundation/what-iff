@@ -474,7 +474,14 @@ let nextPreviewId = 0;
                     <ui-image-icon [size]="13" />
                     Add from gallery
                   </button>
-                  <button type="button" role="menuitem" (click)="openSketchFromMenu()">
+                  <!-- A sketch is uploaded into the thread, so it needs one (as on the Files tab). -->
+                  <button
+                    type="button"
+                    role="menuitem"
+                    [disabled]="!chatId()"
+                    [attr.title]="chatId() ? null : 'Send a first message to start the chat, then sketch'"
+                    (click)="openSketchFromMenu()"
+                  >
                     <ui-edit-icon [size]="13" />
                     New canvas
                   </button>
@@ -1500,7 +1507,7 @@ export class ChatComposerComponent {
   readonly retryGeneration = output<void>();
   readonly stop = output<void>();
   readonly galleryAttachment = output<FileAttachment>();
-  /** The + menu's Sketch: the host opens a blank page to draw on (ADR 0x045 §7). */
+  /** The + menu's Sketch: the host opens a blank page to draw on (ADR 0x047 §7). */
   readonly sketchRequested = output<void>();
   readonly attachmentRemoved = output<string>();
   readonly modeSelected = output<string | null>();

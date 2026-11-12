@@ -137,38 +137,38 @@ func geminiRequest(parts []geminiPart, quality ImageQuality, aspectRatio ImageAs
 }
 
 // buildGeminiEditRequest puts the instructions first, then every input image and, for a mask,
-// the guide image (Gemini has no mask parameter, but follows a marked-up copy well).
-func buildGeminiEditRequest(req ImageEditRequest) (geminiImageRequest, error) {
+// the guide image (Gemini has no mask parameter, but follows a marked-up copy well). req is
+// prepared, so its vendorMask is the guide.
+func buildGeminiEditRequest(req ImageEditRequest) geminiImageRequest {
 	images := req.Images
 	guide := 0
-	var guidePNG []byte
-	if len(req.Mask) > 0 {
-		var err error
-		if guidePNG, err = maskGuidePNG(images[0].Data, req.Mask); err != nil {
-			return geminiImageRequest{}, err
-		}
+	if req.vendorMask != nil {
 		guide = len(images) + 1
 	}
 	parts := []geminiPart{{Text: editInstructions(images, guide, false, req.Prompt)}}
 	for _, img := range images {
 		parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: inputImageMIME(img), Data: base64.StdEncoding.EncodeToString(img.Data)}})
 	}
-	if guidePNG != nil {
-		parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: "image/png", Data: base64.StdEncoding.EncodeToString(guidePNG)}})
+	if req.vendorMask != nil {
+		parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: "image/png", Data: base64.StdEncoding.EncodeToString(req.vendorMask)}})
 	}
-	return geminiRequest(parts, req.Quality, req.AspectRatio), nil
+	return geminiRequest(parts, req.Quality, req.AspectRatio)
+}
+
+// PrepareEdit checks req and draws its mask onto the base as the guide image Gemini is sent.
+func (g *GeminiImageGenerator) PrepareEdit(req ImageEditRequest) (ImageEditRequest, error) {
+	return req.prepared("gemini", func(r ImageEditRequest) ([]byte, error) {
+		return maskGuidePNG(r.Images[0].Data, r.Mask)
+	})
 }
 
 // EditImage is generateContent with the input images inline.
 func (g *GeminiImageGenerator) EditImage(ctx context.Context, req ImageEditRequest) (GeneratedImage, error) {
-	if err := req.validate(); err != nil {
-		return GeneratedImage{}, err
-	}
-	body, err := buildGeminiEditRequest(req)
+	req, err := g.PrepareEdit(req)
 	if err != nil {
 		return GeneratedImage{}, err
 	}
-	return g.call(ctx, genAIOpEditImage, body)
+	return g.call(ctx, genAIOpEditImage, buildGeminiEditRequest(req))
 }
 
 func (g *GeminiImageGenerator) GenerateImage(ctx context.Context, prompt string, quality ImageQuality, aspectRatio ImageAspectRatio) (GeneratedImage, error) {
@@ -190,7 +190,9 @@ func (g *GeminiImageGenerator) call(ctx context.Context, op string, body geminiI
 	}
 	call.end(err)
 	if err != nil {
-		return GeneratedImage{}, err
+		// postJSON is shared by every image vendor, so say which one failed; %w keeps the API
+		// error for safety-violation parsing.
+		return GeneratedImage{}, fmt.Errorf("gemini %s: %w", op, err)
 	}
 	return geminiImageFromResponse(resp)
 }

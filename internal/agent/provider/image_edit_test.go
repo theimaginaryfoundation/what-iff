@@ -216,3 +216,45 @@ func TestGeminiEditImage_SendsImagesAndAGuideForTheMask(t *testing.T) {
 	_, hasRatio := cfg["aspectRatio"]
 	require.False(t, hasRatio, "an edit leaves the shape to the input image")
 }
+
+// PrepareEdit refuses a mask that marks nothing, for both editors, before any vendor is called.
+func TestPrepareEdit_RefusesAMaskThatMarksNothing(t *testing.T) {
+	t.Parallel()
+	editors := map[string]ImageEditor{
+		"openai": newTestOpenAIProvider("http://unused.invalid").ImageGenerator().(ImageEditor),
+		"gemini": NewGeminiImageGenerator(http.DefaultClient, "http://unused.invalid", nil),
+	}
+	for name, ed := range editors {
+		t.Run(name, func(t *testing.T) {
+			_, err := ed.PrepareEdit(ImageEditRequest{
+				Prompt: "a cat",
+				Images: []ImageInput{{Data: solidPNG(t, 4, 4, color.White), Role: ImageRoleBase}},
+				Mask:   solidPNG(t, 4, 4, color.Black),
+			})
+			require.ErrorContains(t, err, "mask marks no area")
+		})
+	}
+}
+
+// A prepared request carries its vendor mask, so EditImage does not rebuild it per image; a
+// request prepared by another vendor is prepared again.
+func TestPrepareEdit_BuildsTheVendorMaskOnce(t *testing.T) {
+	t.Parallel()
+	req := ImageEditRequest{
+		Prompt: "a cat",
+		Images: []ImageInput{{Data: solidPNG(t, 8, 4, color.White), Role: ImageRoleBase}},
+		Mask:   leftHalfMask(t, 8, 4),
+	}
+	gemini := NewGeminiImageGenerator(http.DefaultClient, "http://unused.invalid", nil)
+	prepared, err := gemini.PrepareEdit(req)
+	require.NoError(t, err)
+	require.NotEmpty(t, prepared.vendorMask)
+	again, err := gemini.PrepareEdit(prepared)
+	require.NoError(t, err)
+	require.Equal(t, &prepared.vendorMask[0], &again.vendorMask[0], "an already prepared request is not rebuilt")
+
+	openAI, err := newTestOpenAIProvider("http://unused.invalid").ImageGenerator().(ImageEditor).PrepareEdit(prepared)
+	require.NoError(t, err)
+	require.Equal(t, image.Rect(0, 0, 8, 4), decodeNRGBA(t, openAI.vendorMask).Bounds())
+	require.NotEqual(t, prepared.vendorMask, openAI.vendorMask, "OpenAI builds its own form of the mask")
+}

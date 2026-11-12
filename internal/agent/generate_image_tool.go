@@ -25,7 +25,7 @@ type generateImageToolArgs struct {
 	AspectRatio    *string `json:"aspect_ratio,omitempty"`
 	FilenamePrefix *string `json:"filename_prefix,omitempty"`
 	Folder         *string `json:"folder,omitempty"`
-	// ReferenceImages and MaskImage make the request an edit (ADR 0x045).
+	// ReferenceImages and MaskImage make the request an edit (ADR 0x047).
 	ReferenceImages []generateImageReference `json:"reference_images,omitempty"`
 	MaskImage       string                   `json:"mask_image,omitempty"`
 }
@@ -214,19 +214,28 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 		return out, nil, nil
 	}
 
-	// Input images are found and checked, and the vendor asked whether it edits, before the quota
-	// gate: a request that cannot run should not count against it.
+	// Input images are found and checked, the vendor asked whether it edits, and the request
+	// prepared (the mask decoded and built once for every image) before the quota gate: a request
+	// that cannot run should not count against it.
 	var editor provider.ImageEditor
 	var in imageInputs
+	var editReq provider.ImageEditRequest
 	if editing {
 		var err error
 		if editor, err = a.imageEditorForUser(ctx, chat.UserID); err != nil {
-			if errors.Is(err, errNoImageGenerator) {
+			if errors.Is(err, errNoImageGenerator) || errors.Is(err, errImagePreferenceUnreadable) {
 				return "", nil, err
 			}
 			return a.generateImageFailure(err.Error())
 		}
 		if in, err = a.resolveImageInputs(ctx, chat, toolArgs.ReferenceImages, toolArgs.MaskImage); err != nil {
+			return a.generateImageFailure(err.Error())
+		}
+		editReq, err = editor.PrepareEdit(provider.ImageEditRequest{Prompt: prompt, Quality: quality, AspectRatio: aspectRatio, Images: in.images, Mask: in.mask})
+		if err != nil {
+			if name := in.maskName(); name != "" {
+				return a.generateImageFailure(fmt.Sprintf("%v (mask_image %s)", err, name))
+			}
 			return a.generateImageFailure(err.Error())
 		}
 	}
@@ -266,7 +275,7 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 
 	var generator provider.ImageGenerator = editor
 	generate := func(ctx context.Context) (provider.GeneratedImage, error) {
-		return editor.EditImage(ctx, provider.ImageEditRequest{Prompt: prompt, Quality: quality, AspectRatio: aspectRatio, Images: in.images, Mask: in.mask})
+		return editor.EditImage(ctx, editReq)
 	}
 	if !editing {
 		var err error

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -43,21 +44,35 @@ func buildImageGenerators(cfg AgentConfig, a *Agent) map[models.ModelProvider]pr
 // request; the fallback is logged. An Agent built without NewAgent has no
 // registry and always uses OpenAIProvider.
 func (a *Agent) imageGeneratorForUser(ctx context.Context, userID uuid.UUID) (provider.ImageGenerator, error) {
+	gen, _, err := a.pickImageGenerator(ctx, userID, false)
+	return gen, err
+}
+
+// pickImageGenerator returns the generator imageGeneratorForUser describes, and the vendor the
+// user chose ("" when they never chose one). strict reads the choice even when only one vendor is
+// usable, and fails rather than guess when it cannot be read: a caller that must not move to
+// another vendor compares the two.
+func (a *Agent) pickImageGenerator(ctx context.Context, userID uuid.UUID, strict bool) (provider.ImageGenerator, models.ModelProvider, error) {
 	usable := a.usableImageGenerators(ctx)
 	want := models.DefaultImageGenerationProvider
+	var chosen models.ModelProvider
 	// With one vendor usable there is nothing to choose, so skip the read.
-	if len(usable) > 1 {
-		chosen, err := a.imageGenerationPreference(ctx, userID)
-		if err != nil {
+	if strict || len(usable) > 1 {
+		var err error
+		chosen, err = a.imageGenerationPreference(ctx, userID)
+		switch {
+		case err != nil && strict:
+			return nil, "", fmt.Errorf("%w: %v", errImagePreferenceUnreadable, err)
+		case err != nil:
 			a.logger.Warn("could not read image generation preference; using the default vendor",
 				zap.String("user_id", userID.String()), zap.Error(err))
-		} else if chosen != "" {
+		case chosen != "":
 			want = chosen
 		}
 	}
 	for _, gen := range usable {
 		if gen.Provider() == want {
-			return gen, nil
+			return gen, chosen, nil
 		}
 	}
 	// Fall back in the settings UI's order, OpenAI first, so a caller with only
@@ -67,13 +82,17 @@ func (a *Agent) imageGeneratorForUser(ctx context.Context, userID uuid.UUID) (pr
 			a.logger.Warn("chosen image generation vendor has no key for this caller; using another",
 				zap.String("user_id", userID.String()), zap.String("provider", string(want)), zap.String("using", string(usable[0].Provider())))
 		}
-		return usable[0], nil
+		return usable[0], chosen, nil
 	}
 	if a.imageGenerators == nil && a.OpenAIProvider != nil {
-		return a.OpenAIProvider.ImageGenerator(), nil
+		return a.OpenAIProvider.ImageGenerator(), chosen, nil
 	}
-	return nil, errNoImageGenerator
+	return nil, chosen, errNoImageGenerator
 }
+
+// errImagePreferenceUnreadable means the user's image vendor could not be read for a request that
+// must not guess it: an operational failure, not a refusal.
+var errImagePreferenceUnreadable = errors.New("could not read the image generation setting")
 
 // errNoImageGenerator means no image vendor is usable at all: an operational failure, not a refusal.
 var errNoImageGenerator = errors.New("no image generation provider is available")

@@ -15,7 +15,7 @@ import (
 	_ "golang.org/x/image/webp" // register WebP: an accepted upload type
 )
 
-// ImageRole says what an input image is for (ADR 0x045). The roles shape the instructions the
+// ImageRole says what an input image is for (ADR 0x047). The roles shape the instructions the
 // image model is given, so markup is read as instructions rather than drawn.
 type ImageRole string
 
@@ -50,18 +50,52 @@ type ImageEditRequest struct {
 	// Mask marks the area of Images[0] to change: white is changed, black is kept. Any size; it is
 	// stretched to the base image. Nil leaves the whole image open to change.
 	Mask []byte
+
+	// preparedBy names the vendor whose PrepareEdit checked this request; vendorMask is the mask in
+	// that vendor's form (nil without a mask).
+	preparedBy string
+	vendorMask []byte
 }
 
 // ImageEditor is an ImageGenerator that also takes input images. Vendors without one cannot take
-// reference images, and the generate_image tool moves such a request to a vendor that can.
+// reference images; the generate_image tool refuses such a request rather than moving it to
+// another vendor (ADR 0x047 §5).
 type ImageEditor interface {
 	ImageGenerator
+	// PrepareEdit checks req and does the work that is the same for every image of a request:
+	// it decodes the mask and builds it in the vendor's form. An error means the request itself
+	// is wrong (a mask that marks nothing, an image that cannot be decoded), so the caller can
+	// refuse it before billing. The returned request is what EditImage should be given.
+	PrepareEdit(req ImageEditRequest) (ImageEditRequest, error)
+	// EditImage makes one image. A request that did not come from this editor's PrepareEdit is
+	// prepared first.
 	EditImage(ctx context.Context, req ImageEditRequest) (GeneratedImage, error)
 }
 
 // MaxEditImages is how many input images a request may carry, mask aside: enough for a base, its
 // markup and a reference, and well inside both editing vendors' limits (OpenAI takes 16).
 const MaxEditImages = 3
+
+// prepared returns req checked and with its mask in vendor's form, made by toVendorMask (which is
+// only called when there is a mask). A request vendor already prepared is returned as it is.
+func (r ImageEditRequest) prepared(vendor string, toVendorMask func(r ImageEditRequest) ([]byte, error)) (ImageEditRequest, error) {
+	if r.preparedBy == vendor {
+		return r, nil
+	}
+	if err := r.validate(); err != nil {
+		return ImageEditRequest{}, err
+	}
+	r.vendorMask = nil
+	if len(r.Mask) > 0 {
+		mask, err := toVendorMask(r)
+		if err != nil {
+			return ImageEditRequest{}, err
+		}
+		r.vendorMask = mask
+	}
+	r.preparedBy = vendor
+	return r, nil
+}
 
 // validate checks the request before any vendor sees it.
 func (r ImageEditRequest) validate() error {

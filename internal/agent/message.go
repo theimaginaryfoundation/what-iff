@@ -983,7 +983,7 @@ type chatContext struct {
 	// mcpSessions stores MCP session ids for this single conversation turn.
 	mcpSessions map[string]string
 	// turnImages are the images generate_image made earlier in this turn, which are not saved yet,
-	// so a later call can use them as reference images (ADR 0x045). See rememberTurnImages.
+	// so a later call can use them as reference images (ADR 0x047). See rememberTurnImages.
 	turnImagesMu sync.Mutex
 	turnImages   []*models.FileAttachment
 }

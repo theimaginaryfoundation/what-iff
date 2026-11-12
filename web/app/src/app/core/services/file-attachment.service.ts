@@ -24,7 +24,7 @@ export class FileAttachmentService {
     if (folder?.trim()) {
       formData.append('folder', folder.trim());
     }
-    // Shown to the agent beside the file's name (ADR 0x045: what a mask or a markup copy is).
+    // Shown to the agent beside the file's name (ADR 0x047: what a mask or a markup copy is).
     if (description?.trim()) {
       formData.append('description', description.trim());
     }

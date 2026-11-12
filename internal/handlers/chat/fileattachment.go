@@ -51,7 +51,7 @@ func (h *Handler) CreateFileAttachment(w http.ResponseWriter, r *http.Request) {
 		fileAttachment.Folder = folder
 	}
 
-	// An optional description, which the agent sees beside the file's name (ADR 0x045: the markup
+	// An optional description, which the agent sees beside the file's name (ADR 0x047: the markup
 	// tool says what a mask or a markup copy is).
 	if description := strings.TrimSpace(r.FormValue("description")); description != "" {
 		if utf8.RuneCountInString(description) > maxUploadDescriptionRunes {
