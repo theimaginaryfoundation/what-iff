@@ -3,7 +3,8 @@
 // of it, kept with the text their anchors are placed against: whoever changes the file (the user's
 // editor, an agent's file tools), the next read carries the anchors to the new text (textanchor),
 // so they stay on the words they were on, and a thread none of whose words are left becomes a
-// comment on the whole file. On an image every thread is on the whole file, for now.
+// comment on the whole file. On an image every thread is on the whole file, for now; on a draw.io
+// diagram a thread is on one of its elements (diagram.go).
 package filecomments
 
 import (
@@ -80,14 +81,23 @@ func isImage(file *models.FileAttachment) bool {
 	return strings.HasPrefix(strings.ToLower(file.FileType), "image/")
 }
 
-// onWholeFile reports whether no thread is on a range of the text.
+// onWholeFile reports whether no thread is on a range of the text (or on a diagram's element).
 func onWholeFile(threads []models.FileCommentThread) bool {
 	for _, t := range threads {
-		if t.Anchor != nil {
+		if t.Anchor != nil || t.Cell != nil {
 			return false
 		}
 	}
 	return true
+}
+
+// unread is the threads of a file whose content cannot be read as text (too large, not UTF-8):
+// on the whole file, or a diagram's on the elements they name, unchecked.
+func unread(file *models.FileAttachment, threads []models.FileCommentThread) []models.FileCommentThread {
+	if isDiagram(file) {
+		return OnCells(threads, "")
+	}
+	return onFile(threads)
 }
 
 // onFile puts every thread on the whole file: an image's threads (see isImage).
@@ -98,6 +108,7 @@ func onFile(threads []models.FileCommentThread) []models.FileCommentThread {
 			t.Comments = []models.FileComment{}
 		}
 		t.Anchor = nil
+		t.Cell = nil
 		t.Quote = ""
 		out[i] = t
 	}
@@ -136,14 +147,19 @@ func (s *Service) Read(ctx context.Context, userID, id uuid.UUID) (*models.FileC
 		// The file is no longer text comments can be placed on (it grew past MaxTextBytes, or is
 		// not UTF-8): its comments stay readable, on the whole file, and nothing is stored.
 		if errors.Is(err, ErrNotText) {
-			return &models.FileComments{Threads: onFile(set.Threads), ContentVersion: file.ContentVersion, Revision: set.Revision}, nil
+			return &models.FileComments{Threads: unread(file, set.Threads), ContentVersion: file.ContentVersion, Revision: set.Revision}, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		threads := Carry(set.Threads, set.BaselineText, text)
+		threads, baseline := Carry(set.Threads, set.BaselineText, text), text
+		// A diagram's threads are on its elements, looked up again in the diagram as it is now;
+		// no text is kept to carry anything from.
+		if isDiagram(file) {
+			threads, baseline = OnCells(set.Threads, text), ""
+		}
 		revision, err := s.store.PutFileCommentSet(ctx, userID, key, models.FileCommentSet{
-			Threads: threads, BaselineText: text, BaselineKey: contentKey(userID, file),
+			Threads: threads, BaselineText: baseline, BaselineKey: contentKey(userID, file),
 		}, set.Revision)
 		// Another read carried them first: read what it stored.
 		if errors.Is(err, ErrRevision) && attempt < 2 {
@@ -192,12 +208,15 @@ func (s *Service) write(ctx context.Context, userID, id uuid.UUID, threads []mod
 	} else {
 		text, err = s.text(ctx, userID, file)
 		switch {
-		case errors.Is(err, errTextTooLarge) && onWholeFile(threads):
-			// A file past MaxTextBytes keeps comments on the whole file (Read shows them so): no
-			// text is needed to place those, and the stored key still marks the baseline.
-			threads, text = onFile(threads), ""
+		case errors.Is(err, errTextTooLarge) && (onWholeFile(threads) || isDiagram(file)):
+			// A file past MaxTextBytes keeps comments on the whole file (Read shows them so), and a
+			// diagram's on its elements, unchecked: no text is needed to place those, and the
+			// stored key still marks the baseline.
+			threads, text = unread(file, threads), ""
 		case err != nil:
 			return nil, s.missingIfStale(ctx, userID, id, contentVersion, err)
+		case isDiagram(file):
+			threads, text = OnCells(threads, text), ""
 		default:
 			threads = Place(threads, text)
 		}
@@ -305,6 +324,8 @@ func Place(threads []models.FileCommentThread, text string) []models.FileComment
 		if t.Comments == nil {
 			t.Comments = []models.FileComment{}
 		}
+		// Only a diagram's threads are on elements.
+		t.Cell = nil
 		if a := t.Anchor; a != nil {
 			if a.Start < 0 || a.End > len(units) || a.Start >= a.End {
 				t.Anchor = nil

@@ -6,7 +6,7 @@
  * messages, under names of its own (`whatiff-…`):
  *
  * - to the app: `whatiff-page` (the page shown), `whatiff-selection` (the selected elements, with
- *   their labels), `whatiff-click` (a marked element clicked), `whatiff-menu` (a right-click item);
+ *   their labels), `whatiff-click` (an element, or its comment mark, clicked), `whatiff-menu` (a right-click item);
  * - from the app: `whatiff-marks` (which elements have threads, and which is active),
  *   `whatiff-reveal` (select and show an element).
  *
@@ -72,7 +72,8 @@
         overlay.cursor = 'pointer';
         (function (cellId) {
           overlay.addListener(mxEvent.CLICK, function () {
-            post({ event: 'whatiff-click', cell: cellId, page: pageId() });
+            var cell = graph.model.getCell(cellId);
+            post({ event: 'whatiff-click', cell: cellId, page: pageId(), label: cell != null ? labelOf(cell) : '' });
           });
         })(id);
         graph.addCellOverlay(cell, overlay);
@@ -91,9 +92,30 @@
       post({ event: 'whatiff-selection', page: pageId(), cells: selection() });
     });
 
+    // Any element clicked, as a viewer (no menus, no selection) has nothing else to choose one with.
+    function clicked(cell) {
+      if (cell != null && cell.id !== '0' && cell.id !== '1') {
+        post({ event: 'whatiff-click', cell: cell.id, page: pageId(), label: labelOf(cell) });
+      }
+    }
     graph.addListener(mxEvent.CLICK, function (sender, evt) {
-      var cell = evt.getProperty('cell');
-      if (cell != null && marks[cell.id]) post({ event: 'whatiff-click', cell: cell.id, page: pageId() });
+      if (graph.isEnabled()) clicked(evt.getProperty('cell'));
+    });
+    // Viewing (chrome=0) the graph is disabled and fires no CLICK: a press and release on one
+    // element, without a drag, is the click.
+    var pressed = null;
+    graph.addMouseListener({
+      mouseDown: function (sender, me) {
+        pressed = graph.isEnabled() ? null : { cell: me.getCell(), x: me.getX(), y: me.getY() };
+      },
+      mouseMove: function () {},
+      mouseUp: function (sender, me) {
+        var down = pressed;
+        pressed = null;
+        if (down == null || graph.isEnabled() || me.getCell() !== down.cell) return;
+        if (Math.abs(me.getX() - down.x) + Math.abs(me.getY() - down.y) > 6) return;
+        clicked(me.getCell());
+      },
     });
 
     ui.editor.addListener('pageSelected', function () {

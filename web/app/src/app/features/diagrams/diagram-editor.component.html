@@ -1,0 +1,70 @@
+@if (frameUrl(); as url) {
+  @if (state() === "loading") {
+    <div class="diagram-editor__status" role="status">Opening the diagram…</div>
+  } @else {
+    <div class="diagram-editor__bar" role="toolbar" aria-label="Diagram">
+      <span class="diagram-editor__downloads">
+        <span class="diagram-editor__bar-label">Download</span>
+        <ui-button size="xs" variant="ghost" [loading]="exporting() === 'png'" [disabled]="!!exporting()" (activate)="download('png')"
+          >PNG</ui-button
+        >
+        <ui-button size="xs" variant="ghost" [loading]="exporting() === 'svg'" [disabled]="!!exporting()" (activate)="download('svg')"
+          >SVG</ui-button
+        >
+        @if (exportFailed()) {
+          <span class="diagram-editor__bar-error" role="alert">Couldn't make the image.</span>
+        }
+      </span>
+      @if (comments.available()) {
+        <span class="diagram-editor__comment-tools">
+          @if (canComment()) {
+            <button type="button" class="diagram-editor__comment-tool" [title]="commentTitle()" (click)="cellComments.startComment()">
+              Comment
+            </button>
+          }
+          <button type="button" class="diagram-editor__comment-tool" [attr.aria-pressed]="commentsOpen()" (click)="toggleComments()">
+            Comments
+            @if (comments.openCount()) {
+              <span class="diagram-editor__count">{{ comments.openCount() }}</span>
+            }
+          </button>
+        </span>
+      }
+    </div>
+  }
+  <div class="diagram-editor__main">
+    <iframe
+      #frame
+      class="diagram-editor__frame"
+      [class.diagram-editor__frame--hidden]="state() === 'loading'"
+      [src]="url"
+      title="Diagram editor"
+      sandbox="allow-scripts allow-same-origin allow-downloads allow-modals allow-forms"
+      allow="clipboard-read; clipboard-write"
+    ></iframe>
+    @if (commentsOpen()) {
+      <app-comments-panel
+        class="diagram-editor__comments"
+        [threads]="comments.shown()"
+        [activeId]="comments.activeId()"
+        [draftQuote]="comments.draft()?.quote"
+        [me]="me()"
+        [people]="comments.people()"
+        [readOnly]="!canComment()"
+        [replyRequest]="cellComments.replyRequest()"
+        [saveStatus]="comments.status()"
+        emptyHint="Choose an element, then Comment, to start a thread on it; with none chosen, the thread is on the whole diagram."
+        (select)="cellComments.selectThread($event)"
+        (create)="comments.create($event)"
+        (cancelDraft)="comments.cancelDraft()"
+        (reply)="comments.reply($event)"
+        (edit)="comments.edit($event)"
+        (remove)="comments.remove($event)"
+        (resolve)="comments.resolve($event)"
+        (closed)="closeComments()"
+      />
+    }
+  </div>
+} @else {
+  <p class="diagram-editor__status">Diagrams can't be opened here: this server has no diagram editor set up.</p>
+}

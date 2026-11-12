@@ -16,6 +16,13 @@ type FileCommentRange struct {
 	End   int `json:"end"`
 }
 
+// FileCommentCell is the element of a draw.io diagram a thread is on (ADR 0x049): the cell's id,
+// on the page (a <diagram>) with id Page.
+type FileCommentCell struct {
+	ID   string `json:"id"`
+	Page string `json:"page,omitempty"`
+}
+
 // FileCommentMention is someone a comment mentions: their `@Name` is written into its text.
 type FileCommentMention struct {
 	ID   string `json:"id"`
@@ -32,10 +39,12 @@ type FileComment struct {
 	Mentions   []FileCommentMention `json:"mentions,omitempty"`
 }
 
-// FileCommentThread is a thread on a range of the file, or on the whole file when Anchor is nil.
+// FileCommentThread is a thread on a range of the file, or on the whole file when Anchor is nil;
+// on a diagram, on one of its elements (Cell, Anchor nil, Quote the element's label) or the whole file.
 type FileCommentThread struct {
 	ID       string            `json:"id"`
 	Anchor   *FileCommentRange `json:"anchor"`
+	Cell     *FileCommentCell  `json:"cell,omitempty"`
 	Quote    string            `json:"quote"`
 	Resolved bool              `json:"resolved"`
 	Comments []FileComment     `json:"comments"`

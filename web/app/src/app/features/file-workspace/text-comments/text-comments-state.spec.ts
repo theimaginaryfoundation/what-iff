@@ -168,6 +168,18 @@ describe('TextCommentsState', () => {
     expect(state.available()).toBe(false);
   });
 
+  it('starts a thread on a diagram element, and keeps it when the comment box’s text is selected', () => {
+    const state = new TextCommentsState({} as TextCommentsService, me, () => undefined);
+    state.startOnCell({ id: 'a', page: 'p1' }, 'User');
+    // A DOM select event bubbling to the panel's (select) output is not a thread chosen.
+    state.select(new Event('select') as unknown as string);
+    expect(state.draft()).toMatchObject({ cell: { id: 'a', page: 'p1' }, quote: 'User' });
+    state.create({ text: 'Who?', mentions: [] });
+    expect(state.threads()[0]).toMatchObject({ anchor: null, cell: { id: 'a', page: 'p1' }, quote: 'User' });
+    expect(state.threadOnCell({ id: 'a' })).toBe(state.threads()[0].id);
+    expect(state.shown()[0].quote).toBe('User');
+  });
+
   describe('mergeThreads', () => {
     const c = (id: string, text = id) => ({ id, authorId: 'user:u-1', authorName: 'Pat', createdAt: '2026-11-12T10:00:00Z', text });
     const t = (id: string, comments: ReturnType<typeof c>[], resolved = false) => ({

@@ -14,7 +14,7 @@ import {
 } from '../../office/comments/comment-threads';
 import { CommentAgentHooks } from '../../office/comments/comment-agent.service';
 import { EditEvent, ReplyEvent } from '../../office/comments/comments-panel.component';
-import { TextCommentAnchor, TextCommentThread, TextComments, TextCommentsService } from './text-comments.service';
+import { DiagramCell, TextCommentAnchor, TextCommentThread, TextComments, TextCommentsService } from './text-comments.service';
 
 type Range = { start: number; end: number };
 
@@ -38,6 +38,11 @@ export interface TextCommentSurface {
 function quoteOf(text: string): string {
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length > 160 ? `${flat.slice(0, 157)}…` : flat;
+}
+
+/** What a thread on a diagram's element is on, as the panel shows it: the element's label. */
+function cellQuote(label: string | undefined): string {
+  return label ? quoteOf(label) : 'An element with no label';
 }
 
 /**
@@ -98,8 +103,8 @@ function newThreadId(): string {
 export class TextCommentsState {
   readonly threads = signal<TextCommentThread[]>([]);
   readonly activeId = signal<string | null>(null);
-  /** The thread being started: on a range of the text, or (range null) on the whole file. */
-  readonly draft = signal<{ range: Range | null; quote: string } | null>(null);
+  /** The thread being started: on a range of the text, on a diagram's element, or (neither) on the whole file. */
+  readonly draft = signal<{ range: Range | null; quote: string; cell?: DiagramCell; label?: string } | null>(null);
   readonly status = signal<CommentSaveStatus>('idle');
   /** Whether the file's comments loaded: the server keeps none for a file that is not text (or too large). */
   readonly available = signal(false);
@@ -135,8 +140,9 @@ export class TextCommentsState {
       .sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i)
       .map(({ t }) => {
         const at = positions.get(t.id);
-        const quote =
-          at && this.surface
+        const quote = t.cell
+          ? cellQuote(t.quote)
+          : at && this.surface
             ? quoteOf(this.surface.text(at))
             : t.quote
               ? `The whole file · was on “${quoteOf(t.quote)}”`
@@ -351,6 +357,18 @@ export class TextCommentsState {
     this.activeId.set(null);
   }
 
+  /** Starts a thread on a diagram's element, quoting its label (ADR 0x049). */
+  startOnCell(cell: DiagramCell, label: string): void {
+    this.draft.set({ range: null, quote: cellQuote(label), cell: { ...cell }, label });
+    this.activeId.set(null);
+  }
+
+  /** The thread on a diagram's element, if any (the first, when there are several). */
+  threadOnCell(cell: DiagramCell): string | null {
+    const on = (t: TextCommentThread) => t.cell?.id === cell.id && (!t.cell.page || !cell.page || t.cell.page === cell.page);
+    return (this.threads().find(t => on(t) && !t.resolved) ?? this.threads().find(on))?.id ?? null;
+  }
+
   cancelDraft(): void {
     this.draft.set(null);
   }
@@ -360,8 +378,11 @@ export class TextCommentsState {
     if (!at || (at.range && !this.surface)) return;
     const id = newThreadId();
     const anchor: TextCommentAnchor = at.range ? { ...at.range } : null;
-    const quote = at.range && this.surface ? this.surface.text(at.range) : '';
-    this.threads.update(threads => [...threads, { id, anchor, quote, comments: [newComment(id, this.me(), draft)] }]);
+    // A thread on an element quotes its label (the server quotes it again as the diagram is then).
+    const quote = at.range && this.surface ? this.surface.text(at.range) : (at.label ?? '');
+    const thread: TextCommentThread = { id, anchor, quote, comments: [newComment(id, this.me(), draft)] };
+    if (at.cell) thread.cell = at.cell;
+    this.threads.update(threads => [...threads, thread]);
     this.surface?.place(id, anchor);
     this.draft.set(null);
     this.activeId.set(id);
@@ -377,10 +398,14 @@ export class TextCommentsState {
     const thread = this.threads().find(t => t.id === threadId);
     if (!this.agent || !thread) return;
     const at = this.positions().get(threadId);
-    this.agent.posted(thread, commentId, at && this.surface ? quoteOf(this.surface.text(at)) : '');
+    const quote = thread.cell ? cellQuote(thread.quote) : at && this.surface ? quoteOf(this.surface.text(at)) : '';
+    this.agent.posted(thread, commentId, quote);
   }
 
   select(threadId: string): void {
+    // The panel's (select) output shares its name with the DOM's select event, which bubbles up
+    // from its comment box when text in it is selected: that is not a thread chosen.
+    if (typeof threadId !== 'string') return;
     this.draft.set(null);
     this.activeId.set(threadId);
     const at = this.positions().get(threadId);

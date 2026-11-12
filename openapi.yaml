@@ -12737,6 +12737,19 @@ components:
           type: integer
         end:
           type: integer
+    FileCommentCell:
+      type: object
+      description: >-
+        The element of a draw.io diagram a thread is on (ADR 0x049); a thread with a cell has a
+        null anchor.
+      required: [id]
+      properties:
+        id:
+          type: string
+          description: The cell's id.
+        page:
+          type: string
+          description: The id of the page (diagram) the cell is on.
     FileCommentMention:
       type: object
       required: [id, name]
@@ -12777,9 +12790,13 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/FileCommentRange'
+        cell:
+          $ref: '#/components/schemas/FileCommentCell'
         quote:
           type: string
-          description: The text the thread is on (or was on, for a thread on the whole file).
+          description: >-
+            The text the thread is on (or was on, for a thread on the whole file); on a diagram,
+            the label of the element it is on.
         resolved:
           type: boolean
         comments:

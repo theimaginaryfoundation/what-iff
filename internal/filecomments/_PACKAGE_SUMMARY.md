@@ -2,7 +2,7 @@
 
 ## Role
 
-Keeps the comments on text, code and image files (ADR 0x045), which have no place for comments of their own: a file's threads are stored beside it (ent `FileCommentSet`) with the text their anchors are placed against, and `GET`/`PUT /file-attachment/{id}/comments` only map errors to statuses.
+Keeps the comments on text, code and image files (ADR 0x045) and draw.io diagrams (ADR 0x049), which have no place for comments of their own: a file's threads are stored beside it (ent `FileCommentSet`) with the text their anchors are placed against, and `GET`/`PUT /file-attachment/{id}/comments` only map errors to statuses.
 
 ## Responsibilities
 
@@ -20,6 +20,11 @@ Keeps the comments on text, code and image files (ADR 0x045), which have no plac
   A change replaces the file's content (no earlier version is kept, ADR 0x043), saved through `filesave.Service.Replace` over the version read and started again once when someone saved meanwhile (`ErrStaleContent` after that).
 - **`MentionContext`** (`mention.go`, ADR 0x046) renders the context a comment that mentions the agent sends with its message: the file, what the thread is on and the thread before the comment, bounded in length; `ShortQuote` is the quote a link to the thread shows.
 - **Images:** every thread is on the whole file (`anchor` null, no quote); no text is read and an edit leaves the threads as they are.
+- **draw.io diagrams** (`diagram.go`, ADR 0x049): a thread is on one element (`cell`: its id and its page's id, `anchor` null, the element's label as the quote) or the whole file.
+  **`OnCells`** checks each thread's element against the XML (`internal/drawio`) on write and, once the diagram changed, on read: an element that is there is quoted afresh, one that is gone puts its thread on the whole file with the label it had.
+  No baseline text is kept, since nothing is carried; a diagram that cannot be read (too large, compressed, not XML) leaves the threads' elements unchecked.
+  **`CellOn`** is the element an agent's new thread names (`ErrCellNotFound`); `Current.Diagram` tells an `Update` it is a diagram.
+  Only a diagram's threads are on elements: `Place` drops a `cell` sent for any other file.
 - **Refusals:** `ErrNotText` for content that is neither an image nor UTF-8 text, or text over `MaxTextBytes` (4 MB).
   A read of a file that stopped being such text returns its threads on the whole file, unstored, so they stay readable; a text file over the limit also takes writes of threads on the whole file (`errTextTooLarge`).
   A row with no key (from before keys were recorded) reads a missing or empty object as empty text, as it always did.
@@ -28,7 +33,7 @@ Keeps the comments on text, code and image files (ADR 0x045), which have no plac
 ## Dependencies
 
 - **Inbound:** `internal/handlers/fileattachment`.
-- **Outbound:** `internal/datastore` (`GetFileAttachment`, `CommentFileID`, `GetFileCommentSet`, `PutFileCommentSet`), `internal/storage` (`DownloadFile`, `ReadAttachment` for rows with no key), `internal/textanchor`.
+- **Outbound:** `internal/datastore` (`GetFileAttachment`, `CommentFileID`, `GetFileCommentSet`, `PutFileCommentSet`), `internal/storage` (`DownloadFile`, `ReadAttachment` for rows with no key), `internal/textanchor`, `internal/drawio` (`List`).
 
 ## Non-obvious decisions
 
@@ -48,4 +53,5 @@ Keeps the comments on text, code and image files (ADR 0x045), which have no plac
 
 ## Testing
 
+- `diagram_test.go` — threads on a diagram's elements: quoted with their labels, given their page, put on the whole file when the element is missing, relabelled and detached after a change made elsewhere; a text file's thread is never on an element; an unreadable diagram keeps its threads' elements.
 - `filecomments_test.go` — a missing object mid-read (retried, never carried onto empty text), a file that stopped being text, server-set authorship, placing and quoting on write, stale content and revision refusals, carrying across a change made elsewhere (including the start and end moving), detaching once the words are gone, a file with no comments, binary content, a file and its chat copy sharing one set across an agent's edit, and an image's whole-file threads outliving an edit.

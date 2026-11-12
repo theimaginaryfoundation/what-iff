@@ -9,7 +9,24 @@
  *   native shapes.
  */
 
+/** An element of the diagram as the bridge plugin reports it: its cell id, and its label as plain text. */
+export interface BridgeCell {
+  id: string;
+  label: string;
+}
+
+/**
+ * What our plugin in the editor (web/diagrams/whatiff-bridge.js) reports, for comments on elements:
+ * the page shown, the selection, an element clicked, a right-click menu item chosen.
+ */
+export type BridgeEvent =
+  | { event: 'whatiff-page'; page: string | null }
+  | { event: 'whatiff-selection'; page: string | null; cells: BridgeCell[] }
+  | { event: 'whatiff-click'; page: string | null; cell: string; label?: string }
+  | { event: 'whatiff-menu'; page: string | null; item: 'new' | 'reply' | 'delete'; cell: string; label?: string };
+
 export type DrawioEvent =
+  | BridgeEvent
   | { event: 'init' }
   | { event: 'load'; xml: string }
   | { event: 'autosave'; xml: string }
@@ -22,7 +39,10 @@ export type DrawioAction =
   | { action: 'load'; xml: string; autosave?: 1; title?: string; noExitBtn?: 1 }
   | { action: 'load'; descriptor: { format: 'mermaid'; data: string }; autosave?: 1; title?: string }
   | { action: 'export'; format: 'png' | 'svg' | 'xmlpng' | 'xmlsvg'; scale?: number; background?: string; requestId?: string }
-  | { action: 'configure'; config: Record<string, unknown> };
+  | { action: 'configure'; config: Record<string, unknown> }
+  // Our plugin: which elements on a page have threads (and which is active), and showing one.
+  | { action: 'whatiff-marks'; page: string | null; marks: Record<string, 'open' | 'active'> }
+  | { action: 'whatiff-reveal'; cell: string; page?: string };
 
 /** The editor's URL: embed mode, our JSON protocol, the app's theme, and read-only when viewing. */
 export function drawioUrl(site: string, opts: { readOnly: boolean; dark: boolean }): string {

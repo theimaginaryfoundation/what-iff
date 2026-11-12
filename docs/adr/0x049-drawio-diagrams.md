@@ -34,10 +34,21 @@ The pinned release's code is under the Apache License 2.0 (some 2024 releases ca
 - One component views and edits (`editInPlace`): viewing shows the diagram with no menus or panels and takes no changes; editing is the full editor, in the app's theme. Saving, Save as, conflicts and closing are the workspace's, as for every editor.
 - Files are saved as plain XML, never draw.io's compressed form, so diffs and agents can read them.
 
-### 3. Agents read and change diagrams with their file tools
+### 3. Agents read and change diagrams with their file tools and the `diagram` tool
 
 `.drawio` is among the files agents may create, read and patch (`agent_file_read`, `agent_file_patch`); a user's diagram is changed under the edit grants of ADR 0x046.
 It is not indexed for search: the XML is mostly geometry and style.
+
+The `diagram` tool lets agents work by element rather than by patching XML:
+
+- `list` gives each page's elements (id, kind, plain-text label, parent, position and size, connector ends, style) and a text outline; `validate` checks unique ids, the root cells `0` and `1`, that parents and connector ends exist, and that styles are well formed.
+  Both work on any of the user's diagrams.
+- `create` makes a new diagram of the agent's own from a graph with no positions (nodes, edges, lanes, notes) and lays it out: nodes in ranks along the flow, inside their swimlane, lanes stacked, notes after, left to right or top to bottom.
+  The user can tidy it with the editor's own layouts.
+- `add_node`, `add_edge`, `add_container` (a swimlane or a group), `add_note`, `set_label`, `set_style`, `move` and `delete` (with what is inside and the connectors left without an end) change one element by id.
+- The XML is changed as text where the decoder finds each element, so everything else is kept byte for byte, and a change that would leave the diagram with a new problem is refused.
+- It changes files as `agent_file_write` does: the agent's own diagrams, and a user's under an edit grant, saved as a new version.
+- Compressed pages are refused, with a hint to save the diagram again from the editor.
 
 ### 4. Mermaid becomes native shapes
 
@@ -49,16 +60,27 @@ Above the diagram, viewed or edited, Download PNG and SVG save the diagram as th
 Both images carry the diagram itself, as draw.io's own exports do, so draw.io opens either again as an editable diagram.
 The file itself downloads as every file does.
 
+### 6. Comments on elements
+
+A diagram's comments are kept beside the file, as a text file's are (ADR 0x045 §4), and the same panel shows them.
+A thread is on one element, or on the whole diagram:
+
+- The thread names the element by its cell id and its page's id, and quotes its label; it has no range of the text.
+  Elements keep their ids when they are moved, restyled or relabelled, so nothing is carried: once the diagram changed, the next read looks each element up again and quotes its label as it is now, and a thread whose element is gone is on the whole diagram with the label it had.
+- A small plugin of ours in the editor (`web/diagrams/whatiff-bridge.js`, built into the site's `PostConfig.js`) marks the elements that have threads, the active one more strongly, and reports the page shown, the selection and clicks; right-clicking an element offers New, Reply to and Delete comment, as every other format has (ADR 0x045).
+  It uses only draw.io's graph API, and talks to the app in the embed protocol's messages under names of its own.
+- Viewing, clicking an element and then Comment starts a thread on it (with none chosen, on the whole diagram), and comments are written as they are made; editing, they are written once a save has stored the diagram, so a thread on a new element finds it there.
+- Agents comment with `file_comments`, giving the element's id (`cell`, with `page`); `list` says which element each thread is on.
+
 ## Consequences
 
 - Users draw and edit diagrams in the workspace, and agents change the same files as text.
 - The site is about 118 MB of static files, loaded only when a diagram is opened.
-- draw.io's editor is code we host but do not build; anything we add to it (§ Later) must stay small and is checked on every upgrade.
+- draw.io's editor is code we host but do not build; what we add to it (the plugin of §6) stays small and is checked on every upgrade.
 
 ## Later
 
-- **Comments on diagrams and on single elements**: threads beside the file (ADR 0x045 §4) anchored on an element's id, through a small plugin in the editor.
 - **A preview image** saved with each diagram, for the gallery and for agents to look at; and PDF, which draw.io makes only with an export server.
 - **Open as editable diagram** wherever a Mermaid diagram is drawn (§4).
-- **A `diagram` tool** for agents that changes diagrams by element, and the c4a tooling around it.
+- **c4a tooling** for diagrams: inspecting, laying out with Graphviz, converting from Mermaid and rendering.
 - **Hosting**: the deployed site's bucket, distribution and `frame-ancestors`, and the deploy workflow's build.

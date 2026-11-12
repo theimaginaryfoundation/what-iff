@@ -16528,6 +16528,13 @@ export interface components {
             start: number;
             end: number;
         };
+        /** @description The element of a draw.io diagram a thread is on (ADR 0x049); a thread with a cell has a null anchor. */
+        FileCommentCell: {
+            /** @description The cell's id. */
+            id: string;
+            /** @description The id of the page (diagram) the cell is on. */
+            page?: string;
+        };
         FileCommentMention: {
             /** @description `user:<id>` for a WhatIff user, `author:<name>` for someone known by name */
             id: string;
@@ -16547,7 +16554,8 @@ export interface components {
             id: string;
             /** @description The range the thread is on, or null when it is on the whole file. */
             anchor: components["schemas"]["FileCommentRange"] | null;
-            /** @description The text the thread is on (or was on, for a thread on the whole file). */
+            cell?: components["schemas"]["FileCommentCell"];
+            /** @description The text the thread is on (or was on, for a thread on the whole file); on a diagram, the label of the element it is on. */
             quote: string;
             resolved: boolean;
             /** @description The first comment, then the replies. */

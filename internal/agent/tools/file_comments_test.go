@@ -34,11 +34,16 @@ func (m *memComments) Update(ctx context.Context, userID, id uuid.UUID, change f
 		return nil, err
 	}
 	image := file.FileType == "image/png"
-	threads, err := change(&filecomments.Current{File: file, Text: m.text[id], Image: image, Threads: m.threads[id]})
+	diagram := file.FileType == "application/vnd.jgraph.mxfile"
+	threads, err := change(&filecomments.Current{File: file, Text: m.text[id], Image: image, Diagram: diagram, Threads: m.threads[id]})
 	if err != nil {
 		return nil, err
 	}
-	m.threads[id] = filecomments.Place(threads, m.text[id])
+	if diagram {
+		m.threads[id] = filecomments.OnCells(threads, m.text[id])
+	} else {
+		m.threads[id] = filecomments.Place(threads, m.text[id])
+	}
 	return &models.FileComments{Threads: m.threads[id], ContentVersion: 1}, nil
 }
 
@@ -110,6 +115,36 @@ func TestFileCommentsTool(t *testing.T) {
 	require.Empty(t, res.Error)
 	require.Nil(t, mem.threads[photo.ID][0].Anchor)
 	require.Empty(t, res.CommentRef.Quote)
+}
+
+func TestFileCommentsTool_Diagrams(t *testing.T) {
+	userID := uuid.New()
+	store := &fakeAgentFileStore{userID: userID, rows: map[uuid.UUID]*models.FileAttachment{}}
+	flow, _ := store.CreateFileAttachment(context.Background(), userID, models.FileAttachment{Name: "flow.drawio", FileType: "application/vnd.jgraph.mxfile"})
+	const xml = `<mxfile><diagram id="p1" name="Main"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>` +
+		`<mxCell id="a" value="User" vertex="1" parent="1"><mxGeometry width="80" height="40" as="geometry"/></mxCell>` +
+		`</root></mxGraphModel></diagram></mxfile>`
+	mem := &memComments{files: store, text: map[uuid.UUID]string{flow.ID: xml}, threads: map[uuid.UUID][]models.FileCommentThread{}}
+	tool := &FileCommentsTool{files: store, comments: mem, logger: zap.NewNop(), now: time.Now}
+	chat := &models.Chat{ID: uuid.New(), UserID: userID, PersonalityName: "Iris"}
+
+	// add on an element, by its id and its page's name: the thread quotes its label.
+	res := runComments(t, tool, chat, map[string]any{"action": "add", "file": flow.ID.String(), "cell": "a", "page": "Main", "text": "Who is this?"})
+	require.Empty(t, res.Error)
+	th := mem.threads[flow.ID][0]
+	require.Equal(t, &models.FileCommentCell{ID: "a", Page: "p1"}, th.Cell)
+	require.Equal(t, "User", res.CommentRef.Quote)
+
+	// list says which element.
+	res = runComments(t, tool, chat, map[string]any{"action": "list", "file": flow.ID.String()})
+	require.Equal(t, "User", res.Threads[0].On)
+	require.Equal(t, "element a on page p1", res.Threads[0].Where)
+
+	// An element that is not there, or a quote, is refused with what to do instead.
+	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": flow.ID.String(), "cell": "zz", "text": "?"})
+	require.Contains(t, res.Error, "diagram tool")
+	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": flow.ID.String(), "quote": "User", "text": "?"})
+	require.Contains(t, res.Error, "give cell")
 }
 
 func TestCommentRefsFromCalls(t *testing.T) {
