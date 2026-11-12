@@ -83,7 +83,31 @@ describe('mermaid in markdown', () => {
     expect(svg.querySelector('path')!.getAttribute('marker-end')).toBe('url(#arrow)');
     expect(svg.querySelector('path')!.getAttribute('style')).not.toContain('evil.example');
     expect(diagram.querySelector<HTMLElement>('.mermaid-diagram__source')!.hidden).toBe(true);
-    expect([...diagram.querySelectorAll('.mermaid-diagram__button')].map(b => b.textContent)).toEqual(['Source', 'Copy', 'SVG', 'PNG']);
+    expect([...diagram.querySelectorAll('.mermaid-diagram__button')].map(b => b.textContent)).toEqual([
+      'Source',
+      'Expand',
+      'Copy',
+      'SVG',
+      'PNG',
+    ]);
+  });
+
+  it('sizes the diagram from its drawing, not the 300px a shrinking box gives width="100%"', async () => {
+    const root = mount(render('```mermaid\nflowchart LR\n  Hello\n```'));
+    await renderMermaid(root);
+    const figure = root.querySelector<HTMLElement>('.mermaid-diagram__figure')!;
+    expect(figure.style.getPropertyValue('--mermaid-width')).toBe('100px');
+    expect(figure.querySelector('svg')!.hasAttribute('width')).toBe(false);
+  });
+
+  it('expands the diagram into a dialog, and closes it', async () => {
+    const root = mount(render('```mermaid\nflowchart LR\n  Hello\n```'));
+    await renderMermaid(root);
+    [...root.querySelectorAll<HTMLButtonElement>('.mermaid-diagram__button')].find(b => b.textContent === 'Expand')!.click();
+    const dialog = document.querySelector('dialog.mermaid-diagram__dialog')!;
+    expect(dialog.querySelector('svg text')?.textContent).toBe('Hello');
+    dialog.querySelector<HTMLButtonElement>('.mermaid-diagram__close')!.click();
+    expect(document.querySelector('dialog.mermaid-diagram__dialog')).toBeNull();
   });
 
   it('switches between the diagram and its source', async () => {

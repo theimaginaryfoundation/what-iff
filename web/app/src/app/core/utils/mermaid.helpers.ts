@@ -244,6 +244,7 @@ function showDiagram(element: HTMLElement, svg: string, source: string): void {
   figure.setAttribute('aria-label', 'Diagram');
   // The SVG was sanitized by DOMPurify's SVG profile above.
   figure.innerHTML = svg;
+  sizeDiagram(figure);
   const toolbar = document.createElement('div');
   toolbar.className = 'mermaid-diagram__toolbar';
   const toggle = button(document, 'Source', 'Show the Mermaid source', () => {
@@ -257,6 +258,10 @@ function showDiagram(element: HTMLElement, svg: string, source: string): void {
   toggle.setAttribute('aria-pressed', 'false');
   toolbar.append(
     toggle,
+    button(document, 'Expand', 'Show the diagram full screen', () => {
+      const el = figure.querySelector('svg');
+      if (el) expand(document, el);
+    }),
     button(document, 'Copy', 'Copy the Mermaid source', () => void document.defaultView?.navigator.clipboard?.writeText(source)),
     button(document, 'SVG', 'Download as SVG', () => {
       const el = figure.querySelector('svg');
@@ -270,6 +275,47 @@ function showDiagram(element: HTMLElement, svg: string, source: string): void {
   if (pre) pre.hidden = true;
   element.prepend(toolbar, figure);
   element.dataset[STATE] = 'drawn';
+}
+
+/**
+ * Gives the SVG its own size: Mermaid writes `width="100%"` with a `max-width` of the drawing's
+ * width, and in a box that shrinks to its content (a chat bubble) `100%` falls back to the
+ * browser's default 300px. The drawing's width goes in `--mermaid-width`; the stylesheet scales it
+ * up on wide screens (`--mermaid-scale`) and keeps it within its box and the screen's height.
+ */
+function sizeDiagram(figure: HTMLElement): void {
+  const svg = figure.querySelector('svg');
+  if (!svg) return;
+  const width = svg.viewBox?.baseVal?.width || Number.parseFloat(svg.style.maxWidth) || 0;
+  svg.removeAttribute('width');
+  svg.removeAttribute('height');
+  svg.style.maxWidth = '';
+  if (width > 0) figure.style.setProperty('--mermaid-width', `${Math.ceil(width)}px`);
+}
+
+/** The diagram in a full-screen dialog, scaled to fit it; Escape or a click closes it. */
+function expand(document: Document, svg: SVGSVGElement): void {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'mermaid-diagram__dialog';
+  dialog.setAttribute('aria-label', 'Diagram');
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'mermaid-diagram__button mermaid-diagram__close';
+  close.textContent = 'Close';
+  const copy = svg.cloneNode(true) as SVGSVGElement;
+  dialog.append(close, copy);
+  const done = () => {
+    if (typeof dialog.close === 'function') dialog.close();
+    dialog.remove();
+  };
+  close.addEventListener('click', done);
+  dialog.addEventListener('click', event => {
+    if (event.target === dialog) done();
+  });
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  if (typeof dialog.showModal === 'function') dialog.showModal();
+  else dialog.setAttribute('open', '');
 }
 
 function showError(element: HTMLElement): void {

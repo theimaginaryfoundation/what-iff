@@ -36,9 +36,12 @@ In chat messages, `.md` files in the viewer and the editor's live preview, and n
 
 Mermaid's `base` theme is set from the app's theme tokens (`styles/themes.scss`) for the light and dark themes, so nodes, lines, notes and series colours match the page.
 
-### 4. Each diagram has a toolbar
+### 4. Size, and a toolbar on each diagram
 
-Switch to the source and back, copy the source, and download the diagram as SVG or PNG (twice its size, on the page's background).
+A diagram is drawn at its own width, scaled up on wide screens (1.25× from 1280px, 1.5× from 1800px), never wider than its box nor taller than most of the screen.
+Mermaid's `width="100%"` is not used: in a box that shrinks to its content, such as a chat bubble, it falls back to the browser's default 300px.
+
+The toolbar switches to the source and back, opens the diagram full screen, copies the source, and downloads the diagram as SVG or PNG (twice its size, on the page's background).
 Copying a selection that holds a diagram copies its source as a ` ```mermaid ` fence, as copying a formula copies its TeX.
 
 ### 5. Mermaid files
@@ -50,6 +53,11 @@ The server accepts them as uploads, indexes them as text, and agents can create 
 
 Comments on text files work on a Mermaid file's source as on any text file (ADR 0x045 §4).
 In formatted Markdown, comments are found by their words (ADR 0x045 §4); what is drawn, diagrams and formulas, is left out of those words, so a thread is never placed on a diagram's labels, and a thread on a diagram's source shows in the raw view.
+
+### 7. Resizing a message
+
+On desktop, a chat bubble has a handle on its outer edge (right for the agent's replies, left for the user's messages): dragging it, or the arrow keys on it, sets the bubble's width, and double-click resets it.
+The width is kept per message in the browser, so a resized bubble stays resized after a reload, and a resized bubble's diagrams grow with it, up to twice their drawing's width.
 
 ## Consequences
 
