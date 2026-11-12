@@ -13668,7 +13668,7 @@ export interface paths {
         };
         /**
          * A text file's comments
-         * @description The comment threads of a text or code file (ADR 0x045), which has no place for comments of its own, placed on its current content. When the file changed since the comments were written (by the user or by an agent), each anchor is carried to the new text word by word: kept on its words, its start moved to the first word left after it and its end to the last one before it; a thread none of whose words are left is on the whole file (`anchor` null) with the quote it had.
+         * @description The comment threads of a text or code file (ADR 0x045), which has no place for comments of its own, placed on its current content. When the file changed since the comments were written (by the user or by an agent), each anchor is carried to the new text word by word: kept on its words, its start moved to the first word left after it and its end to the last one before it; a thread none of whose words are left is on the whole file (`anchor` null) with the quote it had. A file and its chat copies have one set of comments: any of their ids reads and writes the same threads.
          */
         get: {
             parameters: {

@@ -46,10 +46,20 @@ func createFileAttachmentTestSchema(t *testing.T, db *sql.DB) {
 			size_bytes integer,
 			content_version integer NOT NULL DEFAULT 1,
 			content_sha256 text,
+			original_id uuid,
 			chat_message_file_attachments uuid,
 			mood_images uuid,
 			personality_file_attachments uuid,
 			user_file_attachments uuid NOT NULL
+		)`,
+		`CREATE TABLE file_comment_sets (
+			id uuid PRIMARY KEY,
+			file_attachment_id uuid NOT NULL UNIQUE,
+			threads text NOT NULL DEFAULT '[]',
+			baseline_text text NOT NULL DEFAULT '',
+			baseline_key text NOT NULL DEFAULT '',
+			revision integer NOT NULL DEFAULT 1,
+			updated_at datetime NOT NULL
 		)`,
 		`CREATE TABLE personality_expressions (
 			id uuid PRIMARY KEY,

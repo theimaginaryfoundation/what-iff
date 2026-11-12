@@ -42,9 +42,11 @@ func (d *Datastore) FindFileAttachmentsAtPath(ctx context.Context, userID uuid.U
 // provided it still points at oldKey, and records the change time. It reports whether the swap
 // happened: false means another writer changed the file first (or it is gone, or not
 // agent-authored), and the caller should drop newKey and re-read. It is SwapFileObject with
-// AgentOnly set; an agent write never repoints the chat copies that share the object.
+// AgentOnly set. The file's chat copies move with it, as they do on a user's save, so every place
+// the file is shown has the agent's change and the file's comments stay one set (ADR 0x045);
+// context-only rows keep the version a reply showed.
 func (d *Datastore) SwapAgentFileObject(ctx context.Context, userID, id uuid.UUID, oldKey, newKey string, sizeBytes int64, sha256Hex string) (bool, error) {
-	return d.SwapFileObject(ctx, userID, id, oldKey, newKey, SwapFileObjectOptions{AgentOnly: true, SizeBytes: sizeBytes, SHA256: sha256Hex})
+	return d.SwapFileObject(ctx, userID, id, oldKey, newKey, SwapFileObjectOptions{AgentOnly: true, MoveSharedRows: true, SizeBytes: sizeBytes, SHA256: sha256Hex})
 }
 
 // CountAgentFiles returns how many agent-authored files the user holds.

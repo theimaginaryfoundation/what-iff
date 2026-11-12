@@ -24,17 +24,17 @@ func (FileCommentSet) Fields() []ent.Field {
 			Default(uuid.New).
 			Immutable(),
 		field.UUID("file_attachment_id", uuid.UUID{}).
-			Immutable().
-			Unique(),
+			Unique().
+			Comment("The file's original row; deleting it hands the set to the earliest copy left."),
 		field.Text("threads").
 			Default("[]").
 			Comment("The threads as JSON (models.FileCommentThread); anchors are UTF-16 ranges of the baseline text."),
 		field.Text("baseline_text").
 			Default("").
 			Comment("The file's text the anchors are placed against; a read after the file changed carries them to its new text."),
-		field.Int("baseline_version").
-			Default(1).
-			Comment("The file's content_version the baseline is."),
+		field.String("baseline_key").
+			Default("").
+			Comment("The stored object the baseline is (the file's s3_key then). Every save writes a new object, so a different key is changed content, whichever of the file's rows it is read through."),
 		field.Int("revision").
 			Default(1).
 			Positive().
@@ -52,7 +52,6 @@ func (FileCommentSet) Edges() []ent.Edge {
 			Ref("comment_set").
 			Field("file_attachment_id").
 			Unique().
-			Required().
-			Immutable(),
+			Required(),
 	}
 }

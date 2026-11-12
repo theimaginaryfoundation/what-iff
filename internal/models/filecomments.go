@@ -47,8 +47,9 @@ type FileComments struct {
 
 // FileCommentSet is the stored set: the threads and the text their anchors are placed against.
 type FileCommentSet struct {
-	Threads         []FileCommentThread
-	BaselineText    string
-	BaselineVersion int
-	Revision        int
+	Threads      []FileCommentThread
+	BaselineText string
+	// BaselineKey is the stored object the baseline is: a different key is changed content.
+	BaselineKey string
+	Revision    int
 }

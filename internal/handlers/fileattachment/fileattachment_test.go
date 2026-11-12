@@ -31,6 +31,10 @@ type stubStore struct {
 	comments *models.FileCommentSet
 }
 
+func (s stubStore) CommentFileID(_ context.Context, _ uuid.UUID, id uuid.UUID) (uuid.UUID, error) {
+	return id, nil
+}
+
 func (s stubStore) GetFileCommentSet(context.Context, uuid.UUID, uuid.UUID) (*models.FileCommentSet, error) {
 	if s.comments == nil || s.comments.Revision == 0 {
 		return nil, nil

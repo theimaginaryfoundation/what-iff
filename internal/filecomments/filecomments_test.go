@@ -23,22 +23,40 @@ func (m memFiles) DeleteFile(_ context.Context, key string) error {
 
 type fakeStore struct {
 	file *models.FileAttachment
-	set  *models.FileCommentSet
-	puts int
+	// copies are other rows of the same file (chat copies), by id.
+	copies map[uuid.UUID]*models.FileAttachment
+	set    *models.FileCommentSet
+	setFor uuid.UUID
+	puts   int
 }
 
-func (f *fakeStore) GetFileAttachment(context.Context, uuid.UUID, uuid.UUID) (*models.FileAttachment, error) {
-	copied := *f.file
+func (f *fakeStore) GetFileAttachment(_ context.Context, _ uuid.UUID, id uuid.UUID) (*models.FileAttachment, error) {
+	row := f.file
+	if c, ok := f.copies[id]; ok {
+		row = c
+	}
+	copied := *row
 	return &copied, nil
 }
-func (f *fakeStore) GetFileCommentSet(context.Context, uuid.UUID, uuid.UUID) (*models.FileCommentSet, error) {
-	if f.set == nil {
+
+func (f *fakeStore) CommentFileID(_ context.Context, _ uuid.UUID, id uuid.UUID) (uuid.UUID, error) {
+	if c, ok := f.copies[id]; ok && c.OriginalID != nil {
+		return *c.OriginalID, nil
+	}
+	return id, nil
+}
+func (f *fakeStore) GetFileCommentSet(_ context.Context, _ uuid.UUID, fileID uuid.UUID) (*models.FileCommentSet, error) {
+	if f.set == nil || fileID != f.setFor {
 		return nil, nil
 	}
 	copied := *f.set
 	return &copied, nil
 }
-func (f *fakeStore) PutFileCommentSet(_ context.Context, _, _ uuid.UUID, set models.FileCommentSet, expect int) (int, error) {
+func (f *fakeStore) PutFileCommentSet(_ context.Context, _, fileID uuid.UUID, set models.FileCommentSet, expect int) (int, error) {
+	if f.set != nil && fileID != f.setFor {
+		return 0, errors.New("a second comment set for one file")
+	}
+	f.setFor = fileID
 	current := 0
 	if f.set != nil {
 		current = f.set.Revision
@@ -78,7 +96,7 @@ func TestWritePlacesThreadsOnTheCurrentTextAndQuotesThem(t *testing.T) {
 	if got.Revision != 1 || got.Threads[0].Quote != "inline comment" || got.Threads[1].Anchor != nil {
 		t.Fatalf("got %+v", got)
 	}
-	if store.set.BaselineText != line || store.set.BaselineVersion != 1 {
+	if store.set.BaselineText != line || store.set.BaselineKey != "k1" {
 		t.Fatalf("baseline %+v", store.set)
 	}
 	// A write against a version that is no longer the file's, or a stale revision, is refused.
@@ -137,5 +155,44 @@ func TestReadOfAFileWithNoCommentsAndOfBinary(t *testing.T) {
 	files["k1"] = []byte{0xff, 0xfe, 0x00}
 	if _, err := svc.Write(context.Background(), uuid.New(), store.file.ID, nil, 1, 0); !errors.Is(err, ErrNotText) {
 		t.Fatalf("binary: %v", err)
+	}
+}
+
+func TestAFileAndItsChatCopyShareOneSetOfComments(t *testing.T) {
+	svc, store, files := setup(line)
+	ctx := context.Background()
+	original := store.file.ID
+	// A chat copy: its own row (and version count), the same stored object.
+	copyID := uuid.New()
+	store.copies = map[uuid.UUID]*models.FileAttachment{copyID: {ID: copyID, S3Key: "k1", Name: "notes.txt", FileType: "text/plain", ContentVersion: 1, OriginalID: &original}}
+
+	// The user comments on the copy (from the chat); the set is the original's.
+	if _, err := svc.Write(ctx, uuid.New(), copyID, []models.FileCommentThread{thread("t", 11, 25)}, 1, 0); err != nil {
+		t.Fatal(err)
+	}
+	if store.setFor != original {
+		t.Fatalf("stored for %v, want the original", store.setFor)
+	}
+	got, err := svc.Read(ctx, uuid.New(), original)
+	if err != nil || len(got.Threads) != 1 || got.Threads[0].Quote != "inline comment" {
+		t.Fatalf("read through the original: %+v, %v", got, err)
+	}
+
+	// The agent edits the file: both rows move to the new object, at their own versions.
+	files["k2"] = []byte("I've updated this inline comment in Go source code")
+	store.file.S3Key, store.file.ContentVersion = "k2", 2
+	store.copies[copyID].S3Key, store.copies[copyID].ContentVersion = "k2", 2
+	got, err = svc.Read(ctx, uuid.New(), copyID)
+	if err != nil || got.Threads[0].Quote != "inline comment" || got.ContentVersion != 2 {
+		t.Fatalf("read through the copy after the edit: %+v, %v", got, err)
+	}
+	// The user replies from the gallery: placed on the original's version.
+	got.Threads[0].Comments = append(got.Threads[0].Comments, models.FileComment{ID: "r", Text: "Thanks"})
+	if _, err := svc.Write(ctx, uuid.New(), original, got.Threads, 2, got.Revision); err != nil {
+		t.Fatal(err)
+	}
+	got, err = svc.Read(ctx, uuid.New(), copyID)
+	if err != nil || len(got.Threads[0].Comments) != 2 {
+		t.Fatalf("the reply through the copy: %+v, %v", got, err)
 	}
 }

@@ -8,6 +8,7 @@ package filecomments
 import (
 	"context"
 	"errors"
+	"fmt"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -33,6 +34,7 @@ var (
 // Store is what the service needs of the datastore.
 type Store interface {
 	GetFileAttachment(ctx context.Context, userID, id uuid.UUID) (*models.FileAttachment, error)
+	CommentFileID(ctx context.Context, userID, id uuid.UUID) (uuid.UUID, error)
 	GetFileCommentSet(ctx context.Context, userID, fileID uuid.UUID) (*models.FileCommentSet, error)
 	PutFileCommentSet(ctx context.Context, userID, fileID uuid.UUID, set models.FileCommentSet, expectRevision int) (int, error)
 }
@@ -48,22 +50,36 @@ func New(store Store, files storage.FileStore) *Service {
 	return &Service{store: store, files: files}
 }
 
-// Read is the file's comments, placed on its current text. When the file changed since they were
-// stored, their anchors are carried across and the result stored, so the next read is direct.
-func (s *Service) Read(ctx context.Context, userID, fileID uuid.UUID) (*models.FileComments, error) {
+// contentKey names the content a row holds: its stored object, which every save replaces. A row
+// stored before keys were recorded is named by itself and its version.
+func contentKey(file *models.FileAttachment) string {
+	if file.S3Key != "" {
+		return file.S3Key
+	}
+	return fmt.Sprintf("row:%s:%d", file.ID, file.ContentVersion)
+}
+
+// Read is the comments of the file id is a row of (its original, for a chat copy: ADR 0x045),
+// placed on the content id holds. When that is not the content they were placed on, their anchors
+// are carried across and the result stored, so the next read is direct.
+func (s *Service) Read(ctx context.Context, userID, id uuid.UUID) (*models.FileComments, error) {
 	for attempt := 0; ; attempt++ {
-		file, err := s.store.GetFileAttachment(ctx, userID, fileID)
+		file, err := s.store.GetFileAttachment(ctx, userID, id)
 		if err != nil {
 			return nil, err
 		}
-		set, err := s.store.GetFileCommentSet(ctx, userID, fileID)
+		key, err := s.store.CommentFileID(ctx, userID, id)
+		if err != nil {
+			return nil, err
+		}
+		set, err := s.store.GetFileCommentSet(ctx, userID, key)
 		if err != nil {
 			return nil, err
 		}
 		if set == nil {
 			return &models.FileComments{Threads: []models.FileCommentThread{}, ContentVersion: file.ContentVersion}, nil
 		}
-		if set.BaselineVersion == file.ContentVersion {
+		if set.BaselineKey == contentKey(file) {
 			return &models.FileComments{Threads: set.Threads, ContentVersion: file.ContentVersion, Revision: set.Revision}, nil
 		}
 		text, err := s.text(ctx, userID, file)
@@ -71,8 +87,8 @@ func (s *Service) Read(ctx context.Context, userID, fileID uuid.UUID) (*models.F
 			return nil, err
 		}
 		threads := Carry(set.Threads, set.BaselineText, text)
-		revision, err := s.store.PutFileCommentSet(ctx, userID, fileID, models.FileCommentSet{
-			Threads: threads, BaselineText: text, BaselineVersion: file.ContentVersion,
+		revision, err := s.store.PutFileCommentSet(ctx, userID, key, models.FileCommentSet{
+			Threads: threads, BaselineText: text, BaselineKey: contentKey(file),
 		}, set.Revision)
 		// Another read carried them first: read what it stored.
 		if errors.Is(err, ErrRevision) && attempt == 0 {
@@ -85,23 +101,28 @@ func (s *Service) Read(ctx context.Context, userID, fileID uuid.UUID) (*models.F
 	}
 }
 
-// Write stores the file's threads, placed on the text of contentVersion, which must be the file's
-// content, over the comments at revision (0 for a file with none yet).
-func (s *Service) Write(ctx context.Context, userID, fileID uuid.UUID, threads []models.FileCommentThread, contentVersion, revision int) (*models.FileComments, error) {
-	file, err := s.store.GetFileAttachment(ctx, userID, fileID)
+// Write stores the threads of the file id is a row of, placed on the content of id at
+// contentVersion, which must be what it holds now, over the comments at revision (0 for a file
+// with none yet).
+func (s *Service) Write(ctx context.Context, userID, id uuid.UUID, threads []models.FileCommentThread, contentVersion, revision int) (*models.FileComments, error) {
+	file, err := s.store.GetFileAttachment(ctx, userID, id)
 	if err != nil {
 		return nil, err
 	}
 	if file.ContentVersion != contentVersion {
 		return nil, ErrStaleContent
 	}
+	key, err := s.store.CommentFileID(ctx, userID, id)
+	if err != nil {
+		return nil, err
+	}
 	text, err := s.text(ctx, userID, file)
 	if err != nil {
 		return nil, err
 	}
 	threads = Place(threads, text)
-	next, err := s.store.PutFileCommentSet(ctx, userID, fileID, models.FileCommentSet{
-		Threads: threads, BaselineText: text, BaselineVersion: file.ContentVersion,
+	next, err := s.store.PutFileCommentSet(ctx, userID, key, models.FileCommentSet{
+		Threads: threads, BaselineText: text, BaselineKey: contentKey(file),
 	}, revision)
 	if err != nil {
 		return nil, err

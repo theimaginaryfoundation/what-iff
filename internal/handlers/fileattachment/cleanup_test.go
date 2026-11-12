@@ -23,6 +23,10 @@ type memRows struct {
 	rows map[uuid.UUID]models.FileAttachment
 }
 
+func (m *memRows) CommentFileID(_ context.Context, _ uuid.UUID, id uuid.UUID) (uuid.UUID, error) {
+	return id, nil
+}
+
 func (m *memRows) GetFileCommentSet(context.Context, uuid.UUID, uuid.UUID) (*models.FileCommentSet, error) {
 	return nil, nil
 }
