@@ -827,6 +827,55 @@ describe('ChatSessionService', () => {
         expect(streamingService.startStreaming).not.toHaveBeenCalled();
     });
 
+    describe('sendComment (ADR 0x046)', () => {
+        const comment = { file_id: 'f1', thread_id: 't1', comment_id: 'c1', quote: 'plan', earlier: [] };
+        const ref = { file_id: 'f1', file_name: 'plan.md', thread_id: 't1', comment_id: 'c1', quote: 'plan' };
+
+        it('sends the comment as a message with its thread, leaving the draft alone', async () => {
+            service.setActive('chat-1');
+            service.draft.set('half typed');
+
+            expect(await service.sendComment(' @Scribe why? ', comment, ref)).toEqual({ status: 'sent' });
+            expect(messageService.sendMessage).toHaveBeenCalledWith('chat-1', { message: '@Scribe why?', origin: 'User', comment }, ref);
+            expect(jobService.pollJob).toHaveBeenCalledWith('job-1', 'chat-1', CHAT_JOB_POLL_INTERVAL_MS);
+            expect(service.draft()).toBe('half typed');
+        });
+
+        it('is a follow-up while a reply is running', async () => {
+            const activeJob$ = new Subject<any>();
+            jobService.pollJob.mockReturnValue(activeJob$ as any);
+            service.setActive('chat-1');
+            await service.sendMessage('research this');
+            activeJob$.next({ id: 'job-1', user_id: 'user-1', status: 'processing', job_type: 'chat_message', reference: 'user-msg', created_at: '', updated_at: '' });
+            messageService.sendMessage.mockClear();
+            jobService.pollJob.mockClear();
+
+            expect(await service.sendComment('@Scribe also this', comment, ref)).toEqual({ status: 'sent' });
+            expect(messageService.sendMessage).toHaveBeenCalledWith('chat-1', expect.objectContaining({ comment, steer: true }), ref);
+            expect(jobService.pollJob).not.toHaveBeenCalled();
+            expect(service.isGenerating()).toBe(true);
+            activeJob$.complete();
+        });
+
+        it('shows why a failed send failed and keeps the draft', async () => {
+            service.setActive('chat-1');
+            service.draft.set('half typed');
+            messageService.sendMessage.mockReturnValue(throwError(() => new Error('network down')));
+
+            expect((await service.sendComment('@Scribe why?', comment, ref)).status).toBe('failed');
+            expect(service.error()).toBe('network down');
+            expect(service.draft()).toBe('half typed');
+            expect(service.isGenerating()).toBe(false);
+        });
+
+        it('sends nothing without text or an active chat', async () => {
+            expect((await service.sendComment('hi', comment, ref)).status).toBe('skipped');
+            service.setActive('chat-1');
+            expect((await service.sendComment('   ', comment, ref)).status).toBe('skipped');
+            expect(messageService.sendMessage).not.toHaveBeenCalled();
+        });
+    });
+
     it('prepends the context prefix to the payload only, never to the saved/restored draft', async () => {
         const prefix = '[Referenced thread "A" — read it with find_context mode="conversation" target="11111111-1111-4111-8111-111111111111"]\n';
         service.setActive('chat-1');

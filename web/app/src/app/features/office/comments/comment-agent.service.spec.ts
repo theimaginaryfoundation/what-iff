@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 
 import { CommentMessage, CommentRef } from '../../../core/models/message.model';
 import { FileWorkspaceService } from '../../file-workspace/file-workspace.service';
-import { CommentAgentService, agentPersonId } from './comment-agent.service';
+import { CommentAgentService, agentPersonId, filesNewRepliesCommentedOn } from './comment-agent.service';
 import { CommentThread, newComment } from './comment-threads';
 
 const ME = { id: 'user:u-1', name: 'Pat Lee' };
@@ -90,5 +90,28 @@ describe('CommentAgentService', () => {
     service.agentCommented([]);
     TestBed.tick();
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('filesNewRepliesCommentedOn', () => {
+  const reply = (id: string, ...files: string[]) => ({ id, origin: 'Assistant', comment_refs: files.map(file_id => ({ file_id })) });
+
+  it('reloads nothing for the replies a chat opens with', () => {
+    const seen = new Set<string>();
+    expect(filesNewRepliesCommentedOn(seen, [reply('a1', 'f1')])).toEqual([]);
+    expect([...seen]).toEqual(['a1']);
+  });
+
+  it('names the files only the new replies commented on', () => {
+    const seen = new Set<string>();
+    filesNewRepliesCommentedOn(seen, [reply('a1', 'f1')]);
+    const messages = [
+      reply('a1', 'f1'),
+      { id: 'u1', origin: 'User', comment_refs: [{ file_id: 'f9' }] },
+      reply('a2', 'f2', 'f3'),
+      reply('a3'),
+    ];
+    expect(filesNewRepliesCommentedOn(seen, messages)).toEqual(['f2', 'f3']);
+    expect(filesNewRepliesCommentedOn(seen, messages)).toEqual([]);
   });
 });

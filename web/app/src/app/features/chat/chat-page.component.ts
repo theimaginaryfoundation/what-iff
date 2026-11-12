@@ -23,7 +23,7 @@ import { FileAttachmentService } from '../../core/services/file-attachment.servi
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
-import { CommentAgentService, agentPersonId } from '../office/comments/comment-agent.service';
+import { CommentAgentService, agentPersonId, filesNewRepliesCommentedOn } from '../office/comments/comment-agent.service';
 import { CommentPerson } from '../office/comments/comment-threads';
 import { RitualService } from '../../core/services/ritual.service';
 import { Chat, isSandboxed } from '../../core/models/chat.model';
@@ -242,16 +242,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   private readonly seenReplies = new Set<string>();
   private readonly agentCommentsWatch = effect(() => {
     const messages = this.session.messages();
-    untracked(() => {
-      const first = this.seenReplies.size === 0;
-      const files: string[] = [];
-      for (const m of messages) {
-        if (m.origin !== 'Assistant' || this.seenReplies.has(m.id)) continue;
-        this.seenReplies.add(m.id);
-        if (!first) for (const ref of m.comment_refs ?? []) files.push(ref.file_id);
-      }
-      this.commentAgent.agentCommented(files);
-    });
+    untracked(() => this.commentAgent.agentCommented(filesNewRepliesCommentedOn(this.seenReplies, messages)));
   });
   private readonly commentAgent = inject(CommentAgentService);
   readonly selectedPersonalityAccentColor = computed<string | null>(() => {

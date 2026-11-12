@@ -10,6 +10,25 @@ export function agentPersonId(personalityId: string | null): string {
 }
 
 /**
+ * The files the chat's new replies commented on (their `comment_refs`), recording every reply in
+ * `seen`. The first call only records the replies already there, so opening a chat does not
+ * reload files for replies that landed before it was opened.
+ */
+export function filesNewRepliesCommentedOn(
+  seen: Set<string>,
+  messages: readonly { id: string; origin: string; comment_refs?: readonly { file_id: string }[] | null }[],
+): string[] {
+  const first = seen.size === 0;
+  const files: string[] = [];
+  for (const m of messages) {
+    if (m.origin !== 'Assistant' || seen.has(m.id)) continue;
+    seen.add(m.id);
+    if (!first) for (const ref of m.comment_refs ?? []) files.push(ref.file_id);
+  }
+  return files;
+}
+
+/**
  * The open chat, as comments see it (ADR 0x046): its agent, and how to send it a comment. The
  * chat page registers itself while it is shown; the file workspace sits outside it, in the layout.
  */
