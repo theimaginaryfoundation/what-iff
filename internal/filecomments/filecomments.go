@@ -159,7 +159,15 @@ func (s *Service) Read(ctx context.Context, userID, id uuid.UUID) (*models.FileC
 // Write stores the threads of the file id is a row of, placed on the content of id at
 // contentVersion, which must be what it holds now, over the comments at revision (0 for a file
 // with none yet).
+//
+// The threads come from the client, so authorship is set here (keepAuthorship).
 func (s *Service) Write(ctx context.Context, userID, id uuid.UUID, threads []models.FileCommentThread, contentVersion, revision int) (*models.FileComments, error) {
+	return s.write(ctx, userID, id, threads, contentVersion, revision, true)
+}
+
+// write is Write; fromClient sets authorship from what is stored rather than from the threads
+// given, which a server-side change (an agent's comment tool, Update) sets itself.
+func (s *Service) write(ctx context.Context, userID, id uuid.UUID, threads []models.FileCommentThread, contentVersion, revision int, fromClient bool) (*models.FileComments, error) {
 	file, err := s.store.GetFileAttachment(ctx, userID, id)
 	if err != nil {
 		return nil, err
@@ -171,11 +179,13 @@ func (s *Service) Write(ctx context.Context, userID, id uuid.UUID, threads []mod
 	if err != nil {
 		return nil, err
 	}
-	prev, err := s.store.GetFileCommentSet(ctx, userID, key)
-	if err != nil {
-		return nil, err
+	if fromClient {
+		prev, err := s.store.GetFileCommentSet(ctx, userID, key)
+		if err != nil {
+			return nil, err
+		}
+		threads = keepAuthorship(threads, prev, userID, time.Now().UTC())
 	}
-	threads = keepAuthorship(threads, prev, userID, time.Now().UTC())
 	var text string
 	if isImage(file) {
 		threads = onFile(threads)

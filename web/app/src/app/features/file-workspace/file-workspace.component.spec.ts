@@ -61,10 +61,13 @@ describe('FileWorkspaceComponent', () => {
   let confirmDiscard: ReturnType<typeof vi.fn>;
   let confirm: ReturnType<typeof vi.fn>;
   let loadViewer: ReturnType<typeof vi.fn<(kind: string) => Promise<unknown> | null>>;
+  /** The chat/file pairs whose chat agent may change the file (ADR 0x046). */
+  let granted: Set<string>;
 
   beforeEach(async () => {
     download = vi.fn().mockReturnValue(of(textBlob('hello')));
     downloadVersion = null;
+    granted = new Set();
     alert = vi.fn().mockResolvedValue(undefined);
     replaceContent = vi.fn().mockImplementation((id: string) => of(file({ id, content_version: 2 })));
     confirmDiscard = vi.fn().mockResolvedValue(true);
@@ -82,6 +85,11 @@ describe('FileWorkspaceComponent', () => {
             downloadFileContent: (id: string) =>
               (download as unknown as (id: string) => Observable<Blob>)(id).pipe(map((blob: Blob) => ({ blob, version: downloadVersion }))),
             replaceContent,
+            fileEditGranted: (chatId: string, fileId: string) => of(granted.has(`${chatId}/${fileId}`)),
+            revokeFileEdit: (chatId: string, fileId: string) => {
+              granted.delete(`${chatId}/${fileId}`);
+              return of(undefined);
+            },
           },
         },
         { provide: ConfirmationService, useValue: { alert, confirmDiscardChanges: confirmDiscard, confirm } },
@@ -121,6 +129,24 @@ describe('FileWorkspaceComponent', () => {
     loadViewer.mockReturnValueOnce(Promise.reject(new Error('stale chunk')));
     await show(file());
     expect(fixture.componentInstance.state()).toBe('error');
+  });
+
+  it("says when the chat's agent may change the file, and takes that back on Revoke", async () => {
+    granted.add('chat-1/f-1');
+    fixture.componentRef.setInput('chatId', 'chat-1');
+    const el = await show(file());
+    expect(el.querySelector('.file-workspace__grant')?.textContent).toContain('can edit this file');
+    button(el, 'Revoke')!.click();
+    fixture.detectChanges();
+    expect(el.querySelector('.file-workspace__grant')).toBeNull();
+    expect(granted.size).toBe(0);
+
+    // Outside a chat there is no agent to grant.
+    fixture.componentRef.setInput('chatId', null);
+    granted.add('chat-1/f-1');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(el.querySelector('.file-workspace__grant')).toBeNull();
   });
 
   it('fetches the bytes once and hands them with the file to the viewer for its kind', async () => {

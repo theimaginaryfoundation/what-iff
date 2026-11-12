@@ -54,6 +54,21 @@ export function userPersonId(userId: string): string {
   return `user:${userId}`;
 }
 
+/**
+ * The user id a file gives a WhatIff person under the WhatIff presence provider (ADR 0x046): a
+ * user's id, or an agent's whole `agent:<id>`; null for someone the file only names.
+ */
+export function providerUserIdOf(personId: string): string | null {
+  if (personId.startsWith('user:')) return personId.slice('user:'.length);
+  if (personId.startsWith('agent:')) return personId;
+  return null;
+}
+
+/** The person a file's WhatIff user id names: an agent by its `agent:<id>`, else a user. */
+export function personIdFromProvider(userId: string): string {
+  return userId.startsWith('agent:') ? userId : userPersonId(userId);
+}
+
 /** Someone known only by the name a file gives them. */
 export function authorPersonId(name: string): string {
   return `author:${name}`;

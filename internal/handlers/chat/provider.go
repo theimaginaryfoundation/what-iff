@@ -34,6 +34,15 @@ type Store interface {
 	SetChatMessageBookmarked(ctx context.Context, userID, messageID uuid.UUID, bookmarked bool) (*models.ChatMessage, error)
 	ListChatMessageBookmarks(ctx context.Context, userID, chatID uuid.UUID) ([]*models.ChatMessage, error)
 	CreateFileAttachment(ctx context.Context, userID uuid.UUID, fileAttachment models.FileAttachment) (*models.FileAttachment, error)
+	// GetFileAttachment finds the file a document comment sent to the agent is on (ADR 0x046).
+	GetFileAttachment(ctx context.Context, userID, id uuid.UUID) (*models.FileAttachment, error)
+	// GrantFileEdit lets the chat's agent change the file a comment mentioning it is on (ADR 0x046),
+	// and says what it changed, so a send that fails can put it back (UndoFileEditGrant).
+	GrantFileEdit(ctx context.Context, userID, chatID, fileID uuid.UUID) (models.FileEditGrantChange, error)
+	UndoFileEditGrant(ctx context.Context, userID uuid.UUID, change models.FileEditGrantChange) error
+	ListFileEditGrants(ctx context.Context, userID, chatID uuid.UUID) ([]models.FileEditGrant, error)
+	HasFileEditGrant(ctx context.Context, userID, chatID, fileID uuid.UUID) (bool, error)
+	RevokeFileEdit(ctx context.Context, userID, chatID, fileID uuid.UUID) error
 	DeleteFileAttachment(ctx context.Context, userID, id uuid.UUID) error
 	SetFileAttachmentS3Key(ctx context.Context, userID, id uuid.UUID, s3Key string) error
 	GetAvailableRituals(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.RitualFilters) (*models.PaginatedResponse, error)

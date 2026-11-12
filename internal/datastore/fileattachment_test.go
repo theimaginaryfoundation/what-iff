@@ -61,6 +61,14 @@ func createFileAttachmentTestSchema(t *testing.T, db *sql.DB) {
 			revision integer NOT NULL DEFAULT 1,
 			updated_at datetime NOT NULL
 		)`,
+		`CREATE TABLE file_edit_grants (
+			id uuid PRIMARY KEY,
+			file_attachment_id uuid NOT NULL,
+			chat_id uuid NOT NULL,
+			personality_id uuid NULL,
+			created_at datetime NOT NULL,
+			UNIQUE (file_attachment_id, chat_id)
+		)`,
 		`CREATE TABLE personality_expressions (
 			id uuid PRIMARY KEY,
 			created_at datetime NOT NULL,

@@ -36,6 +36,7 @@ describe('RightPanelHostComponent', () => {
           useValue: {
             downloadFileAttachment: () => of(new Blob(['x'])),
             downloadFileContent: () => of({ blob: new Blob(['x']), version: null }),
+            fileEditGranted: () => of(false),
           },
         },
       ],

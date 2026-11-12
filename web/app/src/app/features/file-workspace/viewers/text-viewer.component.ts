@@ -17,6 +17,7 @@ import { MarkdownModule } from 'ngx-markdown';
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { renderLatexMath } from '../../../core/utils/latex-math.helpers';
 import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
+import { CommentAgentService } from '../../office/comments/comment-agent.service';
 import { CommentPeopleService } from '../../office/comments/comment-people.service';
 import { CommentsPanelComponent } from '../../office/comments/comments-panel.component';
 import { CommentsPanelState } from '../../office/comments/comments-panel-state.service';
@@ -91,6 +92,7 @@ export class TextViewerComponent {
     this.me,
     () => this.comments.autosave(),
     () => this.saver?.showCurrentContent(),
+    inject(CommentAgentService).hooks(() => this.file()),
   );
   private readonly panel = inject(CommentsPanelState);
   /** Text and Markdown carry comments; a file shown only in part (over 1 MB) does not. */

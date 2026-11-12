@@ -99,6 +99,119 @@ func TestCommentFileID_BackfillsTheLinkFromTheSharedObject(t *testing.T) {
 	require.Equal(t, first.ID, got)
 }
 
+// grant drops what GrantFileEdit changed.
+func grant(_ models.FileEditGrantChange, err error) error { return err }
+
+func TestFileEditGrants_ForTheChatAndTheWholeFile(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID, other := createFATestUser(t, ds), createFATestUser(t, ds)
+	chat, err := ds.dbClient.Chat.Create().SetName("c").SetOwnerID(userID).Save(ctx)
+	require.NoError(t, err)
+	otherChat, err := ds.dbClient.Chat.Create().SetName("o").SetOwnerID(userID).Save(ctx)
+	require.NoError(t, err)
+	foreign, err := ds.dbClient.Chat.Create().SetName("f").SetOwnerID(other).Save(ctx)
+	require.NoError(t, err)
+
+	file, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "brief.md", FileType: "text/markdown", S3Key: "users/u/brief.md"})
+	require.NoError(t, err)
+	copied, err := ds.CreateFileAttachmentReference(ctx, userID, file.ID)
+	require.NoError(t, err)
+
+	// Granted through the chat copy: the file and every copy of it, in that chat only.
+	require.NoError(t, grant(ds.GrantFileEdit(ctx, userID, chat.ID, copied.ID)))
+	again, err := ds.GrantFileEdit(ctx, userID, chat.ID, file.ID)
+	require.NoError(t, err)
+	require.False(t, again.Created || again.Moved, "again is a no-op")
+	for _, id := range []uuid.UUID{file.ID, copied.ID} {
+		ok, err := ds.HasFileEditGrant(ctx, userID, chat.ID, id)
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+	ok, err := ds.HasFileEditGrant(ctx, userID, otherChat.ID, file.ID)
+	require.NoError(t, err)
+	require.False(t, ok, "another chat's agent")
+
+	// A chat holds grants on several files, and a file is granted to several chats.
+	second, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "notes.md", FileType: "text/markdown", S3Key: "users/u/notes.md"})
+	require.NoError(t, err)
+	require.NoError(t, grant(ds.GrantFileEdit(ctx, userID, chat.ID, second.ID)))
+	require.NoError(t, grant(ds.GrantFileEdit(ctx, userID, otherChat.ID, file.ID)))
+	for _, g := range []struct{ chat, file uuid.UUID }{{chat.ID, file.ID}, {chat.ID, second.ID}, {otherChat.ID, file.ID}} {
+		ok, err := ds.HasFileEditGrant(ctx, userID, g.chat, g.file)
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+
+	_, err = ds.GrantFileEdit(ctx, userID, foreign.ID, file.ID)
+	require.ErrorIs(t, err, ErrChatNotFound)
+	_, err = ds.HasFileEditGrant(ctx, other, chat.ID, file.ID)
+	require.ErrorIs(t, err, ErrFileAttachmentNotFound, "someone else's file")
+
+	// Listed for the chat, newest first, and revoked through any row of the file.
+	grants, err := ds.ListFileEditGrants(ctx, userID, chat.ID)
+	require.NoError(t, err)
+	require.Len(t, grants, 2)
+	require.ElementsMatch(t, []string{"brief.md", "notes.md"}, []string{grants[0].FileName, grants[1].FileName})
+	require.NoError(t, ds.RevokeFileEdit(ctx, userID, chat.ID, copied.ID))
+	ok, err = ds.HasFileEditGrant(ctx, userID, chat.ID, file.ID)
+	require.NoError(t, err)
+	require.False(t, ok, "revoked")
+	ok, err = ds.HasFileEditGrant(ctx, userID, otherChat.ID, file.ID)
+	require.NoError(t, err)
+	require.True(t, ok, "only for that chat")
+	require.NoError(t, ds.RevokeFileEdit(ctx, userID, chat.ID, file.ID), "revoking again is a no-op")
+	grants, err = ds.ListFileEditGrants(ctx, other, chat.ID)
+	require.NoError(t, err)
+	require.Empty(t, grants, "someone else's chat")
+}
+
+func TestFileEditGrants_AreForThePersonalityTheChatHad(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := createFATestUser(t, ds)
+	vix := createFATestPersonality(t, ds, userID, "Vix")
+	iris := createFATestPersonality(t, ds, userID, "Iris")
+	chat, err := ds.dbClient.Chat.Create().SetName("c").SetOwnerID(userID).SetPersonalityID(vix).Save(ctx)
+	require.NoError(t, err)
+	file, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "brief.md", FileType: "text/markdown", S3Key: "users/u/brief.md"})
+	require.NoError(t, err)
+
+	first, err := ds.GrantFileEdit(ctx, userID, chat.ID, file.ID)
+	require.NoError(t, err)
+	require.True(t, first.Created)
+	has := func() bool {
+		ok, err := ds.HasFileEditGrant(ctx, userID, chat.ID, file.ID)
+		require.NoError(t, err)
+		return ok
+	}
+	require.True(t, has())
+
+	// Switching the chat to another personality does not pass the grant on.
+	require.NoError(t, ds.dbClient.Chat.UpdateOneID(chat.ID).SetPersonalityID(iris).Exec(ctx))
+	require.False(t, has())
+	// Mentioning the new one grants it, and not the old one any more.
+	moved, err := ds.GrantFileEdit(ctx, userID, chat.ID, file.ID)
+	require.NoError(t, err)
+	require.True(t, moved.Moved)
+	require.Equal(t, &vix, moved.PreviousPersonality)
+	require.True(t, has())
+	// A send that then failed puts it back: Vix's again, not Iris's.
+	require.NoError(t, ds.UndoFileEditGrant(ctx, userID, moved))
+	require.False(t, has())
+	require.NoError(t, ds.dbClient.Chat.UpdateOneID(chat.ID).SetPersonalityID(vix).Exec(ctx))
+	require.True(t, has())
+	require.NoError(t, ds.dbClient.Chat.UpdateOneID(chat.ID).SetPersonalityID(iris).Exec(ctx))
+	_, err = ds.GrantFileEdit(ctx, userID, chat.ID, file.ID)
+	require.NoError(t, err)
+	require.NoError(t, ds.dbClient.Chat.UpdateOneID(chat.ID).SetPersonalityID(vix).Exec(ctx))
+	require.False(t, has())
+	require.NoError(t, ds.dbClient.Chat.UpdateOneID(chat.ID).ClearPersonality().Exec(ctx))
+	require.False(t, has(), "nor the chat with no personality")
+}
+
 func TestFileCommentSet_StoredOnlyOverTheRevisionRead(t *testing.T) {
 	ds, cleanup := newFileAttachmentTestDatastore(t)
 	defer cleanup()

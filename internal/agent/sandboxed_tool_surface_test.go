@@ -25,6 +25,7 @@ var sandboxedToolSurface = map[string]struct {
 	agenttools.CreateAgentJobToolSpec.Name:    {false, "schedules a job in a new ordinary chat and can attach the owner's skills and their MCP servers"},
 	agenttools.UpdateAgentJobToolSpec.Name:    {false, "changes the owner's jobs, which run outside the sandbox and can attach skills and MCP servers"},
 	agenttools.AgentFileReadToolSpec.Name:     {false, "reads the owner's account-wide files"},
+	agenttools.FileCommentsToolSpec.Name:      {false, "reads and writes comments on the owner's files"},
 	agenttools.AgentFileWriteToolSpec.Name:    {false, "writes files into the owner's account-wide file area"},
 	agenttools.EntityGetToolSpec.Name:         {false, "reads the owner's entity wiki, shared by their conversations"},
 	agenttools.EntityWriteToolSpec.Name:       {false, "writes the owner's entity wiki, shared by their conversations"},

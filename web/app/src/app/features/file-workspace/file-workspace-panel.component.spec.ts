@@ -49,6 +49,7 @@ describe('FileWorkspacePanelComponent', () => {
             downloadFileAttachment: () => of(new Blob(['x'])),
             downloadFileContent: () => of({ blob: new Blob(['x']), version: null }),
             deleteFileAttachment: remove,
+            fileEditGranted: () => of(false),
           },
         },
         { provide: ConfirmationService, useValue: { confirm, alert: vi.fn() } },
@@ -101,7 +102,9 @@ describe('FileWorkspacePanelComponent', () => {
 
     (el.querySelector('button[aria-label="Close file"]') as HTMLButtonElement).click();
     // Closing checks for unsaved edits first, so the navigation follows a tick later.
-    await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith([], { queryParams: { file: null }, queryParamsHandling: 'merge' }));
+    await vi.waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith([], { queryParams: { file: null, comment: null }, queryParamsHandling: 'merge' }),
+    );
 
     fixture.componentInstance.rename({ id: 'f-1', name: 'renamed.txt' });
     expect(rename).toHaveBeenCalledWith('f-1', 'renamed.txt');

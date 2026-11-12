@@ -14,6 +14,8 @@ import { COMMENT_SAVER, CommentSaver } from '../../file-workspace/editors/file-e
 import { CommentsPanelState } from '../comments/comments-panel-state.service';
 import { commentedDocx } from '../docx/docx-comments.spec-helper';
 import { CUSTOM_DECORATION_COMMENT } from '../docx/univer-doc-types';
+import { CommentAgentService } from '../comments/comment-agent.service';
+import { FileWorkspaceService } from '../../file-workspace/file-workspace.service';
 import { DocsEditorComponent } from './docs-editor.component';
 
 function fakeUniverKit() {
@@ -311,6 +313,31 @@ describe('DocsEditorComponent', () => {
       // What the saver writes is the document with the comments.
       const back = await docxToDocument(await (await editor.content()).arrayBuffer(), { id: 'x', name: 'x.docx' });
       expect(back.comments.map(t => t.comments.at(-1)!.text)).toEqual(['Me too', 'From the viewer', 'Finance signed this off.']);
+    });
+
+    it('while viewing: a comment that mentions the agent goes to it once its save lands', async () => {
+      // A saver that does what the workspace does: takes the content, writes it, marks it saved.
+      const saveComments = vi.fn(async (ed: { content(): Promise<Blob>; markSaved(b?: Blob): void }) => {
+        const blob = await ed.content();
+        ed.markSaved(blob);
+        return 'saved' as const;
+      });
+      testSaver = { canComment: signal(true), saveComments, showCurrentContent: vi.fn() };
+      Object.defineProperty(TestBed.inject(FileWorkspaceService), 'chatId', { value: signal('c-1') });
+      const sendComment = vi.fn().mockResolvedValue(true);
+      TestBed.inject(CommentAgentService).register({
+        chatId: signal('c-1'),
+        agent: signal({ id: 'agent:p-1', name: 'Iris' }),
+        sendComment,
+      });
+      await open(attachment(), await commentedBlob());
+      await vi.waitFor(() => expect(fake.state.painted.length).toBeGreaterThan(0));
+      fixture.detectChanges();
+      const editor = fixture.componentInstance;
+      editor.reply({ threadId: '5D3E2F01', draft: { text: '@Iris check this', mentions: [{ id: 'agent:p-1', name: 'Iris' }] } });
+      await vi.waitFor(() => expect(sendComment).toHaveBeenCalledTimes(1));
+      expect(sendComment.mock.calls[0].slice(0, 2)).toEqual(['c-1', '@Iris check this']);
+      expect(saveComments).toHaveBeenCalledTimes(1);
     });
 
     it('while viewing, without a saver: comments are read-only', async () => {

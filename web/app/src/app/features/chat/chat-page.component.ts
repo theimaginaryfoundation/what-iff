@@ -1,5 +1,17 @@
 import { CommonModule, DOCUMENT } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  OnDestroy,
+  OnInit,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 import { filter } from 'rxjs/operators';
@@ -11,9 +23,11 @@ import { FileAttachmentService } from '../../core/services/file-attachment.servi
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
+import { CommentAgentService, NewReplies, agentPersonId } from '../office/comments/comment-agent.service';
+import { CommentPerson } from '../office/comments/comment-threads';
 import { RitualService } from '../../core/services/ritual.service';
 import { Chat, isSandboxed } from '../../core/models/chat.model';
-import { ChatMessage, MessageBookmark } from '../../core/models/message.model';
+import { ChatMessage, CommentMessage, CommentRef, MessageBookmark } from '../../core/models/message.model';
 import {
   createPendingFileAttachment,
   FileAttachment,
@@ -159,8 +173,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
         ? needsJobRunPlaceholder(messages, jobPending, jobRun.afterMessageId)
         : needsPendingAssistantPlaceholder(messages, jobPending))
     ) {
-      const name =
-        this.selectedPersonalityName()?.trim() || this.session.thread()?.personality_name?.trim() || 'Assistant';
+      const name = this.selectedPersonalityName()?.trim() || this.session.thread()?.personality_name?.trim() || 'Assistant';
       const waiting = this.session.waitingOn();
       const pending = pendingAssistantPlaceholderMessage({
         chatId: threadId,
@@ -170,9 +183,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
         pendingLabel: jobRun?.job ? JOB_RUN_PENDING_LABEL : undefined,
         jobRun: jobRun?.job ?? null,
         generationPersonality: name,
-        thinkingImageUrl: this.selectedPersonality()?.expressions_enabled === false
-          ? null
-          : this.thinkingExpressionThumbUrl(),
+        thinkingImageUrl: this.selectedPersonality()?.expressions_enabled === false ? null : this.thinkingExpressionThumbUrl(),
       });
       grouped = appendLiveToolCallGroup(grouped, pending, this.session.liveToolCalls(), this.session.advancedProgress());
       grouped = appendPendingAssistantGroup(grouped, pending);
@@ -182,9 +193,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
 
   /** User turn with a generation error and no assistant reply yet (composer retry affordance). */
   readonly retryableUserTurn = computed(() => lastUserTurnWithGenerationError(this.session.messages()));
-  readonly loadedToolCalls = computed(() =>
-    this.session.messages().flatMap(message => message.tool_calls ?? []),
-  );
+  readonly loadedToolCalls = computed(() => this.session.messages().flatMap(message => message.tool_calls ?? []));
   /** Complete bookmark list for the active thread (for the navigator), loaded from the API. */
   readonly bookmarks = signal<MessageBookmark[]>([]);
   private readonly messageList = viewChild(MessageListComponent);
@@ -215,6 +224,34 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   readonly selectedPersonalityName = computed<string | null>(() => {
     return this.selectedPersonality()?.name ?? this.session.thread()?.personality_name ?? null;
   });
+
+  /** Comments on a file open in this chat can mention its agent, which sends them to it (ADR 0x046). */
+  private readonly commentAgentRegistration = (() => {
+    const unregister = inject(CommentAgentService).register({
+      chatId: computed(() => this.session.thread()?.id ?? null),
+      agent: computed<CommentPerson | null>(() => {
+        const thread = this.session.thread();
+        if (!thread) return null;
+        return { id: agentPersonId(thread.personality_id ?? null), name: this.selectedPersonalityName()?.trim() || 'Assistant' };
+      }),
+      sendComment: (chatId, text, comment, ref) => this.sendComment(chatId, text, comment, ref),
+    });
+    inject(DestroyRef).onDestroy(unregister);
+    return unregister;
+  })();
+
+  /** The chat's replies so far, so only a new one that commented on files refreshes their comments. */
+  private readonly newReplies = new NewReplies();
+  private readonly agentCommentsWatch = effect(() => {
+    const messages = this.session.messages();
+    // Switching threads loads another chat: its replies so far are the new baseline.
+    if (this.session.loading()) {
+      this.newReplies.reset();
+      return;
+    }
+    untracked(() => this.commentAgent.agentCommented(this.newReplies.filesCommentedOn(messages)));
+  });
+  private readonly commentAgent = inject(CommentAgentService);
   readonly selectedPersonalityAccentColor = computed<string | null>(() => {
     const personality = this.selectedPersonality();
     if (personality) {
@@ -239,11 +276,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     ),
   );
   readonly selectedPersonalityAvatarUrl = computed(() =>
-    personalityCoverUrl(
-      this.selectedPersonality(),
-      [],
-      this.imageGallery.getImageUrl.bind(this.imageGallery),
-    ),
+    personalityCoverUrl(this.selectedPersonality(), [], this.imageGallery.getImageUrl.bind(this.imageGallery)),
   );
   readonly selectedPersonalityPortraitUrl = computed(() => {
     const personality = this.selectedPersonality();
@@ -253,8 +286,8 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     }
     return personality.cover_image_url ?? this.selectedPersonalityAvatarUrl();
   });
-  readonly threadParticipantLabel = computed(() =>
-    this.selectedPersonalityName() ?? this.session.thread()?.personality_name ?? 'Pick personality',
+  readonly threadParticipantLabel = computed(
+    () => this.selectedPersonalityName() ?? this.session.thread()?.personality_name ?? 'Pick personality',
   );
   readonly personalityTriggerAriaLabel = computed(() => {
     const personality = this.selectedPersonalityName() ?? this.session.thread()?.personality_name ?? null;
@@ -345,7 +378,10 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   });
   /** Threads whose remembered file was already restored this visit, so closing it is not undone. */
   private readonly restoredWorkspaceFor = new Set<string>();
-  private readonly hotkeySequenceState = new Map<string, { keys: string[]; currentIndex: number; timeout?: ReturnType<typeof setTimeout> }>();
+  private readonly hotkeySequenceState = new Map<
+    string,
+    { keys: string[]; currentIndex: number; timeout?: ReturnType<typeof setTimeout> }
+  >();
 
   private readonly syncContextPanelChat = effect(() => {
     this.contextPanel.setActiveChat(this.session.thread());
@@ -483,19 +519,22 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     }
 
     this.welcomeRequestInFlight = true;
-    this.chatService.createWelcomeMessage(pendingChatId).pipe(take(1)).subscribe({
-      next: response => {
-        if (response?.job_id) {
-          this.session.startAssistantJobPolling(response.job_id, pendingChatId);
-        }
-        this.pendingWelcomeChatId.set(null);
-        this.welcomeRequestInFlight = false;
-      },
-      error: () => {
-        this.pendingWelcomeChatId.set(null);
-        this.welcomeRequestInFlight = false;
-      },
-    });
+    this.chatService
+      .createWelcomeMessage(pendingChatId)
+      .pipe(take(1))
+      .subscribe({
+        next: response => {
+          if (response?.job_id) {
+            this.session.startAssistantJobPolling(response.job_id, pendingChatId);
+          }
+          this.pendingWelcomeChatId.set(null);
+          this.welcomeRequestInFlight = false;
+        },
+        error: () => {
+          this.pendingWelcomeChatId.set(null);
+          this.welcomeRequestInFlight = false;
+        },
+      });
   });
 
   private readonly loadHotkeyRituals = effect(onCleanup => {
@@ -505,17 +544,15 @@ export class ChatPageComponent implements OnInit, OnDestroy {
       this.hotkeyRituals.set([]);
       return;
     }
-    const sub = this.ritualService
-      .getAvailableRituals(threadId, 1, HOTKEY_RITUALS_LIMIT, { has_hotkeys: true })
-      .subscribe({
-        next: response => {
-          this.hotkeyRituals.set(response.results ?? []);
-          this.registerHotkeys();
-        },
-        error: () => {
-          this.hotkeyRituals.set([]);
-        },
-      });
+    const sub = this.ritualService.getAvailableRituals(threadId, 1, HOTKEY_RITUALS_LIMIT, { has_hotkeys: true }).subscribe({
+      next: response => {
+        this.hotkeyRituals.set(response.results ?? []);
+        this.registerHotkeys();
+      },
+      error: () => {
+        this.hotkeyRituals.set([]);
+      },
+    });
     onCleanup(() => sub.unsubscribe());
   });
 
@@ -545,19 +582,25 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     this.subscriptions.add(
       this.mcpApps.composerText$.subscribe(text => {
         const current = this.session.draft().trim();
-        this.session.draft.set(current ? `${current}
+        this.session.draft.set(
+          current
+            ? `${current}
 
-${text}` : text);
+${text}`
+            : text,
+        );
       }),
     );
     this.subscriptions.add(
-      this.router.events.pipe(
-        filter((event): event is NavigationEnd => event instanceof NavigationEnd),
-        filter(event => /^\/chat(\/|$)/.test(event.urlAfterRedirects.split('?')[0] ?? '')),
-      ).subscribe(() => {
-        this.sendGate.refresh();
-        this.reloadPersonalities();
-      }),
+      this.router.events
+        .pipe(
+          filter((event): event is NavigationEnd => event instanceof NavigationEnd),
+          filter(event => /^\/chat(\/|$)/.test(event.urlAfterRedirects.split('?')[0] ?? '')),
+        )
+        .subscribe(() => {
+          this.sendGate.refresh();
+          this.reloadPersonalities();
+        }),
     );
     this.contextPanel.restoreDesktopVisible();
     this.document.addEventListener('visibilitychange', this.onReturnToApp);
@@ -596,6 +639,7 @@ ${text}` : text);
       this.route.queryParamMap.subscribe(params => {
         this.checkpointMessageId.set(params.get('checkpoint')?.trim() || null);
         this.syncWorkspaceWithRoute(params.get('file')?.trim() || null);
+        this.workspace.followCommentLink(params.get('file')?.trim() || null, params.get('comment')?.trim() || null);
         const galleryImageId = params.get('galleryImageId')?.trim();
         const welcomeFlag = params.get('welcome')?.trim().toLowerCase() === 'true';
         const routeChatId = this.route.snapshot.paramMap.get('id')?.trim();
@@ -714,6 +758,28 @@ ${text}` : text);
     this.contextPanel.clearComposerThreadReferences();
   }
 
+  /**
+   * Sends a comment that mentions the agent (ADR 0x046) through the same gate as a message: a
+   * blocked chat does not send it, and a refusal (out of credits, no provider) shows as it does
+   * for a message.
+   */
+  private async sendComment(chatId: string, text: string, comment: CommentMessage, ref: CommentRef): Promise<boolean> {
+    if (this.sendGate.blocked()) {
+      // Said, not dropped silently: the comment is saved in the file, but the agent did not get it.
+      this.session.reportError('Your comment was saved, but it could not be sent to the agent: sending is blocked right now.');
+      return false;
+    }
+    const result = await this.session.sendComment(chatId, text, comment, ref);
+    this.sendGate.refresh();
+    if (isChatSendFailed(result)) {
+      this.sendGate.handleSendError(result.error);
+      return false;
+    }
+    if (!isChatSendSucceeded(result)) return false;
+    this.sendGate.sendSucceeded();
+    return true;
+  }
+
   onPendingRitualsChange(next: readonly Ritual[]): void {
     this.pendingRituals.set([...next]);
   }
@@ -737,9 +803,7 @@ ${text}` : text);
     const chat = this.session.thread();
     if (!chat || files.length === 0) return;
 
-    const pending: PendingFileAttachment[] = files.map(file =>
-      createPendingFileAttachment({ file, isUploading: true }),
-    );
+    const pending: PendingFileAttachment[] = files.map(file => createPendingFileAttachment({ file, isUploading: true }));
     this.pendingAttachments.update(current => [...current, ...pending]);
 
     for (const item of pending) {
@@ -774,9 +838,7 @@ ${text}` : text);
   }
 
   onAttachmentRemoved(key: string): void {
-    this.pendingAttachments.update(current =>
-      current.filter(item => pendingAttachmentKey(item) !== key),
-    );
+    this.pendingAttachments.update(current => current.filter(item => pendingAttachmentKey(item) !== key));
   }
 
   async copyMessage(message: ChatMessage): Promise<void> {
@@ -953,9 +1015,7 @@ ${text}` : text);
       if (--remaining === 0) this.refreshBookmarks(chatId);
     };
     for (const id of ids) {
-      this.subscriptions.add(
-        this.messageService.setBookmark(chatId, id, false).subscribe({ next: done, error: done }),
-      );
+      this.subscriptions.add(this.messageService.setBookmark(chatId, id, false).subscribe({ next: done, error: done }));
     }
   }
 
@@ -1019,17 +1079,15 @@ ${text}` : text);
       .slice(0, 2);
   }
 
-  assistantVisualForMessage = (message: ChatMessage): { avatarUrl: string | null; accentColor: string | null; accentSurface: string | null; expressionsEnabled: boolean } => {
+  assistantVisualForMessage = (
+    message: ChatMessage,
+  ): { avatarUrl: string | null; accentColor: string | null; accentSurface: string | null; expressionsEnabled: boolean } => {
     const generationPersonality = message.generation_personality?.trim();
     const personalityFromMessage = generationPersonality
-      ? this.personalityByNormalizedName().get(generationPersonality.toLowerCase()) ?? null
+      ? (this.personalityByNormalizedName().get(generationPersonality.toLowerCase()) ?? null)
       : null;
     const personality = personalityFromMessage ?? (!generationPersonality ? this.selectedPersonality() : null);
-    const avatarUrl = personalityCoverUrl(
-      personality,
-      [],
-      this.imageGallery.getImageUrl.bind(this.imageGallery),
-    );
+    const avatarUrl = personalityCoverUrl(personality, [], this.imageGallery.getImageUrl.bind(this.imageGallery));
     const accentColor = personality
       ? personalityAccent(personality)
       : generationPersonality
@@ -1161,10 +1219,12 @@ ${text}` : text);
 
   private isHotkeyMatch(event: KeyboardEvent, hotkeyString: string, ritualId: string): boolean {
     const parsedHotkey = parseHotkey(hotkeyString);
-    if (event.ctrlKey !== parsedHotkey.modifiers.ctrl ||
-        event.shiftKey !== parsedHotkey.modifiers.shift ||
-        event.altKey !== parsedHotkey.modifiers.alt ||
-        event.metaKey !== parsedHotkey.modifiers.meta) {
+    if (
+      event.ctrlKey !== parsedHotkey.modifiers.ctrl ||
+      event.shiftKey !== parsedHotkey.modifiers.shift ||
+      event.altKey !== parsedHotkey.modifiers.alt ||
+      event.metaKey !== parsedHotkey.modifiers.meta
+    ) {
       this.resetHotkeySequence(ritualId);
       return false;
     }

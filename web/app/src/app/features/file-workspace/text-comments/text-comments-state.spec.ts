@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fakeTextComments } from './fake-text-comments.spec-helper';
 import { TextCommentSurface, TextCommentsState, mergeThreads } from './text-comments-state';
 import { TextCommentsService } from './text-comments.service';
+import { MentionQueue } from '../../office/comments/comment-agent.service';
 
 const TEXT = 'This is an inline comment in a text file';
 
@@ -195,5 +196,69 @@ describe('TextCommentsState', () => {
       const merged = mergeThreads(base, mine, theirs);
       expect(merged).toEqual([expect.objectContaining({ id: 'a', resolved: true, comments: [expect.objectContaining({ text: 'new' })] })]);
     });
+  });
+
+  it('offers the agent hooks its people, and hands them each posted comment with its quote', async () => {
+    const api = fakeTextComments();
+    const posted = vi.fn();
+    const iris = { id: 'agent:p-1', name: 'Iris' };
+    const saved = vi.fn();
+    const state = new TextCommentsState(api as unknown as TextCommentsService, me, () => undefined, undefined, {
+      people: people => [...people, iris],
+      posted,
+      mark: () => posted.mock.calls.length,
+      saved,
+      discard: vi.fn(),
+    });
+    const { s } = surface();
+    state.attach(s);
+    await state.load('f-1');
+    expect(state.people()).toEqual([me(), iris]);
+
+    state.start({ start: 11, end: 25 });
+    state.create({ text: '@Iris rename?', mentions: [{ id: iris.id, name: 'Iris' }] });
+    const thread = state.threads()[0];
+    expect(posted).toHaveBeenLastCalledWith(thread, thread.id, 'inline comment');
+
+    state.reply({ threadId: thread.id, draft: { text: 'Or keep it', mentions: [] } });
+    const reply = state.threads()[0].comments[1];
+    expect(posted).toHaveBeenLastCalledWith(state.threads()[0], reply.id, 'inline comment');
+
+    state.startOnFile();
+    state.create({ text: 'On the file', mentions: [] });
+    expect(posted).toHaveBeenLastCalledWith(state.threads()[1], state.threads()[1].id, '');
+
+    // The mentions go to the agent once the save holding them lands, not before.
+    expect(saved).not.toHaveBeenCalled();
+    await state.save(1);
+    expect(saved).toHaveBeenCalledWith(3);
+  });
+
+  it('sends a mention posted while viewing once the autosave it starts lands', async () => {
+    const api = fakeTextComments();
+    const queue = new MentionQueue();
+    const sent: string[] = [];
+    const hooks = {
+      people: (people: { id: string; name: string }[]) => people,
+      posted: (_thread: unknown, commentId: string) => queue.add(() => sent.push(commentId)),
+      mark: () => queue.mark(),
+      saved: (mark: number) => queue.saved(mark),
+      discard: () => queue.discard(),
+    };
+    // As the viewer wires it: every change saves at once.
+    const state: TextCommentsState = new TextCommentsState(
+      api as unknown as TextCommentsService,
+      me,
+      () => state.autosave(),
+      undefined,
+      hooks,
+    );
+    state.attach(surface().s);
+    await state.load('f-1');
+    state.startOnFile();
+    state.create({ text: '@Iris fix this', mentions: [{ id: 'agent:p-1', name: 'Iris' }] });
+    await new Promise(resolve => setTimeout(resolve));
+    expect(api.state.puts).toHaveLength(1);
+    expect(sent).toEqual([state.threads()[0].id]);
   });
 });

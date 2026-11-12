@@ -6842,6 +6842,88 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /chat/{chatId}/file-edit-grants:
+    get:
+      summary: List the files the chat's agent may change
+      description: >-
+        The user's files the chat's agent may change because the user mentioned it in a comment
+        on them from this chat (ADR 0x046), newest first. A grant is for the personality the chat
+        had when it was made, and is used only in turns the user starts in the app.
+      tags: [Chat Management]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The grants
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grants]
+                properties:
+                  grants:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FileEditGrant'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /chat/{chatId}/file-edit-grants/{fileId}:
+    parameters:
+      - name: chatId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: fileId
+        in: path
+        required: true
+        description: Any row of the file (a chat copy answers for its original)
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Whether the chat's agent may change a file
+      tags: [Chat Management]
+      responses:
+        '200':
+          description: Whether the agent of the chat (with its personality now) holds a grant on the file
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [granted]
+                properties:
+                  granted:
+                    type: boolean
+        '404':
+          description: File attachment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Take back the chat agent's grant on a file
+      description: The chat's agent may no longer change the file. Revoking a grant that is not there succeeds.
+      tags: [Chat Management]
+      responses:
+        '204':
+          description: Revoked
+        '404':
+          description: File attachment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /chat/{chatId}/chat-message:
     get:
       summary: List messages in chat
@@ -6987,6 +7069,8 @@ paths:
                   description: Rituals associated with this message
                 origin:
                   $ref: '#/components/schemas/MessageOrigin'
+                comment:
+                  $ref: '#/components/schemas/CommentMessage'
               required:
                 - message
                 - origin
@@ -8887,7 +8971,7 @@ paths:
         agent's own files written in this thread, and the active skills' bundle files. The same rule
         hydrates the thread's container in builds that have one. Files that share a workspace path
         are all listed; the newest takes the path and the others say which one shadows them.
-      tags: [Chats]
+      tags: [Chat Management]
       parameters:
         - name: chatId
           in: path
@@ -10225,6 +10309,20 @@ components:
       description: Static webhook API token created via /webhook-tokens. Webhook calls act as the user who created the token, limited to the scopes the token was created with (`messages:write`, `chat:read`); a route that needs a scope the token lacks returns 403.
 
   schemas:
+    FileEditGrant:
+      type: object
+      description: One of the user's files the agent of a chat may change (ADR 0x046)
+      required: [file_id, file_name, created_at]
+      properties:
+        file_id:
+          type: string
+          format: uuid
+          description: The file's original row
+        file_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
 
     # Health Check Schemas
     HealthResponse:
@@ -11700,6 +11798,13 @@ components:
           items:
             $ref: '#/components/schemas/ToolCall'
           description: Tool calls associated with this message
+        comment_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommentRef'
+          description: >-
+            Document comments the message is about (ADR 0x046): on a user message the comment
+            that sent it to the agent, on an assistant message the comments it made or replied to.
         generation_model:
           type: string
         generation_personality:
@@ -12682,6 +12787,51 @@ components:
           description: The first comment, then the replies.
           items:
             $ref: '#/components/schemas/FileComment'
+    CommentMessage:
+      type: object
+      description: >-
+        The document comment a message is sent from (ADR 0x046): a comment that mentioned the
+        agent, whose text is the message. The chat shows a link to the thread; what the thread is
+        on and the thread before the comment reach the agent with the message but are not shown.
+        404 when the file is not the user's, 400 without a thread.
+      properties:
+        file_id:
+          type: string
+          format: uuid
+        thread_id:
+          type: string
+        comment_id:
+          type: string
+          description: The comment within the thread (the thread's id for its first comment)
+        quote:
+          type: string
+          description: What the thread is on, as the comments panel shows it; empty for the whole file
+        earlier:
+          type: array
+          description: The thread before this comment, oldest first
+          items:
+            type: object
+            properties:
+              author_name: {type: string}
+              text: {type: string}
+      required: [file_id, thread_id]
+    CommentRef:
+      type: object
+      description: A document comment a chat message is about (ADR 0x046), shown as a link that opens the file at the thread.
+      properties:
+        file_id:
+          type: string
+          format: uuid
+        file_name:
+          type: string
+        thread_id:
+          type: string
+        comment_id:
+          type: string
+        quote:
+          type: string
+          description: What the thread is on, short; empty for the whole file
+      required: [file_id, file_name, thread_id]
     FileComments:
       type: object
       required: [threads, content_version, revision]

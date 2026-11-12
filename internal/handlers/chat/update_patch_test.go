@@ -37,6 +37,8 @@ type fakeStore struct {
 	referencedKeysFn          func(ctx context.Context, keys []string) (map[string]bool, error)
 	existingIDsFn             func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error)
 	createFileAttachmentFn    func(ctx context.Context, userID uuid.UUID, fileAttachment models.FileAttachment) (*models.FileAttachment, error)
+	getFileAttachmentFn       func(ctx context.Context, userID, id uuid.UUID) (*models.FileAttachment, error)
+	grants                    [][2]uuid.UUID
 	listChatMessagesFn        func(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
 }
 
@@ -108,6 +110,49 @@ func (f *fakeStore) CreateFileAttachment(ctx context.Context, userID uuid.UUID, 
 		return f.createFileAttachmentFn(ctx, userID, fileAttachment)
 	}
 	return nil, errors.New("not implemented")
+}
+func (f *fakeStore) GetFileAttachment(ctx context.Context, userID, id uuid.UUID) (*models.FileAttachment, error) {
+	if f.getFileAttachmentFn != nil {
+		return f.getFileAttachmentFn(ctx, userID, id)
+	}
+	return nil, errors.New("not implemented")
+}
+func (f *fakeStore) GrantFileEdit(_ context.Context, _, chatID, fileID uuid.UUID) (models.FileEditGrantChange, error) {
+	f.grants = append(f.grants, [2]uuid.UUID{chatID, fileID})
+	return models.FileEditGrantChange{ChatID: chatID, FileID: fileID, Created: true}, nil
+}
+func (f *fakeStore) UndoFileEditGrant(ctx context.Context, userID uuid.UUID, change models.FileEditGrantChange) error {
+	if change.Created {
+		return f.RevokeFileEdit(ctx, userID, change.ChatID, change.FileID)
+	}
+	return nil
+}
+func (f *fakeStore) ListFileEditGrants(_ context.Context, _, chatID uuid.UUID) ([]models.FileEditGrant, error) {
+	var out []models.FileEditGrant
+	for _, g := range f.grants {
+		if g[0] == chatID {
+			out = append(out, models.FileEditGrant{FileID: g[1]})
+		}
+	}
+	return out, nil
+}
+func (f *fakeStore) HasFileEditGrant(_ context.Context, _, chatID, fileID uuid.UUID) (bool, error) {
+	for _, g := range f.grants {
+		if g == [2]uuid.UUID{chatID, fileID} {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+func (f *fakeStore) RevokeFileEdit(_ context.Context, _, chatID, fileID uuid.UUID) error {
+	kept := f.grants[:0]
+	for _, g := range f.grants {
+		if g != [2]uuid.UUID{chatID, fileID} {
+			kept = append(kept, g)
+		}
+	}
+	f.grants = kept
+	return nil
 }
 func (f *fakeStore) DeleteFileAttachment(ctx context.Context, userID, id uuid.UUID) error {
 	return errors.New("not implemented")

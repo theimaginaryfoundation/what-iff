@@ -10563,6 +10563,147 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/{chatId}/file-edit-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the files the chat's agent may change
+         * @description The user's files the chat's agent may change because the user mentioned it in a comment on them from this chat (ADR 0x046), newest first. A grant is for the personality the chat had when it was made, and is used only in turns the user starts in the app.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The grants */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            grants: components["schemas"]["FileEditGrant"][];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{chatId}/file-edit-grants/{fileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chatId: string;
+                /** @description Any row of the file (a chat copy answers for its original) */
+                fileId: string;
+            };
+            cookie?: never;
+        };
+        /** Whether the chat's agent may change a file */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                    /** @description Any row of the file (a chat copy answers for its original) */
+                    fileId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Whether the agent of the chat (with its personality now) holds a grant on the file */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            granted: boolean;
+                        };
+                    };
+                };
+                /** @description File attachment not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Take back the chat agent's grant on a file
+         * @description The chat's agent may no longer change the file. Revoking a grant that is not there succeeds.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                    /** @description Any row of the file (a chat copy answers for its original) */
+                    fileId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Revoked */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description File attachment not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/{chatId}/chat-message": {
         parameters: {
             query?: never;
@@ -10672,6 +10813,7 @@ export interface paths {
                         /** @description Rituals associated with this message */
                         rituals?: components["schemas"]["Ritual"][];
                         origin: components["schemas"]["MessageOrigin"];
+                        comment?: components["schemas"]["CommentMessage"];
                     };
                 };
             };
@@ -14886,6 +15028,17 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description One of the user's files the agent of a chat may change (ADR 0x046) */
+        FileEditGrant: {
+            /**
+             * Format: uuid
+             * @description The file's original row
+             */
+            file_id: string;
+            file_name: string;
+            /** Format: date-time */
+            created_at: string;
+        };
         /**
          * @example {
          *       "status": "healthy",
@@ -15846,6 +15999,8 @@ export interface components {
             rituals?: components["schemas"]["Ritual"][];
             /** @description Tool calls associated with this message */
             tool_calls?: components["schemas"]["ToolCall"][];
+            /** @description Document comments the message is about (ADR 0x046): on a user message the comment that sent it to the agent, on an assistant message the comments it made or replied to. */
+            comment_refs?: components["schemas"]["CommentRef"][];
             generation_model?: string;
             generation_personality?: string;
             /** Format: uuid */
@@ -16397,6 +16552,31 @@ export interface components {
             resolved: boolean;
             /** @description The first comment, then the replies. */
             comments: components["schemas"]["FileComment"][];
+        };
+        /** @description The document comment a message is sent from (ADR 0x046): a comment that mentioned the agent, whose text is the message. The chat shows a link to the thread; what the thread is on and the thread before the comment reach the agent with the message but are not shown. 404 when the file is not the user's, 400 without a thread. */
+        CommentMessage: {
+            /** Format: uuid */
+            file_id: string;
+            thread_id: string;
+            /** @description The comment within the thread (the thread's id for its first comment) */
+            comment_id?: string;
+            /** @description What the thread is on, as the comments panel shows it; empty for the whole file */
+            quote?: string;
+            /** @description The thread before this comment, oldest first */
+            earlier?: {
+                author_name?: string;
+                text?: string;
+            }[];
+        };
+        /** @description A document comment a chat message is about (ADR 0x046), shown as a link that opens the file at the thread. */
+        CommentRef: {
+            /** Format: uuid */
+            file_id: string;
+            file_name: string;
+            thread_id: string;
+            comment_id?: string;
+            /** @description What the thread is on, short; empty for the whole file */
+            quote?: string;
         };
         FileComments: {
             threads: components["schemas"]["FileCommentThread"][];

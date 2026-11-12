@@ -10,6 +10,7 @@ import {
   removeComment,
   setResolved,
 } from '../comments/comment-threads';
+import { CommentAgentHooks } from '../comments/comment-agent.service';
 import { EditEvent, ReplyEvent } from '../comments/comments-panel.component';
 import { Deck, Slide, SlideElement } from '../pptx/deck-model';
 import { SlideCommentAnchor, SlideCommentThread, elementText, newCommentGuid } from '../pptx/pptx-comments';
@@ -36,6 +37,7 @@ export class SlideComments {
     private readonly me: Signal<CommentPerson>,
     /** Called after every change a save has to write. */
     private readonly changed: () => void,
+    private readonly agent: CommentAgentHooks | null = null,
   ) {}
 
   /** Threads on slides the deck still has; a deleted slide takes its threads with it. */
@@ -68,7 +70,8 @@ export class SlideComments {
   });
   readonly people = computed<CommentPerson[]>(() => {
     const me = this.me();
-    return [me, ...commentAuthors(this.threads()).filter(p => p.id !== me.id)];
+    const people = [me, ...commentAuthors(this.threads()).filter(p => p.id !== me.id)];
+    return this.agent ? this.agent.people(people) : people;
   });
   /** Pins for the current slide: open threads, and a resolved one while it is active. */
   readonly pins = computed<CommentPin[]>(() => {
@@ -174,7 +177,18 @@ export class SlideComments {
     this.threads.update(threads => [...threads, { id, anchor: at.anchor, quote: at.quote, comments: [newComment(id, this.me(), draft)] }]);
     this.draft.set(null);
     this.activeId.set(id);
+    // The mention is queued before the change starts a save (a viewer saves at once), so that save
+    // holds it and sends it when it lands.
+    this.notifyAgent(id, id);
     this.changed();
+  }
+
+  /** Hands a posted comment to the agent hooks, labelled as the panel labels its thread. */
+  private notifyAgent(threadId: string, commentId: string): void {
+    const thread = this.threads().find(t => t.id === threadId);
+    if (!this.agent || !thread) return;
+    const shown = this.onSlide().find(t => t.id === threadId);
+    this.agent.posted(thread, commentId, shown?.quote ?? thread.quote ?? '');
   }
 
   select(threadId: string | null): void {
@@ -183,7 +197,9 @@ export class SlideComments {
   }
 
   reply(event: ReplyEvent): void {
-    this.threads.update(threads => addReply(threads, event.threadId, newComment(newCommentGuid(), this.me(), event.draft)));
+    const comment = newComment(newCommentGuid(), this.me(), event.draft);
+    this.threads.update(threads => addReply(threads, event.threadId, comment));
+    this.notifyAgent(event.threadId, comment.id);
     this.changed();
   }
 

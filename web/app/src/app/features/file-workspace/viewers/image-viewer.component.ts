@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, injec
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
+import { CommentAgentService } from '../../office/comments/comment-agent.service';
 import { CommentPeopleService } from '../../office/comments/comment-people.service';
 import { CommentsPanelComponent } from '../../office/comments/comments-panel.component';
 import { CommentsPanelState } from '../../office/comments/comments-panel-state.service';
@@ -44,6 +45,7 @@ export class ImageViewerComponent {
     this.me,
     () => this.comments.autosave(),
     () => this.saver?.showCurrentContent(),
+    inject(CommentAgentService).hooks(() => this.file()),
   );
   private readonly panel = inject(CommentsPanelState);
   /** Whether the server keeps comments for this image (set once they have loaded). */

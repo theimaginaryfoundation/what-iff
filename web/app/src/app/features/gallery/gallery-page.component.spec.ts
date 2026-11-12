@@ -5,6 +5,8 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ActivatedRoute, ParamMap, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { BehaviorSubject, of, throwError } from 'rxjs';
 
+import { CommentsPanelState } from '../office/comments/comments-panel-state.service';
+
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ActivePersonalityMediaJob } from '../../core/models/personality-media-job.model';
 import { ChatService } from '../../core/services/chat.service';
@@ -119,7 +121,13 @@ describe('GalleryPageComponent refreshing', () => {
 describe('GalleryPageComponent file viewer', () => {
   const doc = (id: string, created_at: string) =>
     ({ id, user_id: 'u', name: `${id}.md`, file_type: 'text/markdown', created_at }) as FileAttachment;
-  const picture = { id: 'pic', user_id: 'u', name: 'pic.png', file_type: 'image/png', created_at: '2026-02-15T00:00:00Z' } as FileAttachment;
+  const picture = {
+    id: 'pic',
+    user_id: 'u',
+    name: 'pic.png',
+    file_type: 'image/png',
+    created_at: '2026-02-15T00:00:00Z',
+  } as FileAttachment;
   const rows = [doc('a', '2026-03-01T00:00:00Z'), picture, doc('b', '2026-02-01T00:00:00Z'), doc('c', '2026-01-01T00:00:00Z')];
 
   let params: BehaviorSubject<ParamMap>;
@@ -144,6 +152,7 @@ describe('GalleryPageComponent file viewer', () => {
       refresh: vi.fn(),
       openDetail: vi.fn(),
       disableGlobalAssociations: vi.fn(),
+      setSelectedPersonalityIds: vi.fn(),
     };
     TestBed.overrideComponent(GalleryPageComponent, {
       set: { imports: [], template: '', templateUrl: undefined, styleUrl: undefined, styleUrls: undefined },
@@ -182,6 +191,14 @@ describe('GalleryPageComponent file viewer', () => {
     expect(component.viewerOpen()).toBe(true);
     expect(getFileInfo).toHaveBeenCalledWith('b');
     expect(component.openFile()?.chat_id).toBe('chat-1');
+  });
+
+  it('focuses the thread a ?comment= link names, with or without a personality', () => {
+    const focus = vi.spyOn(TestBed.inject(CommentsPanelState), 'focusThread');
+    params.next(convertToParamMap({ file: 'b', comment: 't-1' }));
+    expect(focus).toHaveBeenCalledWith('t-1');
+    params.next(convertToParamMap({ file: 'b', comment: 't-2', personality_id: 'p-1' }));
+    expect(focus).toHaveBeenCalledWith('t-2');
   });
 
   it('opens a linked file that is not on a loaded page', () => {

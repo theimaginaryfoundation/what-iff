@@ -8,14 +8,15 @@ import {
   ChatMessageFilters,
   CreateChatMessageRequest,
   ChatMessageResponse,
+  CommentRef,
   MessageBookmark,
-  MessageReadStatus
+  MessageReadStatus,
 } from '../models/message.model';
 import { PaginatedResponse } from '../models/common.model';
 import { AgentPromptResponse } from '../models/job.model';
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class MessageService {
   private http: HttpClient = inject(HttpClient);
@@ -54,7 +55,13 @@ export class MessageService {
    * Asks the server to skip `total_count` (counting every message in the chat); callers page on
    * `next_cursor` instead, which is absent once nothing older remains.
    */
-  listMessages(chatId: string, page: number = 1, limit: number = 50, filters?: ChatMessageFilters, cursor?: string): Observable<PaginatedResponse<ChatMessage>> {
+  listMessages(
+    chatId: string,
+    page: number = 1,
+    limit: number = 50,
+    filters?: ChatMessageFilters,
+    cursor?: string,
+  ): Observable<PaginatedResponse<ChatMessage>> {
     let params: any = { limit: limit.toString(), include_total: 'false' };
     if (cursor) {
       params.cursor = cursor;
@@ -70,26 +77,25 @@ export class MessageService {
     }
 
     const isInitial = !cursor && page === 1;
-    return this.http.get<PaginatedResponse<ChatMessage>>(`${this.apiUrl}/${chatId}/chat-message`, { params })
-      .pipe(
-        tap(response => {
-          if (isInitial) {
-            // Replace message list on the initial (newest) page
-            this.messagesSubject.next(response.results.reverse()); // Reverse to show newest at bottom
-          } else {
-            // Prepend older messages for infinite scroll up. Dedup by id: keeps rendering stable
-            // even if a batch overlaps what we already have (legacy offset pages could; keyset
-            // cursor batches don't), since duplicate ids would break `track message.id`.
-            const currentMessages = this.messagesSubject.getValue();
-            const known = new Set(currentMessages.map(m => m.id));
-            const older = response.results.reverse().filter(m => !known.has(m.id));
-            if (older.length > 0) {
-              this.messagesSubject.next([...older, ...currentMessages]);
-            }
+    return this.http.get<PaginatedResponse<ChatMessage>>(`${this.apiUrl}/${chatId}/chat-message`, { params }).pipe(
+      tap(response => {
+        if (isInitial) {
+          // Replace message list on the initial (newest) page
+          this.messagesSubject.next(response.results.reverse()); // Reverse to show newest at bottom
+        } else {
+          // Prepend older messages for infinite scroll up. Dedup by id: keeps rendering stable
+          // even if a batch overlaps what we already have (legacy offset pages could; keyset
+          // cursor batches don't), since duplicate ids would break `track message.id`.
+          const currentMessages = this.messagesSubject.getValue();
+          const known = new Set(currentMessages.map(m => m.id));
+          const older = response.results.reverse().filter(m => !known.has(m.id));
+          if (older.length > 0) {
+            this.messagesSubject.next([...older, ...currentMessages]);
           }
-        }),
-        catchError(this.handleError)
-      );
+        }
+      }),
+      catchError(this.handleError),
+    );
   }
 
   /**
@@ -102,35 +108,34 @@ export class MessageService {
    */
   reconcileLatestPage(chatId: string, limit: number = 50): Observable<{ appended: number; gap: boolean }> {
     const params = { page: '1', limit: limit.toString(), include_total: 'false' };
-    return this.http
-      .get<PaginatedResponse<ChatMessage>>(`${this.apiUrl}/${chatId}/chat-message`, { params })
-      .pipe(
-        map(response => {
-          const fresh = [...response.results].reverse(); // oldest-first
-          const current = this.messagesSubject.getValue();
-          if (current.length === 0) {
-            this.messagesSubject.next(fresh);
-            return { appended: fresh.length, gap: false };
-          }
-          const known = new Set(current.map(m => m.id));
-          const hasOverlap = fresh.some(m => known.has(m.id));
-          if (!hasOverlap) {
-            // The loaded tail is older than the entire newest page — merging would leave a hole.
-            return { appended: 0, gap: true };
-          }
-          const freshById = new Map(fresh.map(m => [m.id, m]));
-          // A server reconciliation is newer than a pending optimistic bookmark update.
-          fresh.forEach(message => this.bookmarkOperations.delete(message.id));
-          const merged = current.map(m => freshById.get(m.id) ?? m);
-          const appended = fresh.filter(m => !known.has(m.id));
-          this.messagesSubject.next(appended.length > 0 ? [...merged, ...appended] : merged);
-          return { appended: appended.length, gap: false };
-        }),
-        catchError(this.handleError),
-      );
+    return this.http.get<PaginatedResponse<ChatMessage>>(`${this.apiUrl}/${chatId}/chat-message`, { params }).pipe(
+      map(response => {
+        const fresh = [...response.results].reverse(); // oldest-first
+        const current = this.messagesSubject.getValue();
+        if (current.length === 0) {
+          this.messagesSubject.next(fresh);
+          return { appended: fresh.length, gap: false };
+        }
+        const known = new Set(current.map(m => m.id));
+        const hasOverlap = fresh.some(m => known.has(m.id));
+        if (!hasOverlap) {
+          // The loaded tail is older than the entire newest page — merging would leave a hole.
+          return { appended: 0, gap: true };
+        }
+        const freshById = new Map(fresh.map(m => [m.id, m]));
+        // A server reconciliation is newer than a pending optimistic bookmark update.
+        fresh.forEach(message => this.bookmarkOperations.delete(message.id));
+        const merged = current.map(m => freshById.get(m.id) ?? m);
+        const appended = fresh.filter(m => !known.has(m.id));
+        this.messagesSubject.next(appended.length > 0 ? [...merged, ...appended] : merged);
+        return { appended: appended.length, gap: false };
+      }),
+      catchError(this.handleError),
+    );
   }
 
-  sendMessage(chatId: string, messageData: CreateChatMessageRequest): Observable<ChatMessageResponse> {
+  /** Posts a message; `commentRef` is the link a comment's message shows (ADR 0x046) until the server's copy arrives. */
+  sendMessage(chatId: string, messageData: CreateChatMessageRequest, commentRef?: CommentRef): Observable<ChatMessageResponse> {
     let tz: string | undefined;
     try {
       tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -140,7 +145,7 @@ export class MessageService {
 
     const payload: CreateChatMessageRequest = {
       ...messageData,
-      client_timezone: messageData.client_timezone ?? tz
+      client_timezone: messageData.client_timezone ?? tz,
     };
 
     const optimisticId = `temp-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
@@ -153,47 +158,47 @@ export class MessageService {
       response_id: messageData.response_id,
       sent_at: new Date().toISOString(),
       attachments: messageData.attachments,
-      rituals: messageData.rituals
+      rituals: messageData.rituals,
+      ...(commentRef ? { comment_refs: [commentRef] } : {}),
     };
     this.addMessageToList(optimisticMessage);
-    if (messageData.origin === 'User') {
+    // A message to another chat (a comment mention posted there) does not show the open one typing.
+    if (messageData.origin === 'User' && (!this.currentChatId || chatId === this.currentChatId)) {
       this.setAssistantTyping(true);
     }
 
-    return this.http.post<ChatMessageResponse>(`${this.apiUrl}/${chatId}/chat-message`, payload)
-      .pipe(
-        tap(response => {
-          const userMessage: ChatMessage = {
-            id: response.id,
-            chat_id: chatId,
-            message: messageData.message,
-            origin: messageData.origin,
-            read_status: 'read',
-            response_id: messageData.response_id,
-            sent_at: optimisticMessage.sent_at,
-            attachments: messageData.attachments,
-            rituals: messageData.rituals
-          };
-          this.replaceMessageById(optimisticId, userMessage);
-        }),
-        catchError(error => {
-          this.removeMessageById(optimisticId);
-          this.setAssistantTyping(false);
-          console.error('Error sending message:', error);
-          return this.handleError(error);
-        })
-      );
+    return this.http.post<ChatMessageResponse>(`${this.apiUrl}/${chatId}/chat-message`, payload).pipe(
+      tap(response => {
+        const userMessage: ChatMessage = {
+          id: response.id,
+          chat_id: chatId,
+          message: messageData.message,
+          origin: messageData.origin,
+          read_status: 'read',
+          response_id: messageData.response_id,
+          sent_at: optimisticMessage.sent_at,
+          attachments: messageData.attachments,
+          rituals: messageData.rituals,
+          ...(commentRef ? { comment_refs: [commentRef] } : {}),
+        };
+        this.replaceMessageById(optimisticId, userMessage);
+      }),
+      catchError(error => {
+        this.removeMessageById(optimisticId);
+        this.setAssistantTyping(false);
+        console.error('Error sending message:', error);
+        return this.handleError(error);
+      }),
+    );
   }
 
   getMessage(messageId: string): Observable<ChatMessage> {
-    return this.http.get<ChatMessage>(`${this.apiUrl}/chat-message/${messageId}`)
-      .pipe(catchError(this.handleError));
+    return this.http.get<ChatMessage>(`${this.apiUrl}/chat-message/${messageId}`).pipe(catchError(this.handleError));
   }
 
   /** List all bookmarked messages for a chat (complete, regardless of pagination). */
   listBookmarks(chatId: string): Observable<MessageBookmark[]> {
-    return this.http.get<MessageBookmark[]>(`${this.apiUrl}/${chatId}/bookmarks`)
-      .pipe(catchError(this.handleError));
+    return this.http.get<MessageBookmark[]>(`${this.apiUrl}/${chatId}/bookmarks`).pipe(catchError(this.handleError));
   }
 
   /**
@@ -206,26 +211,24 @@ export class MessageService {
     const operation = Symbol(messageId);
     this.bookmarkOperations.set(messageId, operation);
     this.patchMessageInList(messageId, { bookmarked });
-    return this.http
-      .patch<ChatMessage>(`${this.apiUrl}/${chatId}/chat-message/${messageId}/bookmark`, { bookmarked })
-      .pipe(
-        tap(updated => {
-          if (this.bookmarkOperations.get(messageId) === operation) {
-            this.bookmarkOperations.delete(messageId);
-            this.patchMessageInList(messageId, { bookmarked: updated.bookmarked });
+    return this.http.patch<ChatMessage>(`${this.apiUrl}/${chatId}/chat-message/${messageId}/bookmark`, { bookmarked }).pipe(
+      tap(updated => {
+        if (this.bookmarkOperations.get(messageId) === operation) {
+          this.bookmarkOperations.delete(messageId);
+          this.patchMessageInList(messageId, { bookmarked: updated.bookmarked });
+        }
+      }),
+      catchError(error => {
+        if (this.bookmarkOperations.get(messageId) === operation) {
+          this.bookmarkOperations.delete(messageId);
+          const currentMessage = this.messagesSubject.getValue().find(message => message.id === messageId);
+          if (previousMessage && currentMessage) {
+            this.patchMessageInList(messageId, { bookmarked: previousBookmarked });
           }
-        }),
-        catchError(error => {
-          if (this.bookmarkOperations.get(messageId) === operation) {
-            this.bookmarkOperations.delete(messageId);
-            const currentMessage = this.messagesSubject.getValue().find(message => message.id === messageId);
-            if (previousMessage && currentMessage) {
-              this.patchMessageInList(messageId, { bookmarked: previousBookmarked });
-            }
-          }
-          return this.handleError(error);
-        }),
-      );
+        }
+        return this.handleError(error);
+      }),
+    );
   }
 
   /** Shallow-merge a patch onto a message already in the list (no-op if absent). */
@@ -249,20 +252,18 @@ export class MessageService {
 
   /** Re-run async generation for an existing user message (same turn). */
   retryUserMessage(chatId: string, messageId: string): Observable<ChatMessageResponse> {
-    return this.http
-      .post<ChatMessageResponse>(`${this.apiUrl}/${chatId}/chat-message/${messageId}/retry`, {})
-      .pipe(
-        tap(() => {
-          const cur = this.messagesSubject.getValue();
-          const idx = cur.findIndex(m => m.id === messageId);
-          if (idx >= 0) {
-            const next = [...cur];
-            next[idx] = { ...next[idx], last_error_message: null };
-            this.messagesSubject.next(next);
-          }
-        }),
-        catchError(this.handleError),
-      );
+    return this.http.post<ChatMessageResponse>(`${this.apiUrl}/${chatId}/chat-message/${messageId}/retry`, {}).pipe(
+      tap(() => {
+        const cur = this.messagesSubject.getValue();
+        const idx = cur.findIndex(m => m.id === messageId);
+        if (idx >= 0) {
+          const next = [...cur];
+          next[idx] = { ...next[idx], last_error_message: null };
+          this.messagesSubject.next(next);
+        }
+      }),
+      catchError(this.handleError),
+    );
   }
 
   addMessageToList(message: ChatMessage): void {
@@ -324,14 +325,14 @@ export class MessageService {
       message: `Error: ${error}`,
       origin: 'Assistant',
       read_status: 'read',
-      sent_at: new Date().toISOString()
+      sent_at: new Date().toISOString(),
     };
     this.addMessageToList(errorMessage);
   }
 
   markAssistantMessagesRead(chatId: string): void {
     const currentMessages = this.messagesSubject.getValue();
-    const updatedMessages = currentMessages.map((message) => {
+    const updatedMessages = currentMessages.map(message => {
       if (message.chat_id !== chatId) {
         return message;
       }
@@ -343,7 +344,7 @@ export class MessageService {
       }
       return {
         ...message,
-        read_status: 'read' as MessageReadStatus
+        read_status: 'read' as MessageReadStatus,
       };
     });
     this.messagesSubject.next(updatedMessages);

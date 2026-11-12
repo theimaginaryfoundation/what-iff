@@ -5,6 +5,7 @@ import { of, Subject, throwError } from 'rxjs';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
+import { CommentsPanelState } from '../office/comments/comments-panel-state.service';
 import { FileWorkspaceService, LARGE_VIEWPORT_QUERY, MEDIUM_VIEWPORT_QUERY } from './file-workspace.service';
 
 function file(overrides: Partial<FileAttachment> = {}): FileAttachment {
@@ -19,9 +20,12 @@ describe('FileWorkspaceService', () => {
   function setup(): FileWorkspaceService {
     getFileInfo = vi.fn().mockReturnValue(of(file({ chat_id: 'c-9' })));
     navigate = vi.fn().mockResolvedValue(true);
-    vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
-      matches: (query === LARGE_VIEWPORT_QUERY && viewport === 'large') || (query === MEDIUM_VIEWPORT_QUERY && viewport !== 'phone'),
-    }) as MediaQueryList);
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      query =>
+        ({
+          matches: (query === LARGE_VIEWPORT_QUERY && viewport === 'large') || (query === MEDIUM_VIEWPORT_QUERY && viewport !== 'phone'),
+        }) as MediaQueryList,
+    );
     TestBed.configureTestingModule({
       providers: [
         provideZonelessChangeDetection(),
@@ -119,9 +123,34 @@ describe('FileWorkspaceService', () => {
   it('opens and closes through the URL', () => {
     const service = setup();
     service.requestOpen('f-1');
-    expect(navigate).toHaveBeenCalledWith([], { queryParams: { file: 'f-1' }, queryParamsHandling: 'merge', replaceUrl: false });
+    expect(navigate).toHaveBeenCalledWith([], {
+      queryParams: { file: 'f-1', comment: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: false,
+    });
     service.requestClose();
-    expect(navigate).toHaveBeenLastCalledWith([], { queryParams: { file: null }, queryParamsHandling: 'merge' });
+    expect(navigate).toHaveBeenLastCalledWith([], { queryParams: { file: null, comment: null }, queryParamsHandling: 'merge' });
+  });
+
+  it('opens the comments panel at a linked comment, once per link', () => {
+    const service = setup();
+    const panel = TestBed.inject(CommentsPanelState);
+    service.requestOpen('f-1', { comment: 't1' });
+    expect(navigate).toHaveBeenLastCalledWith([], {
+      queryParams: { file: 'f-1', comment: 't1' },
+      queryParamsHandling: 'merge',
+      replaceUrl: false,
+    });
+    expect(panel.focus()).toBe('t1');
+    expect(panel.open()).toBe(true);
+
+    // The page then follows the URL it set: nothing new. A link opened afresh (a reload) is followed.
+    panel.focus.set(null);
+    service.followCommentLink('f-1', 't1');
+    expect(panel.focus()).toBeNull();
+    service.followCommentLink('f-1', null);
+    service.followCommentLink('f-1', 't1');
+    expect(panel.focus()).toBe('t1');
   });
 
   it('merges a rename into the open file without losing its thread link', () => {

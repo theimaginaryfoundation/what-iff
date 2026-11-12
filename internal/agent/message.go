@@ -20,6 +20,8 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/filecomments"
+	"github.com/theimaginaryfoundation/what-iff/internal/filesave"
 	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
@@ -119,8 +121,10 @@ type Agent struct {
 	moveFilesTool  *tools.MoveFilesTool
 	entityTool     *tools.EntityTool
 	agentFileTool  *tools.AgentFileTool
-	chunkPipeline  *filechunker.FileChunkPipeline
-	fileStore      storage.FileStore
+	// fileCommentsTool reads and writes comments on the user's files (ADR 0x046).
+	fileCommentsTool *tools.FileCommentsTool
+	chunkPipeline    *filechunker.FileChunkPipeline
+	fileStore        storage.FileStore
 	// expressionPortraitThumbCache caches thumbnails loaded for expression continuity in message context (bounded).
 	expressionPortraitThumbCache *expressionPortraitThumbCache
 	// tokenCounter is shared for segment token estimates and is safe for concurrent use (stateless tokenizer).
@@ -308,6 +312,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		moveFilesTool:                tools.NewMoveFilesTool(ds, logger),
 		entityTool:                   tools.NewEntityTool(ds, logger),
 		agentFileTool:                tools.NewAgentFileTool(ds, fileStore, logger),
+		fileCommentsTool:             tools.NewFileCommentsTool(ds, fileStore, logger),
 		mcpClient:                    mcpclient.New(nil, logger),
 		chunkPipeline:                newChunkPipelineForMode(cfg.LLMBackend != "vendor", &oaiClient, ds, logger),
 		fileStore:                    fileStore,
@@ -324,6 +329,11 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		localLLM:                     cfg.LLMBackend == "local",
 		localLLMModel:                cfg.LocalLLMModel,
 	}
+	// The agent changes a user's file it was granted, and the comments inside Office files, the way
+	// the file workspace saves a file (ADR 0x046).
+	fileSaver := filesave.New(ds, fileStore, a.chunkPipeline, logger)
+	a.agentFileTool.WithUserFileSaver(fileSaver)
+	a.fileCommentsTool.WithOffice(filecomments.NewOffice(ds, fileStore, fileSaver, officeCommentFormats()))
 	a.listTool.SetMCPDiscoverer(a.mcpClient)
 	if a.lifecycleCtx == nil {
 		a.lifecycleCtx = context.Background()
@@ -2618,7 +2628,7 @@ func (a *Agent) prepareUserMessage(ctx context.Context, _ uuid.UUID, chatMessage
 	if sentAt.IsZero() {
 		sentAt = time.Now()
 	}
-	return formatUserMessageWithTime(sentAt, normalizedTZ, chatMessage.Message), nil
+	return withFileCommentContext(formatUserMessageWithTime(sentAt, normalizedTZ, chatMessage.Message), chatMessage), nil
 }
 
 var tzLocationCache sync.Map // map[string]*time.Location
@@ -2789,6 +2799,8 @@ func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID,
 		GenerationPersonality: generationPersonality,
 		GenerationMoodID:      generationMoodID,
 		ToolCalls:             toolCalls,
+		// The comments the reply made on the user's files, shown as links (ADR 0x046).
+		CommentRefs: tools.CommentRefsFromCalls(toolCalls),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create chat message: %w", err)

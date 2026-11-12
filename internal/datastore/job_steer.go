@@ -6,10 +6,13 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/theimaginaryfoundation/what-iff/ent"
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	entchatmessage "github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
+	"github.com/theimaginaryfoundation/what-iff/ent/chatmessagecontextitem"
 	"github.com/theimaginaryfoundation/what-iff/ent/job"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
 // SteerJobErrorCode marks a steer job a running turn took in (ADR 0x042): it ends cancelled with
@@ -21,6 +24,9 @@ type SteerMessage struct {
 	MessageID uuid.UUID
 	Message   string
 	SentAt    time.Time
+	// FileComments is the document comment the message was sent from (ADR 0x046), as the context
+	// its own turn would have rendered after its text.
+	FileComments []string
 }
 
 // ClaimSteerMessages takes the steer messages queued in chatID after the running turn's job
@@ -80,13 +86,20 @@ func (d *Datastore) ClaimSteerMessages(ctx context.Context, userID, chatID, runn
 			entchatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))),
 		).
 		Order(entchatmessage.BySentAt(), entchatmessage.ByID()).
+		WithContextItems(func(q *ent.ChatMessageContextItemQuery) {
+			q.Where(chatmessagecontextitem.Type(models.AdditionalContextTypeFileComment))
+		}).
 		All(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]SteerMessage, 0, len(rows))
 	for _, m := range rows {
-		out = append(out, SteerMessage{MessageID: m.ID, Message: m.Message, SentAt: m.SentAt})
+		sm := SteerMessage{MessageID: m.ID, Message: m.Message, SentAt: m.SentAt}
+		for _, it := range m.Edges.ContextItems {
+			sm.FileComments = append(sm.FileComments, it.Content)
+		}
+		out = append(out, sm)
 	}
 	return out, nil
 }

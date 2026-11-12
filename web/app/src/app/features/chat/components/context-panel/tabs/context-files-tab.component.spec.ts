@@ -21,7 +21,11 @@ describe('ContextFilesTabComponent', () => {
 
   const response: ChatContextFilesResponse = {
     files: [
-      { file: file('f-new', 'report.csv', 'text/csv'), workspace_path: 'report.csv', reasons: ['attached_recent', 'attached_since_checkpoint'] },
+      {
+        file: file('f-new', 'report.csv', 'text/csv'),
+        workspace_path: 'report.csv',
+        reasons: ['attached_recent', 'attached_since_checkpoint'],
+      },
       { file: file('f-agent', 'journal.md', 'text/markdown'), workspace_path: 'journal.md', reasons: ['agent_written'] },
       { file: file('f-old', 'Report.csv', 'text/csv'), workspace_path: 'Report.csv', reasons: ['recalled'], shadowed_by: 'f-new' },
     ],
@@ -68,7 +72,11 @@ describe('ContextFilesTabComponent', () => {
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     const el = await render();
     (el.querySelector('button[aria-label="Open journal.md"]') as HTMLButtonElement).click();
-    expect(navigate).toHaveBeenCalledWith([], { queryParams: { file: 'f-agent' }, queryParamsHandling: 'merge', replaceUrl: false });
+    expect(navigate).toHaveBeenCalledWith([], {
+      queryParams: { file: 'f-agent', comment: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: false,
+    });
   });
 
   it('closes the panel when a file is opened, leaving the remembered choice alone', async () => {
@@ -120,7 +128,7 @@ describe('ContextFilesTabComponent', () => {
     expect(panel.sketchRequests()).toBe(1);
   });
 
-  it('lists files attached to the next message ahead of the thread\'s, without repeating listed ones', async () => {
+  it("lists files attached to the next message ahead of the thread's, without repeating listed ones", async () => {
     panel.setComposerPending([file('f-pending', 'draft.txt'), file('f-new', 'report.csv', 'text/csv')]);
     const el = await render();
     const pending = [...el.querySelectorAll('[data-testid="context-files-pending"] .files-tab__name')].map(n => n.textContent);

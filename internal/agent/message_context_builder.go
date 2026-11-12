@@ -336,7 +336,7 @@ func (b *messageContextBuilder) appendHistoryMessage(
 	body := msg.Message
 	if msg.Origin == models.MessageOriginUser {
 		role = provider.RoleUser
-		body = formatUserMessageWithTime(msg.SentAt, normalizedTZ, msg.Message)
+		body = withFileCommentContext(formatUserMessageWithTime(msg.SentAt, normalizedTZ, msg.Message), msg)
 	}
 	images := historyImagesForMessage(ctx, b.telemetry.Logger, b.fileStore, userID, chatID, msg, inlineImages)
 	modelCtx.AppendHistoryTurn(role, body, images, true)
@@ -583,7 +583,8 @@ func appendMergedAdditionalContext(modelCtx *provider.ModelContext, items []mode
 	byType := make(map[string][]string)
 	memoryRefs := make([]provider.ContextMemoryRef, 0, len(items))
 	for _, it := range items {
-		if strings.TrimSpace(it.Content) == "" {
+		// A document comment is rendered in its message's turn (withFileCommentContext).
+		if strings.TrimSpace(it.Content) == "" || it.Type == models.AdditionalContextTypeFileComment {
 			continue
 		}
 		if it.Type == models.AdditionalContextTypeMemory {

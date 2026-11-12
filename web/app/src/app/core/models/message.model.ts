@@ -133,6 +133,8 @@ export interface ChatMessage {
   attachments?: FileAttachment[];
   rituals?: Ritual[];
   tool_calls?: ToolCall[];
+  /** Document comments the message is about (ADR 0x046): the one that sent it, or the agent's. */
+  comment_refs?: CommentRef[];
   /** Set when async generation failed for this user turn; cleared after a successful reply. */
   last_error_message?: string | null;
   /** Stable code for last_error_message when it has one (e.g. provider_not_configured). */
@@ -160,6 +162,29 @@ export interface ChatMessageFilters {
   max_date?: string;
 }
 
+/** A document comment a chat message is about (ADR 0x046), shown as a link to its thread. */
+export interface CommentRef {
+  file_id: string;
+  file_name: string;
+  thread_id: string;
+  /** The comment within the thread (the thread's id for its first comment). */
+  comment_id?: string;
+  /** What the thread is on, short; empty for the whole file. */
+  quote?: string;
+}
+
+/**
+ * The document comment a message is sent from (ADR 0x046): its text is the message, and what the
+ * thread is on and the thread before it reach the agent without being shown.
+ */
+export interface CommentMessage {
+  file_id: string;
+  thread_id: string;
+  comment_id: string;
+  quote: string;
+  earlier: { author_name: string; text: string }[];
+}
+
 export interface CreateChatMessageRequest {
   message: string;
   origin: MessageOrigin;
@@ -173,6 +198,8 @@ export interface CreateChatMessageRequest {
    * its next step; if it finishes first, the message runs as its own turn.
    */
   steer?: boolean;
+  /** The message is a document comment that mentioned the agent (ADR 0x046). */
+  comment?: CommentMessage;
 }
 
 export interface ChatMessageResponse {

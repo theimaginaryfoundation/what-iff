@@ -1,4 +1,11 @@
-import { CommentPerson, CommentThread, DocComment, authorPersonId, userPersonId } from '../comments/comment-threads';
+import {
+  CommentPerson,
+  CommentThread,
+  DocComment,
+  authorPersonId,
+  personIdFromProvider,
+  providerUserIdOf,
+} from '../comments/comment-threads';
 import { NS, OoxmlPackage, Relationship, escapeXml, resolveTarget } from '../shared/ooxml';
 import { Deck, Slide, SlideElement, plainText } from './deck-model';
 
@@ -104,7 +111,7 @@ export interface PptxComments {
 }
 
 function personOf(author: PptxAuthor | undefined, fallbackName: string): CommentPerson {
-  if (author?.providerId === WHATIFF_PROVIDER && author.userId) return { id: userPersonId(author.userId), name: author.name };
+  if (author?.providerId === WHATIFF_PROVIDER && author.userId) return { id: personIdFromProvider(author.userId), name: author.name };
   const name = author?.name || fallbackName || 'Unknown';
   return { id: authorPersonId(name), name };
 }
@@ -456,7 +463,7 @@ class AuthorList {
 
   /** The author id for a comment's author, adding them when the list has no such author. */
   idFor(comment: DocComment): string {
-    const userId = comment.authorId.startsWith('user:') ? comment.authorId.slice('user:'.length) : null;
+    const userId = providerUserIdOf(comment.authorId);
     const found = userId
       ? this.list.find(a => a.providerId === WHATIFF_PROVIDER && a.userId === userId)
       : this.list.find(a => a.name === comment.authorName && a.providerId !== WHATIFF_PROVIDER);

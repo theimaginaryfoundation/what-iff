@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
 
@@ -36,6 +38,23 @@ func (a *Agent) steerStore() steerStore {
 // maxSteerNoteChars bounds the steering text one note carries into the model's context.
 const maxSteerNoteChars = 8000
 
+// maxSteerCommentChars bounds a follow-up's document comment context (the thread so far), so a
+// long thread leaves room for the user's own words in maxSteerNoteChars.
+const maxSteerCommentChars = 3000
+
+// clipMiddle is s cut to at most max runes by dropping its middle: the start of a comment's
+// context says what file and text it is on, the end holds the latest comments.
+func clipMiddle(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	const gap = "\n…[earlier comments omitted]…\n"
+	keep := max - utf8.RuneCountInString(gap)
+	head := keep / 3
+	return string(r[:head]) + gap + string(r[len(r)-(keep-head):])
+}
+
 // takeSteering claims the follow-ups sent since the turn began and returns their texts, or nil
 // when there are none. Only an interactive web turn (promptJob) takes them in. A claim error is
 // logged and the messages stay queued (they run as the next turn).
@@ -59,7 +78,14 @@ func (a *Agent) takeSteering(ctx context.Context, chatCtx *chatContext) []string
 	texts := make([]string, 0, len(msgs))
 	for _, m := range msgs {
 		if t := strings.TrimSpace(m.Message); t != "" {
-			texts = append(texts, t)
+			// A comment sent mid-run keeps what it is about (ADR 0x046), as its own turn would.
+			comments := make([]models.AdditionalContextItem, 0, len(m.FileComments))
+			for _, c := range m.FileComments {
+				// Clipped so the user's own words (before it) fit in the note: a long thread
+				// would otherwise push them out (maxSteerNoteChars keeps the tail).
+				comments = append(comments, models.AdditionalContextItem{Type: models.AdditionalContextTypeFileComment, Content: clipMiddle(c, maxSteerCommentChars)})
+			}
+			texts = append(texts, withFileCommentContext(t, &models.ChatMessage{AdditionalContext: comments}))
 		}
 	}
 	a.logger.Info("running turn took in follow-up messages",
@@ -78,30 +104,31 @@ const steerMidRunTag = "[Sent mid-run, while you were still working on my reques
 // steerUserTurn is the user turn the follow-ups go in as: the user's own words, lightly tagged.
 func steerUserTurn(texts []string) string {
 	var b strings.Builder
-	b.WriteString(steerMidRunTag)
 	for _, t := range texts {
 		b.WriteString("\n\n")
 		b.WriteString(t)
 	}
-	return truncateRunesKeepTail(b.String(), maxSteerNoteChars)
+	// The tag is kept whatever is cut: only the oldest of the messages go.
+	return steerMidRunTag + truncateRunesKeepTail(b.String(), maxSteerNoteChars-utf8.RuneCountInString(steerMidRunTag))
 }
 
 // steerToolNote frames follow-ups folded into a tool result, for an adapter that can't add a user
 // turn: there they sit in a tool's output, so the framing says they come from the person.
 func steerToolNote(texts []string) string {
-	var b strings.Builder
-	if len(texts) == 1 {
-		b.WriteString("[The user sent this message mid-run, while you were working. It comes from them, not from a tool.]\n")
-	} else {
-		fmt.Fprintf(&b, "[The user sent these %d messages mid-run, while you were working. They come from them, not from a tool.]\n", len(texts))
+	head := "[The user sent this message mid-run, while you were working. It comes from them, not from a tool.]\n"
+	if len(texts) != 1 {
+		head = fmt.Sprintf("[The user sent these %d messages mid-run, while you were working. They come from them, not from a tool.]\n", len(texts))
 	}
+	const tail = "Take this into account from here on: if it changes what they want, change course (update your plan if you keep one); if it is a question, answer it in your reply."
+	var b strings.Builder
 	for _, t := range texts {
 		b.WriteString("<user_message>\n")
 		b.WriteString(t)
 		b.WriteString("\n</user_message>\n")
 	}
-	b.WriteString("Take this into account from here on: if it changes what they want, change course (update your plan if you keep one); if it is a question, answer it in your reply.")
-	return truncateRunesKeepTail(b.String(), maxSteerNoteChars)
+	// The framing is kept whatever is cut: only the oldest of the messages go.
+	room := maxSteerNoteChars - utf8.RuneCountInString(head) - utf8.RuneCountInString(tail)
+	return head + truncateRunesKeepTail(b.String(), room) + tail
 }
 
 // appendToolResultsWithSteering appends a round's tool results, then the follow-ups the person

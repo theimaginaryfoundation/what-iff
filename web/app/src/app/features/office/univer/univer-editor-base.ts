@@ -1,4 +1,5 @@
 import { useOfficeFonts } from '../shared/office-fonts';
+import { CommentAgentHooks } from '../comments/comment-agent.service';
 import { DOCUMENT } from '@angular/common';
 import {
   DestroyRef,
@@ -156,9 +157,11 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
     const unit = this.unit;
     if (!unit) throw new Error(`The ${this.noun} is not loaded`);
     const mutations = this.mutations;
+    const mentions = this.agentMentions()?.mark() ?? 0;
     const blob = await this.serialize(unit.save(), this.file());
     this.lastContent = blob;
     this.savedAt.set(blob, mutations);
+    this.mentionsAt.set(blob, mentions);
     return blob;
   }
 
@@ -166,7 +169,18 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
     // A change made while the save was running is still unsaved.
     const at = saved && this.savedAt.get(saved);
     this.setDirty(at !== undefined && at !== this.mutations);
+    // Comments that mention the agent go to it once the save that holds them lands (ADR 0x046).
+    const mentions = saved && this.mentionsAt.get(saved);
+    if (mentions !== undefined) this.agentMentions()?.saved(mentions);
   }
+
+  /** The agent hooks of the editor's comments, whose mentions wait for a save (ADR 0x046). */
+  protected agentMentions(): CommentAgentHooks | null {
+    return null;
+  }
+
+  /** The mentions each blob content() made holds, by blob. */
+  private readonly mentionsAt = new WeakMap<Blob, number>();
 
   dismissNotice(): void {
     this.noticeDismissed.set(true);
@@ -175,6 +189,8 @@ export abstract class UniverEditorBase<TData, TUnit extends UniverUnit<TData>> i
   /** Parses the bytes and (re)creates the Univer instance; a newer call wins over one still loading. */
   private async open(blob: Blob): Promise<void> {
     const generation = ++this.generation;
+    // Comments not saved are gone with what the editor held, and so are their mentions.
+    this.agentMentions()?.discard();
     this.dispose();
     this.state.set('loading');
     this.error.set(null);

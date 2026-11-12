@@ -5,6 +5,7 @@ import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { COMMENT_SAVER } from '../../file-workspace/editors/file-editor';
 import { CommentAutosave } from '../comments/comment-autosave';
 import { CommentPeopleService } from '../comments/comment-people.service';
+import { CommentAgentHooks, CommentAgentService } from '../comments/comment-agent.service';
 import {
   CommentDraft,
   CommentPerson,
@@ -77,6 +78,11 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
 
   // --- comments ----------------------------------------------------------------------------------
   readonly me = inject(CommentPeopleService).me;
+  /** The chat's agent, when the document is open in a chat: mentionable, and sent comments that mention it (ADR 0x046). */
+  private readonly agentHooks = inject(CommentAgentService).hooks(() => this.file());
+  protected override agentMentions(): CommentAgentHooks {
+    return this.agentHooks;
+  }
   readonly threads = signal<DocxCommentThread[]>([]);
   /** The file's threads with no place in the text shown, which a save keeps as they are. */
   private unplacedComments: string[] = [];
@@ -106,7 +112,7 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
   readonly openCount = computed(() => this.shownThreads().filter(t => !t.resolved).length);
   readonly people = computed<CommentPerson[]>(() => {
     const me = this.me();
-    return [me, ...commentAuthors(this.threads()).filter(p => p.id !== me.id)];
+    return this.agentHooks.people([me, ...commentAuthors(this.threads()).filter(p => p.id !== me.id)]);
   });
   /** Comments can be written: while editing, or while viewing a file the user may change (saved as they are made). */
   private readonly autosave = new CommentAutosave(inject(COMMENT_SAVER, { optional: true }), this);
@@ -322,6 +328,9 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
     this.draft.set(null);
     this.activeThreadId.set(id);
     this.marked.set(new Set(this.marks.positions().keys()));
+    // The mention is queued before the change starts a save (a viewer saves at once), so that save
+    // holds it and sends it when it lands.
+    this.agentHooks.posted(thread, id, thread.quote ?? '');
     this.commentsChanged();
   }
 
@@ -353,7 +362,10 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
   }
 
   reply(event: ReplyEvent): void {
-    this.threads.update(threads => addReply(threads, event.threadId, newComment(newWordCommentId(), this.me(), event.draft)));
+    const comment = newComment(newWordCommentId(), this.me(), event.draft);
+    this.threads.update(threads => addReply(threads, event.threadId, comment));
+    const thread = this.threads().find(t => t.id === event.threadId);
+    if (thread) this.agentHooks.posted(thread, comment.id, thread.quote ?? '');
     this.commentsChanged();
   }
 

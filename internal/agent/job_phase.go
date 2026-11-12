@@ -88,7 +88,9 @@ func (a *Agent) persistUserTurnAndChatAfterInference(ctx context.Context, userID
 	if persistUserTurnUpdate && chatMessage != nil && result != nil {
 		chatMessage.Tokens = turnContextTokens(chatCtx, result)
 		if chatCtx != nil {
-			chatMessage.AdditionalContext = additionalContextItemsFromChatContext(chatCtx)
+			// The turn's recalled memories replace the message's; what the message was sent with
+			// (the document comment it came from) stays.
+			chatMessage.AdditionalContext = append(sentWithMessage(chatMessage.AdditionalContext), additionalContextItemsFromChatContext(chatCtx)...)
 		}
 		if _, err := a.ds.UpdateChatMessage(ctx, userID, *chatMessage); err != nil {
 			a.logger.Warn("failed to update user message tokens after inference", zap.Error(err))

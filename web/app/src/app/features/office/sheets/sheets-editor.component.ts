@@ -6,6 +6,7 @@ import { csvDelimiterFor, previewKindFor } from '../../gallery/helpers/file-prev
 import { COMMENT_SAVER } from '../../file-workspace/editors/file-editor';
 import { CommentAutosave } from '../comments/comment-autosave';
 import { CommentPeopleService } from '../comments/comment-people.service';
+import { CommentAgentHooks, CommentAgentService } from '../comments/comment-agent.service';
 import { CommentsPanelComponent } from '../comments/comments-panel.component';
 import { CommentsPanelState } from '../comments/comments-panel-state.service';
 import { putSheetComments, takeSheetComments } from '../xlsx/sheet-comments';
@@ -104,7 +105,11 @@ export class SheetsEditorComponent extends UniverEditorBase<UniverWorkbook, Work
 
   // --- comments (ADR 0x045) ------------------------------------------------------------------------
   readonly me = inject(CommentPeopleService).me;
-  readonly comments = new SheetCommentsState(this.me, () => this.commentsChanged());
+  private readonly agentHooks = inject(CommentAgentService).hooks(() => this.file());
+  readonly comments = new SheetCommentsState(this.me, () => this.commentsChanged(), this.agentHooks);
+  protected override agentMentions(): CommentAgentHooks {
+    return this.agentHooks;
+  }
   private readonly autosave = new CommentAutosave(inject(COMMENT_SAVER, { optional: true }), this);
   /** Comments belong to .xlsx files: while editing, or while viewing a file the user may change. */
   readonly commentable = computed(() => !this.isCsv() && (!this.readOnly() || this.autosave.available()));

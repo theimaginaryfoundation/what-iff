@@ -152,7 +152,20 @@ func ReadFileText(ctx context.Context, logger *zap.Logger, files storage.FileSto
 			return "", err
 		}
 		raw = data
+	} else if att.S3Key != "" {
+		// Exactly the object the row names, whitespace and all, and an empty file as empty: an
+		// edit of a granted file (ADR 0x046) writes back what it read, and a version check on the
+		// row does not cover bytes read from another key.
+		data, err := files.DownloadFile(ctx, att.S3Key)
+		if err != nil {
+			return "", err
+		}
+		if data == nil {
+			return "", fileRefusalf("%q could not be read: its stored content is missing", FilePath(att))
+		}
+		raw = data
 	} else {
+		// A row from before keys were recorded: found where uploads used to be stored.
 		text, ok := storage.ResolveAttachmentTextContent(ctx, logger, files, att.UserID, att)
 		if !ok {
 			return "", fileRefusalf("%q could not be read: its stored content is missing or empty", FilePath(att))

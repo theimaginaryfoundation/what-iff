@@ -13,6 +13,7 @@ import {
   viewChildren,
 } from '@angular/core';
 
+import { CommentsPanelState } from './comments-panel-state.service';
 import {
   AvatarComponent,
   CheckIconComponent,
@@ -108,7 +109,18 @@ export class CommentsPanelComponent {
 
   private readonly cards = viewChildren<ElementRef<HTMLElement>>('card');
 
+  private readonly panelState = inject(CommentsPanelState);
+
   constructor() {
+    // A link to a comment: the thread is chosen as if clicked, once the panel has it.
+    effect(() => {
+      const focus = this.panelState.focus();
+      if (!focus || !this.threads().some(t => t.id === focus)) return;
+      untracked(() => {
+        this.panelState.focus.set(null);
+        this.select.emit(focus);
+      });
+    });
     effect(() => {
       const request = this.replyRequest();
       if (request) untracked(() => this.replying.set(request.threadId));

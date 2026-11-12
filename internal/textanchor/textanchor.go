@@ -311,3 +311,29 @@ func abs(n int) int {
 	}
 	return n
 }
+
+// FindAll is every place quote appears in units, in order.
+func FindAll(units []uint16, quote string) []Range {
+	if quote == "" {
+		return nil
+	}
+	q := utf16.Encode([]rune(quote))
+	var out []Range
+	for i := 0; i+len(q) <= len(units); i++ {
+		if same, _ := equalAt(units, q, i); same {
+			out = append(out, Range{Start: i, End: i + len(q)})
+		}
+	}
+	return out
+}
+
+// LineAt is the 1-based line of the UTF-16 offset at in units.
+func LineAt(units []uint16, at int) int {
+	line := 1
+	for i := 0; i < at && i < len(units); i++ {
+		if units[i] == '\n' {
+			line++
+		}
+	}
+	return line
+}

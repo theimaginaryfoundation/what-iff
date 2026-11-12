@@ -162,6 +162,9 @@ func toChatMessageModel(e *ent.ChatMessage) *models.ChatMessage {
 	if e.JobRun != nil {
 		chatMessage.JobRun = e.JobRun
 	}
+	if len(e.CommentRefs) > 0 {
+		chatMessage.CommentRefs = e.CommentRefs
+	}
 	if e.ContextBreakdown != nil && len(e.ContextBreakdown.Segments) > 0 {
 		chatMessage.ContextBreakdown = e.ContextBreakdown
 	}
@@ -336,6 +339,9 @@ func (d *Datastore) CreateChatMessage(ctx context.Context, userID uuid.UUID, cha
 	}
 	if chatMessage.JobRun != nil {
 		create.SetJobRun(chatMessage.JobRun)
+	}
+	if len(chatMessage.CommentRefs) > 0 {
+		create.SetCommentRefs(chatMessage.CommentRefs)
 	}
 	if chatMessage.ModelReasoning != nil {
 		if r := strings.TrimSpace(*chatMessage.ModelReasoning); r != "" {

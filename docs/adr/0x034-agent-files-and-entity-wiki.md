@@ -61,11 +61,12 @@ A file whose stored content cannot be read is refused as unreadable, never repor
 ### 3. Agents change only what they created
 
 An agent may change, move or delete a file only when it is agent-authored **and** was created by the conversation's personality (any conversation with that personality), or, when the conversation has no personality, by that conversation.
-Everything else is read-only to agents, **including every file the user uploaded**.
-To work from a user's file the agent copies it to a new file of its own; the original is never touched.
+Everything else is read-only to agents, **including every file the user uploaded**, with one exception: a user's file the user mentioned the agent in a comment on, from a conversation (ADR 0x046).
+That conversation's agent may change the file's text; it may not move, rename or delete it.
+To work from any other user's file the agent copies it to a new file of its own.
 
-This is the user's rule: agents must not edit user files.
-An approval flow that lets an agent propose an edit to a user file is planned, and will always be opt-in.
+This is the user's rule: agents do not edit user files on their own initiative; mentioning the agent on a file is the user asking it to.
+There is no version history (ADR 0x043): an agent's edit replaces a file's content, its own or a user's, and the content it replaced is not kept.
 
 ### 4. Edits write a new object and swap
 
@@ -164,10 +165,10 @@ The public tools stay basic on purpose.
 
 ## Not done yet
 
-- Opt-in approval flow for agents proposing edits to user files.
+- An approval flow for an agent proposing an edit to a user's file it was not granted.
 - The same exact-name, auditable delete for memories.
 - Wiring entities and files into pre/post-processing (summarizers saving entities, retrieval pulling in linked entities).
 - Fuzzy entity matching and entity aliases.
 - Creating entities from the UI, and showing an entity's links back ("what links here").
-- Revision history or undo for agent files.
+- Version history or undo for agent edits, which comes with version history for every save (ADR 0x043).
 - Including entities in account export and import.

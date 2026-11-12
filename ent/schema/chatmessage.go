@@ -79,6 +79,9 @@ func (ChatMessage) Fields() []ent.Field {
 		field.JSON("context_breakdown", &modeltypes.ContextBreakdown{}).
 			Optional().
 			Comment("jsonb snapshot (modeltypes.ContextBreakdown) of the model-context segment/token composition captured at generation time for this assistant message; used by the Context X-ray UI. jsonb (not text) keeps DB-side JSON queries open; a version field inside guards shape evolution."),
+		field.JSON("comment_refs", []modeltypes.CommentRef{}).
+			Optional().
+			Comment("Document comments the message is about (ADR 0x046): on a user message the comment that sent it, on an assistant message the comments it made or replied to. Shown as links to the thread."),
 		field.Bool("bookmarked").
 			Default(false).
 			Comment("User-flagged bookmark for navigating long threads; either origin can be bookmarked."),

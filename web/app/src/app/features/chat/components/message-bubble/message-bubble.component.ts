@@ -1,9 +1,19 @@
-
 import { McpAppFrameComponent } from '../mcp-app-frame/mcp-app-frame.component';
-import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, computed, inject, input, output, viewChild } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  afterRenderEffect,
+  computed,
+  inject,
+  input,
+  output,
+  viewChild,
+} from '@angular/core';
 import { Router } from '@angular/router';
 
-import { ChatMessage, JobRun } from '../../../../core/models/message.model';
+import { ChatMessage, CommentRef, JobRun } from '../../../../core/models/message.model';
+import { FileWorkspaceService } from '../../../file-workspace/file-workspace.service';
 import { ToolCall } from '../../../../core/models/toolcall.model';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../../chat.constants';
 import { parseThreadReferenceBlock } from '../../helpers/thread-reference.helpers';
@@ -37,7 +47,16 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
 @Component({
   selector: 'app-message-bubble',
   standalone: true,
-  imports: [AgentRunNotesComponent, McpAppFrameComponent, MessageContentComponent, TooltipDirective, StarIconComponent, BrainIconComponent, ChevRightIconComponent, ClockIconComponent],
+  imports: [
+    AgentRunNotesComponent,
+    McpAppFrameComponent,
+    MessageContentComponent,
+    TooltipDirective,
+    StarIconComponent,
+    BrainIconComponent,
+    ChevRightIconComponent,
+    ClockIconComponent,
+  ],
   template: `
     <article
       class="bubble"
@@ -78,11 +97,7 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
         <!-- Live while the model is still thinking (open, auto-following); settles to a
              collapsed "Thought process" once reply text starts or the saved message lands.
              [open] only flips on that transition, so a manual toggle otherwise sticks. -->
-        <details
-          class="bubble__reasoning"
-          [class.bubble__reasoning--live]="reasoningLive()"
-          [open]="reasoningLive()"
-        >
+        <details class="bubble__reasoning" [class.bubble__reasoning--live]="reasoningLive()" [open]="reasoningLive()">
           <summary class="bubble__reasoning-summary" uiTooltip="Show or hide the model's reasoning for this reply">
             <ui-chev-right-icon class="bubble__reasoning-chevron" [size]="12" />
             <ui-brain-icon [size]="12" />
@@ -111,9 +126,7 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
           @if (message().pending_status; as status) {
             <span class="bubble__pending-status" role="status" aria-live="polite">{{ status }}</span>
           } @else {
-            <span class="bubble__pending-dots" aria-hidden="true">
-              <span></span><span></span><span></span>
-            </span>
+            <span class="bubble__pending-dots" aria-hidden="true"> <span></span><span></span><span></span> </span>
           }
         } @else {
           <app-message-content
@@ -126,6 +139,23 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
       </div>
       @for (call of appCalls(); track call.id) {
         <app-mcp-app-frame [chatId]="message().chat_id" [toolCall]="call" />
+      }
+      @if (message().comment_refs?.length) {
+        <div class="bubble__comments" [class.bubble__comments--assistant]="message().origin === 'Assistant'">
+          @for (ref of message().comment_refs!; track ref.file_id + ref.thread_id + (ref.comment_id ?? '')) {
+            <button
+              type="button"
+              class="bubble__comment-ref"
+              (click)="openComment(ref)"
+              [attr.aria-label]="'Open the comment on ' + ref.file_name"
+            >
+              <span class="bubble__comment-file">{{ message().origin === 'Assistant' ? 'Comment on' : 'on' }} {{ ref.file_name }}</span>
+              @if (ref.quote) {
+                <span class="bubble__comment-quote">“{{ ref.quote }}”</span>
+              }
+            </button>
+          }
+        </div>
       }
       @if (userSkillNames().length) {
         <div class="bubble__skills" aria-label="Skills sent with this message">
@@ -162,7 +192,9 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
                 class="bubble__context"
                 (click)="showContext.emit(message())"
                 uiTooltip="See what was sent to the model for this reply"
-              >Context</button>
+              >
+                Context
+              </button>
             }
             @if (modelMoodHint(); as hint) {
               <span class="bubble__hint" uiTooltip="Model and mode used for this reply">{{ hint }}</span>
@@ -172,443 +204,551 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
       }
     </article>
   `,
-  styles: [`
-    :host {
-      display: block;
-      max-width: 100%;
-      min-width: 0;
-      /* Bookmark accent; a warm gold that reads on both light and dark surfaces. */
-      --bookmark-gold: #e0a53a;
-    }
-
-    .bubble {
-      max-width: 100%;
-      min-width: 0;
-      position: relative;
-    }
-
-    .bubble--user {
-      margin-left: auto;
-    }
-
-    .bubble--pending {
-      display: inline-block;
-      width: fit-content;
-      max-width: fit-content;
-    }
-
-    .bubble__body {
-      background: var(--ai-bubble, var(--color-surface-muted));
-      border-radius: 0.625rem 0.625rem 0.625rem 0.25rem;
-      color: var(--ai-text, var(--color-text-primary));
-      font-size: 0.8125rem;
-      line-height: 1.6;
-      max-width: 100%;
-      min-width: 0;
-      overflow: hidden;
-      padding: 0.625rem 0.875rem;
-    }
-
-    .bubble--pending .bubble__body {
-      padding: 0.625rem 0.75rem;
-    }
-
-    .bubble--user .bubble__body {
-      background: var(--user-bubble, color-mix(in srgb, var(--color-accent) 58%, var(--color-surface-base)));
-      border-radius: 0.625rem 0.625rem 0.25rem;
-      color: var(--user-text, var(--color-text-primary));
-    }
-
-    .bubble--user .bubble__body :where(p, li, blockquote, pre, code, strong, em, a, h1, h2, h3, h4, h5, h6, span) {
-      color: inherit;
-    }
-
-    .bubble--user .bubble__body :where(a) {
-      text-decoration-color: color-mix(in srgb, var(--user-text, #fff) 72%, transparent);
-    }
-
-    .bubble--user .bubble__body :where(code, pre) {
-      background: color-mix(in srgb, currentColor 14%, transparent);
-    }
-
-    /* Collapsed-by-default model reasoning, sitting above the reply like a quiet aside. */
-    .bubble__reasoning {
-      margin-bottom: 0.25rem;
-      max-width: 100%;
-      min-width: 0;
-    }
-
-    .bubble__reasoning-summary {
-      align-items: center;
-      border-radius: 999px;
-      color: var(--color-text-muted);
-      cursor: pointer;
-      display: inline-flex;
-      font-family: 'Outfit', sans-serif;
-      font-size: 0.6875rem;
-      gap: 0.3rem;
-      list-style: none;
-      padding: 0.125rem 0.375rem 0.125rem 0.25rem;
-      transition: background 150ms ease, color 150ms ease;
-      user-select: none;
-    }
-
-    .bubble__reasoning-summary::-webkit-details-marker { display: none; }
-
-    .bubble__reasoning-summary:hover,
-    .bubble__reasoning-summary:focus-visible {
-      background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-      color: var(--color-text-secondary);
-    }
-
-    .bubble__reasoning-chevron {
-      display: inline-flex;
-      transition: transform 150ms ease;
-    }
-
-    .bubble__reasoning[open] .bubble__reasoning-chevron {
-      transform: rotate(90deg);
-    }
-
-    .bubble__reasoning-text {
-      border-left: 2px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border-base));
-      color: var(--color-text-secondary);
-      font-size: 0.75rem;
-      line-height: 1.55;
-      margin: 0.25rem 0 0.375rem 0.5rem;
-      max-height: 20rem;
-      overflow-wrap: anywhere;
-      overflow-y: auto;
-      padding: 0.125rem 0 0.125rem 0.625rem;
-      white-space: pre-wrap;
-    }
-
-    .bubble__reasoning--live .bubble__reasoning-summary span {
-      animation: bubble-reasoning-pulse 1.6s ease-in-out infinite;
-    }
-
-    .bubble__reasoning--live .bubble__reasoning-text {
-      max-height: 12rem;
-    }
-
-    @keyframes bubble-reasoning-pulse {
-      0%, 100% { opacity: 0.55; }
-      50% { opacity: 1; }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      .bubble__reasoning-chevron { transition: none; }
-      .bubble__reasoning--live .bubble__reasoning-summary span { animation: none; }
-    }
-
-    .bubble__thread-refs {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.25rem;
-      justify-content: flex-end;
-      margin-bottom: 0.25rem;
-      max-width: 100%;
-    }
-
-    .bubble__thread-ref {
-      align-items: center;
-      background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-      border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
-      border-radius: 999px;
-      color: var(--color-text-secondary);
-      display: inline-flex;
-      font-size: 0.6875rem;
-      font-weight: 600;
-      gap: 0.25rem;
-      max-width: 14rem;
-      padding: 0.0625rem 0.5rem;
-      text-decoration: none;
-    }
-
-    .bubble__thread-ref:hover,
-    .bubble__thread-ref:focus-visible {
-      border-color: var(--color-accent);
-      color: var(--color-accent);
-    }
-
-    .bubble__thread-ref-name {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .bubble__skills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.25rem;
-      justify-content: flex-end;
-      margin-top: 0.25rem;
-      max-width: 100%;
-    }
-
-    .bubble__skill-pill {
-      background: color-mix(in srgb, var(--color-accent) 18%, transparent);
-      border: 1px solid color-mix(in srgb, var(--color-accent) 40%, var(--color-border-base));
-      border-radius: 999px;
-      color: var(--color-text-secondary);
-      font-size: 0.5625rem;
-      font-weight: 700;
-      letter-spacing: 0.03em;
-      max-width: 12rem;
-      overflow: hidden;
-      padding: 0.0625rem 0.4rem;
-      text-overflow: ellipsis;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-
-    .bubble__meta {
-      align-items: center;
-      color: var(--color-text-muted);
-      display: flex;
-      font-family: 'Outfit', sans-serif;
-      font-size: 0.5625rem;
-      gap: 0.5rem;
-      justify-content: flex-start;
-      margin-top: 0.25rem;
-      opacity: 0;
-      transition: opacity 150ms ease;
-      width: 100%;
-    }
-
-    .bubble__meta--assistant {
-      justify-content: space-between;
-      gap: 0.375rem;
-    }
-
-    .bubble__meta-start {
-      align-items: center;
-      display: inline-flex;
-      flex-shrink: 0;
-      gap: 0.5rem;
-    }
-
-    .bubble__meta-end {
-      align-items: center;
-      display: inline-flex;
-      gap: 0.5rem;
-      margin-left: auto;
-      min-width: 0;
-    }
-
-    .bubble__hint {
-      color: var(--color-text-muted);
-      flex: 1 1 auto;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-      font-size: 0.5rem;
-      letter-spacing: 0.02em;
-      line-height: 1.2;
-      max-width: none;
-      min-width: 0;
-      opacity: 0.92;
-      overflow-wrap: anywhere;
-    }
-
-    .bubble__timestamp {
-      align-items: baseline;
-      display: inline-flex;
-      gap: 0.375rem;
-    }
-
-    .bubble__copy,
-    .bubble__context {
-      border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
-      border-radius: 999px;
-      color: var(--color-accent);
-      flex-shrink: 0;
-      opacity: 0.8;
-      padding: 0.125rem 0.375rem;
-      transition: background 150ms ease, opacity 150ms ease;
-    }
-
-    .bubble__copy:hover,
-    .bubble__copy:focus-visible,
-    .bubble__context:hover,
-    .bubble__context:focus-visible {
-      background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-      opacity: 1;
-    }
-
-    .bubble__bookmark {
-      align-items: center;
-      border: 1px solid var(--color-border-base);
-      border-radius: 999px;
-      color: var(--color-text-muted);
-      display: inline-flex;
-      flex-shrink: 0;
-      gap: 0.2rem;
-      opacity: 0.8;
-      padding: 0.125rem 0.375rem;
-      transition: background 150ms ease, color 150ms ease, opacity 150ms ease;
-    }
-
-    .bubble__bookmark:hover,
-    .bubble__bookmark:focus-visible { opacity: 1; }
-
-    .bubble__bookmark--active {
-      border-color: color-mix(in srgb, var(--bookmark-gold) 50%, var(--color-border-base));
-      color: var(--bookmark-gold);
-      opacity: 1;
-    }
-
-    /* Always-visible gold bar so bookmarks are spottable while scrolling (layout-safe inset). */
-    .bubble--bookmarked .bubble__body {
-      box-shadow: inset 3px 0 0 0 var(--bookmark-gold);
-    }
-    .bubble--bookmarked.bubble--user .bubble__body {
-      box-shadow: inset -3px 0 0 0 var(--bookmark-gold);
-    }
-
-    .bubble--user .bubble__meta {
-      justify-content: flex-end;
-    }
-
-    .bubble:hover .bubble__meta,
-    .bubble:focus-within .bubble__meta {
-      opacity: 1;
-    }
-
-    .bubble__job {
-      margin-bottom: 0.375rem;
-      max-width: 100%;
-      min-width: 0;
-    }
-
-    .bubble__job-chip {
-      align-items: center;
-      background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-      border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
-      border-radius: 999px;
-      color: var(--color-text-secondary);
-      cursor: pointer;
-      display: inline-flex;
-      font-size: 0.6875rem;
-      font-weight: 600;
-      gap: 0.25rem;
-      list-style: none;
-      max-width: 100%;
-      padding: 0.0625rem 0.5rem;
-      transition: border-color 120ms ease, color 120ms ease;
-      user-select: none;
-    }
-
-    .bubble__job-chip::-webkit-details-marker { display: none; }
-
-    .bubble__job-chip:hover,
-    .bubble__job-chip:focus-visible,
-    .bubble__job--live .bubble__job-chip {
-      border-color: var(--color-accent);
-      color: var(--color-accent);
-    }
-
-    .bubble__job-name {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .bubble__job-chevron {
-      display: inline-flex;
-      flex-shrink: 0;
-      transition: transform 150ms ease;
-    }
-
-    .bubble__job[open] .bubble__job-chevron {
-      transform: rotate(90deg);
-    }
-
-    .bubble__job-panel {
-      border-left: 2px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border-base));
-      display: grid;
-      gap: 0.375rem;
-      margin: 0.375rem 0 0.25rem 0.5rem;
-      padding: 0.125rem 0 0.125rem 0.625rem;
-    }
-
-    .bubble__job-prompt {
-      color: var(--color-text-secondary);
-      font-size: 0.75rem;
-      line-height: 1.55;
-      max-height: 16rem;
-      overflow-wrap: anywhere;
-      overflow-y: auto;
-      white-space: pre-wrap;
-    }
-
-    .bubble__job-open {
-      color: var(--color-accent);
-      font-size: 0.6875rem;
-      justify-self: start;
-      text-decoration: underline;
-      text-underline-offset: 2px;
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      .bubble__job-chevron { transition: none; }
-    }
-
-    .bubble__pending-status {
-      color: var(--color-text-muted);
-      font-style: italic;
-    }
-
-    .bubble__pending-dots {
-      display: inline-flex;
-      gap: 0.25rem;
-      min-height: 1em;
-      align-items: center;
-    }
-
-    .bubble__pending-dots span {
-      animation: bubble-pending-dot 1.2s ease-in-out infinite;
-      background: var(--color-text-muted);
-      border-radius: 999px;
-      height: 0.375rem;
-      width: 0.375rem;
-    }
-
-    .bubble__pending-dots span:nth-child(2) {
-      animation-delay: 0.15s;
-    }
-
-    .bubble__pending-dots span:nth-child(3) {
-      animation-delay: 0.3s;
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      .bubble__pending-dots span {
-        animation: none;
+  styles: [
+    `
+      :host {
+        display: block;
+        max-width: 100%;
+        min-width: 0;
+        /* Bookmark accent; a warm gold that reads on both light and dark surfaces. */
+        --bookmark-gold: #e0a53a;
       }
-    }
 
-    @keyframes bubble-pending-dot {
-      0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
-      30% { opacity: 1; transform: translateY(-0.125rem); }
-    }
+      .bubble {
+        max-width: 100%;
+        min-width: 0;
+        position: relative;
+      }
 
-    /* Applied by message-list.scrollToMessage when jumping to a message (e.g. a bookmark). */
-    :host(.message-flash) .bubble__body {
-      animation: bubble-flash 1.8s ease;
-    }
+      .bubble--user {
+        margin-left: auto;
+      }
 
-    @keyframes bubble-flash {
-      0%, 100% { box-shadow: 0 0 0 0 transparent; }
-      15% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bookmark-gold) 60%, transparent); }
-    }
+      .bubble--pending {
+        display: inline-block;
+        width: fit-content;
+        max-width: fit-content;
+      }
 
-    @media (prefers-reduced-motion: reduce) {
-      :host(.message-flash) .bubble__body { animation: none; }
-    }
-  `],
+      .bubble__body {
+        background: var(--ai-bubble, var(--color-surface-muted));
+        border-radius: 0.625rem 0.625rem 0.625rem 0.25rem;
+        color: var(--ai-text, var(--color-text-primary));
+        font-size: 0.8125rem;
+        line-height: 1.6;
+        max-width: 100%;
+        min-width: 0;
+        overflow: hidden;
+        padding: 0.625rem 0.875rem;
+      }
+
+      .bubble--pending .bubble__body {
+        padding: 0.625rem 0.75rem;
+      }
+
+      .bubble--user .bubble__body {
+        background: var(--user-bubble, color-mix(in srgb, var(--color-accent) 58%, var(--color-surface-base)));
+        border-radius: 0.625rem 0.625rem 0.25rem;
+        color: var(--user-text, var(--color-text-primary));
+      }
+
+      .bubble--user .bubble__body :where(p, li, blockquote, pre, code, strong, em, a, h1, h2, h3, h4, h5, h6, span) {
+        color: inherit;
+      }
+
+      .bubble--user .bubble__body :where(a) {
+        text-decoration-color: color-mix(in srgb, var(--user-text, #fff) 72%, transparent);
+      }
+
+      .bubble--user .bubble__body :where(code, pre) {
+        background: color-mix(in srgb, currentColor 14%, transparent);
+      }
+
+      /* Collapsed-by-default model reasoning, sitting above the reply like a quiet aside. */
+      .bubble__reasoning {
+        margin-bottom: 0.25rem;
+        max-width: 100%;
+        min-width: 0;
+      }
+
+      .bubble__reasoning-summary {
+        align-items: center;
+        border-radius: 999px;
+        color: var(--color-text-muted);
+        cursor: pointer;
+        display: inline-flex;
+        font-family: 'Outfit', sans-serif;
+        font-size: 0.6875rem;
+        gap: 0.3rem;
+        list-style: none;
+        padding: 0.125rem 0.375rem 0.125rem 0.25rem;
+        transition:
+          background 150ms ease,
+          color 150ms ease;
+        user-select: none;
+      }
+
+      .bubble__reasoning-summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .bubble__reasoning-summary:hover,
+      .bubble__reasoning-summary:focus-visible {
+        background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+        color: var(--color-text-secondary);
+      }
+
+      .bubble__reasoning-chevron {
+        display: inline-flex;
+        transition: transform 150ms ease;
+      }
+
+      .bubble__reasoning[open] .bubble__reasoning-chevron {
+        transform: rotate(90deg);
+      }
+
+      .bubble__reasoning-text {
+        border-left: 2px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border-base));
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+        line-height: 1.55;
+        margin: 0.25rem 0 0.375rem 0.5rem;
+        max-height: 20rem;
+        overflow-wrap: anywhere;
+        overflow-y: auto;
+        padding: 0.125rem 0 0.125rem 0.625rem;
+        white-space: pre-wrap;
+      }
+
+      .bubble__reasoning--live .bubble__reasoning-summary span {
+        animation: bubble-reasoning-pulse 1.6s ease-in-out infinite;
+      }
+
+      .bubble__reasoning--live .bubble__reasoning-text {
+        max-height: 12rem;
+      }
+
+      @keyframes bubble-reasoning-pulse {
+        0%,
+        100% {
+          opacity: 0.55;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .bubble__reasoning-chevron {
+          transition: none;
+        }
+        .bubble__reasoning--live .bubble__reasoning-summary span {
+          animation: none;
+        }
+      }
+
+      .bubble__thread-refs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.25rem;
+        justify-content: flex-end;
+        margin-bottom: 0.25rem;
+        max-width: 100%;
+      }
+
+      .bubble__thread-ref {
+        align-items: center;
+        background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+        border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
+        border-radius: 999px;
+        color: var(--color-text-secondary);
+        display: inline-flex;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        gap: 0.25rem;
+        max-width: 14rem;
+        padding: 0.0625rem 0.5rem;
+        text-decoration: none;
+      }
+
+      .bubble__thread-ref:hover,
+      .bubble__thread-ref:focus-visible {
+        border-color: var(--color-accent);
+        color: var(--color-accent);
+      }
+
+      .bubble__thread-ref-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      // Comments a message is about (ADR 0x046): a link that opens the file at the thread.
+      .bubble__comments {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.125rem;
+        margin-top: 0.25rem;
+        max-width: 100%;
+      }
+
+      .bubble__comments--assistant {
+        align-items: flex-start;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 0.375rem;
+        margin-top: 0.5rem;
+
+        // The agent's comments, like the files it attaches: a pill each.
+        .bubble__comment-ref {
+          align-items: center;
+          background: var(--color-surface-muted);
+          border: 1px solid var(--color-border-base);
+          border-radius: 9999px;
+          max-width: 22rem;
+          padding: 0.25rem 0.7rem;
+
+          &:hover {
+            border-color: var(--color-accent);
+          }
+        }
+      }
+
+      .bubble__comment-ref {
+        background: none;
+        border: 0;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        display: inline-flex;
+        font-size: 0.75rem;
+        gap: 0.35rem;
+        max-width: 100%;
+        padding: 0;
+
+        &:hover .bubble__comment-file {
+          text-decoration: underline;
+        }
+      }
+
+      .bubble__comment-file {
+        color: var(--color-accent);
+        flex: none;
+      }
+
+      .bubble__comment-quote {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .bubble__skills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.25rem;
+        justify-content: flex-end;
+        margin-top: 0.25rem;
+        max-width: 100%;
+      }
+
+      .bubble__skill-pill {
+        background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+        border: 1px solid color-mix(in srgb, var(--color-accent) 40%, var(--color-border-base));
+        border-radius: 999px;
+        color: var(--color-text-secondary);
+        font-size: 0.5625rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        max-width: 12rem;
+        overflow: hidden;
+        padding: 0.0625rem 0.4rem;
+        text-overflow: ellipsis;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      .bubble__meta {
+        align-items: center;
+        color: var(--color-text-muted);
+        display: flex;
+        font-family: 'Outfit', sans-serif;
+        font-size: 0.5625rem;
+        gap: 0.5rem;
+        justify-content: flex-start;
+        margin-top: 0.25rem;
+        opacity: 0;
+        transition: opacity 150ms ease;
+        width: 100%;
+      }
+
+      .bubble__meta--assistant {
+        justify-content: space-between;
+        gap: 0.375rem;
+      }
+
+      .bubble__meta-start {
+        align-items: center;
+        display: inline-flex;
+        flex-shrink: 0;
+        gap: 0.5rem;
+      }
+
+      .bubble__meta-end {
+        align-items: center;
+        display: inline-flex;
+        gap: 0.5rem;
+        margin-left: auto;
+        min-width: 0;
+      }
+
+      .bubble__hint {
+        color: var(--color-text-muted);
+        flex: 1 1 auto;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+        font-size: 0.5rem;
+        letter-spacing: 0.02em;
+        line-height: 1.2;
+        max-width: none;
+        min-width: 0;
+        opacity: 0.92;
+        overflow-wrap: anywhere;
+      }
+
+      .bubble__timestamp {
+        align-items: baseline;
+        display: inline-flex;
+        gap: 0.375rem;
+      }
+
+      .bubble__copy,
+      .bubble__context {
+        border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
+        border-radius: 999px;
+        color: var(--color-accent);
+        flex-shrink: 0;
+        opacity: 0.8;
+        padding: 0.125rem 0.375rem;
+        transition:
+          background 150ms ease,
+          opacity 150ms ease;
+      }
+
+      .bubble__copy:hover,
+      .bubble__copy:focus-visible,
+      .bubble__context:hover,
+      .bubble__context:focus-visible {
+        background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+        opacity: 1;
+      }
+
+      .bubble__bookmark {
+        align-items: center;
+        border: 1px solid var(--color-border-base);
+        border-radius: 999px;
+        color: var(--color-text-muted);
+        display: inline-flex;
+        flex-shrink: 0;
+        gap: 0.2rem;
+        opacity: 0.8;
+        padding: 0.125rem 0.375rem;
+        transition:
+          background 150ms ease,
+          color 150ms ease,
+          opacity 150ms ease;
+      }
+
+      .bubble__bookmark:hover,
+      .bubble__bookmark:focus-visible {
+        opacity: 1;
+      }
+
+      .bubble__bookmark--active {
+        border-color: color-mix(in srgb, var(--bookmark-gold) 50%, var(--color-border-base));
+        color: var(--bookmark-gold);
+        opacity: 1;
+      }
+
+      /* Always-visible gold bar so bookmarks are spottable while scrolling (layout-safe inset). */
+      .bubble--bookmarked .bubble__body {
+        box-shadow: inset 3px 0 0 0 var(--bookmark-gold);
+      }
+      .bubble--bookmarked.bubble--user .bubble__body {
+        box-shadow: inset -3px 0 0 0 var(--bookmark-gold);
+      }
+
+      .bubble--user .bubble__meta {
+        justify-content: flex-end;
+      }
+
+      .bubble:hover .bubble__meta,
+      .bubble:focus-within .bubble__meta {
+        opacity: 1;
+      }
+
+      .bubble__job {
+        margin-bottom: 0.375rem;
+        max-width: 100%;
+        min-width: 0;
+      }
+
+      .bubble__job-chip {
+        align-items: center;
+        background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+        border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
+        border-radius: 999px;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        display: inline-flex;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        gap: 0.25rem;
+        list-style: none;
+        max-width: 100%;
+        padding: 0.0625rem 0.5rem;
+        transition:
+          border-color 120ms ease,
+          color 120ms ease;
+        user-select: none;
+      }
+
+      .bubble__job-chip::-webkit-details-marker {
+        display: none;
+      }
+
+      .bubble__job-chip:hover,
+      .bubble__job-chip:focus-visible,
+      .bubble__job--live .bubble__job-chip {
+        border-color: var(--color-accent);
+        color: var(--color-accent);
+      }
+
+      .bubble__job-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .bubble__job-chevron {
+        display: inline-flex;
+        flex-shrink: 0;
+        transition: transform 150ms ease;
+      }
+
+      .bubble__job[open] .bubble__job-chevron {
+        transform: rotate(90deg);
+      }
+
+      .bubble__job-panel {
+        border-left: 2px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border-base));
+        display: grid;
+        gap: 0.375rem;
+        margin: 0.375rem 0 0.25rem 0.5rem;
+        padding: 0.125rem 0 0.125rem 0.625rem;
+      }
+
+      .bubble__job-prompt {
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+        line-height: 1.55;
+        max-height: 16rem;
+        overflow-wrap: anywhere;
+        overflow-y: auto;
+        white-space: pre-wrap;
+      }
+
+      .bubble__job-open {
+        color: var(--color-accent);
+        font-size: 0.6875rem;
+        justify-self: start;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .bubble__job-chevron {
+          transition: none;
+        }
+      }
+
+      .bubble__pending-status {
+        color: var(--color-text-muted);
+        font-style: italic;
+      }
+
+      .bubble__pending-dots {
+        display: inline-flex;
+        gap: 0.25rem;
+        min-height: 1em;
+        align-items: center;
+      }
+
+      .bubble__pending-dots span {
+        animation: bubble-pending-dot 1.2s ease-in-out infinite;
+        background: var(--color-text-muted);
+        border-radius: 999px;
+        height: 0.375rem;
+        width: 0.375rem;
+      }
+
+      .bubble__pending-dots span:nth-child(2) {
+        animation-delay: 0.15s;
+      }
+
+      .bubble__pending-dots span:nth-child(3) {
+        animation-delay: 0.3s;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .bubble__pending-dots span {
+          animation: none;
+        }
+      }
+
+      @keyframes bubble-pending-dot {
+        0%,
+        60%,
+        100% {
+          opacity: 0.35;
+          transform: translateY(0);
+        }
+        30% {
+          opacity: 1;
+          transform: translateY(-0.125rem);
+        }
+      }
+
+      /* Applied by message-list.scrollToMessage when jumping to a message (e.g. a bookmark). */
+      :host(.message-flash) .bubble__body {
+        animation: bubble-flash 1.8s ease;
+      }
+
+      @keyframes bubble-flash {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 transparent;
+        }
+        15% {
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--bookmark-gold) 60%, transparent);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        :host(.message-flash) .bubble__body {
+          animation: none;
+        }
+      }
+    `,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class MessageBubbleComponent {
   private readonly router = inject(Router);
+  private readonly workspace = inject(FileWorkspaceService);
+
+  /** Opens the file a comment is on, at its thread (ADR 0x046). */
+  openComment(ref: CommentRef): void {
+    this.workspace.requestOpen(ref.file_id, { comment: ref.thread_id });
+  }
   readonly message = input.required<ChatMessage>();
   readonly displayContent = input('');
 
@@ -617,9 +757,7 @@ export class MessageBubbleComponent {
    * the text the user typed so the bubble shows chips instead of the raw block.
    */
   readonly userThreadBlock = computed(() =>
-    this.message().origin === 'User'
-      ? parseThreadReferenceBlock(this.displayContent())
-      : { references: [], body: this.displayContent() },
+    this.message().origin === 'User' ? parseThreadReferenceBlock(this.displayContent()) : { references: [], body: this.displayContent() },
   );
   /** What the markdown renders: the message without its attached-thread block. */
   readonly bodyContent = computed(() => this.userThreadBlock().body);
@@ -658,9 +796,7 @@ export class MessageBubbleComponent {
   });
 
   /** Reasoning is still streaming: pending placeholder with no reply text yet. */
-  readonly reasoningLive = computed(
-    () => this.isPendingPlaceholder() && !!this.reasoning() && !this.displayContent().trim(),
-  );
+  readonly reasoningLive = computed(() => this.isPendingPlaceholder() && !!this.reasoning() && !this.displayContent().trim());
 
   private readonly reasoningBox = viewChild<ElementRef<HTMLElement>>('reasoningBox');
 
@@ -686,11 +822,9 @@ export class MessageBubbleComponent {
     const message = this.message();
     const run = message.job_run;
     if (message.origin !== 'Assistant' || !run?.agent_job_id) return null;
-    return jobChip(run, this.isPendingPlaceholder() ? message.pending_label ?? null : null);
+    return jobChip(run, this.isPendingPlaceholder() ? (message.pending_label ?? null) : null);
   });
-  readonly showPendingDots = computed(
-    () => this.isPendingPlaceholder() && !this.displayContent().trim(),
-  );
+  readonly showPendingDots = computed(() => this.isPendingPlaceholder() && !this.displayContent().trim());
   readonly modelMoodHint = computed((): string | null => {
     const m = this.message();
     if (m.origin !== 'Assistant') {
@@ -708,15 +842,11 @@ export class MessageBubbleComponent {
     if (this.message().origin !== 'User') {
       return [];
     }
-    const names = (this.message().rituals ?? [])
-      .map(r => r.name?.trim())
-      .filter((n): n is string => !!n);
+    const names = (this.message().rituals ?? []).map(r => r.name?.trim()).filter((n): n is string => !!n);
     return [...new Set(names)];
   });
 
-  readonly ariaLabel = computed(() =>
-    this.showPendingDots() ? 'Assistant is composing a reply' : `${this.message().origin} message`,
-  );
+  readonly ariaLabel = computed(() => (this.showPendingDots() ? 'Assistant is composing a reply' : `${this.message().origin} message`));
 
   /** Plain click navigates in-app; modified clicks keep the browser's new-tab behaviour. */
   navigateInApp(event: MouseEvent, href: string): void {

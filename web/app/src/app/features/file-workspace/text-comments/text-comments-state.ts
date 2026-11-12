@@ -12,6 +12,7 @@ import {
   removeComment,
   setResolved,
 } from '../../office/comments/comment-threads';
+import { CommentAgentHooks } from '../../office/comments/comment-agent.service';
 import { EditEvent, ReplyEvent } from '../../office/comments/comments-panel.component';
 import { TextCommentAnchor, TextCommentThread, TextComments, TextCommentsService } from './text-comments.service';
 
@@ -119,6 +120,7 @@ export class TextCommentsState {
     private readonly changed: () => void,
     /** Called when a save finds the file's content changed elsewhere: the host shows it as it is now. */
     private readonly contentChanged?: () => void,
+    private readonly agent: CommentAgentHooks | null = null,
   ) {}
 
   /**
@@ -155,7 +157,8 @@ export class TextCommentsState {
   readonly openCount = computed(() => this.threads().filter(t => !t.resolved).length);
   readonly people = computed<CommentPerson[]>(() => {
     const me = this.me();
-    return [me, ...commentAuthors(this.threads()).filter(p => p.id !== me.id)];
+    const people = [me, ...commentAuthors(this.threads()).filter(p => p.id !== me.id)];
+    return this.agent ? this.agent.people(people) : people;
   });
 
   /** Loads a file's threads; they are placed on the surface once it is attached. */
@@ -180,6 +183,8 @@ export class TextCommentsState {
   }
 
   private adopt(got: TextComments): void {
+    // The comments shown are the server's now: those not saved are gone, and their mentions.
+    this.agent?.discard();
     this.contentVersion = got.contentVersion;
     this.revision = got.revision;
     this.synced = got.threads;
@@ -216,7 +221,7 @@ export class TextCommentsState {
    * written again. When the file's content changed, the comments are read again and the host shows
    * the file as it is now; the status says so.
    */
-  async save(contentVersion: number, threads: TextCommentThread[] = this.snapshot()): Promise<void> {
+  async save(contentVersion: number, threads: TextCommentThread[] = this.snapshot(), mentions = this.mentionMark()): Promise<void> {
     const fileId = this.fileId;
     if (!fileId) return;
     this.status.set('saving');
@@ -229,6 +234,8 @@ export class TextCommentsState {
         if (sent !== threads) this.takeMerged(sent, got.threads);
         this.synced = got.threads;
         this.status.set('saved');
+        // The comments that mention the agent are stored now: it is sent them (ADR 0x046).
+        this.agent?.saved(mentions);
         return;
       } catch (error) {
         const status = (error as { status?: number }).status;
@@ -253,6 +260,11 @@ export class TextCommentsState {
         throw error;
       }
     }
+  }
+
+  /** Where a save takes the comments from, for the mentions it holds (CommentAgentHooks.mark). */
+  mentionMark(): number {
+    return this.agent?.mark() ?? 0;
   }
 
   /** Whether there are changes here a save has not stored: comments, replies, resolved state (anchors aside, which move as the text is typed). */
@@ -354,7 +366,18 @@ export class TextCommentsState {
     this.draft.set(null);
     this.activeId.set(id);
     this.refresh();
+    // The mention is queued before the change starts a save (a viewer saves at once), so that save
+    // holds it and sends it when it lands.
+    this.notifyAgent(id, id);
     this.changed();
+  }
+
+  /** Hands a posted comment to the agent hooks, with what its thread is on now. */
+  private notifyAgent(threadId: string, commentId: string): void {
+    const thread = this.threads().find(t => t.id === threadId);
+    if (!this.agent || !thread) return;
+    const at = this.positions().get(threadId);
+    this.agent.posted(thread, commentId, at && this.surface ? quoteOf(this.surface.text(at)) : '');
   }
 
   select(threadId: string): void {
@@ -365,7 +388,9 @@ export class TextCommentsState {
   }
 
   reply(event: ReplyEvent): void {
-    this.threads.update(threads => addReply(threads, event.threadId, newComment(newThreadId(), this.me(), event.draft)));
+    const comment = newComment(newThreadId(), this.me(), event.draft);
+    this.threads.update(threads => addReply(threads, event.threadId, comment));
+    this.notifyAgent(event.threadId, comment.id);
     this.changed();
   }
 

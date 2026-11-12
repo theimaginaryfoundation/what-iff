@@ -93,7 +93,14 @@ func TestClaimSteerMessages(t *testing.T) {
 	running := job(message(chat.ID, "do the research"), false, models.JobStatusProcessing)
 	first := job(message(chat.ID, "also check 2025"), true, models.JobStatusProcessing)
 	plain := job(message(chat.ID, "a normal queued turn"), false, models.JobStatusPending)
-	second := job(message(chat.ID, "and keep it short"), true, models.JobStatusPending)
+	commented, err := ds.CreateChatMessage(ctx, userID, models.ChatMessage{ChatID: chat.ID, Message: "and keep it short", Origin: models.MessageOriginUser,
+		AdditionalContext: []models.AdditionalContextItem{
+			{Type: models.AdditionalContextTypeFileComment, Content: "on plan.md"},
+			{Type: "MEMORY", Content: "not the comment"},
+		}})
+	require.NoError(t, err)
+	time.Sleep(5 * time.Millisecond)
+	second := job(commented, true, models.JobStatusPending)
 	elsewhere := job(message(otherChat.ID, "other thread"), true, models.JobStatusPending)
 
 	claimed, err := ds.ClaimSteerMessages(ctx, userID, chat.ID, running.ID, running.CreatedAt)
@@ -101,6 +108,8 @@ func TestClaimSteerMessages(t *testing.T) {
 	require.Len(t, claimed, 2)
 	require.Equal(t, "also check 2025", claimed[0].Message)
 	require.Equal(t, "and keep it short", claimed[1].Message)
+	require.Empty(t, claimed[0].FileComments)
+	require.Equal(t, []string{"on plan.md"}, claimed[1].FileComments, "the document comment it was sent from, nothing else")
 
 	status := func(j *models.Job) (models.JobStatus, string) {
 		row, err := ds.dbClient.Job.Query().Where(entjob.ID(j.ID)).Only(ctx)
