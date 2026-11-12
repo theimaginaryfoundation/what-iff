@@ -8,10 +8,8 @@ import (
 	"context"
 	"fmt"
 	"image"
-	"image/color"
 	_ "image/gif" // register GIF decoder
 	"image/jpeg"
-	"image/png"
 	"io"
 	"path/filepath"
 
@@ -25,25 +23,36 @@ import (
 const (
 	DefaultThumbnailMaxPx   = 256
 	DefaultUploadImageMaxPx = 2048
+	// UploadJPEGQuality is the quality a JPEG upload is re-encoded at: high enough
+	// that the second generation of loss does not show.
+	UploadJPEGQuality = 90
 )
 
 // NormalizeForUpload decodes an accepted image from input, scales it down when
-// its longest edge exceeds maxPx, and re-encodes it to output as PNG. It returns
-// the renamed filename and its content type. Images that already fit keep their
+// its longest edge exceeds maxPx, and re-encodes it to output. It returns the
+// renamed filename and its content type. Images that already fit keep their
 // original dimensions; normalization never upscales. Re-encoding also drops
-// metadata such as EXIF.
+// metadata such as EXIF, after applying a JPEG's orientation to its pixels.
 //
-// Uploads are lossless PNG again (ADR 0x045 reverts what-iff#419's JPEG for
-// opaque uploads): JPEG blurred screenshots and drawings, and masks and markup
-// need exact pixels. See encodeUploadPNG for how the PNG is kept small.
+// The format follows the input (ADR 0x047 §9):
+//   - a JPEG stays a JPEG (quality UploadJPEGQuality): it is already lossy, and
+//     storing its pixels as PNG would only make it several times larger;
+//   - everything else (PNG, GIF, WebP) becomes a compact PNG; see CompactPNG.
 func NormalizeForUpload(input io.Reader, output io.Writer, fileName string, maxPx int) (string, string, error) {
 	if maxPx <= 0 {
 		maxPx = DefaultUploadImageMaxPx
 	}
 
-	src, _, err := image.Decode(input)
+	data, err := io.ReadAll(input)
+	if err != nil {
+		return "", "", fmt.Errorf("read image for upload: %w", err)
+	}
+	src, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return "", "", fmt.Errorf("decode image for upload: %w", err)
+	}
+	if format == "jpeg" {
+		src = applyOrientation(src, jpegOrientation(data))
 	}
 
 	bounds := src.Bounds()
@@ -61,70 +70,16 @@ func NormalizeForUpload(input io.Reader, output io.Writer, fileName string, maxP
 	}
 
 	base := fileName[:len(fileName)-len(filepath.Ext(fileName))]
-	if err := encodeUploadPNG(output, dst); err != nil {
+	if format == "jpeg" {
+		if err := jpeg.Encode(output, dst, &jpeg.Options{Quality: UploadJPEGQuality}); err != nil {
+			return "", "", fmt.Errorf("encode upload image as JPEG: %w", err)
+		}
+		return base + ".jpg", "image/jpeg", nil
+	}
+	if err := encodeCompactPNG(output, dst); err != nil {
 		return "", "", fmt.Errorf("encode upload image as PNG: %w", err)
 	}
 	return base + ".png", "image/png", nil
-}
-
-// encodeUploadPNG writes img as a compact PNG:
-//   - 8 bits per channel, whatever the source had (a 16-bit PNG doubles in size for
-//     nothing a screen shows), with no alpha channel when every pixel is opaque;
-//   - an exact palette when the image has at most 256 colours (masks, sketches,
-//     diagrams, most screenshots), which is lossless and several times smaller;
-//   - default zlib compression: the best level saved well under 1% on photos for
-//     twice the time.
-func encodeUploadPNG(w io.Writer, img image.Image) error {
-	flat := toNRGBA(img)
-	var out image.Image = flat
-	if p := exactPalette(flat); p != nil {
-		out = p
-	}
-	return (&png.Encoder{CompressionLevel: png.DefaultCompression}).Encode(w, out)
-}
-
-// toNRGBA copies img into 8-bit non-premultiplied RGBA, which the PNG encoder
-// writes as RGB when every pixel is opaque.
-func toNRGBA(img image.Image) *image.NRGBA {
-	if n, ok := img.(*image.NRGBA); ok && n.Bounds().Min == (image.Point{}) {
-		return n
-	}
-	b := img.Bounds()
-	out := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-	xdraw.Draw(out, out.Bounds(), img, b.Min, xdraw.Src)
-	return out
-}
-
-// maxPaletteColors is the most colours a paletted PNG holds.
-const maxPaletteColors = 256
-
-// exactPalette returns img as a paletted image when it has at most 256 distinct
-// colours, nil otherwise. It stops at the 257th colour, so a photo costs little.
-func exactPalette(img *image.NRGBA) *image.Paletted {
-	index := make(map[color.NRGBA]uint8, maxPaletteColors)
-	palette := make(color.Palette, 0, maxPaletteColors)
-	b := img.Bounds()
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			c := img.NRGBAAt(x, y)
-			if _, ok := index[c]; ok {
-				continue
-			}
-			if len(palette) == maxPaletteColors {
-				return nil
-			}
-			index[c] = uint8(len(palette))
-			palette = append(palette, c)
-		}
-	}
-	out := image.NewPaletted(b, palette)
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		row := out.Pix[(y-b.Min.Y)*out.Stride:]
-		for x := b.Min.X; x < b.Max.X; x++ {
-			row[x-b.Min.X] = index[img.NRGBAAt(x, y)]
-		}
-	}
-	return out
 }
 
 func scaledDimensions(srcW, srcH, maxPx int) (int, int) {

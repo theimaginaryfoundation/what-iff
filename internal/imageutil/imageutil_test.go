@@ -83,8 +83,9 @@ func TestNormalizeForUploadConvertsWebP(t *testing.T) {
 	require.Equal(t, src.Bounds().Size(), normalized.Bounds().Size(), "small images keep their size")
 }
 
-// A JPEG photo becomes an opaque 8-bit PNG with every pixel kept.
-func TestNormalizeForUploadTurnsJPEGIntoPNG(t *testing.T) {
+// A JPEG stays a JPEG: storing an already lossy photo as PNG would only make it
+// several times larger.
+func TestNormalizeForUploadKeepsJPEGAsJPEG(t *testing.T) {
 	t.Parallel()
 
 	src := image.NewRGBA(image.Rect(0, 0, 300, 200))
@@ -95,23 +96,18 @@ func TestNormalizeForUploadTurnsJPEGIntoPNG(t *testing.T) {
 	}
 	var input bytes.Buffer
 	require.NoError(t, jpeg.Encode(&input, src, &jpeg.Options{Quality: 90}))
-	decodedJPEG, _, err := image.Decode(bytes.NewReader(input.Bytes()))
-	require.NoError(t, err)
+	inputLen := input.Len()
 
 	var output bytes.Buffer
 	fileName, contentType, err := NormalizeForUpload(&input, &output, "photo.jpeg", DefaultUploadImageMaxPx)
 	require.NoError(t, err)
-	require.Equal(t, "photo.png", fileName)
-	require.Equal(t, "image/png", contentType)
-
-	cfg, err := png.DecodeConfig(bytes.NewReader(output.Bytes()))
+	require.Equal(t, "photo.jpg", fileName)
+	require.Equal(t, "image/jpeg", contentType)
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(output.Bytes()))
 	require.NoError(t, err)
-	require.Equal(t, color.RGBAModel, cfg.ColorModel, "opaque and 8-bit: no alpha channel, no 16-bit samples")
-	normalized, err := png.Decode(&output)
-	require.NoError(t, err)
-	r1, g1, b1, _ := decodedJPEG.At(120, 80).RGBA()
-	r2, g2, b2, _ := normalized.At(120, 80).RGBA()
-	require.Equal(t, []uint32{r1 >> 8, g1 >> 8, b1 >> 8}, []uint32{r2 >> 8, g2 >> 8, b2 >> 8}, "no further loss")
+	require.Equal(t, "jpeg", format)
+	require.Equal(t, [2]int{300, 200}, [2]int{cfg.Width, cfg.Height})
+	require.Less(t, output.Len(), inputLen*2, "about the size it came in at, not a PNG's")
 }
 
 // Few-colour images (masks, sketches, screenshots) are stored with an exact palette:
