@@ -4,6 +4,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { NEVER, Observable, map, of, Subject, throwError } from 'rxjs';
 
+import { CommentAutosave } from '../office/comments/comment-autosave';
+
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
@@ -383,6 +385,24 @@ describe('FileWorkspaceComponent', () => {
       await fixture.whenStable();
       const editor = ws['editorRef']!.instance as FakeEditorComponent;
       expect(await editor.blob().text()).toBe('with comment');
+    });
+
+    it('waits for a comment queued behind the running save before opening the editor', async () => {
+      await show(file());
+      const ws = fixture.componentInstance;
+      const first = new Subject<FileAttachment>();
+      replaceContent.mockReturnValueOnce(first).mockReturnValueOnce(of(file({ content_version: 3 })));
+      const autosave = new CommentAutosave(ws, viewer().editor);
+      autosave.request();
+      autosave.request(); // a second comment, posted while the first saves
+      const editing = ws.startEdit();
+      await new Promise(resolve => setTimeout(resolve)); // the first save is now writing
+      first.next(file({ content_version: 2 }));
+      first.complete();
+      await editing;
+      expect(replaceContent).toHaveBeenCalledTimes(2);
+      expect(autosave.status()).toBe('saved');
+      expect(ws.mode()).toBe('edit');
     });
 
     it('lets the user comment on a file no editor can write, but writes none into it', async () => {

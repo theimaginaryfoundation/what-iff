@@ -3,6 +3,7 @@ package filecomments
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -316,5 +317,26 @@ func TestWriteSetsAuthorshipOnTheServer(t *testing.T) {
 	}
 	if cs[1].AuthorID != me || cs[1].CreatedAt.After(time.Now()) {
 		t.Fatalf("a new comment is the user's, dated by the server: %+v", cs[1])
+	}
+}
+
+func TestAFileOverTheLimitTakesCommentsOnTheWholeFile(t *testing.T) {
+	svc, store, files := setup(line)
+	ctx := context.Background()
+	files["k1"] = []byte(strings.Repeat("x", MaxTextBytes+1))
+	got, err := svc.Write(ctx, uuid.New(), store.file.ID, []models.FileCommentThread{{ID: "w", Comments: []models.FileComment{{ID: "w", Text: "Too long?"}}}}, 1, 0)
+	if err != nil || len(got.Threads) != 1 || got.Threads[0].Anchor != nil {
+		t.Fatalf("whole-file comment: %+v %v", got, err)
+	}
+	if _, err := svc.Write(ctx, uuid.New(), store.file.ID, []models.FileCommentThread{thread("r", 0, 4)}, 1, got.Revision); !errors.Is(err, ErrNotText) {
+		t.Fatalf("a range still needs text: %v", err)
+	}
+}
+
+func TestALegacyEmptyFileReadsAsEmpty(t *testing.T) {
+	svc, store, _ := setup(line)
+	store.file.S3Key = "" // a row from before keys were recorded, its object empty or gone
+	if _, err := svc.Write(context.Background(), uuid.New(), store.file.ID, nil, 1, 0); err != nil {
+		t.Fatal(err)
 	}
 }

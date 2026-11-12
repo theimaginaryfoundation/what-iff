@@ -126,3 +126,17 @@ func BenchmarkRemapLargeFile(b *testing.B) {
 		}
 	}
 }
+
+func TestFindIsBoundedToo(t *testing.T) {
+	// The work is the units compared: one per place for a quote whose first unit differs.
+	saved := maxSteps
+	t.Cleanup(func() { maxSteps = saved })
+	units := Units(strings.Repeat("ab", 5000) + "target")
+	if got := find("target", units, 0); got == nil || got.Start != 10000 {
+		t.Fatalf("within the budget: %+v", got)
+	}
+	maxSteps = 5000
+	if got := find("target", units, 0); got != nil {
+		t.Fatalf("past the budget the search stops: %+v", got)
+	}
+}

@@ -83,6 +83,10 @@ func (d *Datastore) commentFileID(ctx context.Context, userID, id uuid.UUID, hop
 // is not context-only becomes the original, the rest link to it, and the file's comment set moves
 // to it, so deleting a gallery file leaves its chat copies with their comments (ADR 0x045).
 //
+// A copy whose original is already gone, and which has come to hold the comments itself (they were
+// written through it), is handed over the same way, to its siblings: the other copies of that
+// original.
+//
 // When id goes with other rows (see handOverCopiesOf), doomed matches them, and no copy it matches
 // is chosen.
 func handOverCopies(ctx context.Context, tx *ent.Tx, userID, id uuid.UUID, doomed predicate.FileAttachment) error {
@@ -90,10 +94,17 @@ func handOverCopies(ctx context.Context, tx *ent.Tx, userID, id uuid.UUID, doome
 	if err != nil {
 		return err
 	}
-	if row.OriginalID != nil || row.ContextOnly {
+	if row.ContextOnly {
 		return nil
 	}
 	copies := entfileattachment.OriginalID(id)
+	if row.OriginalID != nil {
+		orphan, err := orphanHoldingComments(ctx, tx, row)
+		if err != nil || !orphan {
+			return err
+		}
+		copies = entfileattachment.Or(copies, entfileattachment.OriginalID(*row.OriginalID))
+	}
 	if row.S3Key != "" {
 		copies = entfileattachment.Or(copies, entfileattachment.And(entfileattachment.OriginalIDIsNil(), entfileattachment.S3Key(row.S3Key)))
 	}
@@ -122,15 +133,71 @@ func handOverCopies(ctx context.Context, tx *ent.Tx, userID, id uuid.UUID, doome
 	if err := tx.FileAttachment.Update().Where(mine, entfileattachment.IDNEQ(heir.ID)).SetOriginalID(heir.ID).Exec(ctx); err != nil {
 		return err
 	}
-	return tx.FileCommentSet.Update().Where(filecommentset.FileAttachmentID(id)).SetFileAttachmentID(heir.ID).Exec(ctx)
+	return moveCommentSet(ctx, tx, id, heir.ID)
+}
+
+// orphanHoldingComments reports whether the copy row's original is gone and the row holds a
+// comment set of its own.
+func orphanHoldingComments(ctx context.Context, tx *ent.Tx, row *ent.FileAttachment) (bool, error) {
+	original, err := tx.FileAttachment.Query().Where(entfileattachment.ID(*row.OriginalID)).Exist(ctx)
+	if err != nil || original {
+		return false, err
+	}
+	return tx.FileCommentSet.Query().Where(filecommentset.FileAttachmentID(row.ID)).Exist(ctx)
+}
+
+// moveCommentSet gives from's comment set to heir. When heir holds a set of its own (copies that
+// drifted apart before links were kept), from's threads join it on the whole file, keeping their
+// quotes, since its anchors are placed on another baseline.
+func moveCommentSet(ctx context.Context, tx *ent.Tx, from, heir uuid.UUID) error {
+	moving, err := tx.FileCommentSet.Query().Where(filecommentset.FileAttachmentID(from)).Only(ctx)
+	if ent.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	kept, err := tx.FileCommentSet.Query().Where(filecommentset.FileAttachmentID(heir)).Only(ctx)
+	if ent.IsNotFound(err) {
+		return tx.FileCommentSet.UpdateOne(moving).SetFileAttachmentID(heir).Exec(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	var keptThreads, movingThreads []models.FileCommentThread
+	if err := json.Unmarshal([]byte(kept.Threads), &keptThreads); err != nil {
+		return err
+	}
+	if err := json.Unmarshal([]byte(moving.Threads), &movingThreads); err != nil {
+		return err
+	}
+	for _, t := range movingThreads {
+		t.Anchor = nil
+		keptThreads = append(keptThreads, t)
+	}
+	merged, err := json.Marshal(keptThreads)
+	if err != nil {
+		return err
+	}
+	if err := tx.FileCommentSet.UpdateOne(kept).SetThreads(string(merged)).SetRevision(kept.Revision + 1).Exec(ctx); err != nil {
+		return err
+	}
+	return tx.FileCommentSet.DeleteOne(moving).Exec(ctx)
 }
 
 // handOverCopiesOf runs before the user's rows matching doomed are deleted by a foreign-key cascade
 // (with the chat, message, personality or skill holding them), which removes their comment sets
-// with them: each of them holding a set hands it to a copy that stays (see handOverCopies).
+// with them: each original among them (with or without comments yet, as DeleteFileAttachment
+// does) hands its copies, and its set, to a copy that stays, and so does a copy holding comments
+// whose original is already gone (see handOverCopies).
 func handOverCopiesOf(ctx context.Context, tx *ent.Tx, userID uuid.UUID, doomed predicate.FileAttachment) error {
 	ids, err := tx.FileAttachment.Query().
-		Where(doomed, entfileattachment.HasOwnerWith(user.ID(userID)), entfileattachment.HasCommentSet()).
+		Where(
+			doomed,
+			entfileattachment.HasOwnerWith(user.ID(userID)),
+			entfileattachment.ContextOnly(false),
+			entfileattachment.Or(entfileattachment.OriginalIDIsNil(), entfileattachment.HasCommentSet()),
+		).
 		IDs(ctx)
 	if err != nil {
 		return err

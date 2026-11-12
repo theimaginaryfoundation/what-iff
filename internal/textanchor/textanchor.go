@@ -274,8 +274,15 @@ func find(quote string, units []uint16, near int) *Range {
 	}
 	q := utf16.Encode([]rune(quote))
 	best := -1
+	// Bounded like the diff: a long quote over a repetitive file is otherwise len(units)×len(q)
+	// compares. Past the budget the nearest place found so far stands, or none.
+	steps := 0
 	for i := 0; i+len(q) <= len(units); i++ {
-		if !equalAt(units, q, i) {
+		same, compared := equalAt(units, q, i)
+		if steps += compared; steps > maxSteps {
+			break
+		}
+		if !same {
 			continue
 		}
 		if best < 0 || abs(i-near) < abs(best-near) {
@@ -288,13 +295,14 @@ func find(quote string, units []uint16, near int) *Range {
 	return &Range{Start: best, End: best + len(q)}
 }
 
-func equalAt(units, q []uint16, at int) bool {
+// equalAt reports whether q is at units[at:], and how many units it compared to tell.
+func equalAt(units, q []uint16, at int) (bool, int) {
 	for j := range q {
 		if units[at+j] != q[j] {
-			return false
+			return false, j + 1
 		}
 	}
-	return true
+	return true, len(q)
 }
 
 func abs(n int) int {

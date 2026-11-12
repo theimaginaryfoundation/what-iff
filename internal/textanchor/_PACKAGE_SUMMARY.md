@@ -24,6 +24,7 @@ Keeps ranges of a text on the same words as the text changes (ADR 0x045): the an
 - **Myers' diff with a bound.**
   The common head and tail are matched first, and the search keeps only the diagonals each step reads back.
   Past `MaxEdits` changed words, or past `maxSteps` of work (a large file with many edits), a range is found by its own text, nearest to where it was, which is what a rewrite of the whole file comes down to.
+  The quote search past the bound counts its compares against the same budget.
   Token values are numbered once (a vocabulary shared by both texts), so the diff compares integers and each value is held once.
 - **A range that starts or ends inside a kept word keeps that part of the word.**
 

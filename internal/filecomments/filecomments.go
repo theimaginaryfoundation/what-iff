@@ -9,6 +9,7 @@ package filecomments
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -32,6 +33,9 @@ var (
 	// ErrNotText means the file is neither UTF-8 text of at most MaxTextBytes nor an image, which
 	// comments can be placed on.
 	ErrNotText = errors.New("comments can be placed only on images and on UTF-8 text files of at most 4 MB")
+	// errTextTooLarge is the ErrNotText of a file over MaxTextBytes, which can still hold comments
+	// on the whole file (Write).
+	errTextTooLarge = fmt.Errorf("%w (it is over 4 MB)", ErrNotText)
 	// ErrContentMissing means the file's stored object could not be found: a save or an agent edit
 	// replaced it after the row was read, or it is gone. Its text is not known, so no anchor is moved.
 	ErrContentMissing = errors.New("the file's content could not be found")
@@ -74,6 +78,16 @@ func contentKey(userID uuid.UUID, file *models.FileAttachment) string {
 // them on the whole file; the baseline key already tells a read that the image changed.
 func isImage(file *models.FileAttachment) bool {
 	return strings.HasPrefix(strings.ToLower(file.FileType), "image/")
+}
+
+// onWholeFile reports whether no thread is on a range of the text.
+func onWholeFile(threads []models.FileCommentThread) bool {
+	for _, t := range threads {
+		if t.Anchor != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // onFile puts every thread on the whole file: an image's threads (see isImage).
@@ -166,10 +180,17 @@ func (s *Service) Write(ctx context.Context, userID, id uuid.UUID, threads []mod
 	if isImage(file) {
 		threads = onFile(threads)
 	} else {
-		if text, err = s.text(ctx, userID, file); err != nil {
+		text, err = s.text(ctx, userID, file)
+		switch {
+		case errors.Is(err, errTextTooLarge) && onWholeFile(threads):
+			// A file past MaxTextBytes keeps comments on the whole file (Read shows them so): no
+			// text is needed to place those, and the stored key still marks the baseline.
+			threads, text = onFile(threads), ""
+		case err != nil:
 			return nil, s.missingIfStale(ctx, userID, id, contentVersion, err)
+		default:
+			threads = Place(threads, text)
 		}
-		threads = Place(threads, text)
 	}
 	next, err := s.store.PutFileCommentSet(ctx, userID, key, models.FileCommentSet{
 		Threads: threads, BaselineText: text, BaselineKey: contentKey(userID, file),
@@ -185,7 +206,7 @@ func (s *Service) Write(ctx context.Context, userID, id uuid.UUID, threads []mod
 // and store that as the baseline.
 func (s *Service) text(ctx context.Context, userID uuid.UUID, file *models.FileAttachment) (string, error) {
 	if file.SizeBytes != nil && *file.SizeBytes > MaxTextBytes {
-		return "", ErrNotText
+		return "", errTextTooLarge
 	}
 	var data []byte
 	var err error
@@ -201,11 +222,16 @@ func (s *Service) text(ctx context.Context, userID uuid.UUID, file *models.FileA
 	if err != nil {
 		return "", err
 	}
-	// DownloadFile is (nil, nil) for a missing object and non-nil for an empty one.
-	if data == nil {
+	// DownloadFile is (nil, nil) for a missing object and non-nil for an empty one. A row from
+	// before keys were recorded cannot tell the two apart (ReadAttachment is nil for both), and
+	// has no object a save could swap away mid-read: it is read as empty, as it always was.
+	if data == nil && file.S3Key != "" {
 		return "", ErrContentMissing
 	}
-	if len(data) > MaxTextBytes || !utf8.Valid(data) {
+	if len(data) > MaxTextBytes {
+		return "", errTextTooLarge
+	}
+	if !utf8.Valid(data) {
 		return "", ErrNotText
 	}
 	return string(data), nil
