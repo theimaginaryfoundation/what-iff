@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/filedelete"
+	"github.com/theimaginaryfoundation/what-iff/internal/filesave"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
@@ -58,7 +59,15 @@ type agentFileStore interface {
 	MoveFileAttachmentsToFolder(ctx context.Context, userID uuid.UUID, ids []uuid.UUID, folder string) (int, error)
 	RenameGalleryFile(ctx context.Context, userID, id uuid.UUID, name string) (string, error)
 	CountAgentFiles(ctx context.Context, userID uuid.UUID) (int, error)
+	// HasFileEditGrant: the user mentioned the chat's agent in a comment on the file (ADR 0x046).
+	HasFileEditGrant(ctx context.Context, userID, chatID, fileID uuid.UUID) (bool, error)
 	storage.AttachmentKeyRefs
+}
+
+// userFileSaver saves new content for one of the user's files, as the file workspace does;
+// *filesave.Service satisfies it.
+type userFileSaver interface {
+	Replace(ctx context.Context, userID uuid.UUID, req filesave.Request) (*models.FileAttachment, error)
 }
 
 // agentFileDeleter deletes a file row and releases its objects; *filedelete.Service satisfies it.
@@ -71,7 +80,15 @@ type AgentFileTool struct {
 	store   agentFileStore
 	files   storage.FileStore
 	deleter agentFileDeleter
-	logger  *zap.Logger
+	// saver changes the content of a user's file the agent was granted (ADR 0x046); nil refuses.
+	saver  userFileSaver
+	logger *zap.Logger
+}
+
+// WithUserFileSaver sets how the tool saves a user's file it was granted (ADR 0x046).
+func (t *AgentFileTool) WithUserFileSaver(saver userFileSaver) *AgentFileTool {
+	t.saver = saver
+	return t
 }
 
 // NewAgentFileTool constructs an AgentFileTool backed by the datastore and object store.
@@ -109,6 +126,33 @@ func ownsAgentFile(chat *models.Chat, att *models.FileAttachment) bool {
 	return att.CreatedByPersonalityID == nil && att.CreatedByChatID != nil && *att.CreatedByChatID == chat.ID
 }
 
+// granted reports whether the user granted chat's agent att (ADR 0x046): a comment on the file
+// that mentions the agent. Skill files stay with the skill editor.
+func (t *AgentFileTool) granted(ctx context.Context, chat *models.Chat, att *models.FileAttachment) bool {
+	if att == nil || att.IsSkillFile() || chat.ID == uuid.Nil {
+		return false
+	}
+	ok, err := t.store.HasFileEditGrant(ctx, chat.UserID, chat.ID, att.ID)
+	if err != nil {
+		t.logger.Warn("agent file tools: could not read a file edit grant", zap.String("file_attachment_id", att.ID.String()), zap.Error(err))
+		return false
+	}
+	return ok
+}
+
+// mayChange reports whether the agent in chat may change att's content: its own file, or one the
+// user granted it.
+func (t *AgentFileTool) mayChange(ctx context.Context, chat *models.Chat, att *models.FileAttachment) bool {
+	return ownsAgentFile(chat, att) || t.granted(ctx, chat, att)
+}
+
+// refEditable is ref with Editable saying whether the agent may change the content.
+func (t *AgentFileTool) refEditable(ctx context.Context, chat *models.Chat, att *models.FileAttachment, content string) agentFileRef {
+	r := t.ref(chat, att, content)
+	r.Editable = t.mayChange(ctx, chat, att)
+	return r
+}
+
 func (t *AgentFileTool) ref(chat *models.Chat, att *models.FileAttachment, content string) agentFileRef {
 	r := agentFileRef{ID: att.ID.String(), Path: FilePath(att), Editable: ownsAgentFile(chat, att)}
 	if content != "" {
@@ -127,12 +171,30 @@ func (t *AgentFileTool) resolve(ctx context.Context, chat *models.Chat, file str
 	return ResolveUserFile(ctx, t.store, chat.UserID, file, func(att *models.FileAttachment) bool { return ownsAgentFile(chat, att) })
 }
 
-// resolveOwned is resolve plus the edit check.
+// resolveChangeable is resolve plus the check that the agent may change the file's content: its
+// own, or one the user granted it by mentioning it in a comment on the file (ADR 0x046).
+func (t *AgentFileTool) resolveChangeable(ctx context.Context, chat *models.Chat, file string) (*models.FileAttachment, error) {
+	att, err := t.resolve(ctx, chat, file)
+	if err != nil {
+		return nil, err
+	}
+	if t.granted(ctx, chat, att) {
+		return att, nil
+	}
+	return t.checkOwned(chat, att)
+}
+
+// resolveOwned is resolve plus the check that the file is the agent's own: deleting, moving and
+// renaming are for its own files only, even ones it was granted.
 func (t *AgentFileTool) resolveOwned(ctx context.Context, chat *models.Chat, file string) (*models.FileAttachment, error) {
 	att, err := t.resolve(ctx, chat, file)
 	if err != nil {
 		return nil, err
 	}
+	return t.checkOwned(chat, att)
+}
+
+func (t *AgentFileTool) checkOwned(chat *models.Chat, att *models.FileAttachment) (*models.FileAttachment, error) {
 	if !ownsAgentFile(chat, att) {
 		what := "the user's file"
 		switch {
@@ -141,7 +203,11 @@ func (t *AgentFileTool) resolveOwned(ctx context.Context, chat *models.Chat, fil
 		case att.AgentAuthored():
 			what = "a file another agent created"
 		}
-		return nil, fileRefusalf("%q is %s, which you can read but not change. To work from it, copy it to a new file of your own with action \"copy\".", FilePath(att), what)
+		hint := ""
+		if !att.IsSkillFile() {
+			hint = " The user can let you change it by mentioning you in a comment on it."
+		}
+		return nil, fileRefusalf("%q is %s, which you can read but not change. To work from it, copy it to a new file of your own with action \"copy\".%s", FilePath(att), what, hint)
 	}
 	return att, nil
 }

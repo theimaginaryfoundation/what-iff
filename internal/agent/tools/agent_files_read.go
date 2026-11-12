@@ -118,7 +118,7 @@ func (t *AgentFileTool) read(ctx context.Context, chat *models.Chat, a agentFile
 	if err != nil {
 		return agentFileReadResult{}, err
 	}
-	ref := t.ref(chat, att, text)
+	ref := t.refEditable(ctx, chat, att, text)
 	lines := splitLines(text)
 	res := agentFileReadResult{File: &ref, TotalLines: len(lines)}
 	if len(lines) == 0 {

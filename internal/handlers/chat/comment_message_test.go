@@ -39,13 +39,14 @@ func postMessage(t *testing.T, h *Handler, userID, chatID uuid.UUID, body string
 func TestCreateChatMessage_FromADocumentComment(t *testing.T) {
 	userID, chatID, fileID := uuid.New(), uuid.New(), uuid.New()
 	ag := &capturingAgent{}
+	store := &fakeStore{getFileAttachmentFn: func(_ context.Context, u, id uuid.UUID) (*models.FileAttachment, error) {
+		if u != userID || id != fileID {
+			return nil, datastore.ErrFileAttachmentNotFound
+		}
+		return &models.FileAttachment{ID: fileID, Name: "plan.md"}, nil
+	}}
 	h := &Handler{
-		ds: &fakeStore{getFileAttachmentFn: func(_ context.Context, u, id uuid.UUID) (*models.FileAttachment, error) {
-			if u != userID || id != fileID {
-				return nil, datastore.ErrFileAttachmentNotFound
-			}
-			return &models.FileAttachment{ID: fileID, Name: "plan.md"}, nil
-		}},
+		ds:           store,
 		logger:       zap.NewNop(),
 		messageAgent: ag,
 	}
@@ -69,6 +70,7 @@ func TestCreateChatMessage_FromADocumentComment(t *testing.T) {
 	require.Contains(t, ctx.Content, `"plan.md"`)
 	require.Contains(t, ctx.Content, `The thread is on: "major features"`)
 	require.Contains(t, ctx.Content, "- Pat Lee: Which three?")
+	require.Equal(t, [][2]uuid.UUID{{chatID, fileID}}, store.grants, "the chat's agent may now change the file")
 
 	// Someone else's file, or no thread, is refused before the agent sees anything.
 	ag.got = nil

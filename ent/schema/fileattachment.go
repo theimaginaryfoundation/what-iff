@@ -121,6 +121,9 @@ func (FileAttachment) Edges() []ent.Edge {
 		edge.To("comment_set", FileCommentSet.Type).
 			Unique().
 			Annotations(entsql.OnDelete(entsql.Cascade)),
+		// Chats whose agent may change the file (ADR 0x046).
+		edge.To("edit_grants", FileEditGrant.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }
 

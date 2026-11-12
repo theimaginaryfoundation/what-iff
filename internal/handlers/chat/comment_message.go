@@ -15,8 +15,8 @@ import (
 )
 
 // attachComment makes msg the document comment c (ADR 0x046): the chat shows a link to the
-// thread, and the agent gets what the thread is on and the thread so far as context of the
-// message. It returns the status to answer with when c cannot be used.
+// thread, the agent gets what the thread is on and the thread so far as context of the message,
+// and the chat's agent may change the file from then on. It returns the status to answer with when c cannot be used.
 func (h *Handler) attachComment(ctx context.Context, msg *models.ChatMessage, c *commentMessageRequest) (int, error) {
 	userID, _ := middleware.GetUserIDFromContext(ctx)
 	threadID := strings.TrimSpace(c.ThreadID)
@@ -29,6 +29,13 @@ func (h *Handler) attachComment(ctx context.Context, msg *models.ChatMessage, c 
 	}
 	if err != nil {
 		return http.StatusInternalServerError, errors.New("could not read the commented file")
+	}
+	// Mentioning the agent on a file lets this chat's agent change it, to do what the comment asks.
+	if err := h.ds.GrantFileEdit(ctx, userID, msg.ChatID, file.ID); err != nil {
+		if errors.Is(err, datastore.ErrChatNotFound) {
+			return http.StatusNotFound, errors.New("chat not found")
+		}
+		return http.StatusInternalServerError, errors.New("could not record the comment")
 	}
 	msg.CommentRefs = []modeltypes.CommentRef{{
 		FileID: file.ID, FileName: file.Name, ThreadID: threadID, CommentID: c.CommentID, Quote: filecomments.ShortQuote(c.Quote),

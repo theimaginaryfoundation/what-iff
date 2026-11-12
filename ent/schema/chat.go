@@ -95,6 +95,9 @@ func (Chat) Edges() []ent.Edge {
 		edge.To("safety_violation_events", SafetyViolationEvent.Type).
 			Annotations(entsql.OnDelete(entsql.SetNull)),
 		edge.To("mcp_servers", MCPServer.Type),
+		// Files of the user's this chat's agent may change (ADR 0x046).
+		edge.To("file_edit_grants", FileEditGrant.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 		edge.To("model", Model.Type).
 			Unique(),
 		edge.To("personality", Personality.Type).

@@ -20,6 +20,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/filesave"
 	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
@@ -327,6 +328,8 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		localLLM:                     cfg.LLMBackend == "local",
 		localLLMModel:                cfg.LocalLLMModel,
 	}
+	// The agent changes a user's file it was granted the way the file workspace saves it (ADR 0x046).
+	a.agentFileTool.WithUserFileSaver(filesave.New(ds, fileStore, a.chunkPipeline, logger))
 	a.listTool.SetMCPDiscoverer(a.mcpClient)
 	if a.lifecycleCtx == nil {
 		a.lifecycleCtx = context.Background()

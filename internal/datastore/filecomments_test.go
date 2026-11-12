@@ -94,3 +94,37 @@ func TestCommentFileID_BackfillsTheLinkFromTheSharedObject(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first.ID, got)
 }
+
+func TestFileEditGrants_ForTheChatAndTheWholeFile(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID, other := createFATestUser(t, ds), createFATestUser(t, ds)
+	chat, err := ds.dbClient.Chat.Create().SetName("c").SetOwnerID(userID).Save(ctx)
+	require.NoError(t, err)
+	otherChat, err := ds.dbClient.Chat.Create().SetName("o").SetOwnerID(userID).Save(ctx)
+	require.NoError(t, err)
+	foreign, err := ds.dbClient.Chat.Create().SetName("f").SetOwnerID(other).Save(ctx)
+	require.NoError(t, err)
+
+	file, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "brief.md", FileType: "text/markdown", S3Key: "users/u/brief.md"})
+	require.NoError(t, err)
+	copied, err := ds.CreateFileAttachmentReference(ctx, userID, file.ID)
+	require.NoError(t, err)
+
+	// Granted through the chat copy: the file and every copy of it, in that chat only.
+	require.NoError(t, ds.GrantFileEdit(ctx, userID, chat.ID, copied.ID))
+	require.NoError(t, ds.GrantFileEdit(ctx, userID, chat.ID, file.ID), "again is a no-op")
+	for _, id := range []uuid.UUID{file.ID, copied.ID} {
+		ok, err := ds.HasFileEditGrant(ctx, userID, chat.ID, id)
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+	ok, err := ds.HasFileEditGrant(ctx, userID, otherChat.ID, file.ID)
+	require.NoError(t, err)
+	require.False(t, ok, "another chat's agent")
+
+	require.ErrorIs(t, ds.GrantFileEdit(ctx, userID, foreign.ID, file.ID), ErrChatNotFound)
+	_, err = ds.HasFileEditGrant(ctx, other, chat.ID, file.ID)
+	require.ErrorIs(t, err, ErrFileAttachmentNotFound, "someone else's file")
+}

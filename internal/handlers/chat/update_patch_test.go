@@ -38,6 +38,7 @@ type fakeStore struct {
 	existingIDsFn             func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error)
 	createFileAttachmentFn    func(ctx context.Context, userID uuid.UUID, fileAttachment models.FileAttachment) (*models.FileAttachment, error)
 	getFileAttachmentFn       func(ctx context.Context, userID, id uuid.UUID) (*models.FileAttachment, error)
+	grants                    [][2]uuid.UUID
 	listChatMessagesFn        func(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
 }
 
@@ -115,6 +116,10 @@ func (f *fakeStore) GetFileAttachment(ctx context.Context, userID, id uuid.UUID)
 		return f.getFileAttachmentFn(ctx, userID, id)
 	}
 	return nil, errors.New("not implemented")
+}
+func (f *fakeStore) GrantFileEdit(_ context.Context, _, chatID, fileID uuid.UUID) error {
+	f.grants = append(f.grants, [2]uuid.UUID{chatID, fileID})
+	return nil
 }
 func (f *fakeStore) DeleteFileAttachment(ctx context.Context, userID, id uuid.UUID) error {
 	return errors.New("not implemented")

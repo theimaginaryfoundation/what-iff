@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/filechange"
+	"github.com/theimaginaryfoundation/what-iff/internal/filesave"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
@@ -20,7 +21,7 @@ import (
 const agentFileWriteAttempts = 3
 
 // AgentFileWriteDescription is the agent-facing description of agent_file_write.
-var AgentFileWriteDescription = fmt.Sprintf(`Create and change your own text files: notes, journals, drafts, checklists, data you are collecting. Only files you created can be changed; every other file is read-only to you. Files are kept in the user's files (the user sees them in their gallery) and last across conversations. Read them with agent_file_read; find them with list (kind="files", origin="agent").
+var AgentFileWriteDescription = fmt.Sprintf(`Create and change your own text files: notes, journals, drafts, checklists, data you are collecting. Only files you created can be changed, plus a user's file the user mentioned you in a comment on (edit its content with append or patch; it stays theirs, so no delete, move or rename); every other file is read-only to you. Files are kept in the user's files (the user sees them in their gallery) and last across conversations. Read them with agent_file_read; find them with list (kind="files", origin="agent").
 
 Ownership: "you" is this personality, in any conversation with it (with no personality, this conversation). The user's own files, and files other personalities made, can be read but never changed in place: to work from one, copy it to a new file of yours and change the copy. Readable does not mean editable; agent_file_read reports editable for each file.
 
@@ -314,9 +315,12 @@ func (t *AgentFileTool) create(ctx context.Context, chat *models.Chat, p, conten
 // text. The new version is uploaded as a new object and the row swapped to it only if nobody
 // changed the file meanwhile; otherwise it re-reads and tries again, so concurrent appends both land.
 func (t *AgentFileTool) rewrite(ctx context.Context, chat *models.Chat, file string, change func(string) (string, error)) (agentFileWriteResult, error) {
-	att, err := t.resolveOwned(ctx, chat, file)
+	att, err := t.resolveChangeable(ctx, chat, file)
 	if err != nil {
 		return agentFileWriteResult{}, err
+	}
+	if !ownsAgentFile(chat, att) {
+		return t.rewriteGranted(ctx, chat, att, change)
 	}
 	for attempt := 0; attempt < agentFileWriteAttempts; attempt++ {
 		if attempt > 0 {
@@ -362,6 +366,47 @@ func (t *AgentFileTool) rewrite(ctx context.Context, chat *models.Chat, file str
 		chatID := chat.ID
 		filechange.Notify(ctx, filechange.Event{Kind: filechange.KindContent, UserID: chat.UserID, File: att, OldKey: oldKey, ChatID: &chatID})
 		ref := t.ref(chat, att, next)
+		return agentFileWriteResult{File: &ref}, nil
+	}
+	return agentFileWriteResult{}, fileRefusalf("the file kept changing while you wrote it; read it again and retry")
+}
+
+// rewriteGranted changes a user's file the agent was granted (ADR 0x046) the way the file
+// workspace saves it: a new version over the one read, again from the top when someone saved
+// meanwhile. The file keeps its type, its chat copies follow it, and it is re-indexed for search.
+func (t *AgentFileTool) rewriteGranted(ctx context.Context, chat *models.Chat, att *models.FileAttachment, change func(string) (string, error)) (agentFileWriteResult, error) {
+	if t.saver == nil {
+		return agentFileWriteResult{}, fileRefusalf("changing the user's files is not available here")
+	}
+	chatID := chat.ID
+	for attempt := 0; attempt < agentFileWriteAttempts; attempt++ {
+		if attempt > 0 {
+			var err error
+			if att, err = t.store.GetFileAttachment(ctx, chat.UserID, att.ID); err != nil {
+				return agentFileWriteResult{}, err
+			}
+		}
+		cur, err := t.readText(ctx, att)
+		if err != nil {
+			return agentFileWriteResult{}, err
+		}
+		next, err := change(cur)
+		if err != nil {
+			return agentFileWriteResult{}, err
+		}
+		version := att.ContentVersion
+		saved, err := t.saver.Replace(ctx, chat.UserID, filesave.Request{ID: att.ID, Content: []byte(next), IfMatch: &version, ChatID: &chatID})
+		var conflict *filesave.ConflictError
+		if errors.As(err, &conflict) {
+			continue
+		}
+		if errors.Is(err, filesave.ErrTooLarge) {
+			return agentFileWriteResult{}, fileRefusalf("the new content is too large to save")
+		}
+		if err != nil {
+			return agentFileWriteResult{}, err
+		}
+		ref := t.refEditable(ctx, chat, saved, next)
 		return agentFileWriteResult{File: &ref}, nil
 	}
 	return agentFileWriteResult{}, fileRefusalf("the file kept changing while you wrote it; read it again and retry")
