@@ -31,7 +31,7 @@ const MaxEdits = 1000
 // maxSteps bounds the diff's work (words compared, diagonals tried): a large file with many edits
 // is otherwise seconds of CPU on a request. Past it a range is found by its words alone, as past
 // MaxEdits.
-const maxSteps = 20_000_000
+var maxSteps = 20_000_000 // a var so tests can lower it
 
 // token is a word or a single other character of the text, at [start, end) in UTF-16 units. id
 // names its value, the same for equal values across the texts compared (see vocabulary).
