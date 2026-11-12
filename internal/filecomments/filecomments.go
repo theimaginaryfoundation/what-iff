@@ -29,8 +29,9 @@ var (
 	ErrStaleContent = errors.New("the file changed since the comments were placed on it")
 	// ErrRevision means the comments changed since the caller read them.
 	ErrRevision = datastore.ErrFileCommentsRevision
-	// ErrNotText means the file is neither text nor an image, which comments can be placed on.
-	ErrNotText = errors.New("comments can be placed only on text and image files")
+	// ErrNotText means the file is neither UTF-8 text of at most MaxTextBytes nor an image, which
+	// comments can be placed on.
+	ErrNotText = errors.New("comments can be placed only on images and on UTF-8 text files of at most 4 MB")
 )
 
 // Store is what the service needs of the datastore.

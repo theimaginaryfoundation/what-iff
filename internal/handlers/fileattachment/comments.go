@@ -90,7 +90,7 @@ func (h *Handler) respondCommentsError(w http.ResponseWriter, err error) {
 	case errors.Is(err, filecomments.ErrRevision):
 		handlerutils.RespondWithError(w, h.logger, http.StatusConflict, handlerutils.CodeNotSet, "The comments changed since they were read", nil)
 	case errors.Is(err, filecomments.ErrNotText):
-		handlerutils.RespondWithError(w, h.logger, http.StatusUnsupportedMediaType, handlerutils.CodeNotSet, "Comments can be placed only on text and image files", nil)
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnsupportedMediaType, handlerutils.CodeNotSet, "Comments can be placed only on images and on UTF-8 text files of at most 4 MB", nil)
 	default:
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read or write the comments", err)
 	}
