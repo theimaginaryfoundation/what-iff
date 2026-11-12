@@ -158,12 +158,42 @@ describe('PersonaPickerDialogComponent', () => {
             return el('[data-testid="new-thread-start"] button') as HTMLButtonElement;
         }
 
-        it('lists Choose a Personality, Privacy, then Thread Title, with Privacy no longer above the picker', () => {
+        it('orders Thread Title, then Choose a Personality, with Private in the footer and no Privacy section', () => {
             openForm();
 
-            const headings = Array.from(fixture.nativeElement.querySelectorAll('section h3') as NodeListOf<HTMLElement>)
-                .map(h => h.textContent?.trim());
-            expect(headings).toEqual(['Choose a Personality', 'Privacy', 'Thread Title']);
+            const title = el('app-thread-title-field') as HTMLElement;
+            const personality = el('#new-thread-personality-heading') as HTMLElement;
+            expect(title.compareDocumentPosition(personality) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+            expect(fixture.nativeElement.textContent).not.toContain('Privacy');
+            expect(el('footer [data-testid="new-thread-sandbox"]')).not.toBeNull();
+        });
+
+        it('starts with the default thread name in the title', () => {
+            openForm();
+
+            expect((el('[data-testid="new-thread-title"]') as HTMLInputElement).value).toBe('New thread');
+            expect(component.threadTitle()).toBe('New thread');
+        });
+
+        it('does not pick a personality when the title text is selected on focus', () => {
+            const hostSelect = vi.fn();
+            fixture.nativeElement.addEventListener('select', hostSelect);
+            const picked: Personality[] = [];
+            component.select.subscribe(p => picked.push(p));
+            openForm();
+
+            (el('[data-testid="new-thread-title"]') as HTMLInputElement).dispatchEvent(new Event('select', { bubbles: true }));
+
+            expect(hostSelect).not.toHaveBeenCalled();
+            expect(picked).toEqual([]);
+        });
+
+        it('puts Start thread before Cancel in the DOM (primary first)', () => {
+            openForm();
+
+            const labels = Array.from(fixture.nativeElement.querySelectorAll('footer ui-button') as NodeListOf<HTMLElement>)
+                .map(b => b.textContent?.trim());
+            expect(labels).toEqual(['Start thread', 'Cancel']);
         });
 
         it('only marks a personality on click; Start thread is what picks it', () => {
@@ -193,7 +223,7 @@ describe('PersonaPickerDialogComponent', () => {
             expect(component.sandboxed()).toBe(true);
         });
 
-        it('reopens blank, without the last pick or title', () => {
+        it('reopens fresh: no last pick, and the title back to the default name', () => {
             openForm();
             component.chosen.set(vera);
             component.threadTitle.set('Old title');
@@ -203,7 +233,7 @@ describe('PersonaPickerDialogComponent', () => {
             flushList([vera, card]);
 
             expect(component.chosen()).toBeNull();
-            expect(component.threadTitle()).toBe('');
+            expect(component.threadTitle()).toBe('New thread');
         });
 
         it('keeps the one-click pick for every other caller', () => {

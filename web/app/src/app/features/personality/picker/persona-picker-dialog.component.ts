@@ -19,7 +19,9 @@ import { PersonalityService } from '../../../core/services/personality.service';
 import { ButtonComponent } from '../../../shared/ui/button/button.component';
 import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 import { ModalComponent } from '../../../shared/ui/modal/modal.component';
+import { DEFAULT_THREAD_NAME } from '../../../core/models/chat.model';
 import { PersonaPickerComponent } from './persona-picker.component';
+import { ThreadTitleFieldComponent } from './thread-title-field.component';
 
 /**
  * Dialog wrapper around `persona-picker`. Fetches the personality list every
@@ -36,7 +38,7 @@ import { PersonaPickerComponent } from './persona-picker.component';
 @Component({
   selector: 'app-persona-picker-dialog',
   standalone: true,
-  imports: [ButtonComponent, CheckboxComponent, ModalComponent, NgTemplateOutlet, PersonaPickerComponent],
+  imports: [ButtonComponent, CheckboxComponent, ModalComponent, NgTemplateOutlet, PersonaPickerComponent, ThreadTitleFieldComponent],
   template: `
     <ui-modal [open]="open()" [labelledBy]="labelId" size="lg" (dismiss)="onCancel()">
       <div modal-header>
@@ -48,45 +50,36 @@ import { PersonaPickerComponent } from './persona-picker.component';
         </div>
       </div>
       @if (threadForm()) {
-        <section class="grid gap-1" aria-labelledby="new-thread-personality-heading">
-          <h3 id="new-thread-personality-heading" class="m-0 text-sm font-semibold text-(--color-text-primary)">Choose a Personality</h3>
-          <ng-container [ngTemplateOutlet]="pickerTpl" />
-        </section>
-        <section class="mt-4 grid gap-2 border-t border-(--color-border-default) pt-4" aria-labelledby="new-thread-privacy-heading">
-          <h3 id="new-thread-privacy-heading" class="m-0 text-sm font-semibold text-(--color-text-primary)">Privacy</h3>
-          <label class="flex items-start gap-2 text-sm text-(--color-text-primary)" data-testid="new-thread-sandbox">
-            <ui-checkbox [checked]="sandboxed()" (checkedChange)="sandboxed.set($event)" />
-            <span>
-              <span class="font-medium">Private (sandboxed) thread</span>
-              <span class="block text-xs text-(--color-text-secondary)">
-                Can't see your other memories, conversations or files. Can't be switched back on later.
-              </span>
-            </span>
-          </label>
-        </section>
-        <section class="mt-4 grid gap-2 border-t border-(--color-border-default) pt-4" aria-labelledby="new-thread-title-heading">
-          <h3 id="new-thread-title-heading" class="m-0 text-sm font-semibold text-(--color-text-primary)">Thread Title</h3>
-          <input
-            type="text"
-            class="rounded-lg border border-(--color-border-default) bg-(--color-surface-input) px-3 py-2 text-sm text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-2 focus:ring-(--color-accent)"
-            data-testid="new-thread-title"
-            aria-labelledby="new-thread-title-heading"
-            maxlength="255"
-            autocomplete="off"
-            placeholder="Optional. Leave blank for “New thread”"
-            [value]="threadTitle()"
-            (input)="threadTitle.set($any($event.target).value)"
-            (keydown.enter)="onStart()"
+        <!-- px-4 lines the title up with the search box under it, which sits in the picker's 16px inset. -->
+        <div class="px-4">
+          <app-thread-title-field
+            [(value)]="threadTitle"
+            [placeholder]="defaultThreadName"
+            (submitted)="onStart()"
           />
+        </div>
+        <section class="mt-4 grid gap-1" aria-labelledby="new-thread-personality-heading">
+          <h3 id="new-thread-personality-heading" class="m-0 px-4 text-sm font-semibold text-(--color-text-primary)">Choose a Personality</h3>
+          <ng-container [ngTemplateOutlet]="pickerTpl" />
         </section>
       } @else {
         <ng-container [ngTemplateOutlet]="pickerTpl" />
       }
-      <div modal-footer>
+      <div modal-footer class="w-full">
         @if (threadForm()) {
-          <div class="flex w-full items-center justify-end gap-2">
-            <ui-button variant="ghost" (activate)="onCancel()">Cancel</ui-button>
-            <ui-button variant="primary" [disabled]="!chosen()" data-testid="new-thread-start" (activate)="onStart()">Start thread</ui-button>
+          <div class="grid gap-4">
+            <label class="flex min-w-0 items-start gap-2 text-sm text-(--color-text-primary)" data-testid="new-thread-sandbox">
+              <ui-checkbox [checked]="sandboxed()" (checkedChange)="sandboxed.set($event)" />
+              <span>
+                <span class="font-medium">Private (sandboxed) thread</span>
+                <span class="block text-xs text-(--color-text-secondary)">Can't see your other memories, conversations or files. Can't be switched back on later.</span>
+              </span>
+            </label>
+            <!-- Primary first in the DOM (BTN-07); flex-row-reverse with justify-start puts it at the inline end. -->
+            <div class="flex flex-row-reverse items-center justify-start gap-2 border-t border-(--color-border-default) pt-4">
+              <ui-button variant="primary" [disabled]="!chosen()" data-testid="new-thread-start" (activate)="onStart()">Start thread</ui-button>
+              <ui-button variant="ghost" (activate)="onCancel()">Cancel</ui-button>
+            </div>
           </div>
         }
       </div>
@@ -103,6 +96,7 @@ import { PersonaPickerComponent } from './persona-picker.component';
           [ariaLabel]="title()"
           [appearance]="pickerAppearance()"
           [showCancel]="!threadForm()"
+          [focusSearchOnOpen]="!threadForm()"
           [selectedId]="chosen()?.id ?? null"
           [compact]="threadForm()"
           (select)="onSelect($event)"
@@ -119,7 +113,8 @@ export class PersonaPickerDialogComponent {
   readonly title = input<string>('Pick a personality');
   readonly subtitle = input<string | null>(null);
   /**
-   * The new-thread form: Choose a Personality, Privacy, Thread Title, then Start thread. A click on a
+   * The new-thread form: Thread Title (default "New thread"), Choose a Personality, and a footer with
+   * the Private checkbox, Cancel and Start thread. A click on a
    * personality only marks it, because the settings below it are still to be set; `select` fires from
    * Start thread. The parent reads the settings through `[(sandboxed)]` and `[(threadTitle)]`.
    * Off, a click on a personality picks it at once (every other caller).
@@ -127,6 +122,7 @@ export class PersonaPickerDialogComponent {
   readonly threadForm = input<boolean>(false);
   readonly sandboxed = model<boolean>(false);
   readonly threadTitle = model<string>('');
+  readonly defaultThreadName = DEFAULT_THREAD_NAME;
   /** The personality marked in the form, until Start thread. */
   readonly chosen = signal<Personality | null>(null);
   readonly pickerAppearance = input<'rich' | 'filter-list'>('rich');
@@ -151,9 +147,9 @@ export class PersonaPickerDialogComponent {
     effect(() => {
       if (!this.open()) return;
       untracked(() => {
-        // A form reopens blank: no stale pick or title from the last time it was cancelled.
+        // A form reopens fresh: no stale pick or title from the last time it was cancelled.
         this.chosen.set(null);
-        this.threadTitle.set('');
+        this.threadTitle.set(this.threadForm() ? DEFAULT_THREAD_NAME : '');
         this.load();
       });
     });

@@ -108,8 +108,7 @@ interface PersonaPickerRow {
           <input
             #searchInput
             type="text"
-            class="persona-picker__search rounded-lg border border-(--color-border-default) bg-(--color-surface-input) px-3 py-2 text-sm text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-2 focus:ring-(--color-accent)"
-            role="combobox"
+            class="persona-picker__search rounded-lg border border-(--color-border-default) bg-(--color-surface-input) px-3 py-2 text-sm text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-2 focus:ring-(--color-accent)"            role="combobox"
             aria-expanded="true"
             aria-autocomplete="list"
             [attr.aria-controls]="listId"
