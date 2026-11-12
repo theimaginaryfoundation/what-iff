@@ -5,7 +5,7 @@ import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { COMMENT_SAVER } from '../../file-workspace/editors/file-editor';
 import { CommentAutosave } from '../comments/comment-autosave';
 import { CommentPeopleService } from '../comments/comment-people.service';
-import { CommentAgentService } from '../comments/comment-agent.service';
+import { CommentAgentHooks, CommentAgentService } from '../comments/comment-agent.service';
 import {
   CommentDraft,
   CommentPerson,
@@ -80,6 +80,9 @@ export class DocsEditorComponent extends UniverEditorBase<DocDocument, Document>
   readonly me = inject(CommentPeopleService).me;
   /** The chat's agent, when the document is open in a chat: mentionable, and sent comments that mention it (ADR 0x046). */
   private readonly agentHooks = inject(CommentAgentService).hooks(() => this.file());
+  protected override agentMentions(): CommentAgentHooks {
+    return this.agentHooks;
+  }
   readonly threads = signal<DocxCommentThread[]>([]);
   /** The file's threads with no place in the text shown, which a save keeps as they are. */
   private unplacedComments: string[] = [];

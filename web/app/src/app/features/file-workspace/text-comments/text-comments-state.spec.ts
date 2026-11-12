@@ -158,9 +158,13 @@ describe('TextCommentsState', () => {
     const api = fakeTextComments();
     const posted = vi.fn();
     const iris = { id: 'agent:p-1', name: 'Iris' };
+    const saved = vi.fn();
     const state = new TextCommentsState(api as unknown as TextCommentsService, me, () => undefined, undefined, {
       people: people => [...people, iris],
       posted,
+      mark: () => posted.mock.calls.length,
+      saved,
+      discard: vi.fn(),
     });
     const { s } = surface();
     state.attach(s);
@@ -179,5 +183,10 @@ describe('TextCommentsState', () => {
     state.startOnFile();
     state.create({ text: 'On the file', mentions: [] });
     expect(posted).toHaveBeenLastCalledWith(state.threads()[1], state.threads()[1].id, '');
+
+    // The mentions go to the agent once the save holding them lands, not before.
+    expect(saved).not.toHaveBeenCalled();
+    await state.save(1);
+    expect(saved).toHaveBeenCalledWith(3);
   });
 });

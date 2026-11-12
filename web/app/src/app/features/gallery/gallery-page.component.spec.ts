@@ -5,6 +5,8 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ActivatedRoute, ParamMap, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { BehaviorSubject, of, throwError } from 'rxjs';
 
+import { CommentsPanelState } from '../office/comments/comments-panel-state.service';
+
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ActivePersonalityMediaJob } from '../../core/models/personality-media-job.model';
 import { ChatService } from '../../core/services/chat.service';
@@ -150,6 +152,7 @@ describe('GalleryPageComponent file viewer', () => {
       refresh: vi.fn(),
       openDetail: vi.fn(),
       disableGlobalAssociations: vi.fn(),
+      setSelectedPersonalityIds: vi.fn(),
     };
     TestBed.overrideComponent(GalleryPageComponent, {
       set: { imports: [], template: '', templateUrl: undefined, styleUrl: undefined, styleUrls: undefined },
@@ -188,6 +191,14 @@ describe('GalleryPageComponent file viewer', () => {
     expect(component.viewerOpen()).toBe(true);
     expect(getFileInfo).toHaveBeenCalledWith('b');
     expect(component.openFile()?.chat_id).toBe('chat-1');
+  });
+
+  it('focuses the thread a ?comment= link names, with or without a personality', () => {
+    const focus = vi.spyOn(TestBed.inject(CommentsPanelState), 'focusThread');
+    params.next(convertToParamMap({ file: 'b', comment: 't-1' }));
+    expect(focus).toHaveBeenCalledWith('t-1');
+    params.next(convertToParamMap({ file: 'b', comment: 't-2', personality_id: 'p-1' }));
+    expect(focus).toHaveBeenCalledWith('t-2');
   });
 
   it('opens a linked file that is not on a loaded page', () => {

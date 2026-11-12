@@ -23,11 +23,11 @@ import { FileAttachmentService } from '../../core/services/file-attachment.servi
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
-import { CommentAgentService, agentPersonId, filesNewRepliesCommentedOn } from '../office/comments/comment-agent.service';
+import { CommentAgentService, NewReplies, agentPersonId } from '../office/comments/comment-agent.service';
 import { CommentPerson } from '../office/comments/comment-threads';
 import { RitualService } from '../../core/services/ritual.service';
 import { Chat, isSandboxed } from '../../core/models/chat.model';
-import { ChatMessage, MessageBookmark } from '../../core/models/message.model';
+import { ChatMessage, CommentMessage, CommentRef, MessageBookmark } from '../../core/models/message.model';
 import {
   createPendingFileAttachment,
   FileAttachment,
@@ -234,17 +234,22 @@ export class ChatPageComponent implements OnInit, OnDestroy {
         if (!thread) return null;
         return { id: agentPersonId(thread.personality_id ?? null), name: this.selectedPersonalityName()?.trim() || 'Assistant' };
       }),
-      sendComment: async (text, comment, ref) => (await this.session.sendComment(text, comment, ref)).status === 'sent',
+      sendComment: (text, comment, ref) => this.sendComment(text, comment, ref),
     });
     inject(DestroyRef).onDestroy(unregister);
     return unregister;
   })();
 
-  /** Replies seen so far, so only a new one that commented on files refreshes their comments. */
-  private readonly seenReplies = new Set<string>();
+  /** The chat's replies so far, so only a new one that commented on files refreshes their comments. */
+  private readonly newReplies = new NewReplies();
   private readonly agentCommentsWatch = effect(() => {
     const messages = this.session.messages();
-    untracked(() => this.commentAgent.agentCommented(filesNewRepliesCommentedOn(this.seenReplies, messages)));
+    // Switching threads loads another chat: its replies so far are the new baseline.
+    if (this.session.loading()) {
+      this.newReplies.reset();
+      return;
+    }
+    untracked(() => this.commentAgent.agentCommented(this.newReplies.filesCommentedOn(messages)));
   });
   private readonly commentAgent = inject(CommentAgentService);
   readonly selectedPersonalityAccentColor = computed<string | null>(() => {
@@ -751,6 +756,24 @@ ${text}`
     this.pendingAttachments.update(current => current.filter(attachment => !attachments.includes(attachment)));
     this.pendingRituals.set([]);
     this.contextPanel.clearComposerThreadReferences();
+  }
+
+  /**
+   * Sends a comment that mentions the agent (ADR 0x046) through the same gate as a message: a
+   * blocked chat does not send it, and a refusal (out of credits, no provider) shows as it does
+   * for a message.
+   */
+  private async sendComment(text: string, comment: CommentMessage, ref: CommentRef): Promise<boolean> {
+    if (this.sendGate.blocked()) return false;
+    const result = await this.session.sendComment(text, comment, ref);
+    this.sendGate.refresh();
+    if (isChatSendFailed(result)) {
+      this.sendGate.handleSendError(result.error);
+      return false;
+    }
+    if (!isChatSendSucceeded(result)) return false;
+    this.sendGate.sendSucceeded();
+    return true;
   }
 
   onPendingRitualsChange(next: readonly Ritual[]): void {

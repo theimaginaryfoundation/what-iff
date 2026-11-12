@@ -1,7 +1,21 @@
-import { ChangeDetectionStrategy, Component, ElementRef, afterNextRender, computed, input, output, signal, viewChild } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  ElementRef,
+  afterNextRender,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
 
 import { ButtonComponent } from '../../../shared/ui';
 import { CommentDraft, CommentMention, CommentPerson, keptMentions } from './comment-threads';
+import { CommentsPanelState } from './comments-panel-state.service';
 
 const MAX_SUGGESTIONS = 6;
 /** An `@` at the start or after a space, then what has been typed of a name so far. */
@@ -96,6 +110,10 @@ export class MentionInputComponent {
   });
 
   constructor() {
+    // Text not posted yet holds off a reload of the file (an agent's reply), which would lose it.
+    const panel = inject(CommentsPanelState);
+    effect(() => panel.setWriting(this, !!this.text().trim()));
+    inject(DestroyRef).onDestroy(() => panel.setWriting(this, false));
     afterNextRender(() => {
       const initial = this.initial();
       if (initial) {

@@ -86,6 +86,20 @@
         @if (editable()) {
           <button type="button" class="file-workspace__button file-workspace__button--primary" (click)="startEdit()">Edit</button>
         }
+        @if (agentMayEdit()) {
+          <span class="file-workspace__grant">
+            {{ agentName() }} can edit this file
+            <button
+              type="button"
+              class="file-workspace__button"
+              uiTooltip="You mentioned the agent in a comment on this file. Revoke to stop it changing the file."
+              placement="bottom"
+              (click)="revokeAgentEdit()"
+            >
+              Revoke
+            </button>
+          </span>
+        }
       }
       @if (!isRenaming() && mode() === "view") {
         <button

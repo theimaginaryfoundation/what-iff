@@ -35,6 +35,7 @@ import {
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { CommentAgentService } from '../office/comments/comment-agent.service';
+import { CommentsPanelState } from '../office/comments/comments-panel-state.service';
 import { COMMENT_SAVER, CommentSaveResult, CommentSaver, FileEditor } from './editors/file-editor';
 import { ImageMarkupComponent, MarkupResult } from './markup/image-markup.component';
 import { galleryDisplayBaseName, galleryFilenameFromBaseName } from '../gallery/helpers/gallery-filename.helpers';
@@ -484,9 +485,49 @@ export class FileWorkspaceComponent implements CommentSaver {
   private readonly agentCommentsReload = inject(CommentAgentService).watchAgentComments(
     () => this.file(),
     () => {
-      if (!this.holdsWork()) this.reloadContent();
+      if (this.holdsWork()) return;
+      // A comment being written would be lost with the reload: it waits until that is posted or cleared.
+      if (this.commentsPanel.hasDraft()) this.reloadWhenWritten.set(true);
+      else this.reloadContent();
     },
   );
+  private readonly commentsPanel = inject(CommentsPanelState);
+
+  // --- the chat agent's grant on the file (ADR 0x046) ---------------------------------------------
+  private readonly commentAgent = inject(CommentAgentService);
+  /** Whether the agent of the chat the file is open in may change it (the user mentioned it in a comment on it there). */
+  readonly agentMayEdit = signal(false);
+  readonly agentName = computed(() => this.commentAgent.agent()?.name ?? 'The agent');
+  private readonly loadAgentGrant = effect(onCleanup => {
+    const chatId = this.chatId();
+    const fileId = this.file().id;
+    this.commentAgent.sent();
+    this.agentMayEdit.set(false);
+    if (!chatId) return;
+    const sub = this.files.fileEditGranted(chatId, fileId).subscribe({
+      next: granted => this.agentMayEdit.set(granted),
+      error: () => this.agentMayEdit.set(false),
+    });
+    onCleanup(() => sub.unsubscribe());
+  });
+
+  /** Takes back the agent's grant: it may no longer change the file. */
+  revokeAgentEdit(): void {
+    const chatId = this.chatId();
+    if (!chatId) return;
+    this.files
+      .revokeFileEdit(chatId, this.file().id)
+      .pipe(take(1))
+      .subscribe({ next: () => this.agentMayEdit.set(false) });
+  }
+  private readonly reloadWhenWritten = signal(false);
+  private readonly reloadAfterWriting = effect(() => {
+    if (!this.reloadWhenWritten() || this.commentsPanel.hasDraft()) return;
+    untracked(() => {
+      this.reloadWhenWritten.set(false);
+      if (!this.holdsWork()) this.reloadContent();
+    });
+  });
 
   /** Shows the file as stored now, dropping what the viewer holds. */
   private reloadContent(): void {

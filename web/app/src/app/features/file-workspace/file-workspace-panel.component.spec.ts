@@ -49,6 +49,7 @@ describe('FileWorkspacePanelComponent', () => {
             downloadFileAttachment: () => of(new Blob(['x'])),
             downloadFileContent: () => of({ blob: new Blob(['x']), version: null }),
             deleteFileAttachment: remove,
+            fileEditGranted: () => of(false),
           },
         },
         { provide: ConfirmationService, useValue: { confirm, alert: vi.fn() } },

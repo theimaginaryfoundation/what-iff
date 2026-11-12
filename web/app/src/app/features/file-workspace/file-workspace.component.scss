@@ -134,6 +134,15 @@
   padding: 0.35rem 0.7rem;
 }
 
+/* The chat agent's grant on the file (ADR 0x046): a note with its Revoke button. */
+.file-workspace__grant {
+  align-items: center;
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-size: 0.8125rem;
+  gap: 0.4rem;
+}
+
 .file-workspace__button--primary {
   background: var(--accent);
   border-color: var(--accent);

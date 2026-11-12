@@ -238,8 +238,9 @@ export class GalleryPageComponent implements OnInit {
       const personalityId = params.get('personality_id') || params.get('personalityId');
       if (personalityId) {
         this.view.setSelectedPersonalityIds([personalityId]);
-        this.workspace.followCommentLink(params.get('file'), params.get('comment'));
       }
+      // A link to a comment opens its file at the thread, with or without a personality filter.
+      this.workspace.followCommentLink(params.get('file'), params.get('comment'));
 
       const imageId = params.get('image');
       if (imageId) {

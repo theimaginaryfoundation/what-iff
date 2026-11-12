@@ -183,6 +183,8 @@ export class TextCommentsState {
   }
 
   private adopt(got: TextComments): void {
+    // The comments shown are the server's now: those not saved are gone, and their mentions.
+    this.agent?.discard();
     this.contentVersion = got.contentVersion;
     this.revision = got.revision;
     this.synced = got.threads;
@@ -219,7 +221,7 @@ export class TextCommentsState {
    * written again. When the file's content changed, the comments are read again and the host shows
    * the file as it is now; the status says so.
    */
-  async save(contentVersion: number, threads: TextCommentThread[] = this.snapshot()): Promise<void> {
+  async save(contentVersion: number, threads: TextCommentThread[] = this.snapshot(), mentions = this.mentionMark()): Promise<void> {
     const fileId = this.fileId;
     if (!fileId) return;
     this.status.set('saving');
@@ -232,6 +234,8 @@ export class TextCommentsState {
         if (sent !== threads) this.takeMerged(threads, got.threads);
         this.synced = got.threads;
         this.status.set('saved');
+        // The comments that mention the agent are stored now: it is sent them (ADR 0x046).
+        this.agent?.saved(mentions);
         return;
       } catch (error) {
         const status = (error as { status?: number }).status;
@@ -251,6 +255,11 @@ export class TextCommentsState {
         throw error;
       }
     }
+  }
+
+  /** Where a save takes the comments from, for the mentions it holds (CommentAgentHooks.mark). */
+  mentionMark(): number {
+    return this.agent?.mark() ?? 0;
   }
 
   /** Whether there are changes here a save has not stored: comments, replies, resolved state (anchors aside, which move as the text is typed). */

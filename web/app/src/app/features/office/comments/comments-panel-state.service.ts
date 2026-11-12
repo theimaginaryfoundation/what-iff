@@ -1,4 +1,4 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, computed, signal } from '@angular/core';
 
 /**
  * Whether the comments panel is open (ADR 0x045), kept across the editors a file opens in, so
@@ -13,6 +13,21 @@ export class CommentsPanelState {
    * which makes it active in the file, and clears this.
    */
   readonly focus = signal<string | null>(null);
+
+  /** The comment boxes with text not posted yet, which a reload of the file would lose. */
+  private readonly writing = signal<ReadonlySet<object>>(new Set());
+  readonly hasDraft = computed(() => this.writing().size > 0);
+
+  /** Records whether a comment box (`owner`) holds text not posted yet. */
+  setWriting(owner: object, writing: boolean): void {
+    if (this.writing().has(owner) === writing) return;
+    this.writing.update(set => {
+      const next = new Set(set);
+      if (writing) next.add(owner);
+      else next.delete(owner);
+      return next;
+    });
+  }
 
   /** Opens the panel at a thread. */
   focusThread(threadId: string): void {

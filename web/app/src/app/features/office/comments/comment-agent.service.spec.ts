@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 
 import { CommentMessage, CommentRef } from '../../../core/models/message.model';
 import { FileWorkspaceService } from '../../file-workspace/file-workspace.service';
-import { CommentAgentService, agentPersonId, filesNewRepliesCommentedOn } from './comment-agent.service';
+import { CommentAgentService, MentionQueue, NewReplies, agentPersonId } from './comment-agent.service';
 import { CommentThread, newComment } from './comment-threads';
 
 const ME = { id: 'user:u-1', name: 'Pat Lee' };
@@ -93,25 +93,63 @@ describe('CommentAgentService', () => {
   });
 });
 
-describe('filesNewRepliesCommentedOn', () => {
-  const reply = (id: string, ...files: string[]) => ({ id, origin: 'Assistant', comment_refs: files.map(file_id => ({ file_id })) });
-
-  it('reloads nothing for the replies a chat opens with', () => {
-    const seen = new Set<string>();
-    expect(filesNewRepliesCommentedOn(seen, [reply('a1', 'f1')])).toEqual([]);
-    expect([...seen]).toEqual(['a1']);
+describe('NewReplies', () => {
+  const reply = (id: string, sent_at: string, ...files: string[]) => ({
+    id,
+    origin: 'Assistant',
+    sent_at,
+    comment_refs: files.map(file_id => ({ file_id })),
   });
 
-  it('names the files only the new replies commented on', () => {
-    const seen = new Set<string>();
-    filesNewRepliesCommentedOn(seen, [reply('a1', 'f1')]);
-    const messages = [
-      reply('a1', 'f1'),
-      { id: 'u1', origin: 'User', comment_refs: [{ file_id: 'f9' }] },
-      reply('a2', 'f2', 'f3'),
-      reply('a3'),
-    ];
-    expect(filesNewRepliesCommentedOn(seen, messages)).toEqual(['f2', 'f3']);
-    expect(filesNewRepliesCommentedOn(seen, messages)).toEqual([]);
+  it('reloads nothing for the replies a chat opens with, or older ones loaded later', () => {
+    const replies = new NewReplies();
+    expect(replies.filesCommentedOn([reply('a1', '2026-11-12T10:00:00Z', 'f1')])).toEqual([]);
+    expect(replies.filesCommentedOn([reply('a0', '2026-11-11T10:00:00Z', 'f0'), reply('a1', '2026-11-12T10:00:00Z', 'f1')])).toEqual([]);
+  });
+
+  it('names the files only the new replies commented on, once each, when their refs arrive', () => {
+    const replies = new NewReplies();
+    replies.filesCommentedOn([reply('a1', '2026-11-12T10:00:00Z', 'f1')]);
+    const user = { id: 'u1', origin: 'User', sent_at: '2026-11-12T11:00:00Z', comment_refs: [{ file_id: 'f9' }] };
+    // The reply shows while it is written, without refs, then with them.
+    expect(replies.filesCommentedOn([user, reply('a2', '2026-11-12T11:01:00Z')])).toEqual([]);
+    expect(replies.filesCommentedOn([user, reply('a2', '2026-11-12T11:01:00Z', 'f2', 'f3')])).toEqual(['f2', 'f3']);
+    expect(replies.filesCommentedOn([user, reply('a2', '2026-11-12T11:01:00Z', 'f2', 'f3')])).toEqual([]);
+  });
+
+  it('counts the first reply of a chat that had none, and starts over for another chat', () => {
+    const replies = new NewReplies();
+    expect(replies.filesCommentedOn([])).toEqual([]);
+    expect(replies.filesCommentedOn([reply('a1', '2026-11-12T10:00:00Z', 'f1')])).toEqual(['f1']);
+    replies.reset();
+    expect(replies.filesCommentedOn([reply('b1', '2026-11-12T12:00:00Z', 'f5')])).toEqual([]); // the other chat opens with it
+  });
+});
+
+describe('MentionQueue', () => {
+  it('sends the mentions a landed save held, keeps later ones, and drops them on discard', () => {
+    const sent: string[] = [];
+    const q = new MentionQueue();
+    q.add(() => sent.push('a'));
+    q.add(() => sent.push('b'));
+    const first = q.mark();
+    q.add(() => sent.push('c')); // posted while that save ran
+    q.saved(first);
+    expect(sent).toEqual(['a', 'b']);
+    q.saved(first);
+    expect(sent).toEqual(['a', 'b']);
+
+    // A save that failed sends nothing; the next one that lands sends what it held.
+    const failed = q.mark();
+    q.add(() => sent.push('d'));
+    void failed;
+    q.saved(q.mark());
+    expect(sent).toEqual(['a', 'b', 'c', 'd']);
+
+    q.add(() => sent.push('e'));
+    const lost = q.mark();
+    q.discard();
+    q.saved(lost);
+    expect(sent).toEqual(['a', 'b', 'c', 'd']);
   });
 });

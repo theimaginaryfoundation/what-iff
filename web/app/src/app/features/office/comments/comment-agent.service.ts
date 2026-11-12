@@ -9,23 +9,52 @@ export function agentPersonId(personalityId: string | null): string {
   return `agent:${personalityId ?? 'chat'}`;
 }
 
+/** A chat message as NewReplies reads it. */
+interface ReplyLike {
+  id: string;
+  origin: string;
+  sent_at?: string | null;
+  comment_refs?: readonly { file_id: string }[] | null;
+}
+
 /**
- * The files the chat's new replies commented on (their `comment_refs`), recording every reply in
- * `seen`. The first call only records the replies already there, so opening a chat does not
- * reload files for replies that landed before it was opened.
+ * The files a chat's new replies comment on (their `comment_refs`), each reply once. What the chat
+ * holds when it has loaded is the baseline, so opening a chat (or loading older messages) does not
+ * reload files for replies that landed before; a reply counts once its refs arrive (it may first
+ * show while it is still being written).
  */
-export function filesNewRepliesCommentedOn(
-  seen: Set<string>,
-  messages: readonly { id: string; origin: string; comment_refs?: readonly { file_id: string }[] | null }[],
-): string[] {
-  const first = seen.size === 0;
-  const files: string[] = [];
-  for (const m of messages) {
-    if (m.origin !== 'Assistant' || seen.has(m.id)) continue;
-    seen.add(m.id);
-    if (!first) for (const ref of m.comment_refs ?? []) files.push(ref.file_id);
+export class NewReplies {
+  private primed = false;
+  /** The newest message of the baseline: an older one is not new. */
+  private since = '';
+  private readonly handled = new Set<string>();
+
+  /** The chat is (re)loading: what it holds once loaded is the next baseline. */
+  reset(): void {
+    this.primed = false;
+    this.since = '';
+    this.handled.clear();
   }
-  return files;
+
+  /** The files the replies among `messages` not handled yet comment on. */
+  filesCommentedOn(messages: readonly ReplyLike[]): string[] {
+    if (!this.primed) {
+      this.primed = true;
+      for (const m of messages) {
+        if ((m.sent_at ?? '') > this.since) this.since = m.sent_at ?? '';
+        if (m.comment_refs?.length) this.handled.add(m.id);
+      }
+      return [];
+    }
+    const files: string[] = [];
+    for (const m of messages) {
+      if (m.origin !== 'Assistant' || !m.comment_refs?.length || this.handled.has(m.id)) continue;
+      this.handled.add(m.id);
+      if ((m.sent_at ?? '') < this.since) continue;
+      for (const ref of m.comment_refs) files.push(ref.file_id);
+    }
+    return files;
+  }
 }
 
 /**
@@ -45,8 +74,49 @@ export interface CommentAgentHost {
  */
 export interface CommentAgentHooks {
   people(people: CommentPerson[]): CommentPerson[];
-  /** `quote` is what the thread is on as the panel shows it (empty for the whole file). */
+  /**
+   * A comment was posted: one that mentions the agent waits for the save that stores it (see
+   * mark/saved). `quote` is what the thread is on as the panel shows it (empty for the whole file).
+   */
   posted(thread: CommentThread<unknown>, commentId: string, quote: string): void;
+  /** Where a save takes the comments from: the mentions posted so far are in it. */
+  mark(): number;
+  /** The save that took the comments at `mark` landed: the agent is sent those mentions. */
+  saved(mark: number): void;
+  /** The comments not saved yet are gone (the file was reloaded): their mentions are not sent. */
+  discard(): void;
+}
+
+/**
+ * Comments that mention the agent, waiting for the save that stores them (ADR 0x046): the agent
+ * is sent a comment only once it is in the file (or beside it), so it reads the thread it is asked
+ * about, and its own change to the file does not race the user's save. A save that fails keeps
+ * them for the next one; one that throws the comments away (a reload) drops them.
+ */
+export class MentionQueue {
+  private sends: (() => void)[] = [];
+  /** How many mentions have left the queue, so a mark taken before them still counts right. */
+  private gone = 0;
+
+  add(send: () => void): void {
+    this.sends.push(send);
+  }
+
+  mark(): number {
+    return this.gone + this.sends.length;
+  }
+
+  saved(mark: number): void {
+    const n = Math.max(0, mark - this.gone);
+    const due = this.sends.splice(0, n);
+    this.gone += due.length;
+    for (const send of due) send();
+  }
+
+  discard(): void {
+    this.gone += this.sends.length;
+    this.sends = [];
+  }
 }
 
 /**
@@ -65,6 +135,9 @@ export class CommentAgentService {
     const chatId = this.workspace.chatId();
     return host && chatId && host.chatId() === chatId ? host.agent() : null;
   });
+
+  /** Counts the comments sent to the agent: each may have granted it the file it is on. */
+  readonly sent = signal(0);
 
   /** The files the agent's last reply commented on, and a count that changes with every reply. */
   private readonly agentComments = signal<{ fileIds: ReadonlySet<string>; n: number }>({ fileIds: new Set(), n: 0 });
@@ -98,9 +171,17 @@ export class CommentAgentService {
 
   /** The hooks for the comments of a file (read when a comment is posted). */
   hooks(file: () => { id: string; name: string }): CommentAgentHooks {
+    const queue = new MentionQueue();
     return {
       people: people => this.withAgent(people),
-      posted: (thread, commentId, quote) => void this.posted(file(), thread, commentId, quote),
+      posted: (thread, commentId, quote) => {
+        // Who the agent is and which file, as they are now; sent once the save lands.
+        const send = this.sender(file(), thread, commentId, quote);
+        if (send) queue.add(send);
+      },
+      mark: () => queue.mark(),
+      saved: mark => queue.saved(mark),
+      discard: () => queue.discard(),
     };
   }
 
@@ -112,15 +193,26 @@ export class CommentAgentService {
   }
 
   /**
-   * Called once a comment is posted: when it mentions the agent, sends it. `quote` is what the
-   * thread is on as the panel shows it (empty for the whole file).
+   * Sends a posted comment to the agent when it mentions it, at once (hooks() waits for the save).
+   * `quote` is what the thread is on as the panel shows it (empty for the whole file).
    */
   async posted(file: { id: string; name: string }, thread: CommentThread<unknown>, commentId: string, quote: string): Promise<boolean> {
+    const send = this.sender(file, thread, commentId, quote);
+    return send ? send() : false;
+  }
+
+  /** How to send a posted comment to the agent, or null when it does not mention the agent. */
+  private sender(
+    file: { id: string; name: string },
+    thread: CommentThread<unknown>,
+    commentId: string,
+    quote: string,
+  ): (() => Promise<boolean>) | null {
     const agent = this.agent();
     const host = this.host();
     const at = thread.comments.findIndex(c => c.id === commentId);
     const comment = thread.comments[at];
-    if (!agent || !host || !comment?.mentions?.some(m => m.id === agent.id)) return false;
+    if (!agent || !host || !comment?.mentions?.some(m => m.id === agent.id)) return null;
     const message: CommentMessage = {
       file_id: file.id,
       thread_id: thread.id,
@@ -129,6 +221,10 @@ export class CommentAgentService {
       earlier: thread.comments.slice(0, at).map(c => ({ author_name: c.authorName, text: c.text })),
     };
     const ref: CommentRef = { file_id: file.id, file_name: file.name, thread_id: thread.id, comment_id: comment.id, quote };
-    return host.sendComment(comment.text, message, ref);
+    return async () => {
+      const sent = await host.sendComment(comment.text, message, ref);
+      if (sent) this.sent.update(n => n + 1);
+      return sent;
+    };
   }
 }

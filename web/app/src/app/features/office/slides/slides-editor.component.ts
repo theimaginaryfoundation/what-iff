@@ -165,13 +165,8 @@ export class SlidesEditorComponent implements FileEditor {
 
   // --- comments (ADR 0x045) ------------------------------------------------------------------------
   readonly me = inject(CommentPeopleService).me;
-  readonly comments = new SlideComments(
-    this.deck,
-    this.slide,
-    this.me,
-    () => this.commentsChanged(),
-    inject(CommentAgentService).hooks(() => this.file()),
-  );
+  private readonly agentHooks = inject(CommentAgentService).hooks(() => this.file());
+  readonly comments = new SlideComments(this.deck, this.slide, this.me, () => this.commentsChanged(), this.agentHooks);
   /** Comments can be written: while editing, or while viewing a file the user may change (saved as they are made). */
   private readonly autosave = new CommentAutosave(inject(COMMENT_SAVER, { optional: true }), this);
   readonly commentable = computed(() => !this.readOnly() || this.autosave.available());
@@ -226,6 +221,7 @@ export class SlidesEditorComponent implements FileEditor {
   async content(): Promise<Blob> {
     const deck = this.deck();
     const threads = this.comments.threads();
+    const mentions = this.agentHooks.mark();
     const { bytes, report } = await deckToPptx(deck, {
       original: this.original,
       imported: this.imported,
@@ -238,6 +234,7 @@ export class SlidesEditorComponent implements FileEditor {
     this.lastContent = blob;
     this.savedDecks.set(blob, deck);
     this.savedComments.set(blob, threads);
+    this.mentionsAt.set(blob, mentions);
     // Every save patches the file as it was opened, against the deck read from it. Patching what an
     // earlier save wrote would not work: shapes added since opening have no id in that file, so they
     // would be inserted again, and shapes deleted after that save would stay.
@@ -249,7 +246,13 @@ export class SlidesEditorComponent implements FileEditor {
     const deck = saved && this.savedDecks.get(saved);
     const threads = saved && this.savedComments.get(saved);
     this.setDirty(deck !== undefined && (deck !== this.deck() || threads !== this.comments.threads()));
+    // Comments that mention the agent go to it once the save that holds them lands (ADR 0x046).
+    const mentions = saved && this.mentionsAt.get(saved);
+    if (mentions !== undefined) this.agentHooks.saved(mentions);
   }
+
+  /** The mentions each blob content() made holds, by blob. */
+  private readonly mentionsAt = new WeakMap<Blob, number>();
 
   dismissNotice(): void {
     this.noticeDismissed.set(true);
@@ -259,6 +262,8 @@ export class SlidesEditorComponent implements FileEditor {
 
   private async open(blob: Blob): Promise<void> {
     const generation = ++this.generation;
+    // Comments not saved are gone with what the editor held, and so are their mentions.
+    this.agentHooks.discard();
     this.state.set('loading');
     this.error.set(null);
     this.history.clear();

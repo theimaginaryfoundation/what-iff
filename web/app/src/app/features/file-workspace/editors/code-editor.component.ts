@@ -88,6 +88,8 @@ export class CodeEditorComponent implements FileEditor {
   private readonly previewComments = new PreviewCommentHighlights();
   /** The threads as they were when each blob handed to the host was made, anchored on its text. */
   private readonly handedOutComments = new WeakMap<Blob, TextCommentThread[]>();
+  /** The comment mentions each blob content() handed out holds (TextCommentsState.mentionMark). */
+  private readonly handedOutMentions = new WeakMap<Blob, number>();
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private onCommentKey: import('monaco-editor').editor.IContextKey<boolean> | null = null;
   readonly previewText = signal('');
@@ -141,6 +143,7 @@ export class CodeEditorComponent implements FileEditor {
     const blob = new Blob([text], { type: this.file().file_type || 'text/plain' });
     this.handedOut.set(blob, text);
     this.handedOutComments.set(blob, this.comments.snapshot());
+    this.handedOutMentions.set(blob, this.comments.mentionMark());
     this.lastContent = blob;
     return blob;
   }
@@ -157,7 +160,7 @@ export class CodeEditorComponent implements FileEditor {
     const threads = this.handedOutComments.get(content) ?? this.comments.snapshot();
     // A file that never had comments has nothing to write.
     if (!threads.length && !this.hadComments) return;
-    await this.comments.save(file.content_version ?? this.comments.placedOn, threads);
+    await this.comments.save(file.content_version ?? this.comments.placedOn, threads, this.handedOutMentions.get(content));
     this.hadComments = threads.length > 0;
     // Comments changed while the save ran (a reply posted meanwhile) are still unsaved.
     this.commentsDirty = this.comments.unsaved();

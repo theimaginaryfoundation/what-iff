@@ -133,6 +133,16 @@ export class FileAttachmentService {
   listChatContextFiles(chatId: string): Observable<ChatContextFilesResponse> {
     return this.http.get<ChatContextFilesResponse>(`${this.apiUrl}/chat/${chatId}/context-files`);
   }
+
+  /** Whether the chat's agent may change the file, because the user mentioned it in a comment on it there (ADR 0x046). */
+  fileEditGranted(chatId: string, fileId: string): Observable<boolean> {
+    return this.http.get<{ granted: boolean }>(`${this.apiUrl}/chat/${chatId}/file-edit-grants/${fileId}`).pipe(map(r => r.granted));
+  }
+
+  /** Takes back the chat agent's grant on the file. */
+  revokeFileEdit(chatId: string, fileId: string): Observable<void> {
+    return this.http.delete<void>(`${this.apiUrl}/chat/${chatId}/file-edit-grants/${fileId}`);
+  }
 }
 
 /** A content version ETag is the quoted version number, possibly weak (`W/"3"`). */
