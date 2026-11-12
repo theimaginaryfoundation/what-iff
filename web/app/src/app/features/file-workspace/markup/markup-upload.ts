@@ -1,9 +1,10 @@
 import { inject } from '@angular/core';
-import { Observable, firstValueFrom } from 'rxjs';
+import { Observable, firstValueFrom, tap } from 'rxjs';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { FileAttachmentService } from '../../../core/services/file-attachment.service';
 import { ImageGalleryService } from '../../../core/services/image-gallery.service';
+import { LoggerService } from '../../../core/services/logger.service';
 import { ContextPanelService } from '../../chat/services/context-panel.service';
 import { MarkupResult } from './image-markup.component';
 import { markupStem } from './markup-strokes';
@@ -125,10 +126,14 @@ export function injectMarkupSender(): (chatId: string, source: FileAttachment | 
   const files = inject(FileAttachmentService);
   const gallery = inject(ImageGalleryService);
   const contextPanel = inject(ContextPanelService);
+  const logger = inject(LoggerService);
   const ops: MarkupFileOps = {
     upload: (...args) => files.uploadChatFileAttachment(...args),
     reference: id => gallery.referenceImage(id),
-    remove: id => files.deleteFileAttachment(id),
+    // A failed rollback leaves a stray file in the thread; the upload's own error is what the person
+    // sees, so this is only logged.
+    remove: id =>
+      files.deleteFileAttachment(id).pipe(tap({ error: error => logger.error(`Could not remove partial markup upload ${id}`, error) })),
   };
   return async (chatId, source, result) => {
     const onMessage = [...contextPanel.composerPending(), ...contextPanel.composerAttachments()];

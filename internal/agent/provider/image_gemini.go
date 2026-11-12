@@ -190,7 +190,9 @@ func (g *GeminiImageGenerator) call(ctx context.Context, op string, body geminiI
 	}
 	call.end(err)
 	if err != nil {
-		return GeneratedImage{}, err
+		// postJSON is shared by every image vendor, so say which one failed; %w keeps the API
+		// error for safety-violation parsing.
+		return GeneratedImage{}, fmt.Errorf("gemini %s: %w", op, err)
 	}
 	return geminiImageFromResponse(resp)
 }
