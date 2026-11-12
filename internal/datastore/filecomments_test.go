@@ -94,3 +94,48 @@ func TestCommentFileID_BackfillsTheLinkFromTheSharedObject(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first.ID, got)
 }
+
+func TestFileCommentSet_StoredOnlyOverTheRevisionRead(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID, other := createFATestUser(t, ds), createFATestUser(t, ds)
+	file, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: "notes.md", FileType: "text/markdown", S3Key: "users/u/notes.md"})
+	require.NoError(t, err)
+
+	got, err := ds.GetFileCommentSet(ctx, userID, file.ID)
+	require.NoError(t, err)
+	require.Nil(t, got, "a file with no comments has no set")
+
+	thread := models.FileCommentThread{ID: "t1", Quote: "plan", Comments: []models.FileComment{{ID: "t1", AuthorID: "user:1", AuthorName: "Ada", Text: "Why?"}}}
+	rev, err := ds.PutFileCommentSet(ctx, userID, file.ID, models.FileCommentSet{Threads: []models.FileCommentThread{thread}, BaselineText: "the plan", BaselineKey: "users/u/notes.md"}, 0)
+	require.NoError(t, err)
+	require.Equal(t, 1, rev)
+	_, err = ds.PutFileCommentSet(ctx, userID, file.ID, models.FileCommentSet{}, 0)
+	require.ErrorIs(t, err, ErrFileCommentsRevision, "a second first write")
+
+	got, err = ds.GetFileCommentSet(ctx, userID, file.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, got.Revision)
+	require.Equal(t, "the plan", got.BaselineText)
+	require.Equal(t, "users/u/notes.md", got.BaselineKey)
+	require.Len(t, got.Threads, 1)
+	require.Equal(t, "Why?", got.Threads[0].Comments[0].Text)
+
+	rev, err = ds.PutFileCommentSet(ctx, userID, file.ID, models.FileCommentSet{BaselineText: "the plan", BaselineKey: "users/u/notes.md"}, 1)
+	require.NoError(t, err)
+	require.Equal(t, 2, rev)
+	_, err = ds.PutFileCommentSet(ctx, userID, file.ID, models.FileCommentSet{}, 1)
+	require.ErrorIs(t, err, ErrFileCommentsRevision, "a write over a revision since replaced")
+	got, err = ds.GetFileCommentSet(ctx, userID, file.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, got.Revision)
+	require.NotNil(t, got.Threads, "no threads are stored as an empty list")
+	require.Empty(t, got.Threads)
+
+	got, err = ds.GetFileCommentSet(ctx, other, file.ID)
+	require.NoError(t, err)
+	require.Nil(t, got, "someone else's file reads as having none")
+	_, err = ds.PutFileCommentSet(ctx, other, file.ID, models.FileCommentSet{}, 2)
+	require.ErrorIs(t, err, ErrFileAttachmentNotFound)
+}
