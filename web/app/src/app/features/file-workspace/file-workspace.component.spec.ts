@@ -395,7 +395,7 @@ describe('FileWorkspaceComponent', () => {
     expect(await payload.blob.text()).toBe('copy me');
     expect(fixture.componentInstance.saveAsOpen()).toBe(false);
   });
-  describe('markup (ADR 0x045)', () => {
+  describe('markup (ADR 0x047)', () => {
     const png = () => file({ name: 'photo.png', file_type: 'image/png' });
 
     async function startMarkup(): Promise<HTMLElement> {

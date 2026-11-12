@@ -116,17 +116,31 @@ Add to message attaches `sketch-<time>` (filed in `sketches`), described as a ro
 Markup only creates new files; the image it was drawn on is attached as it is.
 The derived files are ordinary thread uploads in the gallery's `image_masks` folder, which the user can see and delete; sketches go to `sketches`.
 
-### 9. Uploads are PNG again, kept small
+### 9. Stored images: the input's format, compact
 
-ADR 0x038 §3 re-encoded opaque uploads as JPEG to keep them near 1 MB.
-That caused problems in practice, and a lossy copy is wrong for what markup produces: a mask must keep its exact edges, and screenshots, sketches and line art blur.
-`NormalizeForUpload` goes back to PNG for every upload (still capped at 2048 px, still without metadata), and keeps the PNG small:
-- 8 bits per channel whatever the source had, and no alpha channel when every pixel is opaque;
-- an exact palette when the image has at most 256 colours (masks, sketches, diagrams, most screenshots), which is lossless and several times smaller;
-- default zlib compression, since the best level saved under 1% on a photo for twice the time.
+Uploads and generated images keep a widely supported format, and are stored as small as that format allows without visible loss.
+`NormalizeForUpload` still caps uploads at 2048 px and drops metadata, and chooses the format from the input:
+- **A JPEG stays a JPEG**, re-encoded at quality 90 with its EXIF orientation applied to the pixels (so a portrait phone photo is stored upright once the tag is gone).
+  Storing an already lossy photo as PNG would only make it several times larger.
+- **Everything else (PNG, GIF, WebP) becomes a compact PNG** (`imageutil.CompactPNG`):
+  - 8 bits per channel whatever the source had, and no alpha channel when every pixel is opaque;
+  - an exact palette when the image has at most 256 colours (masks, sketches, diagrams, most screenshots), which is lossless and several times smaller;
+  - otherwise, near-lossless **residual quantization**: each colour channel is rebuilt as the pixel above it plus the original difference rounded to a multiple of 6 (ties towards zero), so PNG's Up filter sees long runs of a few values. No channel moves more than 3 of 255, alpha is kept exactly, and the file is a plain 8-bit PNG.
 
-Photos cost more storage than as JPEG (a 1536 × 1024 photo is about 3 MB), but the memory problem 0x038 solved stays solved: history images are still capped and sent as thumbnails (0x038 §1–2, §4).
-Files already stored as JPEG are left as they are.
+Generated images are stored through `CompactPNG` too (`Agent.compactGeneratedImage`): vendors write large PNGs, and OpenAI's are compressed at zlib's fastest level.
+Measured on a 1536 × 1024 OpenAI image (2,005 KB):
+
+| Encoding (all PNG) | Size | PSNR |
+|---|---|---|
+| Lossless optimizers (oxipng, zopfli) | 86–87% | lossless |
+| **Residual quantization, step 6 (this)** | **38%, in about 110 ms** | **43 dB** |
+| Residual quantization, step 8 | 28% (oxipng) | 40.7 dB, faint banding in gradients |
+| 256-colour quantization (pngquant-style) | 16–22% | 35 dB, visible banding |
+
+Step 6 showed no banding at 3× zoom in the image's gradients or foliage. A step that varied with local texture did no better than a fixed one.
+Grainier generated images shrink less (32–39% smaller in a sample of three).
+Re-encoding drops a vendor's ancillary chunks, including OpenAI's C2PA provenance manifest; its hash binding would not survive any re-encode.
+History images are still capped and sent as thumbnails (0x038 §1–2, §4). Files already stored are left as they are.
 
 ## Alternatives considered
 
@@ -148,7 +162,7 @@ Files already stored as JPEG are left as they are.
 - Any image the agent can see can be edited or used as a reference, including one it made earlier in the same turn.
 - Edits cost the same as generations at the chosen quality, metered against the vendor that ran them (`path: tool_edit`).
 - A user whose image vendor is z.ai or Qwen can draw markup but the agent cannot act on it; both the surface and the tool say so.
-- Uploads are PNG again (§9), so masks keep exact edges; the mask is still read by brightness with a 50% threshold, so a JPEG mask from before works too.
+- Masks are uploaded as PNG and stored with an exact palette (§9). The mask is read by brightness with a 50% threshold, so compression at the edges would not matter either.
 - Masks and markup copies collect in the gallery's `image_masks` folder, sketches in `sketches`.
 
 ## Not done yet
