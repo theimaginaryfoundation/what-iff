@@ -37,19 +37,20 @@ const (
 // agentFileTypes are the extensions an agent can create, with their stored MIME types. A name
 // without an extension gets ".md".
 var agentFileTypes = map[string]string{
-	".md":    "text/markdown",
-	".mmd":   "text/vnd.mermaid",
-	".txt":   "text/plain",
-	".json":  "application/json",
-	".jsonl": "application/jsonl",
-	".yaml":  "application/yaml",
-	".yml":   "application/yaml",
-	".csv":   "text/csv",
-	".tsv":   "text/tab-separated-values",
-	".toml":  "application/toml",
-	".xml":   "application/xml",
-	".html":  "text/html",
-	".log":   "text/plain",
+	".md":     "text/markdown",
+	".mmd":    "text/vnd.mermaid",
+	".drawio": "application/vnd.jgraph.mxfile",
+	".txt":    "text/plain",
+	".json":   "application/json",
+	".jsonl":  "application/jsonl",
+	".yaml":   "application/yaml",
+	".yml":    "application/yaml",
+	".csv":    "text/csv",
+	".tsv":    "text/tab-separated-values",
+	".toml":   "application/toml",
+	".xml":    "application/xml",
+	".html":   "text/html",
+	".log":    "text/plain",
 }
 
 // agentFileStore is the narrow datastore surface the file tools need. *datastore.Datastore

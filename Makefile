@@ -250,6 +250,19 @@ jupyterlite: ## Build the JupyterLite site that runs notebooks into web/jupyterl
 	@cd $(JUPYTERLITE_DIR) && .venv/bin/jupyter lite build
 	@python3 -c "import json,sys; p='$(JUPYTERLITE_DIR)/dist/jupyter-lite.json'; d=json.load(open(p)); d['jupyter-config-data']['whatiffHostOrigins']='$(JUPYTERLITE_HOST_ORIGINS)'; json.dump(d,open(p,'w'),indent=2)"
 
+# The draw.io site the file workspace embeds for .drawio files (ADR 0x049): one pinned release,
+# checked against its SHA-256, served from an origin other than the app's.
+DRAWIO_VERSION := v32.6.10
+DRAWIO_SHA256 := a57b06b3b6a876a351dacfe65d027d9509319cd030e9bacf6ae04a034d66a38f
+
+.PHONY: diagrams-site
+diagrams-site: ## Build the draw.io site for .drawio files into web/diagrams/dist
+	@scripts/build-diagrams-site.sh $(DRAWIO_VERSION) $(DRAWIO_SHA256)
+
+.PHONY: diagrams-serve
+diagrams-serve: ## Serve the built draw.io site on :4204 for local development
+	@python3 -m http.server 4204 --bind 127.0.0.1 --directory web/diagrams/dist
+
 .PHONY: jupyterlite-serve
 jupyterlite-serve: ## Serve the built JupyterLite site on :4203 for local development
 	@python3 -m http.server 4203 --bind 127.0.0.1 --directory $(JUPYTERLITE_DIR)/dist

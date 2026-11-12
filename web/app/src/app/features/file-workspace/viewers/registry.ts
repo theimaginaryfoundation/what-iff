@@ -37,6 +37,7 @@ const loadSheetsEditor = () => import('../../office/sheets/sheets-editor.compone
 const loadDocsEditor = () => import('../../office/docs/docs-editor.component').then(m => m.DocsEditorComponent);
 const loadSlidesEditor = () => import('../../office/slides/slides-editor.component').then(m => m.SlidesEditorComponent);
 
+const loadDiagramEditor = () => import('../../diagrams/diagram-editor.component').then(m => m.DiagramEditorComponent);
 const loadNotebookEditor = () => import('../../notebook/notebook-editor.component').then(m => m.NotebookEditorComponent);
 
 const VIEWERS: Partial<Record<FilePreviewKind, ViewerEntry>> = {
@@ -47,6 +48,7 @@ const VIEWERS: Partial<Record<FilePreviewKind, ViewerEntry>> = {
   spreadsheet: { load: loadSheetsEditor, phoneView: true, edit: loadSheetsEditor, editInPlace: true },
   document: { load: loadDocsEditor, phoneView: true, edit: loadDocsEditor, editInPlace: true },
   slides: { load: loadSlidesEditor, phoneView: true, edit: loadSlidesEditor, editInPlace: true },
+  diagram: { load: loadDiagramEditor, phoneView: true, edit: loadDiagramEditor, editInPlace: true },
   notebook: { load: loadNotebookEditor, phoneView: true, edit: loadNotebookEditor, editInPlace: true },
   image: {
     load: () => import('./image-viewer.component').then(m => m.ImageViewerComponent),
