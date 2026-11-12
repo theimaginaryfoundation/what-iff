@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
-	"io"
 	"path"
 	"strings"
 
@@ -20,6 +19,10 @@ const (
 // pkg is an open zip package. Parts that change are kept here until save; every other entry is
 // copied as it was.
 type pkg struct {
+	budget *officecomments.Budget
+	// err is the first part that could not be read: a change is not saved over it, so an
+	// oversized part is never taken for a missing one and written again beside it.
+	err     error
 	r       *zip.Reader
 	files   map[string]*zip.File
 	changed map[string][]byte
@@ -31,7 +34,7 @@ func openPkg(data []byte) (*pkg, error) {
 	if err != nil {
 		return nil, officecomments.ErrNotOffice
 	}
-	p := &pkg{r: r, files: map[string]*zip.File{}, changed: map[string][]byte{}}
+	p := &pkg{budget: officecomments.NewBudget(), r: r, files: map[string]*zip.File{}, changed: map[string][]byte{}}
 	for _, f := range r.File {
 		p.files[strings.ToLower(f.Name)] = f
 	}
@@ -67,13 +70,11 @@ func (p *pkg) read(part string) ([]byte, bool) {
 	if data, ok := p.changed[name]; ok {
 		return data, true
 	}
-	rc, err := p.files[strings.ToLower(name)].Open()
+	data, err := p.budget.Read(p.files[strings.ToLower(name)])
 	if err != nil {
-		return nil, false
-	}
-	defer rc.Close()
-	data, err := io.ReadAll(rc)
-	if err != nil {
+		if p.err == nil {
+			p.err = fmt.Errorf("xlsx: read %s: %w", name, err)
+		}
 		return nil, false
 	}
 	return data, true
@@ -89,6 +90,9 @@ func (p *pkg) put(part string, data []byte) {
 
 // save writes the package: entries in their order, unchanged ones copied raw, new parts last.
 func (p *pkg) save() ([]byte, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
 	write := func(h *zip.FileHeader, data []byte) error {

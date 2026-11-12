@@ -3,8 +3,8 @@ package pptx
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"fmt"
-	"io"
 	"path"
 	"strings"
 
@@ -24,6 +24,10 @@ const (
 
 // pkg is an open .pptx: its zip entries in order, and the parts changed or added since.
 type pkg struct {
+	budget *officecomments.Budget
+	// err is the first part that could not be read or parsed: a change is not saved over it, so a
+	// broken or oversized part is never taken for a missing one and written again beside it.
+	err     error
 	files   []*zip.File
 	byName  map[string]*zip.File
 	changed map[string][]byte
@@ -36,7 +40,7 @@ func openPkg(data []byte) (*pkg, error) {
 	if err != nil {
 		return nil, officecomments.ErrNotOffice
 	}
-	p := &pkg{files: zr.File, byName: map[string]*zip.File{}, changed: map[string][]byte{}, removed: map[string]bool{}}
+	p := &pkg{budget: officecomments.NewBudget(), files: zr.File, byName: map[string]*zip.File{}, changed: map[string][]byte{}, removed: map[string]bool{}}
 	for _, f := range zr.File {
 		p.byName[f.Name] = f
 	}
@@ -66,16 +70,19 @@ func (p *pkg) read(name string) []byte {
 	if f == nil {
 		return nil
 	}
-	rc, err := f.Open()
+	b, err := p.budget.Read(f)
 	if err != nil {
-		return nil
-	}
-	defer rc.Close()
-	b, err := io.ReadAll(rc)
-	if err != nil {
+		p.fail(fmt.Errorf("pptx: read %s: %w", name, err))
 		return nil
 	}
 	return b
+}
+
+// fail records the first part that could not be read.
+func (p *pkg) fail(err error) {
+	if p.err == nil {
+		p.err = err
+	}
 }
 
 func (p *pkg) xml(name string) (*node, []byte) {
@@ -85,6 +92,10 @@ func (p *pkg) xml(name string) (*node, []byte) {
 	}
 	root, err := parseXML(data)
 	if err != nil {
+		if !errors.Is(err, officecomments.ErrTooLarge) {
+			err = fmt.Errorf("%w: %s: %v", officecomments.ErrNotOffice, name, err)
+		}
+		p.fail(err)
 		return nil, nil
 	}
 	return root, data
@@ -119,6 +130,9 @@ func (p *pkg) remove(name string) {
 
 // save writes the package: untouched entries as they were, in their order, then the new ones.
 func (p *pkg) save() ([]byte, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	write := func(name string, data []byte, like *zip.File) error {
@@ -231,6 +245,12 @@ func (p *pkg) addOverride(part, contentType string) {
 	root, data := p.xml("[Content_Types].xml")
 	if root == nil {
 		return
+	}
+	// A part the types already name (a leftover Override) is not named twice.
+	for _, o := range root.kids(nsCT, "Override") {
+		if strings.EqualFold(o.attr("PartName"), "/"+part) {
+			return
+		}
 	}
 	entry := fmt.Sprintf(`<Override PartName="/%s" ContentType="%s"/>`, part, contentType)
 	p.put("[Content_Types].xml", applyEdits(data, []edit{appendChild(data, root, entry)}))

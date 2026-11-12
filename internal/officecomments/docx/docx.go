@@ -173,6 +173,9 @@ func (Format) Reply(data []byte, threadID string, cm officecomments.Comment) ([]
 		return nil, officecomments.ErrNoThread
 	}
 	root := t.comments[0]
+	if root.lastParaID == "" {
+		return nil, officecomments.ErrOldComment
+	}
 	w, err := c.newComment(cm, root.lastParaID, t.resolved)
 	if err != nil {
 		return nil, err
@@ -244,6 +247,9 @@ func (Format) Resolve(data []byte, threadID string, resolved bool) ([]byte, erro
 	t := c.thread(threadID)
 	if t == nil {
 		return nil, officecomments.ErrNoThread
+	}
+	if t.comments[0].lastParaID == "" {
+		return nil, officecomments.ErrOldComment
 	}
 	if err := c.setDone(t, resolved); err != nil {
 		return nil, err

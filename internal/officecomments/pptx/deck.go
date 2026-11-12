@@ -243,6 +243,10 @@ type shape struct {
 // shapes are the elements at the top of a slide's shape tree, in order.
 func shapes(slideRoot *node) []shape {
 	tree := slideRoot.kid(nsP, "cSld").kid(nsP, "spTree")
+	// A slide with no shape tree (another writer's, or a broken one) has no shapes.
+	if tree == nil {
+		return nil
+	}
 	var out []shape
 	for _, el := range tree.Children {
 		if el.Name.Space != nsP {

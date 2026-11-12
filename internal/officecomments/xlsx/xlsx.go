@@ -49,6 +49,9 @@ func (Format) List(data []byte) ([]officecomments.Thread, error) {
 			out = append(out, t)
 		}
 	}
+	if b.p.err != nil {
+		return nil, b.p.err
+	}
 	return out, nil
 }
 

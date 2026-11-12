@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/officecomments"
 )
 
 // node is an element of an XML part with where it is in the part's bytes, so a change can be made
@@ -81,6 +83,9 @@ func scan(data []byte, maxDepth int) (*node, error) {
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
+			if len(stack) >= officecomments.MaxXMLDepth {
+				return nil, officecomments.ErrTooLarge
+			}
 			n := &node{name: t.Name, start: off, tagEnd: int(d.InputOffset())}
 			depth := len(stack)
 			if depth <= maxDepth {
@@ -172,11 +177,4 @@ func setAttr(tag, name, value string) string {
 var xmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;")
 
 // escapeXML escapes text as the browser does, dropping characters XML cannot hold.
-func escapeXML(s string) string {
-	return xmlEscaper.Replace(strings.Map(func(r rune) rune {
-		if r < 0x20 && r != '\t' && r != '\n' && r != '\r' || r == 0x7f || r == 0xfffe || r == 0xffff {
-			return -1
-		}
-		return r
-	}, s))
-}
+func escapeXML(s string) string { return xmlEscaper.Replace(officecomments.XMLText(s)) }

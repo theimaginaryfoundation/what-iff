@@ -5,6 +5,8 @@ import (
 	"encoding/xml"
 	"io"
 	"strings"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/officecomments"
 )
 
 // Namespaces of the parts this package reads.
@@ -89,6 +91,7 @@ func parseXML(data []byte) (*node, error) {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	doc := &node{}
 	cur := doc
+	depth := 0
 	for {
 		off := int(dec.InputOffset())
 		tok, err := dec.Token()
@@ -101,10 +104,14 @@ func parseXML(data []byte) (*node, error) {
 		end := int(dec.InputOffset())
 		switch t := tok.(type) {
 		case xml.StartElement:
+			if depth++; depth > officecomments.MaxXMLDepth {
+				return nil, officecomments.ErrTooLarge
+			}
 			n := &node{space: t.Name.Space, local: t.Name.Local, attrs: t.Attr, parent: cur, start: off, startEnd: end}
 			cur.children = append(cur.children, n)
 			cur = n
 		case xml.EndElement:
+			depth--
 			cur.endStart, cur.end = off, end
 			cur = cur.parent
 		case xml.CharData:
@@ -120,7 +127,8 @@ func parseXML(data []byte) (*node, error) {
 var escaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;")
 
 // escapeXML escapes text for an element or a double-quoted attribute, as the browser's escapeXml.
-func escapeXML(s string) string { return escaper.Replace(s) }
+// Characters XML cannot hold are dropped (officecomments.XMLText).
+func escapeXML(s string) string { return escaper.Replace(officecomments.XMLText(s)) }
 
 // edit replaces data[from:to] with text.
 type edit struct {

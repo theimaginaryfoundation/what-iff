@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/officecomments"
+	"github.com/theimaginaryfoundation/what-iff/internal/officecomments/officecommentstest"
 )
 
 const (
@@ -495,5 +496,53 @@ func TestReplyToLegacyThreadWritesTheSlideModern(t *testing.T) {
 	}
 	if last.ID != legacyID || strings.Join(got, "|") != "author:Kim Lee: Cut this slide?|author:Ola Berg: No, keep it.|user:u-42: Agreed" {
 		t.Fatalf("read back %s %v", last.ID, got)
+	}
+}
+
+func TestHostileInput(t *testing.T) {
+	// Pasted control characters are dropped, so the slide's comment part stays one Office opens,
+	// and a second comment goes into the same part rather than a new one beside a broken one.
+	agent := officecomments.Comment{AuthorID: "agent:p-1", AuthorName: "Cl\faude", Text: "see \v here"}
+	out, _, err := New().Add(build(t, basicParts()), officecomments.Anchor{Quote: "plan", Slide: 1}, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := officecommentstest.WellFormed(out); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err = New().Add(out, officecomments.Anchor{Quote: "Quarterly", Slide: 1}, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, _ := entries(t, out)
+	n := 0
+	for name := range files {
+		if strings.HasPrefix(name, "ppt/comments/") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d comment parts", n)
+	}
+
+	// A slide with no shape tree has no shapes, rather than a nil pointer.
+	parts := basicParts()
+	parts[4].body = head + `<p:sld xmlns:a="` + nsA + `" xmlns:r="` + nsR + `" xmlns:p="` + nsP + `"/>`
+	if _, err := New().List(build(t, parts)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := New().Add(build(t, parts), officecomments.Anchor{Quote: "Budget"}, agent); err != nil {
+		t.Fatal(err)
+	}
+
+	// A broken comment part is an error, not a missing part to write again beside it.
+	broken := commentedParts()
+	for i := range broken {
+		if strings.HasPrefix(broken[i].name, "ppt/comments/modernComment") {
+			broken[i].body = head + "<p188:cmLst>\v</p188:cmLst>"
+		}
+	}
+	if _, _, err := New().Add(build(t, broken), officecomments.Anchor{Quote: "Quarterly", Slide: 1}, agent); !errors.Is(err, officecomments.ErrNotOffice) {
+		t.Fatalf("broken part: %v", err)
 	}
 }

@@ -8,6 +8,8 @@ Each format works on the file's bytes, writes what the browser writes, and leave
 ## Responsibilities
 
 - **`officecomments`** — the shared `Format` interface (`List`, `Add`, `Reply`, `Resolve` over a file's bytes), `Thread`, `Comment`, `Anchor`, the errors the agent's tool turns into refusals, and how people are named in files (`PersonID`, `ProviderUserID`).
+  `limits.go`: `Budget` reads zip entries within `MaxPartBytes` each and `MaxReadBytes` together, `MaxXMLDepth` caps nesting (`ErrTooLarge`), and `XMLText` drops the characters XML cannot hold, which every format's escaper applies.
+  `officecommentstest.WellFormed` checks a package's parts with a strict parser, for the formats' tests.
 - **`docx`** — Word comments: comments.xml with commentsExtended, commentsIds, commentsExtensible and people.xml.
   Thread and comment ids are Word's durable ids, as the browser reads them.
   Add places a thread on quoted text in the body, splitting runs at its ends and writing the range markers and reference as the browser does.
@@ -38,4 +40,5 @@ Each format works on the file's bytes, writes what the browser writes, and leave
 ## Testing
 
 - Each format builds small packages in its tests: listing what the browser writes, Add, Reply and Resolve round trips, refusals, an agent author surviving, and untouched entries byte-identical.
+- Hostile input: control characters in comments and names (output checked with a strict parser), parts nested past the limit, a slide with no shape tree, a broken comment part (an error, not a second part), and a Word 2007 comment (`ErrOldComment`); `limits_test.go` covers the read budget.
 - `pptx` checks the context hash against the browser's vectors.

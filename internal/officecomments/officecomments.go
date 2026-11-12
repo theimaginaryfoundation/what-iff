@@ -29,6 +29,10 @@ var (
 	// ErrBadAnchor means the anchor does not name a place in the file (a slide or cell that is not
 	// there, or an anchor of the wrong kind for the format).
 	ErrBadAnchor = errors.New("that place is not in the file")
+	// ErrOldComment means the thread was written by an older Office (Word 2007's comments have no
+	// paragraph ids) and cannot be replied to or resolved as newer ones are: a reply would show
+	// as a thread of its own, and resolving has nowhere to be written.
+	ErrOldComment = errors.New("the thread was written by an older version of Office and cannot be replied to or resolved")
 	// ErrNotOffice means the bytes are not a package of the format.
 	ErrNotOffice = errors.New("the file is not a valid Office package")
 )

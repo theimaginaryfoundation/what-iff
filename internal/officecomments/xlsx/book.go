@@ -162,10 +162,14 @@ func (b *book) addPerson(pr person) {
 	b.p.addRel(b.wbPath, relPerson, b.personsPath)
 }
 
-// sheetNamed finds a sheet by name (any case); an empty name is the first sheet.
+// sheetNamed finds a sheet by name (any case); an empty name is the first sheet. A name quoted as
+// in a reference ('My Sheet', as List writes it) is taken without its quotes.
 func (b *book) sheetNamed(name string) (sheet, bool) {
 	if len(b.sheets) == 0 {
 		return sheet{}, false
+	}
+	if len(name) >= 2 && strings.HasPrefix(name, "'") && strings.HasSuffix(name, "'") {
+		name = strings.ReplaceAll(name[1:len(name)-1], "''", "'")
 	}
 	if name == "" {
 		return b.sheets[0], true

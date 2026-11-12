@@ -352,3 +352,12 @@ func TestHelpers(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestSheetNamedTakesAQuotedName(t *testing.T) {
+	b := &book{sheets: []sheet{{name: "Plan"}, {name: "Bob's Sheet"}}}
+	for _, name := range []string{"Bob's Sheet", "'Bob''s Sheet'", "bob's sheet"} {
+		if s, ok := b.sheetNamed(name); !ok || s.name != "Bob's Sheet" {
+			t.Fatalf("%q: %+v %v", name, s, ok)
+		}
+	}
+}

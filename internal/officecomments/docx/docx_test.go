@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/officecomments"
+	"github.com/theimaginaryfoundation/what-iff/internal/officecomments/officecommentstest"
 )
 
 const (
@@ -364,4 +365,67 @@ func TestGivenIDIsKept(t *testing.T) {
 	if !threads[0].Comments[0].CreatedAt.Equal(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)) {
 		t.Fatalf("date: %v", threads[0].Comments[0].CreatedAt)
 	}
+}
+
+func TestHostileInput(t *testing.T) {
+	f := New()
+
+	// Pasted control characters in a comment or an author's name are dropped, not written raw.
+	out, _, err := f.Add(plain(t, `<w:p><w:r><w:t>Hello brave world</w:t></w:r></w:p>`), officecomments.Anchor{Quote: "brave"},
+		officecomments.Comment{AuthorID: "agent:p-1", AuthorName: "Cl\faude", Text: "see \v here"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := officecommentstest.WellFormed(out); err != nil {
+		t.Fatal(err)
+	}
+	threads, err := f.List(out)
+	if err != nil || threads[0].Comments[0].Text != "see  here" || threads[0].Comments[0].AuthorName != "Claude" {
+		t.Fatalf("read back: %+v %v", threads, err)
+	}
+
+	// A part nested past MaxXMLDepth is refused rather than walked.
+	deep := strings.Repeat("<w:sdt>", officecomments.MaxXMLDepth) + strings.Repeat("</w:sdt>", officecomments.MaxXMLDepth)
+	if _, err := f.List(plain(t, `<w:p><w:r><w:t>x</w:t></w:r></w:p>`+deep)); !errors.Is(err, officecomments.ErrTooLarge) {
+		t.Fatalf("deep: %v", err)
+	}
+}
+
+func TestAWord2007CommentIsNotRepliedToOrResolvedAsIfItWere(t *testing.T) {
+	// The commented file with its first comment's paragraph ids taken away, as Word 2007 wrote it.
+	old := strings.NewReplacer(` w14:paraId="1A2B0000"`, ``, ` w14:paraId="1A2B3C4D"`, ``).Replace(string(commentedEntry(t, "word/comments.xml")))
+	data := replaceEntry(t, commented(t), "word/comments.xml", old)
+	threads, err := New().List(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := threads[0].ID
+	if _, err := New().Reply(data, id, officecomments.Comment{AuthorName: "Helper", Text: "Done."}); !errors.Is(err, officecomments.ErrOldComment) {
+		t.Fatalf("reply: %v", err)
+	}
+	if _, err := New().Resolve(data, id, false); !errors.Is(err, officecomments.ErrOldComment) {
+		t.Fatalf("resolve: %v", err)
+	}
+}
+
+func commentedEntry(t *testing.T, name string) []byte {
+	return []byte(entries(t, commented(t))[name])
+}
+
+// replaceEntry is data with one entry's content replaced, the rest as they were.
+func replaceEntry(t *testing.T, data []byte, name, content string) []byte {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parts []part
+	for _, f := range zr.File {
+		body := entries(t, data)[f.Name]
+		if f.Name == name {
+			body = content
+		}
+		parts = append(parts, part{f.Name, body})
+	}
+	return build(t, parts...)
 }

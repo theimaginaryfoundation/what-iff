@@ -233,6 +233,9 @@ func (Format) List(data []byte) ([]officecomments.Thread, error) {
 	for _, t := range d.threads() {
 		out = append(out, t.Thread)
 	}
+	if d.p.err != nil {
+		return nil, d.p.err
+	}
 	return out, nil
 }
 

@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/officecomments"
 )
 
 // node is an element of a part, with where it is in the part's text, so a change can be made to
@@ -36,6 +38,7 @@ func parseXML(data []byte) (*node, error) {
 	}
 	dec := xml.NewDecoder(bytes.NewReader(data[base:]))
 	var root, cur *node
+	depth := 0
 	for {
 		start := int(dec.InputOffset()) + base
 		tok, err := dec.Token()
@@ -48,6 +51,9 @@ func parseXML(data []byte) (*node, error) {
 		end := int(dec.InputOffset()) + base
 		switch t := tok.(type) {
 		case xml.StartElement:
+			if depth++; depth > officecomments.MaxXMLDepth {
+				return nil, officecomments.ErrTooLarge
+			}
 			n := &node{Name: t.Name, Attr: t.Attr, Parent: cur, Start: start, StartTagEnd: end}
 			for _, a := range t.Attr {
 				if a.Name.Space == "xmlns" {
@@ -65,6 +71,7 @@ func parseXML(data []byte) (*node, error) {
 			}
 			cur = n
 		case xml.EndElement:
+			depth--
 			if cur == nil {
 				return nil, errors.New("unbalanced xml")
 			}
@@ -141,6 +148,9 @@ func (n *node) kid(space, local string) *node {
 
 // walk visits the element's descendants in document order.
 func (n *node) walk(visit func(*node)) {
+	if n == nil {
+		return
+	}
 	for _, c := range n.Children {
 		visit(c)
 		c.walk(visit)
@@ -238,5 +248,5 @@ func setAttr(data []byte, n *node, name string, value *string) edit {
 
 var xmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;")
 
-// escapeXML escapes text as the browser's escapeXml does.
-func escapeXML(s string) string { return xmlEscaper.Replace(s) }
+// escapeXML escapes text as the browser's escapeXml does, dropping characters XML cannot hold.
+func escapeXML(s string) string { return xmlEscaper.Replace(officecomments.XMLText(s)) }

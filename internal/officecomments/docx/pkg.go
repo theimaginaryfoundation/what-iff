@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
-	"io"
 	"path"
 	"strings"
 
@@ -20,6 +19,7 @@ const (
 
 // pkg is a .docx opened for reading, with the parts a change rewrites or adds.
 type pkg struct {
+	budget  *officecomments.Budget
 	zr      *zip.Reader
 	files   map[string]*zip.File
 	changed map[string][]byte
@@ -31,7 +31,7 @@ func openPkg(data []byte) (*pkg, error) {
 	if err != nil {
 		return nil, officecomments.ErrNotOffice
 	}
-	p := &pkg{zr: zr, files: map[string]*zip.File{}, changed: map[string][]byte{}}
+	p := &pkg{budget: officecomments.NewBudget(), zr: zr, files: map[string]*zip.File{}, changed: map[string][]byte{}}
 	for _, f := range zr.File {
 		p.files[f.Name] = f
 	}
@@ -50,12 +50,11 @@ func (p *pkg) read(name string) ([]byte, error) {
 	if f == nil {
 		return nil, nil
 	}
-	rc, err := f.Open()
+	data, err := p.budget.Read(f)
 	if err != nil {
-		return nil, fmt.Errorf("docx: open %s: %w", name, err)
+		return nil, fmt.Errorf("docx: read %s: %w", name, err)
 	}
-	defer rc.Close()
-	return io.ReadAll(rc)
+	return data, nil
 }
 
 func (p *pkg) write(name string, data []byte) {
