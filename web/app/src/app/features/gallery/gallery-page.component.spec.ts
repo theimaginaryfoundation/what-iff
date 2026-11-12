@@ -119,7 +119,13 @@ describe('GalleryPageComponent refreshing', () => {
 describe('GalleryPageComponent file viewer', () => {
   const doc = (id: string, created_at: string) =>
     ({ id, user_id: 'u', name: `${id}.md`, file_type: 'text/markdown', created_at }) as FileAttachment;
-  const picture = { id: 'pic', user_id: 'u', name: 'pic.png', file_type: 'image/png', created_at: '2026-02-15T00:00:00Z' } as FileAttachment;
+  const picture = {
+    id: 'pic',
+    user_id: 'u',
+    name: 'pic.png',
+    file_type: 'image/png',
+    created_at: '2026-02-15T00:00:00Z',
+  } as FileAttachment;
   const rows = [doc('a', '2026-03-01T00:00:00Z'), picture, doc('b', '2026-02-01T00:00:00Z'), doc('c', '2026-01-01T00:00:00Z')];
 
   let params: BehaviorSubject<ParamMap>;

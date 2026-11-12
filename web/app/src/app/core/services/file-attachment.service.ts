@@ -6,7 +6,7 @@ import { FileAttachment, FileAttachmentFilters, ChatContextFilesResponse } from 
 import { PaginatedResponse } from '../models/common.model';
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class FileAttachmentService {
   private http = inject(HttpClient);
@@ -37,7 +37,13 @@ export class FileAttachmentService {
    * the editor loaded; null overwrites unconditionally. A stale version is a 412 whose
    * `details.content_version` is the current one (see conflictVersionOf).
    */
-  replaceContent(attachmentId: string, content: Blob, contentType: string, ifMatch: number | null, chatId?: string | null): Observable<FileAttachment> {
+  replaceContent(
+    attachmentId: string,
+    content: Blob,
+    contentType: string,
+    ifMatch: number | null,
+    chatId?: string | null,
+  ): Observable<FileAttachment> {
     let headers = new HttpHeaders({ 'Content-Type': contentType || 'application/octet-stream' });
     if (ifMatch !== null) {
       headers = headers.set('If-Match', String(ifMatch));
@@ -56,10 +62,12 @@ export class FileAttachmentService {
    * @param filters Optional filters to apply
    * @returns Observable of paginated file attachments
    */
-  listFileAttachments(page: number = 1, limit: number = 10, filters?: FileAttachmentFilters): Observable<PaginatedResponse<FileAttachment>> {
-    let params = new HttpParams()
-      .set('page', page.toString())
-      .set('limit', limit.toString());
+  listFileAttachments(
+    page: number = 1,
+    limit: number = 10,
+    filters?: FileAttachmentFilters,
+  ): Observable<PaginatedResponse<FileAttachment>> {
+    let params = new HttpParams().set('page', page.toString()).set('limit', limit.toString());
 
     if (filters) {
       if (filters.name) params = params.set('name', filters.name);

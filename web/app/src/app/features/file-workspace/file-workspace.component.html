@@ -32,7 +32,9 @@
           truncatedOnly
           [truncationTarget]="titleEl"
           placement="bottom"
-        >{{ title() }}</h2>
+        >
+          {{ title() }}
+        </h2>
       }
       <p class="file-workspace__meta">
         <span>{{ typeLabel() }}</span>
@@ -42,10 +44,12 @@
         <span>
           {{ folderName() }}
           @if (showMove()) {
-            <button type="button" class="file-workspace__link" uiTooltip="File this in a folder" (click)="moveToFolder.emit(file().id)">Move to…</button>
+            <button type="button" class="file-workspace__link" uiTooltip="File this in a folder" (click)="moveToFolder.emit(file().id)">
+              Move to…
+            </button>
           }
         </span>
-        <span>{{ file().created_at | date: 'medium' }}</span>
+        <span>{{ file().created_at | date: "medium" }}</span>
         @if (file().chat_id && !showGalleryLink()) {
           <a class="file-workspace__link" [routerLink]="['/chat', file().chat_id]">Open its thread</a>
         }
@@ -56,13 +60,18 @@
     </div>
 
     <div class="file-workspace__actions">
-      @if (mode() === 'edit') {
-        <button type="button" class="file-workspace__button file-workspace__button--primary" [disabled]="!editorDirty() || saving()" (click)="save()">
-          {{ saving() ? 'Saving…' : 'Save' }}
+      @if (mode() === "edit") {
+        <button
+          type="button"
+          class="file-workspace__button file-workspace__button--primary"
+          [disabled]="!editorDirty() || saving()"
+          (click)="save()"
+        >
+          {{ saving() ? "Saving…" : "Save" }}
         </button>
         <button type="button" class="file-workspace__button" [disabled]="saving()" (click)="openSaveAs()">Save as…</button>
         <button type="button" class="file-workspace__button" [disabled]="saving()" (click)="stopEdit()">Done</button>
-      } @else if (mode() === 'view') {
+      } @else if (mode() === "view") {
         @if (canMarkup()) {
           <button
             type="button"
@@ -78,8 +87,15 @@
           <button type="button" class="file-workspace__button file-workspace__button--primary" (click)="startEdit()">Edit</button>
         }
       }
-      @if (!isRenaming() && mode() === 'view') {
-        <button type="button" class="file-workspace__icon-btn" uiTooltip="Rename this file" placement="bottom" aria-label="Rename file" (click)="startRename()">
+      @if (!isRenaming() && mode() === "view") {
+        <button
+          type="button"
+          class="file-workspace__icon-btn"
+          uiTooltip="Rename this file"
+          placement="bottom"
+          aria-label="Rename file"
+          (click)="startRename()"
+        >
           <ui-edit-icon [size]="14" />
         </button>
       }
@@ -116,7 +132,14 @@
         </button>
       }
       @if (!backLabel()) {
-        <button type="button" class="file-workspace__icon-btn" uiTooltip="Close" placement="bottom" aria-label="Close file" (click)="requestClose()">
+        <button
+          type="button"
+          class="file-workspace__icon-btn"
+          uiTooltip="Close"
+          placement="bottom"
+          aria-label="Close file"
+          (click)="requestClose()"
+        >
           <ui-x-icon [size]="14" />
         </button>
       }
@@ -130,19 +153,19 @@
   <div class="file-workspace__body">
     <ng-container #editorOutlet />
     @switch (state()) {
-      @case ('loading') {
+      @case ("loading") {
         <p class="file-workspace__placeholder" role="status">Loading {{ title() }}…</p>
       }
-      @case ('error') {
+      @case ("error") {
         <div class="file-workspace__placeholder" role="alert">
           <p>Could not load this file.</p>
           <button type="button" class="file-workspace__button" (click)="download()">Try downloading it</button>
         </div>
       }
-      @case ('ready') {
-        @if (mode() === 'edit') {
+      @case ("ready") {
+        @if (mode() === "edit") {
           <!-- The editor is created in the outlet above. -->
-        } @else if (mode() === 'markup') {
+        } @else if (mode() === "markup") {
           <app-image-markup
             [source]="blob()"
             [name]="title()"
@@ -162,8 +185,13 @@
         <div class="file-workspace__placeholder">
           <p class="file-workspace__placeholder-badge" aria-hidden="true">{{ typeLabel() }}</p>
           <p>There is no preview for this kind of file.</p>
-          <button type="button" class="file-workspace__button file-workspace__button--primary" [disabled]="downloading()" (click)="download()">
-            {{ downloading() ? 'Downloading…' : 'Download' }}
+          <button
+            type="button"
+            class="file-workspace__button file-workspace__button--primary"
+            [disabled]="downloading()"
+            (click)="download()"
+          >
+            {{ downloading() ? "Downloading…" : "Download" }}
           </button>
         </div>
       }
@@ -175,13 +203,15 @@
   <ui-modal [open]="true" labelledBy="file-workspace-conflict-title" size="sm" (dismiss)="dismissConflict()">
     <h2 modal-header id="file-workspace-conflict-title" class="file-workspace__dialog-title">The file changed</h2>
     <p class="file-workspace__dialog-text">
-      Someone, or the agent, saved {{ title() }} since you opened it (now version {{ conflictVersion() }}). Reload to see their
-      version and lose your edits, overwrite it with yours, or save yours as a new file.
+      Someone, or the agent, saved {{ title() }} since you opened it (now version {{ conflictVersion() }}). Reload to see their version and
+      lose your edits, overwrite it with yours, or save yours as a new file.
     </p>
     <div modal-footer class="file-workspace__dialog-actions">
       <button type="button" class="file-workspace__button" (click)="reloadAfterConflict()">Reload</button>
       <button type="button" class="file-workspace__button" (click)="openSaveAs()">Save as…</button>
-      <button type="button" class="file-workspace__button file-workspace__button--danger" (click)="overwriteAfterConflict()">Overwrite</button>
+      <button type="button" class="file-workspace__button file-workspace__button--danger" (click)="overwriteAfterConflict()">
+        Overwrite
+      </button>
     </div>
   </ui-modal>
 }
@@ -192,7 +222,13 @@
     <form class="file-workspace__dialog-form" (submit)="$event.preventDefault(); submitSaveAs()">
       <label class="file-workspace__dialog-label">
         Name
-        <input type="text" class="file-workspace__rename-input" [value]="saveAsName()" (input)="saveAsName.set($any($event.target).value)" autofocus />
+        <input
+          type="text"
+          class="file-workspace__rename-input"
+          [value]="saveAsName()"
+          (input)="saveAsName.set($any($event.target).value)"
+          autofocus
+        />
       </label>
       <label class="file-workspace__dialog-label">
         Folder
