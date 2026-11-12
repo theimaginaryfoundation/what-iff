@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 // anchored is the text a range of the old text is on once the text is new.
@@ -79,8 +78,39 @@ func TestRemapCodeEdits(t *testing.T) {
 	}
 }
 
-func TestRemapOfALargeRepetitiveFileIsBounded(t *testing.T) {
-	// 4 MB of words, a few of each repeated, edited all through within MaxEdits: the diff's worst case.
+func TestTheDiffGivesUpAtItsWorkBudget(t *testing.T) {
+	saved := maxSteps
+	t.Cleanup(func() { maxSteps = saved })
+
+	words := make([]string, 2000)
+	for i := range words {
+		words[i] = "w" + strconv.Itoa(i%7)
+	}
+	oldText := strings.Join(words, " ")
+	for i := 0; i < len(words); i += 50 {
+		words[i] = "edit"
+	}
+	newText := strings.Join(words, " ")
+	vocab := vocabulary{}
+	oldTokens, newTokens := tokenize(Units(oldText), vocab), tokenize(Units(newText), vocab)
+
+	if _, ok := match(oldTokens, newTokens); !ok {
+		t.Fatal("within the budget the diff finishes")
+	}
+	maxSteps = 100
+	if _, ok := match(oldTokens, newTokens); ok {
+		t.Fatal("past the budget the diff gives up")
+	}
+	// Past the budget a range is still found, by its own words.
+	got := Remap(oldText, newText, []Range{{Start: 3, End: 5}})
+	if got[0] == nil || Slice(Units(newText), *got[0]) != "w1" {
+		t.Fatalf("got %+v", got[0])
+	}
+}
+
+// BenchmarkRemapLargeFile is a 4 MB file of a few repeated words, edited all through within
+// MaxEdits: the diff's worst case. Run with -bench to see it stay well under a second.
+func BenchmarkRemapLargeFile(b *testing.B) {
 	words := make([]string, 800_000)
 	for i := range words {
 		words[i] = "w" + strconv.Itoa(i%7)
@@ -90,12 +120,9 @@ func TestRemapOfALargeRepetitiveFileIsBounded(t *testing.T) {
 		words[i] = "edit"
 	}
 	newText := strings.Join(words, " ")
-	start := time.Now()
-	got := Remap(oldText, newText, []Range{{Start: 10, End: 14}})
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Fatalf("took %v", elapsed)
-	}
-	if got[0] == nil {
-		t.Fatal("the range was lost")
+	for b.Loop() {
+		if got := Remap(oldText, newText, []Range{{Start: 3, End: 5}}); got[0] == nil {
+			b.Fatal("the range was lost")
+		}
 	}
 }

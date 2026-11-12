@@ -29,4 +29,4 @@ Keeps ranges of a text on the same words as the text changes (ADR 0x045): the an
 
 ## Testing
 
-- `textanchor_test.go` — edits inside, before and after a range, a range inside a word, a range whose words are all gone, code edits, UTF-16 counting with emoji and a byte order mark, the fallback past the diff's bound, and a 4 MB file edited throughout staying well under a second.
+- `textanchor_test.go` — edits inside, before and after a range, a range inside a word, a range whose words are all gone, code edits, UTF-16 counting with emoji and a byte order mark, the fallback past the diff's bound and past its work budget (`maxSteps`, lowered in the test); `BenchmarkRemapLargeFile` times a 4 MB file edited throughout (about 0.1 s), kept out of the race-detector test run where wall time is meaningless.
