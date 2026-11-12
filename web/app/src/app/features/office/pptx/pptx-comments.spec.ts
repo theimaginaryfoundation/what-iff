@@ -362,6 +362,29 @@ describe('pptx comments', () => {
     expect(moved.anchor.elementId).toBe(shape2.id);
   });
 
+  it('keeps a text anchor on a quote that spans a paragraph break', async () => {
+    const { bytes } = await commentedDeck();
+    const { deck } = await read(bytes);
+    const slide = structuredClone(deck.slides[0]);
+    const shape = slide.elements[0];
+    if (shape.kind !== 'shape' || !shape.text) throw new Error('the title is a shape with text');
+    const run = shape.text.paragraphs[0].runs[0];
+    shape.text.paragraphs = [
+      { ...shape.text.paragraphs[0], runs: [{ ...run, text: 'Hello' }] },
+      { ...shape.text.paragraphs[0], runs: [{ ...run, text: 'world' }] },
+    ];
+    const thread: SlideCommentThread = {
+      id: 't',
+      anchor: { slideId: slide.id, x: 0, y: 0, elementId: shape.id, text: { start: 0, length: 11 } },
+      quote: 'Hello world', // as the panel shows it, the break collapsed
+      comments: [],
+    };
+    expect(carryTextAnchors([thread], slide)[0].anchor.text).toEqual({ start: 0, length: 11 });
+
+    shape.text.paragraphs[0].runs[0] = { ...run, text: 'Big Hello' };
+    expect(carryTextAnchors([thread], slide)[0].anchor.text).toEqual({ start: 4, length: 11 });
+  });
+
   it('hashes text as PowerPoint does (the context it wrote for "Churn 3.1%")', () => {
     expect(officeArtHash('Churn 3.1%\r')).toBe(1604253316);
   });

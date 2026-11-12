@@ -231,7 +231,7 @@ export class TextCommentsState {
         const got = await firstValueFrom(this.api.put(fileId, sent, contentVersion, this.revision));
         this.contentVersion = got.contentVersion;
         this.revision = got.revision;
-        if (sent !== threads) this.takeMerged(threads, got.threads);
+        if (sent !== threads) this.takeMerged(sent, got.threads);
         this.synced = got.threads;
         this.status.set('saved');
         // The comments that mention the agent are stored now: it is sent them (ADR 0x046).
@@ -239,11 +239,16 @@ export class TextCommentsState {
         return;
       } catch (error) {
         const status = (error as { status?: number }).status;
-        if (status === 409 && attempt === 0) {
+        if (status === 409 && attempt < 2) {
           const theirs = await this.reread(fileId);
           if (theirs) {
-            sent = mergeThreads(this.synced, threads, theirs.threads);
+            const merged = mergeThreads(this.synced, sent, theirs.threads);
+            // What is shown takes their changes now, so `synced` (theirs) and what is shown agree
+            // even if this write fails too: a later merge then cannot read their comments as
+            // removed here.
+            this.takeMerged(sent, merged);
             this.synced = theirs.threads;
+            sent = merged;
             continue;
           }
         }
