@@ -367,6 +367,15 @@ describe('FileWorkspaceComponent', () => {
       expect(await ws.saveComments(editor)).toBe('failed');
     });
 
+    it('lets the user comment on a file no editor can write, but writes none into it', async () => {
+      await show(file({ name: 'loop.gif', file_type: 'image/gif' }));
+      const ws = fixture.componentInstance;
+      expect(ws.editable()).toBe(false);
+      expect(ws.canComment()).toBe(true);
+      expect(await ws.saveComments(viewer().editor)).toBe('failed');
+      expect(replaceContent).not.toHaveBeenCalled();
+    });
+
     it('reloads the file when it changed elsewhere, rather than overwrite it', async () => {
       await show(file());
       replaceContent.mockReturnValueOnce(

@@ -1,14 +1,16 @@
-// Package filecomments keeps the comments on text and code files (ADR 0x045). Those formats have
-// no place for comments, so a file's threads are stored beside it with the text their anchors are
-// placed against. Whoever changes the file (the user's editor, an agent's file tools), the next
-// read carries the anchors to the new text (textanchor), so they stay on the words they were on;
-// a thread none of whose words are left becomes a comment on the whole file.
+// Package filecomments keeps the comments on text, code and image files (ADR 0x045). Those formats
+// have no place for comments, so a file's threads are stored beside it. On text they are on ranges
+// of it, kept with the text their anchors are placed against: whoever changes the file (the user's
+// editor, an agent's file tools), the next read carries the anchors to the new text (textanchor),
+// so they stay on the words they were on, and a thread none of whose words are left becomes a
+// comment on the whole file. On an image every thread is on the whole file, for now.
 package filecomments
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -27,8 +29,8 @@ var (
 	ErrStaleContent = errors.New("the file changed since the comments were placed on it")
 	// ErrRevision means the comments changed since the caller read them.
 	ErrRevision = datastore.ErrFileCommentsRevision
-	// ErrNotText means the file is not text that comments can be placed on.
-	ErrNotText = errors.New("comments can be placed only on text files")
+	// ErrNotText means the file is neither text nor an image, which comments can be placed on.
+	ErrNotText = errors.New("comments can be placed only on text and image files")
 )
 
 // Store is what the service needs of the datastore.
@@ -59,6 +61,30 @@ func contentKey(file *models.FileAttachment) string {
 	return fmt.Sprintf("row:%s:%d", file.ID, file.ContentVersion)
 }
 
+// isImage reports whether the file is an image, whose threads are on the whole file.
+//
+// Regions of an image (a box drawn on it) are the expected next anchor. They would be a separate
+// field of the thread, in fractions of the image's width and height so they do not depend on its
+// size, and an edit that changes the image's geometry (a crop, a rotation) would move them or put
+// them on the whole file; the baseline key already tells a read that the image changed.
+func isImage(file *models.FileAttachment) bool {
+	return strings.HasPrefix(strings.ToLower(file.FileType), "image/")
+}
+
+// onFile puts every thread on the whole file: an image's threads (see isImage).
+func onFile(threads []models.FileCommentThread) []models.FileCommentThread {
+	out := make([]models.FileCommentThread, len(threads))
+	for i, t := range threads {
+		if t.Comments == nil {
+			t.Comments = []models.FileComment{}
+		}
+		t.Anchor = nil
+		t.Quote = ""
+		out[i] = t
+	}
+	return out
+}
+
 // Read is the comments of the file id is a row of (its original, for a chat copy: ADR 0x045),
 // placed on the content id holds. When that is not the content they were placed on, their anchors
 // are carried across and the result stored, so the next read is direct.
@@ -79,7 +105,8 @@ func (s *Service) Read(ctx context.Context, userID, id uuid.UUID) (*models.FileC
 		if set == nil {
 			return &models.FileComments{Threads: []models.FileCommentThread{}, ContentVersion: file.ContentVersion}, nil
 		}
-		if set.BaselineKey == contentKey(file) {
+		// An image's threads are on the whole file, which an edit does not move.
+		if set.BaselineKey == contentKey(file) || isImage(file) {
 			return &models.FileComments{Threads: set.Threads, ContentVersion: file.ContentVersion, Revision: set.Revision}, nil
 		}
 		text, err := s.text(ctx, userID, file)
@@ -116,11 +143,15 @@ func (s *Service) Write(ctx context.Context, userID, id uuid.UUID, threads []mod
 	if err != nil {
 		return nil, err
 	}
-	text, err := s.text(ctx, userID, file)
-	if err != nil {
-		return nil, err
+	var text string
+	if isImage(file) {
+		threads = onFile(threads)
+	} else {
+		if text, err = s.text(ctx, userID, file); err != nil {
+			return nil, err
+		}
+		threads = Place(threads, text)
 	}
-	threads = Place(threads, text)
 	next, err := s.store.PutFileCommentSet(ctx, userID, key, models.FileCommentSet{
 		Threads: threads, BaselineText: text, BaselineKey: contentKey(file),
 	}, revision)

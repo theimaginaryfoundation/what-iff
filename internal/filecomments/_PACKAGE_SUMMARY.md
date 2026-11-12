@@ -2,7 +2,7 @@
 
 ## Role
 
-Keeps the comments on text and code files (ADR 0x045), which have no place for comments of their own: a file's threads are stored beside it (ent `FileCommentSet`) with the text their anchors are placed against, and `GET`/`PUT /file-attachment/{id}/comments` only map errors to statuses.
+Keeps the comments on text, code and image files (ADR 0x045), which have no place for comments of their own: a file's threads are stored beside it (ent `FileCommentSet`) with the text their anchors are placed against, and `GET`/`PUT /file-attachment/{id}/comments` only map errors to statuses.
 
 ## Responsibilities
 
@@ -13,7 +13,8 @@ Keeps the comments on text and code files (ADR 0x045), which have no place for c
 - **`Place`** checks anchors against the text and sets each thread's quote; **`Carry`** moves anchors to new text.
 - **One set per file, whichever row it is read through.**
   A chat copy of a file reads and writes the original's set (`CommentFileID`), so a comment made in a chat shows in the gallery and the other way round.
-- **Refusals:** `ErrNotText` for content that is not UTF-8 or is over `MaxTextBytes` (4 MB).
+- **Images:** every thread is on the whole file (`anchor` null, no quote); no text is read and an edit leaves the threads as they are.
+- **Refusals:** `ErrNotText` for content that is neither an image nor UTF-8 text, or text over `MaxTextBytes` (4 MB).
 
 ## Dependencies
 
@@ -29,8 +30,10 @@ Keeps the comments on text and code files (ADR 0x045), which have no place for c
 - **The baseline is the stored object, not a version number.**
   Every save writes a new object, and a file's rows each count their own `content_version`, so the set records the `s3_key` its baseline was read from; a different key on the row read through is changed content.
   A row with no key (content inline) uses its id and version instead.
+- **Image regions are left for later, and not ruled out.**
+  A box drawn on an image would be a separate field of the thread, in fractions of the image's size; the stored `s3_key` baseline already tells a read that the image was edited, which is when regions would have to move.
 - **Two reads carrying at once:** the second one's write fails on the revision, and it reads what the first stored.
 
 ## Testing
 
-- `filecomments_test.go` — placing and quoting on write, stale content and revision refusals, carrying across a change made elsewhere (including the start and end moving), detaching once the words are gone, a file with no comments, binary content, and a file and its chat copy sharing one set across an agent's edit.
+- `filecomments_test.go` — placing and quoting on write, stale content and revision refusals, carrying across a change made elsewhere (including the start and end moving), detaching once the words are gone, a file with no comments, binary content, a file and its chat copy sharing one set across an agent's edit, and an image's whole-file threads outliving an edit.

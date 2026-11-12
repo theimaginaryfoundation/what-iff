@@ -1,0 +1,42 @@
+// The comment controls a viewer shows (ADR 0x045): its Comment and Comments buttons at the end of
+// its toolbar, and the panel beside what it shows. `$block` is the viewer's class prefix.
+@mixin comment-controls($block) {
+  #{$block}__comments {
+    flex: 0 0 300px;
+    max-width: 45%;
+  }
+
+  #{$block}__comment-tools {
+    display: inline-flex;
+    gap: 0.35rem;
+    margin-left: auto;
+  }
+
+  #{$block}__comment-tool {
+    align-items: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 0.8125rem;
+    gap: 0.35rem;
+    padding: 0.25rem 0.6rem;
+
+    &[aria-pressed="true"] {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+  }
+
+  #{$block}__count {
+    background: var(--accent);
+    border-radius: 999px;
+    color: #fff;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1;
+    padding: 0.15rem 0.4rem;
+  }
+}

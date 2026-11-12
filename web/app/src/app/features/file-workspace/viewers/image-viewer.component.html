@@ -1,0 +1,43 @@
+@if (hasComments()) {
+  <div class="image-viewer__toolbar">
+    <span class="image-viewer__comment-tools">
+      @if (canComment()) {
+        <button type="button" class="image-viewer__comment-tool" title="Comment on the image" (click)="startComment()">Comment</button>
+      }
+      <button type="button" class="image-viewer__comment-tool" [attr.aria-pressed]="commentsOpen()" (click)="toggleComments()">
+        Comments
+        @if (comments.openCount()) {
+          <span class="image-viewer__count">{{ comments.openCount() }}</span>
+        }
+      </button>
+    </span>
+  </div>
+}
+<div class="image-viewer__main">
+  <div class="image-viewer__stage">
+    @if (safeUrl(); as url) {
+      <img class="image-viewer__image" [src]="url" [alt]="file().name" />
+    }
+  </div>
+  @if (commentsOpen()) {
+    <app-comments-panel
+      class="image-viewer__comments"
+      [threads]="comments.shown()"
+      [activeId]="comments.activeId()"
+      [draftQuote]="comments.draft()?.quote"
+      [me]="me()"
+      [people]="comments.people()"
+      [readOnly]="!canComment()"
+      [saveStatus]="comments.status()"
+      emptyHint="Choose Comment to start a thread on the image."
+      (select)="comments.select($event)"
+      (create)="comments.create($event)"
+      (cancelDraft)="comments.cancelDraft()"
+      (reply)="comments.reply($event)"
+      (edit)="comments.edit($event)"
+      (remove)="comments.remove($event)"
+      (resolve)="comments.resolve($event)"
+      (closed)="closeComments()"
+    />
+  }
+</div>

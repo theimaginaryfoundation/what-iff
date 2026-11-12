@@ -14,7 +14,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
-// Comments on text and code files (ADR 0x045), which have no place for them of their own.
+// Comments on text, code and image files (ADR 0x045), which have no place for them of their own.
 
 type putFileCommentsRequest struct {
 	Threads        []models.FileCommentThread `json:"threads"`
@@ -90,7 +90,7 @@ func (h *Handler) respondCommentsError(w http.ResponseWriter, err error) {
 	case errors.Is(err, filecomments.ErrRevision):
 		handlerutils.RespondWithError(w, h.logger, http.StatusConflict, handlerutils.CodeNotSet, "The comments changed since they were read", nil)
 	case errors.Is(err, filecomments.ErrNotText):
-		handlerutils.RespondWithError(w, h.logger, http.StatusUnsupportedMediaType, handlerutils.CodeNotSet, "Comments can be placed only on text files", nil)
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnsupportedMediaType, handlerutils.CodeNotSet, "Comments can be placed only on text and image files", nil)
 	default:
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read or write the comments", err)
 	}

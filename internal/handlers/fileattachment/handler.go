@@ -24,7 +24,7 @@ type attachmentStore interface {
 	filesave.Store
 	// Whether a save's chat is the caller's, and sandboxed.
 	GetChat(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error)
-	// Comments on text and code files (filecomments.Service).
+	// Comments on text, code and image files (filecomments.Service).
 	CommentFileID(ctx context.Context, userID, id uuid.UUID) (uuid.UUID, error)
 	GetFileCommentSet(ctx context.Context, userID, fileID uuid.UUID) (*models.FileCommentSet, error)
 	PutFileCommentSet(ctx context.Context, userID, fileID uuid.UUID, set models.FileCommentSet, expectRevision int) (int, error)

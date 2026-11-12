@@ -196,3 +196,38 @@ func TestAFileAndItsChatCopyShareOneSetOfComments(t *testing.T) {
 		t.Fatalf("the reply through the copy: %+v, %v", got, err)
 	}
 }
+
+func TestAnImagesThreadsAreOnTheWholeFileAndOutliveAnEdit(t *testing.T) {
+	ctx := context.Background()
+	files := memFiles{"img1": {0x89, 'P', 'N', 'G', 0xff, 0x00}}
+	store := &fakeStore{file: &models.FileAttachment{ID: uuid.New(), S3Key: "img1", Name: "photo.png", FileType: "image/png", ContentVersion: 1}}
+	svc := New(store, files)
+
+	// An anchor sent for an image is dropped: its threads are on the whole file.
+	got, err := svc.Write(ctx, uuid.New(), store.file.ID, []models.FileCommentThread{thread("t1", 0, 3)}, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Threads[0].Anchor != nil || got.Threads[0].Quote != "" || got.Revision != 1 {
+		t.Fatalf("placed %+v", got)
+	}
+	if store.set.BaselineKey != "img1" || store.set.BaselineText != "" {
+		t.Fatalf("stored %+v", store.set)
+	}
+
+	// The image is edited (a new object); its threads are read as they were, with nothing stored.
+	files["img2"] = []byte{0x89, 'P', 'N', 'G', 0x01}
+	store.file.S3Key, store.file.ContentVersion = "img2", 2
+	got, err = svc.Read(ctx, uuid.New(), store.file.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Threads) != 1 || got.Threads[0].ID != "t1" || got.ContentVersion != 2 || store.puts != 1 {
+		t.Fatalf("read %+v after %d puts", got, store.puts)
+	}
+
+	// A write is still placed on the image's current content.
+	if _, err := svc.Write(ctx, uuid.New(), store.file.ID, got.Threads, 1, got.Revision); !errors.Is(err, ErrStaleContent) {
+		t.Fatalf("stale: %v", err)
+	}
+}

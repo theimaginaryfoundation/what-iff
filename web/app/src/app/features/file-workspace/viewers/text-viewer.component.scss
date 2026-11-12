@@ -1,3 +1,5 @@
+@use "./viewer-comments" as comments;
+
 :host {
   display: flex;
   flex-direction: column;
@@ -128,44 +130,7 @@
   }
 }
 
-.text-viewer__comments {
-  flex: 0 0 300px;
-  max-width: 45%;
-}
-
-.text-viewer__comment-tools {
-  display: inline-flex;
-  gap: 0.35rem;
-  margin-left: auto;
-}
-
-.text-viewer__comment-tool {
-  align-items: center;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 0.8125rem;
-  gap: 0.35rem;
-  padding: 0.25rem 0.6rem;
-
-  &[aria-pressed="true"] {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-}
-
-.text-viewer__count {
-  background: var(--accent);
-  border-radius: 999px;
-  color: #fff;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  line-height: 1;
-  padding: 0.15rem 0.4rem;
-}
+@include comments.comment-controls(".text-viewer");
 
 .text-viewer__scrim {
   inset: 0;

@@ -9159,9 +9159,9 @@ paths:
 
   /file-attachment/{id}/comments:
     get:
-      summary: A text file's comments
+      summary: A text or image file's comments
       description: >-
-        The comment threads of a text or code file (ADR 0x045), which has no place for comments of
+        The comment threads of a text, code or image file (ADR 0x045), which has no place for comments of
         its own, placed on its current content. When the file changed since the comments were
         written (by the user or by an agent), each anchor is carried to the new text word by word:
         kept on its words, its start moved to the first word left after it and its end to the last
@@ -9197,17 +9197,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '415':
-          description: The file is not text (or is over 4 MB)
+          description: The file is neither an image nor text (or is text over 4 MB)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
     put:
-      summary: Write a text file's comments
+      summary: Write a text or image file's comments
       description: >-
         Stores the file's threads (ADR 0x045), their anchors placed on the text of
         `content_version`, which must be the file's current content, over the `revision` the client
-        read (0 for a file with no comments yet). Each thread's `quote` is set from the text.
+        read (0 for a file with no comments yet). Each thread's `quote` is set from the text. An
+        image's threads are all on the whole file: an `anchor` sent for one is dropped.
       tags: [File Attachments]
       parameters:
         - name: id
@@ -9261,7 +9262,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '415':
-          description: The file is not text (or is over 4 MB)
+          description: The file is neither an image nor text (or is text over 4 MB)
           content:
             application/json:
               schema:

@@ -53,7 +53,8 @@ function newThreadId(): string {
 export class TextCommentsState {
   readonly threads = signal<TextCommentThread[]>([]);
   readonly activeId = signal<string | null>(null);
-  readonly draft = signal<{ range: Range; quote: string } | null>(null);
+  /** The thread being started: on a range of the text, or (range null) on the whole file. */
+  readonly draft = signal<{ range: Range | null; quote: string } | null>(null);
   readonly status = signal<CommentSaveStatus>('idle');
   /** Where each thread is, as last read from the surface. */
   readonly positions = signal<ReadonlyMap<string, Range | null>>(new Map());
@@ -222,20 +223,24 @@ export class TextCommentsState {
     this.activeId.set(null);
   }
 
+  /** Starts a thread on the whole file (an image's, which has no text to place one on). */
+  startOnFile(): void {
+    this.draft.set({ range: null, quote: '' });
+    this.activeId.set(null);
+  }
+
   cancelDraft(): void {
     this.draft.set(null);
   }
 
   create(draft: CommentDraft): void {
     const at = this.draft();
-    if (!at || !this.surface) return;
+    if (!at || (at.range && !this.surface)) return;
     const id = newThreadId();
-    const anchor: TextCommentAnchor = { ...at.range };
-    this.threads.update(threads => [
-      ...threads,
-      { id, anchor, quote: this.surface!.text(at.range), comments: [newComment(id, this.me(), draft)] },
-    ]);
-    this.surface.place(id, anchor);
+    const anchor: TextCommentAnchor = at.range ? { ...at.range } : null;
+    const quote = at.range && this.surface ? this.surface.text(at.range) : '';
+    this.threads.update(threads => [...threads, { id, anchor, quote, comments: [newComment(id, this.me(), draft)] }]);
+    this.surface?.place(id, anchor);
     this.draft.set(null);
     this.activeId.set(id);
     this.refresh();

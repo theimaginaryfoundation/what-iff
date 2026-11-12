@@ -150,8 +150,11 @@ export class FileWorkspaceComponent implements CommentSaver {
   readonly editorBusy = signal(false);
   /** Leaving edit mode would lose something: unsaved changes, or work in progress. */
   readonly holdsWork = computed(() => this.editorDirty() || this.editorBusy());
-  /** Comments can be written while viewing a file the user may change (ADR 0x045). */
-  readonly canComment = computed(() => this.editable() && this.mode() === 'view');
+  /**
+   * Comments can be written while viewing a file the user may change (ADR 0x045). Kept beside the
+   * file (text, images) that is all they need; written into it (saveComments), the file needs an editor too.
+   */
+  readonly canComment = computed(() => this.canEdit() && this.state() === 'ready' && this.mode() === 'view');
   /** The file whose lossy save the user accepted for comments, so they are asked once, not per comment. */
   private lossyCommentsAccepted: string | null = null;
   readonly saving = signal(false);
@@ -351,7 +354,7 @@ export class FileWorkspaceComponent implements CommentSaver {
    */
   async saveComments(editor: Pick<FileEditor, 'content' | 'markSaved' | 'losses'>): Promise<CommentSaveResult> {
     const file = this.file();
-    if (!this.canComment()) return 'failed';
+    if (!this.canComment() || !this.editable()) return 'failed';
     let content: Blob;
     try {
       content = await editor.content();

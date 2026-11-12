@@ -13667,8 +13667,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * A text file's comments
-         * @description The comment threads of a text or code file (ADR 0x045), which has no place for comments of its own, placed on its current content. When the file changed since the comments were written (by the user or by an agent), each anchor is carried to the new text word by word: kept on its words, its start moved to the first word left after it and its end to the last one before it; a thread none of whose words are left is on the whole file (`anchor` null) with the quote it had. A file and its chat copies have one set of comments: any of their ids reads and writes the same threads.
+         * A text or image file's comments
+         * @description The comment threads of a text, code or image file (ADR 0x045), which has no place for comments of its own, placed on its current content. When the file changed since the comments were written (by the user or by an agent), each anchor is carried to the new text word by word: kept on its words, its start moved to the first word left after it and its end to the last one before it; a thread none of whose words are left is on the whole file (`anchor` null) with the quote it had. A file and its chat copies have one set of comments: any of their ids reads and writes the same threads.
          */
         get: {
             parameters: {
@@ -13709,7 +13709,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The file is not text (or is over 4 MB) */
+                /** @description The file is neither an image nor text (or is text over 4 MB) */
                 415: {
                     headers: {
                         [name: string]: unknown;
@@ -13721,8 +13721,8 @@ export interface paths {
             };
         };
         /**
-         * Write a text file's comments
-         * @description Stores the file's threads (ADR 0x045), their anchors placed on the text of `content_version`, which must be the file's current content, over the `revision` the client read (0 for a file with no comments yet). Each thread's `quote` is set from the text.
+         * Write a text or image file's comments
+         * @description Stores the file's threads (ADR 0x045), their anchors placed on the text of `content_version`, which must be the file's current content, over the `revision` the client read (0 for a file with no comments yet). Each thread's `quote` is set from the text. An image's threads are all on the whole file: an `anchor` sent for one is dropped.
          */
         put: {
             parameters: {
@@ -13794,7 +13794,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The file is not text (or is over 4 MB) */
+                /** @description The file is neither an image nor text (or is text over 4 MB) */
                 415: {
                     headers: {
                         [name: string]: unknown;

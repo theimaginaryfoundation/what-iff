@@ -1,0 +1,41 @@
+@use "./viewer-comments" as comments;
+
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.image-viewer__toolbar {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+}
+
+.image-viewer__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.image-viewer__stage {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  justify-content: center;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.image-viewer__image {
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+@include comments.comment-controls(".image-viewer");
