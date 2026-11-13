@@ -7,16 +7,17 @@
  *
  *   theme tokens   → src/styles/_tailwind-theme.scss (`@theme inline { ... }`)
  *   plugins        → `@plugin` lines in this file
- *   content scan   → `@source` lines in this file (plus v4 auto-detection
- *                    from the directory containing this CSS file, which
- *                    already covers `src/**`)
+ *   content scan   → `@source` lines in this file, and nothing else
  *   dark variant   → `@custom-variant dark` line below
  */
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 
-/* Make content scanning explicit so future readers can see what utilities
- * are generated against. v4 auto-detects sources beneath this CSS file's
- * directory; the extra entries below cover assets that live outside it. */
+/* The only files scanned for class names. Automatic source detection is off
+ * (`source(none)` above): it scans the build's working directory (web/app),
+ * skipping what .gitignore lists only inside a git repository. Outside one, as
+ * in a composed or exported copy of the app, it read all of node_modules
+ * (~78k files, minutes on a CI runner), and inside one it still read e2e/,
+ * docs/ and the draw.io site behind diagrams-site/. */
 @source "./";
 @source "../node_modules/flowbite";
 
