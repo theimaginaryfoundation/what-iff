@@ -1,6 +1,12 @@
 @if (frameUrl(); as url) {
   @if (state() === "loading") {
-    <div class="diagram-editor__status" role="status">Opening the diagram…</div>
+    @if (unreachable()) {
+      <div class="diagram-editor__status" role="alert">
+        The diagram editor didn't load from {{ siteOrigin }}. Check that it is running and that this browser can reach it.
+      </div>
+    } @else {
+      <div class="diagram-editor__status" role="status">Opening the diagram…</div>
+    }
   } @else {
     <div class="diagram-editor__bar" role="toolbar" aria-label="Diagram">
       <span class="diagram-editor__downloads">

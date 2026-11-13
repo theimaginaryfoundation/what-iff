@@ -22,7 +22,7 @@ The pinned release's code is under the Apache License 2.0 (some 2024 releases ca
 - `make diagrams-site` builds the site from one pinned release (`DRAWIO_VERSION`, checked against `DRAWIO_SHA256`): the static web app from the release's `draw.war`, without the Java servlets, source maps and cloud integrations, with its `LICENSE` and a `NOTICE`.
   Upgrading is changing the pair, after reading the new release's `LICENSE`.
 - Our settings (`web/diagrams/PreConfig.js`) replace the release's: no export server, no outside services (`stealth`, `offline`), and files saved as plain XML (`compressXml: false`).
-- The site is served from an origin other than the app's, as the notebooks site is (ADR 0x043 §11), so draw.io's scripts never run with the app's session: locally `make diagrams-serve` (:4204), deployed `diagrams-dev.whatiff.chat` and `diagrams.whatiff.chat`.
+- The site is served from an origin other than the app's, as the notebooks site is (ADR 0x043 §11), so draw.io's scripts never run with the app's session: locally the app's dev server serves the built site at `/diagrams/` on `127.0.0.1` (another origin than `localhost`), deployed `diagrams-dev.whatiff.chat` and `diagrams.whatiff.chat`.
   The app's `diagramsUrl` names it; a URL on the app's own origin, or plain http off localhost, turns diagrams off.
 - The embedded editor makes no requests outside its own site.
 

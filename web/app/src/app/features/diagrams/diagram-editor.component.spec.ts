@@ -79,6 +79,22 @@ describe('DiagramEditorComponent', () => {
     expect(fixture.componentInstance.dirty()).toBe(false);
   });
 
+  it('says so when the editor does not load, instead of waiting forever', async () => {
+    vi.useFakeTimers();
+    try {
+      TestBed.resetTestingModule();
+      setUp(SITE);
+      fixture.componentRef.setInput('file', file());
+      fixture.componentRef.setInput('blob', new Blob([XML]));
+      fixture.detectChanges();
+      vi.advanceTimersByTime(20_000);
+      fixture.detectChanges();
+      expect(fixture.nativeElement.textContent).toContain("didn't load from " + ORIGIN);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('downloads the diagram as an image the editor makes', async () => {
     const saved: { blob: Blob; name: string }[] = [];
     let blob: Blob | null = null;

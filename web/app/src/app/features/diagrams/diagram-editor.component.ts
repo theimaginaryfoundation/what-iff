@@ -34,6 +34,8 @@ import { BridgeEvent, DrawioAction, dataUrlToBlob, drawioUrl, exportName, readDr
 const DIAGRAM_MIME = 'application/vnd.jgraph.mxfile';
 /** How long an image export may take before it is given up on. */
 const EXPORT_TIMEOUT_MS = 30_000;
+/** How long the editor may take to say it is ready before the panel says it did not load. */
+const EDITOR_READY_TIMEOUT_MS = 20_000;
 
 type ImageFormat = 'png' | 'svg';
 /** What an export asks the editor for. */
@@ -68,6 +70,8 @@ export class DiagramEditorComponent implements FileEditor {
 
   readonly dirty = signal(false);
   readonly state = signal<'loading' | 'ready'>('loading');
+  /** The editor has not said it is ready in time: its site is down or out of this browser's reach. */
+  readonly unreachable = signal(false);
   /** The image being made for a download, if any. */
   readonly exporting = signal<ImageFormat | null>(null);
   readonly exportFailed = signal(false);
@@ -75,6 +79,7 @@ export class DiagramEditorComponent implements FileEditor {
   private readonly document = inject(DOCUMENT);
   private readonly site = inject(DIAGRAMS_URL);
   private readonly origin = this.site ? new URL(this.site).origin : null;
+  readonly siteOrigin = this.origin ?? '';
   private readonly sanitizer = inject(DomSanitizer);
   private readonly frame = viewChild<ElementRef<HTMLIFrameElement>>('frame');
 
@@ -153,6 +158,8 @@ export class DiagramEditorComponent implements FileEditor {
       const action = this.cellComments.marksAction();
       if (this.state() === 'ready') untracked(() => this.send(action));
     });
+    const notReady = setTimeout(() => this.unreachable.set(!this.ready), EDITOR_READY_TIMEOUT_MS);
+    inject(DestroyRef).onDestroy(() => clearTimeout(notReady));
     const onMessage = (event: MessageEvent) => this.onMessage(event);
     this.document.defaultView?.addEventListener('message', onMessage);
     inject(DestroyRef).onDestroy(() => {
@@ -285,6 +292,7 @@ export class DiagramEditorComponent implements FileEditor {
     switch (message.event) {
       case 'init':
         this.ready = true;
+        this.unreachable.set(false);
         // Bytes not read yet are loaded once they are (take); otherwise what the editor held.
         if (this.haveBytes) this.pending ??= this.latest;
         this.loadPending();

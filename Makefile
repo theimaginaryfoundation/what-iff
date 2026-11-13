@@ -259,10 +259,6 @@ DRAWIO_SHA256 := a57b06b3b6a876a351dacfe65d027d9509319cd030e9bacf6ae04a034d66a38
 diagrams-site: ## Build the draw.io site for .drawio files into web/diagrams/dist
 	@scripts/build-diagrams-site.sh $(DRAWIO_VERSION) $(DRAWIO_SHA256)
 
-.PHONY: diagrams-serve
-diagrams-serve: ## Serve the built draw.io site on :4204 for local development
-	@python3 -m http.server 4204 --bind 127.0.0.1 --directory web/diagrams/dist
-
 .PHONY: jupyterlite-serve
 jupyterlite-serve: ## Serve the built JupyterLite site on :4203 for local development
 	@python3 -m http.server 4203 --bind 127.0.0.1 --directory $(JUPYTERLITE_DIR)/dist
