@@ -120,20 +120,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v7
+      # Go from go.mod, and this job's own build cache (see the action).
+      - id: go
+        uses: ./.github/actions/setup-go-cached
         with:
-          go-version-file: go.mod
-          cache: true
+          name: e2e-local-llm
 
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: 'web/app/package-lock.json'
 
       - name: Install frontend dependencies
-        working-directory: web/app
-        run: npm ci
+        uses: ./.github/actions/npm-ci-cached
+        with:
+          working-directory: web/app
+          environment: ${{ needs.version.outputs.image }}
 
       # make, zstd, psql, jq, python3, and the Ollama binary + model weights
       # are all baked into the e2e-ollama image (docker/ci/Dockerfile) — this
@@ -153,6 +154,13 @@ jobs:
         run: go generate ./ent
       - name: Build API
         run: go build -buildvcs=false -o /tmp/api-server ./cmd/api-server
+      # Right after the build, so a failing test run still keeps what it compiled.
+      - name: Save Go cache
+        if: steps.go.outputs.save == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.go.outputs.paths }}
+          key: ${{ steps.go.outputs.key }}
 
       - name: Start API (local LLM)
         run: |

@@ -60,10 +60,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      # Go from go.mod, and this job's own build cache, kept current by the
+      # save step at the end of the job (see the action).
       - name: Setup Go
-        uses: actions/setup-go@v7
+        id: go
+        uses: ./.github/actions/setup-go-cached
         with:
-          go-version-file: go.mod
+          name: validate
 
       # A malformed codecov.yml is silently ignored by Codecov, which would
       # quietly drop the flag/component/ignore config. Fail here instead.
@@ -171,6 +174,13 @@ jobs:
       - name: Verify build
         run: make build
 
+      - name: Save Go cache
+        if: steps.go.outputs.save == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.go.outputs.paths }}
+          key: ${{ steps.go.outputs.key }}
+
   # Hermetic backend end-to-end run (scripts/mock-e2e.sh): own isolated
   # Postgres via docker compose, real register/login/chat/job pipeline
   # against the mock LLM. A separate job (not a step in `validate`) so this
@@ -190,16 +200,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      # Go from go.mod, and this job's own build cache (see the action).
       - name: Setup Go
-        uses: actions/setup-go@v7
+        id: go
+        uses: ./.github/actions/setup-go-cached
         with:
-          # go-version-file, not a literal: setup-go exports GOTOOLCHAIN=local, so a
-          # pin below go.mod's `go` directive cannot self-upgrade and every Go step
-          # dies with "go.mod requires go >= X (running go Y; GOTOOLCHAIN=local)".
-          # That is what happened when go.mod moved to 1.27.0 and this pin stayed at
-          # 1.25.4. Every other setup-go in this repo reads the file; this was the
-          # only literal.
-          go-version-file: go.mod
+          name: mock-e2e
 
       - name: Generate Ent code
         run: go generate ./ent
@@ -243,6 +249,13 @@ jobs:
           flags: go-mock-e2e
           disable_search: true
           fail_ci_if_error: false
+
+      - name: Save Go cache
+        if: steps.go.outputs.save == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.go.outputs.paths }}
+          key: ${{ steps.go.outputs.key }}
 
   # Resolves the baked CI image's `e2e-ollama` target (docker/ci/Dockerfile,
   # published by ci-image.yml), which bundles the pinned Ollama binary and
@@ -294,10 +307,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      # validate's build cache, restored only: these opt-in jobs run on pull
+      # requests, which never save.
       - name: Setup Go
-        uses: actions/setup-go@v7
+        uses: ./.github/actions/setup-go-cached
         with:
-          go-version-file: go.mod
+          name: validate
 
       - name: Generate Ent code
         run: make generate
@@ -320,10 +335,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      # validate's build cache, restored only: these opt-in jobs run on pull
+      # requests, which never save.
       - name: Setup Go
-        uses: actions/setup-go@v7
+        uses: ./.github/actions/setup-go-cached
         with:
-          go-version-file: go.mod
+          name: validate
 
       - name: Run integration-tagged tests
         env:

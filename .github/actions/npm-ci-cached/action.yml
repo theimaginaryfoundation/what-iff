@@ -1,0 +1,53 @@
+name: 'npm ci, or the node_modules it made last time'
+description: >-
+  Restores a node_modules directory keyed on its package-lock.json, the Node
+  version and the job's environment, and runs `npm ci` only when there is none.
+
+  setup-node's `cache: npm` keeps only npm's download cache, so `npm ci` still
+  deletes and rebuilds node_modules on every run (20-60 s a job). The lockfile
+  fixes what `npm ci` installs, and the package has no install scripts that
+  write outside node_modules, so a node_modules made from the same lockfile by
+  the same Node on the same image is the same tree.
+
+  A tree is saved by the run that built it, on main only: a pull request that
+  changes the lockfile builds its own every run instead of filling the
+  repository's cache with one copy per PR.
+inputs:
+  working-directory:
+    description: 'The package directory, e.g. web/app'
+    required: true
+  environment:
+    description: >-
+      What else the installed tree depends on beyond OS and Node, such as the
+      job's container image; jobs with different values never share a tree.
+    required: false
+    default: 'runner'
+runs:
+  using: composite
+  steps:
+    - id: key
+      shell: bash
+      env:
+        LOCK: ${{ hashFiles(format('{0}/package-lock.json', inputs.working-directory)) }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        DIR: ${{ inputs.working-directory }}
+      run: |
+        env_hash="$(printf '%s' "$ENVIRONMENT" | sha256sum | cut -c1-12)"
+        echo "key=node-modules-${RUNNER_OS}-$(uname -m)-node$(node -p 'process.versions.node')-${env_hash}-${DIR//\//_}-${LOCK}" >> "$GITHUB_OUTPUT"
+
+    - id: restore
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ inputs.working-directory }}/node_modules
+        key: ${{ steps.key.outputs.key }}
+
+    - if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm ci
+
+    - if: steps.restore.outputs.cache-hit != 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ inputs.working-directory }}/node_modules
+        key: ${{ steps.key.outputs.key }}
