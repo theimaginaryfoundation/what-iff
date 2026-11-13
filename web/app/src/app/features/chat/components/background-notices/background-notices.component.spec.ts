@@ -84,6 +84,8 @@ describe('BackgroundNoticesComponent', () => {
     expect(el.querySelector('[data-testid="background-notice-fix"]')).toBeNull();
     expect(texts(el)[0]).toContain("Mistral isn't set up on this server.");
     expect(texts(el)[0]).not.toContain('Add one');
+    expect(texts(el)[1]).toContain('It may have been turned off, or its provider removed.');
+    expect(texts(el)[1]).not.toContain('Choose another');
   });
 
   it('offers to change background models for a provider error', async () => {

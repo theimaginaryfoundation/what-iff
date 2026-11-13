@@ -179,7 +179,7 @@ export class BackgroundNoticesComponent {
       const label = roleLabel(n.step.slice('fallback_'.length));
       return {
         what: label ? `The model chosen for ${label} wasn't available.` : "A model chosen for background work wasn't available.",
-        why: `It may have been turned off, or its provider removed. Choose another.${times}`,
+        why: `It may have been turned off, or its provider removed.${this.keys.accountsSupplyKeys() ? ' Choose another.' : ''}${times}`,
         action: 'background-models',
         actionLabel: 'Change background models',
       };
