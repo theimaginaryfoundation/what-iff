@@ -118,3 +118,27 @@ describe('BackgroundModelsStepComponent', () => {
     expect(select('memory').value).toBe('luna');
   });
 });
+
+describe('BackgroundModelsStepComponent with no models loaded', () => {
+  it("says the models couldn't be loaded, and leaves Off as the only choice", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await TestBed.configureTestingModule({
+      imports: [HostComponent],
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: UtilityModelsService, useValue: { choose: vi.fn(), switchOff: vi.fn() } },
+        { provide: ModelService, useValue: { models$: new BehaviorSubject<Model[]>([]), getModels: vi.fn(() => throwError(() => new Error('offline'))) } },
+      ],
+    }).compileComponents();
+    const fixture = TestBed.createComponent(HostComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid="background-models-step-error"]')?.textContent).toContain("Your models couldn't be loaded.");
+    const memory = el.querySelector('[data-testid="onboarding-background-model-memory"]') as HTMLSelectElement;
+    expect(Array.from(memory.options).map(o => o.value)).toEqual(['off']);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
