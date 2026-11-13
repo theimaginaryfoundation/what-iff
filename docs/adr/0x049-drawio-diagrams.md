@@ -100,6 +100,7 @@ The server cannot draw a diagram, so the browser that shows one sends a picture 
 - Beside it is a tag, a hash of the picture: it is the preview's ETag, so a cached copy is revalidated from the tag alone without reading the picture, and a picture replaced at the same version (an agent's `render`) is never served stale.
 - A diagram attached to a message is shown by it, in the same card as an image, and the gallery shows it as the diagram's tile.
   Where a message shows a diagram that has no preview yet (one just uploaded, or made by an agent), the browser draws one in a hidden editor and stores it, one diagram at a time.
+  The page keeps the pictures of the last few dozen diagrams it showed and releases older ones; a diagram it could not get a picture of is tried again the next time it is shown.
 - The `diagram` tool's `list` shows it to models that take images, with the outline, or says there is none of this version yet.
   A picture over 3 MB or 4096 pixels a side is shown as its thumbnail instead.
   A diagram an agent changed has none until the user opens it.

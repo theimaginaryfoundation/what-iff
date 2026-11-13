@@ -1,3 +1,4 @@
+import { bytesToBase64 } from '../../core/utils/base64';
 import { DrawioAction, DrawioEvent, drawioUrl, readDrawioMessage } from './drawio-frame';
 
 /** How long the editor may take to start and convert a diagram. */
@@ -118,8 +119,5 @@ function convertInEditor(document: Document, site: string, timeoutMs: number, sc
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(binary);
+  return bytesToBase64(new Uint8Array(await blob.arrayBuffer()));
 }

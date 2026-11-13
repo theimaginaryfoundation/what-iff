@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
-import { DiagramPictures } from './diagram-pictures.service';
+import { DiagramPictures, MAX_PICTURES } from './diagram-pictures.service';
 import { DIAGRAMS_URL } from './diagram-site.config';
 
 const PNG = 'data:image/png;base64,iVBORw0KGgo=';
@@ -69,6 +69,37 @@ describe('DiagramPictures', () => {
     await expect(first).resolves.toBe(PNG);
     await expect(second).resolves.toBe(PNG);
     expect(render).toHaveBeenCalledTimes(2);
+  });
+
+  it('tries again after there was nothing to show', async () => {
+    const { pictures, render, http } = setup();
+    render.mockRejectedValueOnce(new Error('The diagram editor did not answer.'));
+    const failed = firstValueFrom(pictures.picture(diagram('f')));
+    http.expectOne('/api/file-attachment/f/preview?size=full').flush(new Blob(['none']), { status: 404, statusText: 'Not Found' });
+    await expect(failed).resolves.toBeNull();
+    const again = firstValueFrom(pictures.picture(diagram('f')));
+    http.expectOne('/api/file-attachment/f/preview?size=full').flush(new Blob(['none']), { status: 404, statusText: 'Not Found' });
+    await expect(again).resolves.toBe(PNG);
+    expect(render).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the latest pictures only, revoking the object URLs of those it lets go', async () => {
+    const { pictures, http } = setup();
+    let n = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:${n++}`);
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const show = async (id: string) => {
+      const picture = firstValueFrom(pictures.picture(diagram(id)));
+      http.match(`/api/file-attachment/${id}/preview?size=full`).forEach(r => r.flush(new Blob(['png'])));
+      return picture;
+    };
+    await expect(show('p0')).resolves.toBe('blob:0');
+    for (let i = 1; i < MAX_PICTURES; i++) await show(`p${i}`);
+    await show('p0'); // asked for again: now the latest, nothing fetched
+    expect(revoke).not.toHaveBeenCalled();
+    await show('extra');
+    expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:1');
+    await expect(show('p0')).resolves.toBe('blob:0');
   });
 
   it('has nothing to show for a diagram with no preview where there is no editor', async () => {

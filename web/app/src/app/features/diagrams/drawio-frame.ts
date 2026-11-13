@@ -1,3 +1,5 @@
+import { base64ToBytes } from '../../core/utils/base64';
+
 /**
  * The draw.io embed protocol (ADR 0x049), as far as the file workspace uses it: the editor runs in
  * an iframe on its own origin (embed=1, proto=json) and the two sides exchange JSON messages.
@@ -93,10 +95,7 @@ export function dataUrlToBlob(url: string): Blob | null {
   if (!match) return null;
   const [, type, params, payload] = match;
   if (!params.split(';').includes('base64')) return new Blob([decodeURIComponent(payload)], { type });
-  const binary = atob(payload);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type });
+  return new Blob([base64ToBytes(payload)], { type });
 }
 
 /** A download's name: the diagram's file name with the image's extension in place of .drawio. */
