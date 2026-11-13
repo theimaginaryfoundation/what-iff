@@ -54,6 +54,7 @@ export const ALLOWED_FILE_TYPES = [
   'text/plain',
   'text/csv',
   'text/markdown',
+  'text/vnd.mermaid',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',

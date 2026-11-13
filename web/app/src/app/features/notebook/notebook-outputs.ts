@@ -1,5 +1,6 @@
 import DOMPurify from 'dompurify';
 
+import { escapeHtml } from '../../core/utils/escape-html';
 import { NotebookOutput, isDataOutput, isErrorOutput, isStreamOutput, joinSource, recordField } from './nbformat';
 
 /**
@@ -61,7 +62,9 @@ function mergeStreams(outputs: readonly NotebookOutput[]): NotebookOutput[] {
 function outputView(output: NotebookOutput, loaders: string): OutputView | null {
   if (isStreamOutput(output)) return textView(applyCarriageReturns(joinSource(output.text)), output.name === 'stderr');
   if (isErrorOutput(output)) {
-    const trace = Array.isArray(output.traceback) ? output.traceback.map(String).join('\n') : `${String(output.ename ?? 'Error')}: ${String(output.evalue ?? '')}`;
+    const trace = Array.isArray(output.traceback)
+      ? output.traceback.map(String).join('\n')
+      : `${String(output.ename ?? 'Error')}: ${String(output.evalue ?? '')}`;
     return textView(trace, true);
   }
   if (isDataOutput(output)) return dataView(recordField(output.data), recordField(output.metadata), loaders);
@@ -80,7 +83,8 @@ function dataView(data: Record<string, unknown>, metadata: Record<string, unknow
   // A widget is a view of objects in a live kernel; its repr says nothing useful without one.
   if (data[WIDGET_VIEW] !== undefined) return { kind: 'widget' };
   const scripted = interactiveBody(data);
-  if (scripted !== null) return { kind: 'interactive', document: frameDocument(scripted, loaders), fallback: staticView(data, metadata, true) };
+  if (scripted !== null)
+    return { kind: 'interactive', document: frameDocument(scripted, loaders), fallback: staticView(data, metadata, true) };
   return staticView(data, metadata, false);
 }
 
@@ -122,7 +126,13 @@ function jsonInScript(value: unknown): string {
 
 /** Whether HTML holds no visible content beyond scripts and styles. */
 function onlyScripts(html: string): boolean {
-  return /<script\b/i.test(html) && !html.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, '').replace(/<!--[\s\S]*?-->/g, '').trim();
+  return (
+    /<script\b/i.test(html) &&
+    !html
+      .replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .trim()
+  );
 }
 
 /**
@@ -267,10 +277,6 @@ export function ansiToHtml(text: string): string {
   return out;
 }
 
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] as string);
-}
-
 // Its own instance: hooks on the shared one would reach the chat's clipboard code.
 let purifier: ReturnType<typeof DOMPurify> | null = null;
 
@@ -296,7 +302,10 @@ function outputPurifier(view: Window & typeof globalThis): ReturnType<typeof DOM
         // variants) or a backslash escape, which can spell one, drops the whole attribute.
         const plain = value.replace(/\b(?:rgba?|hsla?|calc|var)\(/gi, '');
         if (/[(\\@]/.test(plain)) node.removeAttribute(name);
-      } else if ((/url\s*\(|image-set\s*\(|@import/i.test(value) || /\\[\s\S]*\(/.test(value)) && !/^\s*url\(\s*['"]?#[\w-]+['"]?\s*\)\s*$/i.test(value)) {
+      } else if (
+        (/url\s*\(|image-set\s*\(|@import/i.test(value) || /\\[\s\S]*\(/.test(value)) &&
+        !/^\s*url\(\s*['"]?#[\w-]+['"]?\s*\)\s*$/i.test(value)
+      ) {
         node.removeAttribute(name);
       }
     }
@@ -315,7 +324,23 @@ export function sanitizeOutputHtml(html: string): string {
   const view = typeof window === 'undefined' ? undefined : window;
   if (!view?.document) return escapeHtml(html);
   return outputPurifier(view).sanitize(html, {
-    FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'iframe', 'object', 'embed', 'base', 'meta', 'link', 'video', 'audio', 'source'],
+    FORBID_TAGS: [
+      'style',
+      'form',
+      'input',
+      'button',
+      'textarea',
+      'select',
+      'iframe',
+      'object',
+      'embed',
+      'base',
+      'meta',
+      'link',
+      'video',
+      'audio',
+      'source',
+    ],
     FORBID_ATTR: ['formaction', 'background'],
   }) as string;
 }

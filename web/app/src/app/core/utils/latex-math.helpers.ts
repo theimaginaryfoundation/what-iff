@@ -1,5 +1,8 @@
 import type { MarkedExtension, TokenizerAndRendererExtension, Tokens } from 'marked';
 
+import { escapeHtml } from './escape-html';
+import { retryingLoader } from './retrying-loader';
+
 /**
  * LaTeX math in rendered markdown.
  *
@@ -76,10 +79,6 @@ function inlineTokenizer(src: string): LatexMathToken | undefined {
   return undefined;
 }
 
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
 function renderPlaceholder(token: LatexMathToken, tag: 'div' | 'span'): string {
   const classes = token.display ? `${LATEX_MATH_CLASS} ${LATEX_MATH_DISPLAY_CLASS}` : LATEX_MATH_CLASS;
   return `<${tag} class="${classes}">${escapeHtml(token.text)}</${tag}>`;
@@ -119,13 +118,9 @@ export function latexMathExtension(): MarkedExtension {
 }
 
 type Katex = typeof import('katex').default;
-let katexLoader: Promise<Katex> | null = null;
 
 /** KaTeX is ~270 kB, so it is only fetched once a message actually contains math. */
-function loadKatex(): Promise<Katex> {
-  katexLoader ??= import('katex').then(module => module.default);
-  return katexLoader;
-}
+const loadKatex = retryingLoader<Katex>(() => import('katex').then(module => module.default));
 
 /**
  * Renders every `.latex-math` placeholder under `root` with KaTeX. Invalid TeX renders as KaTeX's

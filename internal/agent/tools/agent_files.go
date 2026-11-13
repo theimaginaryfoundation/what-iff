@@ -37,20 +37,36 @@ const (
 // agentFileTypes are the extensions an agent can create, with their stored MIME types. A name
 // without an extension gets ".md".
 var agentFileTypes = map[string]string{
-	".md":     "text/markdown",
-	".mmd":    "text/vnd.mermaid",
-	".drawio": "application/vnd.jgraph.mxfile",
-	".txt":    "text/plain",
-	".json":   "application/json",
-	".jsonl":  "application/jsonl",
-	".yaml":   "application/yaml",
-	".yml":    "application/yaml",
-	".csv":    "text/csv",
-	".tsv":    "text/tab-separated-values",
-	".toml":   "application/toml",
-	".xml":    "application/xml",
-	".html":   "text/html",
-	".log":    "text/plain",
+	".md":      "text/markdown",
+	".mmd":     "text/vnd.mermaid",
+	".mermaid": "text/vnd.mermaid",
+	".drawio":  "application/vnd.jgraph.mxfile",
+	".txt":     "text/plain",
+	".json":    "application/json",
+	".jsonl":   "application/jsonl",
+	".yaml":    "application/yaml",
+	".yml":     "application/yaml",
+	".csv":     "text/csv",
+	".tsv":     "text/tab-separated-values",
+	".toml":    "application/toml",
+	".xml":     "application/xml",
+	".html":    "text/html",
+	".log":     "text/plain",
+}
+
+// agentFileExtensions lists agentFileTypes' extensions for the tool description, ".md" first.
+func agentFileExtensions() string {
+	exts := make([]string, 0, len(agentFileTypes))
+	for ext := range agentFileTypes {
+		exts = append(exts, ext)
+	}
+	sort.Slice(exts, func(i, j int) bool {
+		if (exts[i] == ".md") != (exts[j] == ".md") {
+			return exts[i] == ".md"
+		}
+		return exts[i] < exts[j]
+	})
+	return strings.Join(exts, " ")
 }
 
 // agentFileStore is the narrow datastore surface the file tools need. *datastore.Datastore
