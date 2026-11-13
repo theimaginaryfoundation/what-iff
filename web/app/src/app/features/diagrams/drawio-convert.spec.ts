@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { convertMermaidToDrawio, convertVisioToDrawio } from './drawio-convert';
+import { convertMermaidToDrawio, convertVisioToDrawio, renderDiagramPng } from './drawio-convert';
 
 const SITE = 'https://diagrams.example.test/index.html';
 const ORIGIN = 'https://diagrams.example.test';
@@ -74,6 +74,20 @@ describe('convertVisioToDrawio', () => {
     answer({ event: 'init' });
     answer({ event: 'whatiff-import-failed', message: 'Invalid file' });
     await expect(done).rejects.toThrow('could not be converted: Invalid file');
+    expect(document.querySelector('iframe')).toBeNull();
+  });
+});
+
+describe('renderDiagramPng', () => {
+  it('loads the diagram into a hidden editor and takes the PNG it exports', async () => {
+    const done = renderDiagramPng(document, SITE, DIAGRAM);
+    const { sent, answer } = editorFrame();
+    answer({ event: 'init' });
+    expect(sent[0]).toEqual({ action: 'load', xml: DIAGRAM, autosave: 1 });
+    answer({ event: 'load', xml: DIAGRAM });
+    expect(sent[1]).toEqual({ action: 'export', format: 'png', scale: 1, background: '#ffffff' });
+    answer({ event: 'export', format: 'png', data: 'data:image/png;base64,iVBORw0KGgo=' });
+    await expect(done).resolves.toBe('data:image/png;base64,iVBORw0KGgo=');
     expect(document.querySelector('iframe')).toBeNull();
   });
 });

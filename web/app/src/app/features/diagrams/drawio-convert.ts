@@ -38,16 +38,40 @@ export async function convertVisioToDrawio(
   });
 }
 
+/**
+ * A PNG of a diagram (draw.io XML), drawn on white in a hidden editor, as a `data:` URL: a diagram's
+ * preview where no editor has shown it yet (ADR 0x049 §8).
+ */
+export function renderDiagramPng(document: Document, site: string, xml: string, timeoutMs = CONVERT_TIMEOUT_MS): Promise<string> {
+  return convertInEditor(document, site, timeoutMs, {
+    start: send => send({ action: 'load', xml, autosave: 1 }),
+    export: { action: 'export', format: 'png', scale: 1, background: '#ffffff' },
+    result: message => (message.data?.startsWith('data:image/png') ? message.data : null),
+  });
+}
+
+type ExportEvent = Extract<DrawioEvent, { event: 'export' }>;
+
 interface EditorScript {
   /** What is sent once the editor is ready; a `load` follows, then the diagram is exported. */
   start: (send: (action: DrawioAction) => void) => void;
   /** Any other message, before the `load`. */
   onMessage?: (message: DrawioEvent, send: (action: DrawioAction) => void, fail: (error: Error) => void) => void;
+  /** What is asked for once the diagram is loaded; its plain XML by default. */
+  export?: DrawioAction;
+  /** The result in the export's answer, or null to ask again; by default the XML, once it has shapes. */
+  result?: (message: ExportEvent) => string | null;
 }
 
+const xmlWithShapes = (message: ExportEvent) => {
+  const xml = message.xml ?? '';
+  return /<mxCell [^>]*vertex="1"/.test(xml) ? xml : null;
+};
+
 /**
- * Runs `script` in a hidden editor and resolves with the diagram it ends up with, exported as plain
- * XML once it has shapes. The editor is removed once it is done, or has failed or timed out.
+ * Runs `script` in a hidden editor and resolves with what the export gives once the diagram is
+ * drawn (by default its plain XML, once it has shapes). The editor is removed once it is done, or
+ * has failed or timed out.
  */
 function convertInEditor(document: Document, site: string, timeoutMs: number, script: EditorScript): Promise<string> {
   const origin = new URL(site).origin;
@@ -72,17 +96,18 @@ function convertInEditor(document: Document, site: string, timeoutMs: number, sc
       else resolve(xml ?? '');
     };
     const send = (action: DrawioAction) => frame.contentWindow?.postMessage(JSON.stringify(action), origin);
-    const exportXml = () => send({ action: 'export', format: 'xml' });
+    const exportDiagram = () => send(script.export ?? { action: 'export', format: 'xml' });
+    const result = script.result ?? xmlWithShapes;
     const onMessage = (event: MessageEvent) => {
       const message = readDrawioMessage(event, origin, frame.contentWindow);
       if (!message) return;
       if (message.event === 'init') script.start(send);
-      else if (message.event === 'load') exportXml();
+      else if (message.event === 'load') exportDiagram();
       else if (message.event === 'export') {
-        const xml = message.xml ?? '';
+        const got = result(message);
         // The shapes may still be being drawn just after the load: asked again, a few times.
-        if (/<mxCell [^>]*vertex="1"/.test(xml)) finish(null, xml);
-        else if (++exports < MAX_EXPORTS) setTimeout(exportXml, 300);
+        if (got) finish(null, got);
+        else if (++exports < MAX_EXPORTS) setTimeout(exportDiagram, 300);
         else finish(new Error('The editor could not draw this diagram.'));
       } else script.onMessage?.(message, send, error => finish(error));
     };

@@ -7,7 +7,9 @@ import { FileAttachmentService } from '../../../../core/services/file-attachment
 import { saveBlobAsFile } from '../../../../core/utils/download.helpers';
 import { renderLatexMath } from '../../../../core/utils/latex-math.helpers';
 import { renderMermaid } from '../../../../core/utils/mermaid.helpers';
+import { DIAGRAMS_URL } from '../../../diagrams/diagram-site.config';
 import { FileWorkspaceService } from '../../../file-workspace/file-workspace.service';
+import { previewKindFor } from '../../../gallery/helpers/file-preview.helpers';
 import { DownloadIconComponent } from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 import { buildClipboardPayload } from '../../helpers/html-clipboard.helpers';
@@ -37,6 +39,10 @@ import { MessageImageAttachmentsComponent } from './message-image-attachments.co
 
     @if (imageAttachments().length) {
       <app-message-image-attachments [attachments]="imageAttachments()" [size]="imageSize()" />
+    }
+
+    @if (diagramAttachments().length) {
+      <app-message-image-attachments [attachments]="diagramAttachments()" kind="diagram" />
     }
 
     @if (nonImageAttachments().length) {
@@ -152,6 +158,7 @@ export class MessageContentComponent {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly files = inject(FileAttachmentService);
   private readonly workspace = inject(FileWorkspaceService);
+  private readonly diagramsSite = inject(DIAGRAMS_URL);
 
   readonly content = input('');
   readonly attachments = input<readonly FileAttachment[]>([]);
@@ -160,7 +167,11 @@ export class MessageContentComponent {
   readonly imageSize = input<'thumbnail' | 'full'>('thumbnail');
   readonly images = computed(() => extractImages(this.content()));
   readonly imageAttachments = computed(() => this.attachments().filter(isImageAttachment));
-  readonly nonImageAttachments = computed(() => this.attachments().filter(attachment => !isImageAttachment(attachment)));
+  /** draw.io diagrams, shown by their picture as images are, where the app has a diagram editor (ADR 0x049 §8). */
+  readonly diagramAttachments = computed(() => (this.diagramsSite ? this.attachments().filter(isDiagramAttachment) : []));
+  readonly nonImageAttachments = computed(() =>
+    this.attachments().filter(attachment => !isImageAttachment(attachment) && !this.diagramAttachments().includes(attachment)),
+  );
 
   onMarkdownReady(): void {
     void renderLatexMath(this.host.nativeElement);
@@ -197,4 +208,8 @@ export class MessageContentComponent {
       .downloadFileAttachment(attachment.id)
       .subscribe(blob => saveBlobAsFile(blob, attachment.name || `attachment-${attachment.id}`));
   }
+}
+
+function isDiagramAttachment(attachment: FileAttachment): boolean {
+  return !isImageAttachment(attachment) && previewKindFor(attachment) === 'diagram';
 }

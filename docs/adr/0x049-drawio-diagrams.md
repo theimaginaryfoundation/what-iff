@@ -93,7 +93,8 @@ The server cannot draw a diagram, so the browser that shows one sends a picture 
 - It is drawn when a diagram is shown that has none of its current version (one just uploaded, converted or changed by an agent), and after every save.
 - It is kept by the stored object it shows, not by the file: a preview always matches the content it was drawn from, the copies of a file that share its object share it, and a save, which always writes a new object, leaves the file without one until it is drawn again.
   It is deleted with its object.
-- The gallery shows it as the diagram's tile.
+- A diagram attached to a message is shown by it, in the same card as an image, and the gallery shows it as the diagram's tile.
+  Where a message shows a diagram that has no preview yet (one just uploaded, or made by an agent), the browser draws one in a hidden editor and stores it, one diagram at a time.
 - The `diagram` tool's `list` shows it to models that take images, with the outline, or says there is none of this version yet.
   A diagram an agent changed has none until the user opens it.
 

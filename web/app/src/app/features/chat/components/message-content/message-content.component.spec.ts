@@ -7,6 +7,8 @@ import { MARKED_EXTENSIONS, SANITIZE, provideMarkdown } from 'ngx-markdown';
 
 import { latexMathExtension } from '../../../../core/utils/latex-math.helpers';
 import { MessageContentComponent } from './message-content.component';
+import { of } from 'rxjs';
+import { DiagramPictures } from '../../../diagrams/diagram-pictures.service';
 
 describe('MessageContentComponent', () => {
   let fixture: ComponentFixture<MessageContentComponent>;
@@ -129,6 +131,26 @@ describe('MessageContentComponent', () => {
     expect(anchor.href).toBe('blob:download');
     expect(click).toHaveBeenCalled();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:download');
+  });
+
+  it('shows a draw.io diagram as a picture card, as an image is, not as a pill', () => {
+    const pictures = TestBed.inject(DiagramPictures);
+    const picture = vi.spyOn(pictures, 'picture').mockReturnValue(of('data:image/png;base64,iVBORw0KGgo='));
+    fixture.componentRef.setInput('attachments', [
+      fileAttachment('d-1', 'flow.drawio', 'application/vnd.jgraph.mxfile'),
+      fileAttachment('doc-1', 'notes.txt', 'text/plain'),
+    ]);
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.message-images__card') as HTMLElement;
+    expect(card.querySelector('img.message-images__diagram')?.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=');
+    expect(card.textContent).toContain('flow.drawio');
+    expect(picture).toHaveBeenCalledWith(expect.objectContaining({ id: 'd-1' }));
+    const pills = [...fixture.nativeElement.querySelectorAll('[data-testid="message-attachment"]')].map(p =>
+      (p as HTMLElement).textContent?.trim(),
+    );
+    expect(pills).toHaveLength(1);
+    expect(pills[0]).toContain('notes.txt');
   });
 
   it('opens a non-image attachment in the file workspace from the pill', () => {
