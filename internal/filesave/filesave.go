@@ -166,7 +166,7 @@ func (s *Service) Replace(ctx context.Context, userID uuid.UUID, req Request) (*
 		}
 		return nil, &ConflictError{Current: cur.ContentVersion}
 	}
-	storage.ReleaseReplacedObject(context.WithoutCancel(ctx), s.logger, s.files, s.ds, att.S3Key)
+	storage.ReleaseReplacedObject(context.WithoutCancel(ctx), s.logger, s.files, s.ds, att.S3Key, att)
 	if isImage {
 		// Best effort, like uploads: a missing thumbnail is regenerated on demand.
 		if err := s.files.UploadFile(ctx, storage.FileKeyForImageThumbnail(userID, att.ID), thumb, "image/jpeg"); err != nil {

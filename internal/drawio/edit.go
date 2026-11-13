@@ -65,20 +65,40 @@ func change(data []byte, pageRef string, fn func(d *doc, p *page) ([]edit, error
 	if err != nil {
 		return nil, fmt.Errorf("the change would break the file: %w", err)
 	}
+	if err := problemsError(newProblems(d.validate(), after.validate())); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CheckNoNewProblems checks after, a changed copy of before made elsewhere (a layout), has no
+// problem before did not have, as every change made here is checked: the new ones are an
+// *InvalidError naming them. A diagram that already had problems can still be changed.
+func CheckNoNewProblems(before, after []byte) error {
+	b, err := parse(before)
+	if err != nil {
+		return err
+	}
+	a, err := parse(after)
+	if err != nil {
+		return fmt.Errorf("the changed diagram could not be read: %w", err)
+	}
+	return problemsError(newProblems(b.validate(), a.validate()))
+}
+
+// newProblems are the problems in now that were not in was, told apart by what they say and where.
+func newProblems(was, now []Problem) []Problem {
 	before := map[string]bool{}
-	for _, pr := range d.validate() {
+	for _, pr := range was {
 		before[pr.String()] = true
 	}
 	var fresh []Problem
-	for _, pr := range after.validate() {
+	for _, pr := range now {
 		if !before[pr.String()] {
 			fresh = append(fresh, pr)
 		}
 	}
-	if err := problemsError(fresh); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return fresh
 }
 
 // newID is an id no cell in the file has: prefix and the lowest free number.

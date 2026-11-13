@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/drawio"
 	"github.com/theimaginaryfoundation/what-iff/internal/filecomments"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
@@ -226,6 +227,9 @@ func refusalOf(err error) (string, bool) {
 		return "comments can be read and written here only on images, draw.io diagrams and UTF-8 text and code files of at most 4 MB", true
 	case errors.Is(err, filecomments.ErrCellNotFound):
 		return err.Error() + "; list the diagram's elements with the diagram tool", true
+	case errors.Is(err, filecomments.ErrDiagramUnreadable), errors.Is(err, drawio.ErrNoPage):
+		// Says why, as the diagram tool does (a compressed diagram: open and save it in the editor).
+		return err.Error(), true
 	case errors.Is(err, filecomments.ErrQuoteNotFound):
 		return err.Error() + "; copy the quote exactly from the file (read it with agent_file_read)", true
 	case errors.Is(err, filecomments.ErrQuoteAmbiguous):

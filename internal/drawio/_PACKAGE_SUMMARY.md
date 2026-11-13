@@ -8,24 +8,27 @@ Everything is a pure function over the file's text, with no I/O.
 ## Responsibilities
 
 - **Reading** (`drawio.go`): `List` gives each page's elements (id, kind, plain-text label, parent, geometry, connector ends, style) and `Outline` a short text picture of them.
+  Each `Page` carries its `Number` (from 1), so a page picked out of the others keeps it in the outline.
+  `FindPage` is the one way a page reference is read, here and by its callers: an id, else the first page of that name, else a number from 1 (`ErrNoPage` lists the pages).
   A file is an `<mxfile>` of `<diagram>` pages or a bare `<mxGraphModel>`; a cell is an `<mxCell>` or an `<object>`/`<UserObject>` wrapping one (the wrapper holds the id and the label).
   A compressed page is refused with `ErrCompressed` (it is not inflated); anything else unreadable is `ErrNotDiagram`.
 - **Changing** (`edit.go`): `AddCell` (node, container, note), `AddEdge`, `SetLabel`, `SetStyle` (merge or replace), `Move` and `Delete` (with a container's contents and the connectors left without an end).
   A new cell with no position goes to the right of what is already in its parent, a container grows to fit a new child, and a connector is filed in the innermost container holding both ends.
 - **Checking** (`validate.go`): `Validate` lists unique-id, root-cell (`0`, `1`), parent, connector-end, edge-geometry, parent-loop and style problems.
+  Every change is refused when it brings a problem the diagram did not have (problems told apart by what they say and where); `CheckNoNewProblems` applies the same check to a copy changed elsewhere, such as a layout.
 - **Laying out** (`layout.go`): `New` turns a `Graph` (nodes, edges, lanes, notes, no positions) into a new file: ranks along the flow by longest path (cycles broken where the depth-first search entered them), nodes inside their lane, lanes stacked, notes after the diagram, `right` or `down`.
 - **Styles and shapes** (`style.go`, `cells.go`): `ParseStyle`, `Style.Merge`, `CheckStyle`, the named node shapes (`ShapeNames`) and the default node, edge, note and lane styles, following jgraph's XML reference for generated diagrams.
 
 ## Key types and entry points
 
-- `List`, `Outline`, `Validate`, `New`, `AddCell`, `AddEdge`, `SetLabel`, `SetStyle`, `Move`, `Delete`.
+- `List`, `Outline`, `FindPage`, `Validate`, `CheckNoNewProblems`, `New`, `AddCell`, `AddEdge`, `SetLabel`, `SetStyle`, `Move`, `Delete`.
 - `Page`, `Element`, `Geometry`, `Placement`, `NewCell`, `NewEdge`, `Graph`, `Problem`.
-- `IsDiagramFile`, `MediaType`: which files are diagrams (also used by `internal/filecomments` and the preview route).
-- Errors: `ErrNotDiagram`, `ErrCompressed`, `ErrInput` (the request does not fit the diagram), `*InvalidError` (the change would leave new problems).
+- `IsDiagramFile`, `MediaType`: which files are diagrams, the one rule used by the `diagram` tool, `internal/filecomments`, `internal/storage` (preview cleanup) and the preview route.
+- Errors: `ErrNotDiagram`, `ErrCompressed`, `ErrNoPage`, `ErrInput` (the request does not fit the diagram), `*InvalidError` (the change would leave new problems).
 
 ## Dependencies
 
-- **Inbound:** `internal/agent/tools` (`DiagramTool`), `internal/filecomments` and `internal/handlers/fileattachment` (`IsDiagramFile`).
+- **Inbound:** `internal/agent/tools` (`DiagramTool`), `internal/filecomments`, `internal/storage` and `internal/handlers/fileattachment` (`IsDiagramFile`).
 - **Outbound:** standard library, and `internal/officecomments` for `XMLText` (dropping characters XML cannot hold).
 
 ## Non-obvious decisions

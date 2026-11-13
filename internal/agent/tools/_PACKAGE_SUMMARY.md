@@ -30,7 +30,9 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
     On Word, PowerPoint and Excel files it goes through `filecomments.Office` (`WithOffice`) instead, with Office anchors (`slide`, `sheet`, `cell`), and each change saves the file, replacing its content (no version history).
     Each write returns a `comment_ref`; `CommentRefsFromCalls` turns a turn's calls into the reply's `comment_refs`, one per thread.
   - `DiagramTool` — `diagram` (ADR 0x049, `diagram.go`): lists, validates, creates and changes draw.io diagrams by element (`add_node`, `add_edge`, `add_container`, `add_note`, `set_label`, `set_style`, `move`, `delete`), with the XML work in `internal/drawio`.
-    `list` shows the model the diagram's preview (ADR 0x049 §8), when one of its current version exists, through `AddResultImage`.
+    `list` shows the model the diagram's preview (ADR 0x049 §8), when one of its current version exists, through `AddResultImage`; `render` shows its picture the same way, and a picture over 3 MB or 4096 pixels a side is shown as its thumbnail (`addDiagramPicture`).
+    Diagrams are told from other files by `drawio.IsDiagramFile`, and pages by `drawio.FindPage`, as everywhere else.
+    A layout that leaves the diagram with any problem it did not have is refused, naming it (`drawio.CheckNoNewProblems`).
     A build that can run draw.io and Graphviz registers a `DiagramWorkshop` (`SetDiagramWorkshop`, `diagram_workshop.go`), and the tool then also offers `layout` (place a diagram's elements again), `render` (a picture shown to the model, kept as the preview) and `create` from `mermaid`; `mergedFunctionToolCatalog` puts those in the spec only then.
     It is thin over `AgentFileTool`: `create` goes through its `create` (an agent file, type `application/vnd.jgraph.mxfile`), every change through its `rewrite` (own file in place, a granted user file through `filesave`), and `list`/`validate` read any of the user's diagrams.
     A refusal from `internal/drawio` (unknown id, bad style, compressed page, a change that would leave a new problem) reaches the model as a file refusal, and nothing is saved.

@@ -33,6 +33,8 @@ var (
 	ErrNotDiagram = errors.New("not a draw.io diagram")
 	// ErrCompressed means a page is saved in draw.io's compressed form.
 	ErrCompressed = errors.New("the diagram is saved compressed; open it in the editor and save it again (diagrams are saved as plain XML), then retry")
+	// ErrNoPage means no page is the one a page reference names (FindPage).
+	ErrNoPage = errors.New("no page")
 )
 
 // Kinds of element.
@@ -66,6 +68,9 @@ type Element struct {
 
 // Page is one page (a <diagram>) of the file.
 type Page struct {
+	// Number is the page's place in the file, from 1; it stays the page's number when the page is
+	// picked out of the others.
+	Number   int       `json:"number"`
 	ID       string    `json:"id,omitempty"`
 	Name     string    `json:"name,omitempty"`
 	Elements []Element `json:"elements"`
@@ -231,25 +236,49 @@ func readModel(model *node) (*page, error) {
 	return p, nil
 }
 
-// pageAt picks a page by its name, id or 1-based number; "" is the first page.
+// pageAt picks a page as FindPage does; "" is the first page.
 func (d *doc) pageAt(ref string) (*page, int, error) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return d.pages[0], 0, nil
+	i, err := findPage(len(d.pages), func(i int) (string, string) { return d.pages[i].id, d.pages[i].name }, ref)
+	if err != nil {
+		return nil, 0, err
 	}
-	for i, p := range d.pages {
-		if p.name == ref || p.id == ref {
-			return p, i, nil
+	return d.pages[i], i, nil
+}
+
+// FindPage is the index in pages of the page ref names: the page whose id it is, else the first
+// whose name it is, else the page with that number, from 1. "" is the first page. A ref that names
+// no page is an ErrNoPage error that lists the pages.
+func FindPage(pages []Page, ref string) (int, error) {
+	return findPage(len(pages), func(i int) (string, string) { return pages[i].ID, pages[i].Name }, ref)
+}
+
+func findPage(n int, page func(i int) (id, name string), ref string) (int, error) {
+	ref = strings.TrimSpace(ref)
+	if n == 0 {
+		return 0, fmt.Errorf("%w: the diagram has no pages", ErrNoPage)
+	}
+	if ref == "" {
+		return 0, nil
+	}
+	for i := 0; i < n; i++ {
+		if id, _ := page(i); id == ref {
+			return i, nil
 		}
 	}
-	if n, err := strconv.Atoi(ref); err == nil && n >= 1 && n <= len(d.pages) {
-		return d.pages[n-1], n - 1, nil
+	for i := 0; i < n; i++ {
+		if _, name := page(i); name == ref {
+			return i, nil
+		}
 	}
-	names := make([]string, len(d.pages))
-	for i, p := range d.pages {
-		names[i] = strconv.Quote(p.name)
+	if num, err := strconv.Atoi(ref); err == nil && num >= 1 && num <= n {
+		return num - 1, nil
 	}
-	return nil, 0, fmt.Errorf("no page %q; the pages are %s (or pass their number, from 1)", ref, strings.Join(names, ", "))
+	names := make([]string, n)
+	for i := range names {
+		_, name := page(i)
+		names[i] = strconv.Quote(name)
+	}
+	return 0, fmt.Errorf("%w %q; the pages are %s (or pass their number, from 1)", ErrNoPage, ref, strings.Join(names, ", "))
 }
 
 // List is the file's pages and their elements, the reserved root cells left out.
@@ -259,8 +288,8 @@ func List(data []byte) ([]Page, error) {
 		return nil, err
 	}
 	out := make([]Page, 0, len(d.pages))
-	for _, p := range d.pages {
-		pg := Page{ID: p.id, Name: p.name, Elements: []Element{}}
+	for i, p := range d.pages {
+		pg := Page{Number: i + 1, ID: p.id, Name: p.name, Elements: []Element{}}
 		for _, c := range p.cells {
 			if c.id == "0" || (c.kind() == KindLayer && c.id == "1") {
 				continue
@@ -273,15 +302,19 @@ func List(data []byte) ([]Page, error) {
 }
 
 // Outline is a short text picture of the pages: containers with what is in them, then the
-// connectors, one per line.
+// connectors, one per line. Each page is called by its Number (its place in pages when it has none).
 func Outline(pages []Page) string {
 	var b strings.Builder
 	for i, p := range pages {
+		number := p.Number
+		if number < 1 {
+			number = i + 1
+		}
 		name := p.Name
 		if name == "" {
-			name = fmt.Sprintf("Page %d", i+1)
+			name = fmt.Sprintf("Page %d", number)
 		}
-		fmt.Fprintf(&b, "Page %d %q:\n", i+1, name)
+		fmt.Fprintf(&b, "Page %d %q:\n", number, name)
 		kids := map[string][]Element{}
 		ids := map[string]bool{}
 		for _, e := range p.Elements {

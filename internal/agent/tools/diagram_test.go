@@ -1,8 +1,11 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
 	"strings"
 	"testing"
 
@@ -157,6 +160,9 @@ func TestDiagram_ReadRefusals(t *testing.T) {
 	fx.userUpload("", "broken.drawio", `<mxfile><diagram name="P"><mxGraphModel><root><mxCell id="0"/><mxCell id="v" vertex="1" parent="q"/></root></mxGraphModel></diagram></mxfile>`)
 
 	requireRefused(t, callJSON(t, tool.Run, chat, map[string]any{"action": "list", "file": "notes.md"}), "not a draw.io diagram")
+	// Any other .xml is not a diagram here, as it is not to comments, previews or the app.
+	fx.userUpload("", "export.xml", userDiagram)
+	requireRefused(t, callJSON(t, tool.Run, chat, map[string]any{"action": "list", "file": "export.xml"}), "not a draw.io diagram")
 	requireRefused(t, callJSON(t, tool.Run, chat, map[string]any{"action": "list", "file": "packed.drawio"}), "compressed")
 	res := callJSON(t, tool.Run, chat, map[string]any{"action": "validate", "file": "broken.drawio"})
 	requireOK(t, res)
@@ -195,8 +201,32 @@ func TestDiagram_ListShowsThePreviewOfThisVersion(t *testing.T) {
 	require.Contains(t, res["preview"], "No picture of this version yet")
 	require.Empty(t, images)
 
-	fx.objects.objs[storage.FileKeyForPreview(upload.S3Key)] = []byte("png bytes")
+	var pic bytes.Buffer
+	require.NoError(t, png.Encode(&pic, image.NewRGBA(image.Rect(0, 0, 4, 2))))
+	fx.objects.objs[storage.FileKeyForPreview(upload.S3Key)] = pic.Bytes()
 	res, images = list()
 	require.Contains(t, res["preview"], "A picture of this version")
-	require.Equal(t, []ResultImage{{Data: []byte("png bytes"), MediaType: "image/png"}}, images)
+	require.Equal(t, []ResultImage{{Data: pic.Bytes(), MediaType: "image/png"}}, images)
+
+	// Too large to show as it is: its thumbnail instead.
+	pic.Reset()
+	require.NoError(t, png.Encode(&pic, image.NewRGBA(image.Rect(0, 0, diagramPictureMaxSide+1, 1))))
+	fx.objects.objs[storage.FileKeyForPreview(upload.S3Key)] = pic.Bytes()
+	fx.objects.objs[storage.FileKeyForPreviewThumbnail(upload.S3Key)] = []byte("jpeg")
+	_, images = list()
+	require.Equal(t, []ResultImage{{Data: []byte("jpeg"), MediaType: "image/jpeg"}}, images)
+}
+
+func TestDiagram_ListOnePageKeepsItsNumber(t *testing.T) {
+	fx, tool := newDiagramFixture()
+	chat := fx.chat(uuid.New())
+	two := strings.Replace(userDiagram, "</mxfile>", `<diagram id="p2" name="Later"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>`, 1)
+	fx.userUpload("", "two.drawio", two)
+	for _, page := range []string{"Later", "2", "p2"} {
+		res := callJSON(t, tool.Run, chat, map[string]any{"action": "list", "file": "two.drawio", "page": page})
+		requireOK(t, res)
+		require.True(t, strings.HasPrefix(res["outline"].(string), `Page 2 "Later":`), res["outline"])
+		require.Equal(t, float64(2), res["pages"].([]any)[0].(map[string]any)["number"])
+	}
+	requireRefused(t, callJSON(t, tool.Run, chat, map[string]any{"action": "list", "file": "two.drawio", "page": "3"}), `the pages are "Flow", "Later"`)
 }

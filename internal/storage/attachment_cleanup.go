@@ -64,6 +64,8 @@ func ReleaseAttachmentObjects(ctx context.Context, logger *zap.Logger, store Fil
 
 	var shared, thumbs []string
 	seen := map[string]bool{}
+	// rowsOf are the rows each key was released for, to ask whether it may have a preview.
+	rowsOf := map[string][]*models.FileAttachment{}
 	for i := range atts {
 		if surviving[atts[i].ID] {
 			logger.Warn("attachment cleanup: row still exists after delete, keeping its objects",
@@ -72,6 +74,7 @@ func ReleaseAttachmentObjects(ctx context.Context, logger *zap.Logger, store Fil
 			continue
 		}
 		for _, k := range attachmentReleaseKeys(userID, &atts[i]) {
+			rowsOf[k] = append(rowsOf[k], &atts[i])
 			if !seen[k] {
 				seen[k] = true
 				shared = append(shared, k)
@@ -107,7 +110,7 @@ func ReleaseAttachmentObjects(ctx context.Context, logger *zap.Logger, store Fil
 			res.Kept++
 			continue
 		}
-		if del(k) {
+		if del(k) && mayHavePreview(k, rowsOf[k]...) {
 			DeletePreviews(ctx, logger, store, k)
 		}
 	}
@@ -126,7 +129,10 @@ func ReleaseAttachmentObjects(ctx context.Context, logger *zap.Logger, store Fil
 // was swapped to a new version (agent file edits, ADR 0x034), unless another row (a reference copy)
 // still stores it. Best effort, like ReleaseAttachmentObjects: it reports whether the object was
 // deleted and only logs failures.
-func ReleaseReplacedObject(ctx context.Context, logger *zap.Logger, store FileStore, refs AttachmentKeyRefs, key string) bool {
+//
+// row is the file whose object key was (nil for one that cannot be a diagram, such as a skill
+// file): it decides, with key, whether a preview goes too.
+func ReleaseReplacedObject(ctx context.Context, logger *zap.Logger, store FileStore, refs AttachmentKeyRefs, key string, row *models.FileAttachment) bool {
 	if store == nil || refs == nil || strings.TrimSpace(key) == "" {
 		return false
 	}
@@ -145,7 +151,9 @@ func ReleaseReplacedObject(ctx context.Context, logger *zap.Logger, store FileSt
 		logger.Warn("attachment cleanup: replaced object delete failed", zap.String("key", key), zap.Error(err))
 		return false
 	}
-	DeletePreviews(ctx, logger, store, key)
+	if mayHavePreview(key, row) {
+		DeletePreviews(ctx, logger, store, key)
+	}
 	return true
 }
 

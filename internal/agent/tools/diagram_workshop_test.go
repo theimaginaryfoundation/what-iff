@@ -14,8 +14,12 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 )
 
-// fakeWorkshop lays out by moving every vertex, draws a 2×2 PNG and turns any Mermaid into one box.
-type fakeWorkshop struct{ calls []string }
+// fakeWorkshop lays out by moving every vertex, draws a 2×2 PNG (or side×side) and turns any
+// Mermaid into one box.
+type fakeWorkshop struct {
+	calls []string
+	side  int
+}
 
 func (w *fakeWorkshop) Layout(_ context.Context, _ *models.Chat, d []byte, page, direction string) ([]byte, error) {
 	w.calls = append(w.calls, "layout:"+direction)
@@ -25,7 +29,8 @@ func (w *fakeWorkshop) Layout(_ context.Context, _ *models.Chat, d []byte, page,
 func (w *fakeWorkshop) Render(context.Context, *models.Chat, []byte, string) ([]byte, error) {
 	w.calls = append(w.calls, "render")
 	var buf bytes.Buffer
-	_ = png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 2, 2)))
+	side := max(w.side, 2)
+	_ = png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, side, 2)))
 	return buf.Bytes(), nil
 }
 
@@ -101,4 +106,47 @@ type breakingWorkshop struct{ fakeWorkshop }
 
 func (*breakingWorkshop) Layout(_ context.Context, _ *models.Chat, d []byte, _, _ string) ([]byte, error) {
 	return []byte(strings.Replace(string(d), `parent="1"`, `parent="nowhere"`, 2)), nil
+}
+
+func TestDiagramWorkshop_ALargeRenderIsShownAsItsThumbnail(t *testing.T) {
+	w := withWorkshop(t)
+	w.side = diagramPictureMaxSide + 1
+	fx, tool := newDiagramFixture()
+	chat := fx.chat(uuid.New())
+	requireOK(t, callJSON(t, tool.Run, chat, map[string]any{"action": "create", "path": "wide", "nodes": []map[string]any{{"id": "a", "label": "A"}}}))
+	ctx, shown := WithResultImages(appTurn)
+	_, err := tool.Run(ctx, chat, []byte(`{"action":"render","file":"wide.drawio"}`))
+	require.NoError(t, err)
+	require.Len(t, shown.Images(), 1)
+	require.Equal(t, "image/jpeg", shown.Images()[0].MediaType)
+	att, err := fx.tool.resolve(context.Background(), chat, "wide.drawio")
+	require.NoError(t, err)
+	stored := fx.objects.objs[storage.FileKeyForPreview(att.S3Key)]
+	cfg, err := png.DecodeConfig(bytes.NewReader(stored))
+	require.NoError(t, err)
+	require.Equal(t, diagramPictureMaxSide+1, cfg.Width, "the preview itself is kept at full size")
+}
+
+func TestDiagramWorkshop_LayoutSwappingOneProblemForAnotherIsRefused(t *testing.T) {
+	SetDiagramWorkshop(&swappingWorkshop{})
+	t.Cleanup(func() { SetDiagramWorkshop(nil) })
+	fx, tool := newDiagramFixture()
+	chat := fx.chat(uuid.New())
+	// One problem already: an edge to a cell that is not there.
+	_, err := fx.tool.create(appTurn, chat, "d.drawio", `<mxfile><diagram id="p" name="P"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>`+
+		`<mxCell id="a" value="A" vertex="1" parent="1"><mxGeometry x="40" y="40" width="80" height="40" as="geometry"/></mxCell>`+
+		`<mxCell id="e" edge="1" parent="1" source="a" target="gone"><mxGeometry relative="1" as="geometry"/></mxCell>`+
+		`</root></mxGraphModel></diagram></mxfile>`)
+	require.NoError(t, err)
+	before := fx.raw(t, chat, "d.drawio")
+	requireRefused(t, callJSON(t, tool.Run, chat, map[string]any{"action": "layout", "file": "d.drawio"}), `"elsewhere"`)
+	require.Equal(t, before, fx.raw(t, chat, "d.drawio"))
+}
+
+// swappingWorkshop's layout mends the edge's missing end and breaks its source instead: as many
+// problems as before, but a new one.
+type swappingWorkshop struct{ fakeWorkshop }
+
+func (*swappingWorkshop) Layout(_ context.Context, _ *models.Chat, d []byte, _, _ string) ([]byte, error) {
+	return []byte(strings.Replace(string(d), `source="a" target="gone"`, `source="elsewhere" target="a"`, 1)), nil
 }

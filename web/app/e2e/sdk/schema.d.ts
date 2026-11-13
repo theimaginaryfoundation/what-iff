@@ -13992,7 +13992,7 @@ export interface paths {
         };
         /**
          * Get a diagram's preview
-         * @description A picture of the file as it is now (ADR 0x049 §8): the PNG the browser drew of a draw.io diagram, or its JPEG thumbnail (`size=thumbnail`). 404 when there is none of the current version: every save leaves the file without one until it is drawn again.
+         * @description A picture of the file as it is now (ADR 0x049 §8): the PNG the browser drew of a draw.io diagram, or its JPEG thumbnail (`size=thumbnail`). 404 when there is none of the current version: every save leaves the file without one until it is drawn again. The ETag changes whenever the picture is replaced, also at the same content_version; send it back as If-None-Match for a 304.
          */
         get: {
             parameters: {
@@ -14047,7 +14047,7 @@ export interface paths {
         };
         /**
          * Store a diagram's preview
-         * @description Stores a PNG of a draw.io diagram as it is at `version` (its content_version), with a thumbnail, beside the stored file (ADR 0x049 §8). The browser that drew the diagram sends it, after opening or saving it. At most 8 MB and 8000 pixels a side.
+         * @description Stores a PNG of a draw.io diagram as it is at `version` (its content_version), with a thumbnail, beside the stored file (ADR 0x049 §8). The browser that drew the diagram sends it, after opening or saving it. At most 8 MB, 4096 pixels a side and 8 megapixels (8,388,608 pixels).
          */
         put: {
             parameters: {

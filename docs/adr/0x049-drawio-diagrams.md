@@ -29,6 +29,7 @@ The pinned release's code is under the Apache License 2.0 (some 2024 releases ca
 ### 2. `.drawio` files open in the file workspace
 
 - `.drawio` (and `.drawio.xml`, `application/vnd.jgraph.mxfile`) is the `diagram` file kind.
+  The server, its tools and the app all use this one rule (`drawio.IsDiagramFile`); any other `.xml` is plain text.
 - The editor is embedded in an iframe in embed mode with draw.io's JSON message protocol: once the editor says it is ready it is sent the file, and every change comes back as the whole diagram (`autosave`).
   Messages are taken only from that frame's window and origin.
 - One component views and edits (`editInPlace`): viewing shows the diagram with no menus or panels and takes no changes; editing is the full editor, in the app's theme. Saving, Save as, conflicts and closing are the workspace's, as for every editor.
@@ -41,16 +42,18 @@ It is not indexed for search: the XML is mostly geometry and style.
 
 The `diagram` tool lets agents work by element rather than by patching XML:
 
-- `list` gives each page's elements (id, kind, plain-text label, parent, position and size, connector ends, style) and a text outline; `validate` checks unique ids, the root cells `0` and `1`, that parents and connector ends exist, and that styles are well formed.
+- `list` gives each page's elements (id, kind, plain-text label, parent, position and size, connector ends, style) and a text outline, each page under its own number even when `page` picks one out; `validate` checks unique ids, the root cells `0` and `1`, that parents and connector ends exist, and that styles are well formed.
   Both work on any of the user's diagrams.
 - `create` makes a new diagram of the agent's own from a graph with no positions (nodes, edges, lanes, notes) and lays it out: nodes in ranks along the flow, inside their swimlane, lanes stacked, notes after, left to right or top to bottom.
   The user can tidy it with the editor's own layouts.
 - `add_node`, `add_edge`, `add_container` (a swimlane or a group), `add_note`, `set_label`, `set_style`, `move` and `delete` (with what is inside and the connectors left without an end) change one element by id.
 - The XML is changed as text where the decoder finds each element, so everything else is kept byte for byte, and a change that would leave the diagram with a new problem is refused.
 - It changes files as `agent_file_write` does: the agent's own diagrams, and a user's under an edit grant, saved as a new version.
-- Compressed pages are refused, with a hint to save the diagram again from the editor.
-- A build that can run draw.io and Graphviz beside the conversation registers them with the tool, which then also offers `layout` (place an existing diagram's elements again, keeping ids, labels and styles), `render` (a picture of a page, shown to the model and kept as the diagram's preview, §8) and `create` from Mermaid source (drawn as native shapes, as §4).
+- A page is named by its id, else its name (the first page of that name), else its number from 1, by every action and by `file_comments` alike (`drawio.FindPage`).
+- Compressed pages are refused, with a hint to save the diagram again from the editor; `file_comments` gives the same refusal.
+- A build that can run draw.io and Graphviz beside the conversation registers them with the tool, which then also offers `layout` (place an existing diagram's elements again, keeping ids, labels and styles), `render` (a picture of a page, shown to the model as `list` shows a preview, and kept as the diagram's preview, §8) and `create` from Mermaid source (drawn as native shapes, as §4).
   These are actions of the same tool, offered only where they work; the public build has none.
+  A layout is checked as every change is: one that leaves the diagram with any problem it did not have is refused, naming it.
 
 ### 4. Mermaid becomes native shapes
 
@@ -91,11 +94,14 @@ A thread is on one element, or on the whole diagram:
 The server cannot draw a diagram, so the browser that shows one sends a picture of it: a PNG the editor exports, stored with a JPEG thumbnail beside the file (`GET`/`PUT /file-attachment/{id}/preview`).
 
 - It is drawn when a diagram is shown that has none of its current version (one just uploaded, converted or changed by an agent), and after every save.
+- It is at most 8 MB, 4096 pixels a side and 8 megapixels, checked from the PNG's header before it is decoded for its thumbnail.
 - It is kept by the stored object it shows, not by the file: a preview always matches the content it was drawn from, the copies of a file that share its object share it, and a save, which always writes a new object, leaves the file without one until it is drawn again.
-  It is deleted with its object.
+  It is deleted with its object whenever the object's key or a file pointing at it is a diagram's, so a file renamed to or from `.drawio` leaves none behind.
+- Beside it is a tag, a hash of the picture: it is the preview's ETag, so a cached copy is revalidated from the tag alone without reading the picture, and a picture replaced at the same version (an agent's `render`) is never served stale.
 - A diagram attached to a message is shown by it, in the same card as an image, and the gallery shows it as the diagram's tile.
   Where a message shows a diagram that has no preview yet (one just uploaded, or made by an agent), the browser draws one in a hidden editor and stores it, one diagram at a time.
 - The `diagram` tool's `list` shows it to models that take images, with the outline, or says there is none of this version yet.
+  A picture over 3 MB or 4096 pixels a side is shown as its thumbnail instead.
   A diagram an agent changed has none until the user opens it.
 
 ## Consequences

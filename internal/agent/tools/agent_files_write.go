@@ -355,7 +355,7 @@ func (t *AgentFileTool) rewrite(ctx context.Context, chat *models.Chat, file str
 			t.dropObject(ctx, key)
 			continue
 		}
-		storage.ReleaseReplacedObject(context.WithoutCancel(ctx), t.logger, t.files, t.store, att.S3Key)
+		storage.ReleaseReplacedObject(context.WithoutCancel(ctx), t.logger, t.files, t.store, att.S3Key, att)
 		oldKey := att.S3Key
 		// The event and the reply describe the file as it is now, not as it was read.
 		att.S3Key = key

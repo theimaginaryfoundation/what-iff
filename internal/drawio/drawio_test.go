@@ -505,3 +505,47 @@ func TestNewCyclesAndChecks(t *testing.T) {
 		require.ErrorIs(t, err, ErrInput, name)
 	}
 }
+
+func TestFindPage(t *testing.T) {
+	pages := []Page{{ID: "p1", Name: "2"}, {ID: "Flow", Name: "Second"}, {ID: "p3", Name: "Flow"}, {ID: "p4", Name: "Second"}}
+	for ref, want := range map[string]int{
+		"":       0,
+		" p3 ":   2,
+		"Flow":   1, // an id before a name
+		"Second": 1, // the first page of that name
+		"2":      0, // a name before a number
+		"3":      2,
+		"4":      3,
+	} {
+		got, err := FindPage(pages, ref)
+		require.NoError(t, err, ref)
+		require.Equal(t, want, got, ref)
+	}
+	_, err := FindPage(pages, "9")
+	require.ErrorIs(t, err, ErrNoPage)
+	require.Contains(t, err.Error(), `no page "9"; the pages are "2", "Second", "Flow", "Second"`)
+	_, err = FindPage(nil, "")
+	require.ErrorIs(t, err, ErrNoPage)
+}
+
+func TestOutlineKeepsAPickedPagesNumber(t *testing.T) {
+	pages, err := List([]byte(sample))
+	require.NoError(t, err)
+	require.Equal(t, []int{1, 2}, []int{pages[0].Number, pages[1].Number})
+	outline := Outline(pages[1:])
+	require.True(t, strings.HasPrefix(outline, `Page 2 "Second":`), outline)
+}
+
+func TestCheckNoNewProblems(t *testing.T) {
+	broken := strings.Replace(sample, `target="b"`, `target="gone"`, 1)
+	require.NoError(t, CheckNoNewProblems([]byte(sample), []byte(sample)))
+	require.NoError(t, CheckNoNewProblems([]byte(broken), []byte(broken)), "a problem it had is not new")
+	require.NoError(t, CheckNoNewProblems([]byte(broken), []byte(sample)))
+	swapped := strings.Replace(sample, `source="a"`, `source="elsewhere"`, 1)
+	err := CheckNoNewProblems([]byte(broken), []byte(swapped))
+	var invalid *InvalidError
+	require.ErrorAs(t, err, &invalid)
+	require.Len(t, invalid.Problems, 1)
+	require.Contains(t, invalid.Problems[0].String(), "elsewhere")
+	require.ErrorIs(t, CheckNoNewProblems([]byte(sample), []byte("nope")), ErrNotDiagram)
+}

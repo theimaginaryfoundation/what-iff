@@ -2,7 +2,7 @@ package filecomments
 
 import (
 	"errors"
-	"strconv"
+	"fmt"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/drawio"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -48,18 +48,22 @@ func OnCells(threads []models.FileCommentThread, xml string) []models.FileCommen
 }
 
 // CellOn is the element of the diagram in xml a new thread is on: the cell with id cell, on the
-// page page names (its id, its name, or its number from 1; empty for any page).
+// page page names (as drawio.FindPage reads it; empty for any page). A diagram that cannot be read
+// is an ErrDiagramUnreadable error saying why; a page it does not have, a drawio.ErrNoPage one.
 func CellOn(xml, cell, page string) (*models.FileCommentCell, string, error) {
 	pages, err := drawio.List([]byte(xml))
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("%w: %w", ErrDiagramUnreadable, err)
 	}
 	if page != "" {
-		for i, p := range pages {
-			if p.ID == page || p.Name == page || strconv.Itoa(i+1) == page {
-				page = p.ID
-				break
-			}
+		i, err := drawio.FindPage(pages, page)
+		if err != nil {
+			return nil, "", err
+		}
+		page = pages[i].ID
+		if page == "" {
+			// A page without an id: look in it alone.
+			pages = pages[i : i+1]
 		}
 	}
 	pageID, el, ok := findCell(pages, models.FileCommentCell{ID: cell, Page: page})
@@ -69,8 +73,13 @@ func CellOn(xml, cell, page string) (*models.FileCommentCell, string, error) {
 	return &models.FileCommentCell{ID: el.ID, Page: pageID}, el.Label, nil
 }
 
-// ErrCellNotFound means a diagram has no element with the id a new thread names.
-var ErrCellNotFound = errors.New("the diagram has no element with that id")
+var (
+	// ErrCellNotFound means a diagram has no element with the id a new thread names.
+	ErrCellNotFound = errors.New("the diagram has no element with that id")
+	// ErrDiagramUnreadable means a diagram's XML could not be read (drawio.ErrCompressed,
+	// drawio.ErrNotDiagram, …); the error says why.
+	ErrDiagramUnreadable = errors.New("the diagram could not be read")
+)
 
 // findCell is the element a thread's cell names: on its page, or on any page when it names none
 // (an id is unique only within its page, so the first page that has it).

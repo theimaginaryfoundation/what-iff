@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	pngpkg "image/png"
 	"path"
 	"strings"
 
@@ -391,9 +393,35 @@ func (t *DiagramTool) read(ctx context.Context, chat *models.Chat, a diagramArgs
 	return res, nil
 }
 
-// diagramPreviewMaxBytes is the largest preview shown at full size; a larger one is shown as its
-// thumbnail.
-const diagramPreviewMaxBytes = 3 << 20
+const (
+	// diagramPictureMaxBytes and diagramPictureMaxSide bound a diagram's picture shown to the model
+	// at full size; a larger one is shown as its JPEG thumbnail.
+	diagramPictureMaxBytes = 3 << 20
+	diagramPictureMaxSide  = 4096
+)
+
+// fitsFullSize reports whether a diagram's PNG may be shown to the model as it is.
+func fitsFullSize(png []byte) bool {
+	if len(png) > diagramPictureMaxBytes {
+		return false
+	}
+	cfg, err := pngpkg.DecodeConfig(bytes.NewReader(png))
+	return err == nil && cfg.Width <= diagramPictureMaxSide && cfg.Height <= diagramPictureMaxSide
+}
+
+// addDiagramPicture shows the model a picture of a diagram with the result: the PNG when it fits
+// full size, else its thumbnail (none when there is no thumbnail). It reports whether it showed one.
+func addDiagramPicture(ctx context.Context, png, thumb []byte) bool {
+	switch {
+	case len(png) > 0 && fitsFullSize(png):
+		AddResultImage(ctx, png, "image/png")
+	case len(thumb) > 0:
+		AddResultImage(ctx, thumb, "image/jpeg")
+	default:
+		return false
+	}
+	return true
+}
 
 // showPreview shows the model the diagram's preview (ADR 0x049 §8), the picture the user's editor
 // last drew of this version, with the result, and says what it showed.
@@ -402,27 +430,23 @@ func (t *DiagramTool) showPreview(ctx context.Context, att *models.FileAttachmen
 		return ""
 	}
 	data, err := t.files.files.DownloadFile(ctx, storage.FileKeyForPreview(att.S3Key))
-	mediaType := "image/png"
-	if err == nil && len(data) > diagramPreviewMaxBytes {
-		data, err = t.files.files.DownloadFile(ctx, storage.FileKeyForPreviewThumbnail(att.S3Key))
-		mediaType = "image/jpeg"
+	var thumb []byte
+	if err == nil && len(data) > 0 && !fitsFullSize(data) {
+		thumb, err = t.files.files.DownloadFile(ctx, storage.FileKeyForPreviewThumbnail(att.S3Key))
 	}
-	if err != nil || len(data) == 0 {
+	if err != nil || !addDiagramPicture(ctx, data, thumb) {
 		return "No picture of this version yet: one is drawn when the user next opens the diagram."
 	}
-	AddResultImage(ctx, data, mediaType)
 	return "A picture of this version, as the user's editor drew it, follows this result (if you can see images)."
 }
 
-// pickPage is the one page ref names (its name, or its number from 1).
+// pickPage is the one page ref names (drawio.FindPage), keeping its number.
 func pickPage(pages []drawio.Page, ref string) ([]drawio.Page, error) {
-	ref = strings.TrimSpace(ref)
-	for i, p := range pages {
-		if p.Name == ref || p.ID == ref || fmt.Sprint(i+1) == ref {
-			return pages[i : i+1], nil
-		}
+	i, err := drawio.FindPage(pages, ref)
+	if err != nil {
+		return nil, diagramRefusal(err)
 	}
-	return nil, fileRefusalf("no page %q; the diagram has %d page(s)", ref, len(pages))
+	return pages[i : i+1], nil
 }
 
 // capElements keeps the first max elements across the pages, saying how many it left out.
@@ -443,9 +467,9 @@ func capElements(pages []drawio.Page, max int) ([]drawio.Page, string) {
 	return out, fmt.Sprintf("%d elements are left out of pages (the outline names them all); pass page to list one page", cut)
 }
 
-// isDiagramFile reports whether att is a draw.io file by its name or type.
+// isDiagramFile reports whether att is a draw.io file, by the rule every other part uses.
 func isDiagramFile(att *models.FileAttachment) bool {
-	return drawio.IsDiagramFile(att.Name, att.FileType) || strings.HasSuffix(strings.ToLower(att.Name), ".xml")
+	return drawio.IsDiagramFile(att.Name, att.FileType)
 }
 
 func (t *DiagramTool) create(ctx context.Context, chat *models.Chat, a diagramArgs) (diagramResult, error) {

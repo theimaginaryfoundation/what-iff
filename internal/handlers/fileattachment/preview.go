@@ -19,7 +19,6 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
-	"go.uber.org/zap"
 )
 
 // Previews (ADR 0x049 §8): a picture of a file the server cannot draw, a draw.io diagram, sent by
@@ -28,8 +27,11 @@ import (
 const (
 	// maxPreviewBytes caps an uploaded preview.
 	maxPreviewBytes = 8 << 20
-	// maxPreviewSide caps a preview's width and height, in pixels.
-	maxPreviewSide = 8000
+	// maxPreviewSide caps a preview's width and height, and maxPreviewPixels its area: it is decoded
+	// whole to make its thumbnail, at 4 bytes a pixel (32 MB at the cap). Checked from the PNG's
+	// header before anything is decoded.
+	maxPreviewSide   = 4096
+	maxPreviewPixels = 8 << 20
 )
 
 // PutFilePreview handles PUT /file-attachment/{id}/preview?version=N: the body is a PNG of the file
@@ -65,9 +67,9 @@ func (h *Handler) PutFilePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg, err := png.DecodeConfig(bytes.NewReader(body))
-	if err != nil || cfg.Width < 1 || cfg.Height < 1 || cfg.Width > maxPreviewSide || cfg.Height > maxPreviewSide {
+	if err != nil || cfg.Width < 1 || cfg.Height < 1 || cfg.Width > maxPreviewSide || cfg.Height > maxPreviewSide || cfg.Width*cfg.Height > maxPreviewPixels {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet,
-			fmt.Sprintf("The preview must be a PNG of at most %d×%d pixels", maxPreviewSide, maxPreviewSide), err)
+			fmt.Sprintf("The preview must be a PNG of at most %d pixels a side and %d megapixels", maxPreviewSide, maxPreviewPixels>>20), err)
 		return
 	}
 	thumb, err := imageutil.GenerateThumbnail(body, imageutil.DefaultThumbnailMaxPx)
@@ -81,12 +83,9 @@ func (h *Handler) PutFilePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	object := att.S3Key
-	if err := store.UploadFile(r.Context(), storage.FileKeyForPreview(object), body, "image/png"); err != nil {
+	if err := storage.PutPreview(r.Context(), h.logger, store, object, body, thumb); err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to store the preview", err)
 		return
-	}
-	if err := store.UploadFile(r.Context(), storage.FileKeyForPreviewThumbnail(object), thumb, "image/jpeg"); err != nil {
-		h.logger.Warn("file preview: thumbnail upload failed", zap.Error(err))
 	}
 	// A save that landed meanwhile moved the file to a new object: this picture is of the old one,
 	// which the save releases, so it is dropped now rather than left for that.
@@ -100,6 +99,11 @@ func (h *Handler) PutFilePreview(w http.ResponseWriter, r *http.Request) {
 
 // GetFilePreview handles GET /file-attachment/{id}/preview: the file's preview as a PNG, or its
 // thumbnail (size=thumbnail) as a JPEG; 404 when it has none of its current content.
+//
+// Its ETag is the preview's tag (storage.PreviewTag), a hash of the picture kept beside it: it
+// changes whenever the picture is replaced, also at the same content_version (an agent's render),
+// and a current copy is answered 304 from the tag alone, without downloading the picture. A
+// preview stored without a tag is downloaded and hashed instead.
 func (h *Handler) GetFilePreview(w http.ResponseWriter, r *http.Request) {
 	_, att, ok := h.previewFile(w, r)
 	if !ok {
@@ -110,31 +114,56 @@ func (h *Handler) GetFilePreview(w http.ResponseWriter, r *http.Request) {
 	if thumb {
 		key, mediaType = storage.FileKeyForPreviewThumbnail(att.S3Key), "image/jpeg"
 	}
-	etag := strconv.Quote(fmt.Sprintf("%d-%t", att.ContentVersion, thumb))
-	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "private, no-cache")
-	store := h.agent.FileStore()
-	var data []byte
-	if store != nil && att.S3Key != "" {
-		var err error
-		if data, err = store.DownloadFile(r.Context(), key); err != nil {
-			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the preview", err)
-			return
+	etagOf := func(tag string) string {
+		if thumb {
+			tag += "-thumbnail"
 		}
+		return strconv.Quote(tag)
 	}
-	if len(data) == 0 {
-		w.Header().Del("ETag")
-		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "This file has no preview of its current version", nil)
+	store := h.agent.FileStore()
+	if store == nil || att.S3Key == "" {
+		h.noPreview(w)
 		return
 	}
-	if r.Header.Get("If-None-Match") == etag {
-		w.WriteHeader(http.StatusNotModified)
+	tag, err := storage.PreviewTag(r.Context(), store, att.S3Key)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the preview", err)
+		return
+	}
+	if tag != "" && notModified(w, r, etagOf(tag)) {
+		return
+	}
+	data, err := store.DownloadFile(r.Context(), key)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the preview", err)
+		return
+	}
+	if len(data) == 0 {
+		h.noPreview(w)
+		return
+	}
+	if tag == "" && notModified(w, r, etagOf(storage.PreviewTagOf(data))) {
 		return
 	}
 	w.Header().Set("Content-Type", mediaType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+// notModified sets the preview's ETag and caching, and answers 304 when the caller's copy is it.
+func notModified(w http.ResponseWriter, r *http.Request, etag string) bool {
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if r.Header.Get("If-None-Match") != etag {
+		return false
+	}
+	w.WriteHeader(http.StatusNotModified)
+	return true
+}
+
+func (h *Handler) noPreview(w http.ResponseWriter) {
+	handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "This file has no preview of its current version", nil)
 }
 
 // previewFile is the caller's file named in the path, or false once it has answered.

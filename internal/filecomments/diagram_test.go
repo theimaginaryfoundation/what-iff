@@ -2,9 +2,11 @@ package filecomments
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/drawio"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -96,5 +98,25 @@ func TestADiagramThatCannotBeReadKeepsItsThreadsElements(t *testing.T) {
 	threads := OnCells([]models.FileCommentThread{onCell("t1", "a", "p1")}, "")
 	if c := threads[0].Cell; c == nil || c.ID != "a" || threads[0].Anchor != nil {
 		t.Fatalf("unread diagram: %+v", threads[0])
+	}
+}
+
+func TestCellOn(t *testing.T) {
+	xml := diagramXML(userCell)
+	for _, page := range []string{"p2", "Page-2", "2"} {
+		cell, label, err := CellOn(xml, "a", page)
+		if err != nil || cell.Page != "p2" || label != "Other page" {
+			t.Fatalf("page %q: %+v %q %v", page, cell, label, err)
+		}
+	}
+	if cell, _, err := CellOn(xml, "a", ""); err != nil || cell.Page != "p1" {
+		t.Fatalf("any page: %+v %v", cell, err)
+	}
+	if _, _, err := CellOn(xml, "a", "9"); !errors.Is(err, drawio.ErrNoPage) {
+		t.Fatalf("no such page: %v", err)
+	}
+	_, _, err := CellOn(`<mxfile><diagram id="p" name="P">7VZNb5tAEP01HBuxQIhzbGicNlKlqj70</diagram></mxfile>`, "a", "")
+	if !errors.Is(err, ErrDiagramUnreadable) || !errors.Is(err, drawio.ErrCompressed) {
+		t.Fatalf("compressed: %v", err)
 	}
 }

@@ -23,7 +23,7 @@ Keeps the comments on text, code and image files (ADR 0x045) and draw.io diagram
 - **draw.io diagrams** (`diagram.go`, ADR 0x049): a thread is on one element (`cell`: its id and its page's id, `anchor` null, the element's label as the quote) or the whole file.
   **`OnCells`** checks each thread's element against the XML (`internal/drawio`) on write and, once the diagram changed, on read: an element that is there is quoted afresh, one that is gone puts its thread on the whole file with the label it had.
   No baseline text is kept, since nothing is carried; a diagram that cannot be read (too large, compressed, not XML) leaves the threads' elements unchecked.
-  **`CellOn`** is the element an agent's new thread names (`ErrCellNotFound`); `Current.Diagram` tells an `Update` it is a diagram.
+  **`CellOn`** is the element an agent's new thread names, its page read by `drawio.FindPage` (`ErrCellNotFound`; `drawio.ErrNoPage`; `ErrDiagramUnreadable` wrapping why, such as `drawio.ErrCompressed`, so the agent is told to save it again); `Current.Diagram` tells an `Update` it is a diagram.
   Only a diagram's threads are on elements: `Place` drops a `cell` sent for any other file.
 - **Refusals:** `ErrNotText` for content that is neither an image nor UTF-8 text, or text over `MaxTextBytes` (4 MB).
   A read of a file that stopped being such text returns its threads on the whole file, unstored, so they stay readable; a text file over the limit also takes writes of threads on the whole file (`errTextTooLarge`).

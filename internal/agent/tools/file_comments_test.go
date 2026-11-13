@@ -145,6 +145,16 @@ func TestFileCommentsTool_Diagrams(t *testing.T) {
 	require.Contains(t, res.Error, "diagram tool")
 	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": flow.ID.String(), "quote": "User", "text": "?"})
 	require.Contains(t, res.Error, "give cell")
+	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": flow.ID.String(), "cell": "a", "page": "Nope", "text": "?"})
+	require.Contains(t, res.Error, `no page "Nope"; the pages are "Main"`)
+
+	// A diagram saved compressed is refused with what to do about it, as the diagram tool does.
+	mem.text[flow.ID] = `<mxfile><diagram id="p1" name="Main">7VZNb5tAEP01HBuxQIhzbGicNlKlqj70vIEJrLKwaBnbuL</diagram></mxfile>`
+	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": flow.ID.String(), "cell": "a", "text": "?"})
+	require.Contains(t, res.Error, "open it in the editor and save it again")
+	mem.text[flow.ID] = `not a diagram`
+	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": flow.ID.String(), "cell": "a", "text": "?"})
+	require.Contains(t, res.Error, "not a draw.io diagram")
 }
 
 func TestCommentRefsFromCalls(t *testing.T) {

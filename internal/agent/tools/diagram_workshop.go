@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -100,10 +101,15 @@ func (t *DiagramTool) workshopAction(ctx context.Context, chat *models.Chat, a d
 		if err != nil {
 			return diagramResult{}, fileRefusalf("could not draw the diagram: %v", err)
 		}
-		AddResultImage(ctx, png, "image/png")
+		thumb, err := imageutil.GenerateThumbnail(png, imageutil.DefaultThumbnailMaxPx)
+		if err != nil {
+			t.files.logger.Warn("diagram: rendered picture has no thumbnail", zap.Error(err))
+			thumb = nil
+		}
+		addDiagramPicture(ctx, png, thumb)
 		// The first page, as the editor's preview shows it, is the file's preview too.
 		if strings.TrimSpace(a.Page) == "" {
-			t.storePreview(ctx, att, png)
+			t.storePreview(ctx, att, png, thumb)
 		}
 		ref := t.files.refEditable(ctx, chat, att, "")
 		return diagramResult{File: &ref, Preview: "A picture of the diagram follows this result (if you can see images)."}, nil
@@ -128,34 +134,33 @@ func (t *DiagramTool) createFromMermaid(ctx context.Context, chat *models.Chat, 
 	return diagramResult{File: out.File, Outline: drawio.Outline(pages)}, nil
 }
 
-// storePreview keeps png as the preview of the file's current object (ADR 0x049 §8). Best effort.
-func (t *DiagramTool) storePreview(ctx context.Context, att *models.FileAttachment, png []byte) {
+// storePreview keeps png, with its thumbnail, as the preview of the file's current object (ADR
+// 0x049 §8). Best effort.
+func (t *DiagramTool) storePreview(ctx context.Context, att *models.FileAttachment, png, thumb []byte) {
 	if t.files.files == nil || att.S3Key == "" {
 		return
 	}
-	if err := t.files.files.UploadFile(ctx, storage.FileKeyForPreview(att.S3Key), png, "image/png"); err != nil {
+	if err := storage.PutPreview(ctx, t.files.logger, t.files.files, att.S3Key, png, thumb); err != nil {
 		t.files.logger.Warn("diagram: preview upload failed", zap.Error(err))
-		return
-	}
-	if thumb, err := imageutil.GenerateThumbnail(png, imageutil.DefaultThumbnailMaxPx); err == nil {
-		_ = t.files.files.UploadFile(ctx, storage.FileKeyForPreviewThumbnail(att.S3Key), thumb, "image/jpeg")
 	}
 }
 
-// noNewProblems refuses a workshop result that leaves the diagram with problems it did not have.
+// noNewProblems refuses a workshop result that leaves the diagram with a problem it did not have,
+// naming the new ones (drawio.CheckNoNewProblems, the check every change made by element passes).
 func noNewProblems(before, after []byte) error {
-	was, err := drawio.Validate(before)
-	if err != nil {
-		return diagramRefusal(err)
+	err := drawio.CheckNoNewProblems(before, after)
+	var invalid *drawio.InvalidError
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &invalid):
+		names := make([]string, len(invalid.Problems))
+		for i, p := range invalid.Problems {
+			names[i] = p.String()
+		}
+		return fileRefusalf("laying out would leave the diagram with new problems (%s); it was left as it was", strings.Join(names, "; "))
 	}
-	now, err := drawio.Validate(after)
-	if err != nil {
-		return fileRefusalf("the laid-out diagram could not be read: %v", err)
-	}
-	if len(now) > len(was) {
-		return fileRefusalf("laying out would leave the diagram with new problems (%s); it was left as it was", now[len(now)-1].Message)
-	}
-	return nil
+	return diagramRefusal(err)
 }
 
 // workshopArgsProblem is checkDiagramArgs for the workshop's actions and arguments.
