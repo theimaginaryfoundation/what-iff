@@ -23,18 +23,24 @@ In chat messages, `.md` files in the viewer and the editor's live preview, and n
 - Once the sanitized HTML is in the page, `renderMermaid(root)` draws each placeholder, where `renderLatexMath(root)` already runs.
 - Only a closed fence becomes a placeholder: a reply still streaming in shows the code until the closing fence arrives, instead of a diagram that fails with every chunk.
 - Drawings are cached by source and theme, so a message rendered again as it streams does not draw its finished diagrams again.
+  Source Mermaid cannot draw is cached as such; a failure to load Mermaid itself (a chunk that did not download) is not, so the next diagram tries again rather than every diagram failing until a reload.
+- Diagrams are drawn one at a time; a diagram whose placeholder has gone by its turn (a preview typed into, a reply re-rendered as it streams) is skipped, so drawing never falls behind the text.
+- Each drawn copy of a diagram, and its full-screen view, gets ids of its own, so one copy's arrowheads and gradients never point into another copy.
 
 ### 2. Drawn safely
 
 - Mermaid (MIT) is loaded on demand with a dynamic `import()`, and loads each diagram type on demand, so none of it is in the initial bundle.
-- It runs with `securityLevel: 'strict'` and HTML labels off, so the SVG holds no HTML (`foreignObject`).
-- A diagram's own `%%{init}%%` directive cannot change the security level, the theme's CSS or variables, fonts or labels.
-- The SVG passes through DOMPurify's SVG profile before it is inserted; anything in its CSS that could fetch (`@import`, `url()` to anything but a fragment) is removed.
+- It runs with `securityLevel: 'strict'` and HTML labels off, so the SVG holds no HTML (`foreignObject`), and with `suppressErrorRendering`, so a failed drawing leaves nothing behind in the page.
+- A diagram's own `%%{init}%%` directive cannot change the security level, error rendering, the theme's CSS or variables, fonts or labels.
+- The SVG passes through DOMPurify's SVG profile before it is inserted.
+  Anything in its CSS that could fetch is removed: `@import`, and `url()`, `image-set()`, `image()` and `src()` to anything but a fragment of the SVG itself (`url(#arrow)`, quoted or not).
+  CSS escapes are decoded before that check, and what is inserted is the decoded text, so an escaped `url(` or `@import` cannot get past it.
 - Source Mermaid cannot draw stays as code, with "Couldn't draw this diagram."
 
 ### 3. It looks like the page
 
-Mermaid's `base` theme is set from the app's theme tokens (`styles/themes.scss`) for the light and dark themes, so nodes, lines, notes and series colours match the page.
+Mermaid's `base` theme is set from the app's theme tokens (`styles/themes.scss`), read as the page resolves them for the light or dark theme, so nodes, lines, notes and series colours match the page.
+Node fills and some series colours are tints of the accent that have no token of their own.
 
 ### 4. Size, and a toolbar on each diagram
 
@@ -42,7 +48,7 @@ A diagram is drawn at its own width, scaled up on wide screens (1.25× from 1280
 Mermaid's `width="100%"` is not used: in a box that shrinks to its content, such as a chat bubble, it falls back to the browser's default 300px.
 
 The toolbar switches to the source and back, opens the diagram full screen, copies the source, and downloads the diagram as SVG or PNG (twice its size, on the page's background).
-Copying a selection that holds a diagram copies its source as a ` ```mermaid ` fence, as copying a formula copies its TeX.
+Copying a selection that holds a diagram copies its source as a ` ```mermaid ` fence (longer than any run of backticks in it) in a `pre`, with its lines kept, as copying a formula copies its TeX.
 
 ### 5. Mermaid files
 
