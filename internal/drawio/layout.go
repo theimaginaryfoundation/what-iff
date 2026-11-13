@@ -61,6 +61,7 @@ const (
 // New lays out g as a new diagram file: nodes in ranks along the flow (each after the nodes that
 // lead to it), in their lanes, lanes stacked across the flow, notes after the diagram.
 func New(g Graph) ([]byte, error) {
+	g = g.trimmed()
 	if err := g.check(); err != nil {
 		return nil, err
 	}
@@ -292,6 +293,29 @@ func (g Graph) edgeIDs() []string {
 	return out
 }
 
+// trimmed is g with surrounding spaces taken off every id and every reference to one, so an id
+// the model wrote as " a" is the same cell as "a" everywhere it is used.
+func (g Graph) trimmed() Graph {
+	t := strings.TrimSpace
+	g.Nodes = append([]GraphNode(nil), g.Nodes...)
+	for i := range g.Nodes {
+		g.Nodes[i].ID, g.Nodes[i].Lane = t(g.Nodes[i].ID), t(g.Nodes[i].Lane)
+	}
+	g.Edges = append([]GraphEdge(nil), g.Edges...)
+	for i := range g.Edges {
+		g.Edges[i].Source, g.Edges[i].Target = t(g.Edges[i].Source), t(g.Edges[i].Target)
+	}
+	g.Lanes = append([]GraphLane(nil), g.Lanes...)
+	for i := range g.Lanes {
+		g.Lanes[i].ID = t(g.Lanes[i].ID)
+	}
+	g.Notes = append([]GraphNote(nil), g.Notes...)
+	for i := range g.Notes {
+		g.Notes[i].ID = t(g.Notes[i].ID)
+	}
+	return g
+}
+
 // check refuses a graph that cannot be drawn: missing or repeated ids, unknown shapes, lanes or
 // edge ends.
 func (g Graph) check() error {
@@ -303,7 +327,6 @@ func (g Graph) check() error {
 	}
 	ids := map[string]string{"0": "reserved", "1": "reserved"}
 	claim := func(id, what string) error {
-		id = strings.TrimSpace(id)
 		if id == "" {
 			return inputErr("every %s needs an id", what)
 		}

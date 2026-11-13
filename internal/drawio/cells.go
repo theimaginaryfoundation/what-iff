@@ -87,26 +87,38 @@ func laneStyle(i int, titleLeft bool) string {
 	return s + "fillColor=" + c[0] + ";strokeColor=" + c[1] + ";container=1;collapsible=0;pointerEvents=0;"
 }
 
-// labelSize grows a shape's default size to fit its label, roughly (draw.io's default font is
-// 12px, about 7px a character).
+// Label sizing estimates for draw.io's default 12px Helvetica, used to grow a shape so its label
+// fits without measuring text (the server has no fonts). Rough on purpose: draw.io wraps the text
+// itself (whiteSpace=wrap), so these only need to give it enough room.
+const (
+	charWidth     = 7.0   // average width of a character, px
+	lineHeight    = 18.0  // height of a line of text, px
+	labelPadX     = 24.0  // horizontal room around the text, px
+	labelPadY     = 24.0  // vertical room around the text, px
+	wrapInset     = 16.0  // horizontal room draw.io keeps inside the shape when wrapping, px
+	maxLabelWidth = 240.0 // widest a shape grows for its label; longer lines wrap, px
+	gridSize      = 10.0  // draw.io's default grid, px
+)
+
+// labelSize grows a shape's default size (w, h) to fit its label: wide enough for the longest
+// line, up to maxLabelWidth, and tall enough for the lines once wrapped at that width.
 func labelSize(label string, w, h float64) (float64, float64) {
-	longest, lines := 0, 0
-	for _, l := range strings.Split(label, "\n") {
-		lines++
+	lines := strings.Split(label, "\n")
+	longest := 0
+	for _, l := range lines {
 		longest = max(longest, len([]rune(l)))
 	}
-	need := float64(longest)*7 + 24
-	width := min(max(w, need), 240)
-	perLine := max(1, int((width-16)/7))
+	width := min(max(w, float64(longest)*charWidth+labelPadX), maxLabelWidth)
+	perLine := max(1, int((width-wrapInset)/charWidth))
 	wrapped := 0
-	for _, l := range strings.Split(label, "\n") {
+	for _, l := range lines {
 		wrapped += max(1, (len([]rune(l))+perLine-1)/perLine)
 	}
-	return ceil10(width), ceil10(max(h, float64(wrapped)*18+24))
+	return snapUp(width), snapUp(max(h, float64(wrapped)*lineHeight+labelPadY))
 }
 
-// ceil10 rounds up to draw.io's 10px grid.
-func ceil10(f float64) float64 { return math.Ceil(f/10) * 10 }
+// snapUp rounds up to draw.io's grid.
+func snapUp(f float64) float64 { return math.Ceil(f/gridSize) * gridSize }
 
 // cellSpec is a new cell to write.
 type cellSpec struct {

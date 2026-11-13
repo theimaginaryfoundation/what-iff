@@ -15,8 +15,9 @@ import { dataUrlToBlob } from './drawio-frame';
  * attachments): its stored preview (ADR 0x049 §8), or, for one no editor has shown yet (just
  * uploaded, made by an agent), one drawn now in a hidden editor and stored as its preview. Drawing
  * runs one diagram at a time. The last MAX_PICTURES file versions' pictures are kept, so each is
- * fetched or drawn once while it is in use; an older one's object URL is revoked. Having no picture
- * is not kept: the next request tries again.
+ * fetched or drawn once while it is in use; an older one's object URL is revoked. One let go while
+ * it was still being found is kept again when it arrives, as the latest, since it is on its way to
+ * the screen. Having no picture is not kept: the next request tries again.
  */
 /** How many file versions' pictures are kept. */
 export const MAX_PICTURES = 40;
@@ -52,17 +53,35 @@ export class DiagramPictures {
       catchError(() => of(null)),
       tap(url => {
         if (url === null) this.forget(key, picture);
-        else picture.url = url;
+        else this.arrived(key, picture, url);
       }),
       shareReplay(1),
     );
     this.pictures.set(key, picture);
+    this.trim();
+    return picture.url$;
+  }
+
+  /** Records a found picture's URL, keeping it again if it was let go while being found. */
+  private arrived(key: string, picture: Picture, url: string): void {
+    picture.url = url;
+    if (this.pictures.get(key) === picture) return;
+    if (this.pictures.has(key)) {
+      // Another request for this version is kept instead; this one is a spare.
+      release(url);
+      return;
+    }
+    this.pictures.set(key, picture);
+    this.trim();
+  }
+
+  /** Lets go of the least recently asked for pictures beyond MAX_PICTURES, revoking their URLs. */
+  private trim(): void {
     for (const [oldest, old] of this.pictures) {
       if (this.pictures.size <= MAX_PICTURES) break;
-      this.forget(oldest, old);
-      if (old.url?.startsWith('blob:')) URL.revokeObjectURL(old.url);
+      this.pictures.delete(oldest);
+      if (old.url) release(old.url);
     }
-    return picture.url$;
   }
 
   private forget(key: string, picture: Picture): void {
@@ -92,4 +111,9 @@ export class DiagramPictures {
     if (blob && version) this.files.putPreview(file.id, version, blob).subscribe({ error: () => undefined });
     return png;
   }
+}
+
+/** Revokes a picture's object URL; a drawn picture's data URL needs nothing. */
+function release(url: string): void {
+  if (url.startsWith('blob:')) URL.revokeObjectURL(url);
 }

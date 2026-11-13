@@ -2,6 +2,7 @@ package drawio
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -132,11 +133,9 @@ func CheckStyle(s string) error {
 	return nil
 }
 
-func styleName(s string) bool {
-	for _, r := range s {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-') {
-			return false
-		}
-	}
-	return s != ""
-}
+// styleNamePattern is what draw.io style keys and bare style names are made of: ASCII letters,
+// digits, '.', '_' and '-' (e.g. "fillColor", "mxgraph.flowchart.document", "shape-2").
+var styleNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// styleName reports whether s can be a style key or a bare style name.
+func styleName(s string) bool { return styleNamePattern.MatchString(s) }

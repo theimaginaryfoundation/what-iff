@@ -102,6 +102,49 @@ describe('DiagramPictures', () => {
     await expect(show('p0')).resolves.toBe('blob:0');
   });
 
+  it('keeps a picture let go while it was being found, so its object URL is not lost', async () => {
+    const { pictures, http } = setup();
+    let n = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:${n++}`);
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const preview = (id: string) => `/api/file-attachment/${id}/preview?size=full`;
+    const slow = firstValueFrom(pictures.picture(diagram('slow')));
+    const pending = http.expectOne(preview('slow'));
+    for (let i = 0; i < MAX_PICTURES; i++) {
+      const picture = firstValueFrom(pictures.picture(diagram(`p${i}`)));
+      http.expectOne(preview(`p${i}`)).flush(new Blob(['png']));
+      await picture;
+    }
+    // 'slow' was let go to make room; when its preview arrives it is kept again as the latest,
+    // and the oldest finished one makes room instead.
+    pending.flush(new Blob(['png']));
+    await expect(slow).resolves.toBe(`blob:${MAX_PICTURES}`);
+    expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:0');
+    await expect(firstValueFrom(pictures.picture(diagram('slow')))).resolves.toBe(`blob:${MAX_PICTURES}`);
+  });
+
+  it('revokes a spare picture when another request for the same version is kept', async () => {
+    const { pictures, http } = setup();
+    let n = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:${n++}`);
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const preview = (id: string) => `/api/file-attachment/${id}/preview?size=full`;
+    const first = firstValueFrom(pictures.picture(diagram('s')));
+    const firstRequest = http.expectOne(preview('s'));
+    for (let i = 0; i < MAX_PICTURES; i++) {
+      const picture = firstValueFrom(pictures.picture(diagram(`p${i}`)));
+      http.expectOne(preview(`p${i}`)).flush(new Blob(['png']));
+      await picture;
+    }
+    // Asked again after it was let go: a second request, which is kept.
+    const second = firstValueFrom(pictures.picture(diagram('s')));
+    http.expectOne(preview('s')).flush(new Blob(['png']));
+    await expect(second).resolves.toBe(`blob:${MAX_PICTURES}`);
+    firstRequest.flush(new Blob(['png']));
+    await expect(first).resolves.toBe(`blob:${MAX_PICTURES + 1}`);
+    expect(revoke).toHaveBeenLastCalledWith(`blob:${MAX_PICTURES + 1}`);
+  });
+
   it('has nothing to show for a diagram with no preview where there is no editor', async () => {
     const { pictures, render, http } = setup(null);
     const picture = firstValueFrom(pictures.picture(diagram('e')));

@@ -491,6 +491,19 @@ func TestNewCyclesAndChecks(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(out), `<mxCell id="e2" value="" style="`+EdgeStyle)
 
+	// Ids are trimmed wherever they are given, so " a" and "a" are one cell.
+	out, err = New(Graph{
+		Lanes: []GraphLane{{ID: "l "}},
+		Nodes: []GraphNode{{ID: " a", Lane: " l"}, {ID: "b"}},
+		Edges: []GraphEdge{{Source: "a ", Target: " b"}},
+	})
+	require.NoError(t, err)
+	problems, err := Validate(out)
+	require.NoError(t, err)
+	require.Empty(t, problems)
+	require.Contains(t, string(out), `<mxCell id="a" `)
+	require.NotContains(t, string(out), `" a"`)
+
 	for name, g := range map[string]Graph{
 		"empty":         {},
 		"no id":         {Nodes: []GraphNode{{Label: "x"}}},

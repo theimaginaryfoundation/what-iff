@@ -37,11 +37,12 @@
       return ui.currentPage != null ? ui.currentPage.getId() : null;
     }
 
+    // A cell's label as plain text. HTML labels are parsed with DOMParser, never innerHTML: the
+    // parsed document is inert, so a label such as <img onerror=...> runs nothing in this frame.
     function labelOf(cell) {
       var value = graph.convertValueToString(cell) || '';
-      var div = document.createElement('div');
-      div.innerHTML = value;
-      return (div.textContent || div.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+      var text = new DOMParser().parseFromString(value, 'text/html').body.textContent || '';
+      return text.replace(/\s+/g, ' ').trim().slice(0, 200);
     }
 
     function bubble(color) {

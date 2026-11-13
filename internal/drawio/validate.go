@@ -108,6 +108,11 @@ func (d *doc) validate() []Problem {
 	return out
 }
 
+// maxListedProblems is how many problems an InvalidError's message spells out; the rest are
+// counted. The message goes back to the model as a tool result, where a few problems are enough to
+// act on and a long list only costs tokens. All of them stay in Problems.
+const maxListedProblems = 5
+
 // problemsError joins problems into one error.
 func problemsError(problems []Problem) error {
 	if len(problems) == 0 {
@@ -115,8 +120,8 @@ func problemsError(problems []Problem) error {
 	}
 	msgs := make([]string, 0, len(problems))
 	for i, p := range problems {
-		if i == 5 {
-			msgs = append(msgs, fmt.Sprintf("and %d more", len(problems)-5))
+		if i == maxListedProblems {
+			msgs = append(msgs, fmt.Sprintf("and %d more", len(problems)-maxListedProblems))
 			break
 		}
 		msgs = append(msgs, p.String())
