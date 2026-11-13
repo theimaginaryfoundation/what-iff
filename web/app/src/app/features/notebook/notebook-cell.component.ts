@@ -19,6 +19,7 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { MarkdownModule } from 'ngx-markdown';
 
 import { renderLatexMath } from '../../core/utils/latex-math.helpers';
+import { renderMermaid } from '../../core/utils/mermaid.helpers';
 import { MONACO_LOADER, type Monaco } from '../file-workspace/editors/monaco/monaco-loader';
 import { appTheme, followAppTheme, monacoThemeFor } from '../file-workspace/editors/monaco/monaco-themes';
 import { NotebookCell, resolveAttachments } from './nbformat';
@@ -108,6 +109,7 @@ export class NotebookCellComponent {
 
   onMarkdownReady(): void {
     void renderLatexMath(this.host.nativeElement);
+    void renderMermaid(this.host.nativeElement);
   }
 
   private async colorize(source: string, language: string): Promise<void> {

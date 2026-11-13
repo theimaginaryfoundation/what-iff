@@ -15,6 +15,9 @@ describe('file-preview.helpers', () => {
     it.each([
       ['notes.md', 'text/plain', 'markdown'],
       ['notes', 'text/markdown', 'markdown'],
+      ['flow.mmd', '', 'mermaid'],
+      ['flow.mermaid', 'application/octet-stream', 'mermaid'],
+      ['flow', 'text/vnd.mermaid', 'mermaid'],
       ['data.csv', 'application/octet-stream', 'csv'],
       ['data.tsv', '', 'csv'],
       ['report.pdf', 'application/pdf', 'pdf'],
@@ -58,6 +61,7 @@ describe('file-preview.helpers', () => {
 
   it('describes the type in plain words', () => {
     expect(fileTypeLabel(file('a.md'))).toBe('Markdown');
+    expect(fileTypeLabel(file('flow.mmd'))).toBe('Mermaid diagram');
     expect(fileTypeLabel(file('a.tsv'))).toBe('TSV table');
     expect(fileTypeLabel(file('a.go'))).toBe('GO file');
     expect(fileTypeLabel(file('a.zip', 'application/zip'))).toBe('ZIP file');
@@ -99,20 +103,29 @@ describe('file-preview.helpers', () => {
     it('splits the header from the rows', () => {
       expect(parseCsv('name,age\nAda,36\nAlan,41\n')).toEqual({
         header: ['name', 'age'],
-        rows: [['Ada', '36'], ['Alan', '41']],
+        rows: [
+          ['Ada', '36'],
+          ['Alan', '41'],
+        ],
         truncated: false,
       });
     });
 
     it('handles quotes, doubled quotes, delimiters and line breaks inside quotes, and CRLF', () => {
       const table = parseCsv('a,b\r\n"x, y","say ""hi"""\r\n"multi\nline",z');
-      expect(table.rows).toEqual([['x, y', 'say "hi"'], ['multi\nline', 'z']]);
+      expect(table.rows).toEqual([
+        ['x, y', 'say "hi"'],
+        ['multi\nline', 'z'],
+      ]);
     });
 
     it('pads ragged rows and skips blank lines', () => {
       const table = parseCsv('a,b,c\n1\n\n2,3\n');
       expect(table.header).toEqual(['a', 'b', 'c']);
-      expect(table.rows).toEqual([['1', '', ''], ['2', '3', '']]);
+      expect(table.rows).toEqual([
+        ['1', '', ''],
+        ['2', '3', ''],
+      ]);
     });
 
     it('splits on tabs for TSV', () => {

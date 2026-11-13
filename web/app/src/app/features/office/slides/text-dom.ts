@@ -1,6 +1,7 @@
 import { safeLinkUrl } from '../shared/safe-link';
 import { Paragraph, Run } from '../pptx/deck-model';
 import { htmlToParagraphs } from '../pptx/pptx-text';
+import { escapeHtml } from '../../../core/utils/escape-html';
 
 /**
  * Rich text on the slide canvas: paragraphs rendered as HTML the browser can edit in place, and
@@ -69,10 +70,6 @@ function runHtml(run: Run): string {
   const span = style.length ? `<span style="${style.join(';')}">${text}</span>` : `<span>${text}</span>`;
   const link = safeLinkUrl(run.link);
   return link ? `<a href="${escapeHtml(link)}">${span}</a>` : span;
-}
-
-export function escapeHtml(text: string): string {
-  return text.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch] as string);
 }
 
 /**

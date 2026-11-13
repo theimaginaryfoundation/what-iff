@@ -21,6 +21,7 @@ import (
 // Follow-up: add PDF/DOCX extraction for application/pdf,
 // application/vnd.openxmlformats-officedocument.wordprocessingml.document
 var SupportedTextTypes = map[string]struct{}{
+	"text/vnd.mermaid": {},
 	// text/* types
 	"text/plain":           {},
 	"text/markdown":        {},
@@ -48,27 +49,29 @@ var SupportedTextTypes = map[string]struct{}{
 
 // textFileExtensions lists file extensions we support as text content.
 var textFileExtensions = map[string]struct{}{
-	".txt":   {},
-	".md":    {},
-	".go":    {},
-	".py":    {},
-	".js":    {},
-	".ts":    {},
-	".html":  {},
-	".css":   {},
-	".json":  {},
-	".c":     {},
-	".cpp":   {},
-	".cs":    {},
-	".java":  {},
-	".rb":    {},
-	".sh":    {},
-	".php":   {},
-	".tex":   {},
-	".yaml":  {},
-	".yml":   {},
-	".jsonl": {},
-	".tsv":   {},
+	".txt":     {},
+	".md":      {},
+	".mmd":     {},
+	".mermaid": {},
+	".go":      {},
+	".py":      {},
+	".js":      {},
+	".ts":      {},
+	".html":    {},
+	".css":     {},
+	".json":    {},
+	".c":       {},
+	".cpp":     {},
+	".cs":      {},
+	".java":    {},
+	".rb":      {},
+	".sh":      {},
+	".php":     {},
+	".tex":     {},
+	".yaml":    {},
+	".yml":     {},
+	".jsonl":   {},
+	".tsv":     {},
 }
 
 // IsTextType returns true if the given MIME content type can be chunked as text.

@@ -90,6 +90,7 @@
     "konva": "^10.9.1",
     "marked": "^18.0.10",
     "marked-katex-extension": "^5.1.12",
+    "mermaid": "^11.17.2",
     "monaco-editor": "^0.57.0",
     "ngx-markdown": "^22.0.0",
     "pdfjs-dist": "^6.5.438",

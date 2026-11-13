@@ -42,4 +42,23 @@ describe('RenderedTextMap', () => {
     const at = map.offsetOf(strong, 8)!;
     expect(SOURCE.slice(at - 2, at + 3)).toBe('major');
   });
+
+  it('leaves diagrams and formulas out: their words are never where a thread is shown', () => {
+    const source = 'Intro flow here.\n\n```mermaid\nflowchart LR\n  flow --> here\n```\n\nThe flow here ends. $x$\n';
+    const root = document.createElement('div');
+    root.innerHTML =
+      '<p>Intro flow here.</p>' +
+      '<div class="mermaid-diagram"><svg><text>flow</text><text>here</text></svg><pre class="mermaid-diagram__source" hidden>flowchart LR\n  flow --&gt; here</pre></div>' +
+      '<p>The flow here ends. <span class="katex">x</span></p>';
+    document.body.appendChild(root);
+    const map = new RenderedTextMap(root, source);
+    // A thread on the last "flow here" is shown there, not in the diagram nearer by offset.
+    const last = source.lastIndexOf('flow here');
+    const range = map.range(last, last + 'flow here'.length)!;
+    expect(range.startContainer.parentElement?.closest('.mermaid-diagram')).toBeNull();
+    expect(range.startContainer.parentElement?.tagName).toBe('P');
+    // A thread on the diagram's source has no place in the formatted text (the viewer shows the raw text).
+    const inDiagram = source.indexOf('flow --> here');
+    expect(map.range(inDiagram, inDiagram + 'flow --> here'.length)).toBeNull();
+  });
 });

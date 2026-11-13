@@ -6,6 +6,7 @@ import { FileAttachment, isImageAttachment } from '../../../../core/models/file-
 import { FileAttachmentService } from '../../../../core/services/file-attachment.service';
 import { saveBlobAsFile } from '../../../../core/utils/download.helpers';
 import { renderLatexMath } from '../../../../core/utils/latex-math.helpers';
+import { renderMermaid } from '../../../../core/utils/mermaid.helpers';
 import { FileWorkspaceService } from '../../../file-workspace/file-workspace.service';
 import { DownloadIconComponent } from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
@@ -64,84 +65,86 @@ import { MessageImageAttachmentsComponent } from './message-image-attachments.co
       </div>
     }
   `,
-  styles: [`
-    :host {
-      display: block;
-      min-width: 0;
-      max-width: 100%;
-    }
+  styles: [
+    `
+      :host {
+        display: block;
+        min-width: 0;
+        max-width: 100%;
+      }
 
-    .message-attachment {
-      align-items: stretch;
-      border: 1px solid var(--color-border-base);
-      border-radius: 9999px;
-      display: inline-flex;
-      overflow: hidden;
-    }
+      .message-attachment {
+        align-items: stretch;
+        border: 1px solid var(--color-border-base);
+        border-radius: 9999px;
+        display: inline-flex;
+        overflow: hidden;
+      }
 
-    .message-attachment__open,
-    .message-attachment__download {
-      background: var(--color-surface-muted);
-      border: 0;
-      color: var(--color-text-secondary);
-      cursor: pointer;
-      font-size: 0.75rem;
-    }
+      .message-attachment__open,
+      .message-attachment__download {
+        background: var(--color-surface-muted);
+        border: 0;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        font-size: 0.75rem;
+      }
 
-    .message-attachment__open {
-      padding: 0.25rem 0.5rem 0.25rem 0.75rem;
-    }
+      .message-attachment__open {
+        padding: 0.25rem 0.5rem 0.25rem 0.75rem;
+      }
 
-    .message-attachment__download {
-      align-items: center;
-      border-left: 1px solid var(--color-border-base);
-      display: inline-flex;
-      padding: 0 0.5rem;
-    }
+      .message-attachment__download {
+        align-items: center;
+        border-left: 1px solid var(--color-border-base);
+        display: inline-flex;
+        padding: 0 0.5rem;
+      }
 
-    .message-attachment__open:hover,
-    .message-attachment__download:hover {
-      color: var(--color-text-primary);
-    }
+      .message-attachment__open:hover,
+      .message-attachment__download:hover {
+        color: var(--color-text-primary);
+      }
 
-    :host ::ng-deep .message-content__markdown {
-      max-width: 100%;
-      min-width: 0;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-    }
+      :host ::ng-deep .message-content__markdown {
+        max-width: 100%;
+        min-width: 0;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
 
-    :host ::ng-deep .message-content__markdown p,
-    :host ::ng-deep .message-content__markdown li,
-    :host ::ng-deep .message-content__markdown blockquote {
-      overflow-wrap: anywhere;
-      word-break: break-word;
-    }
+      :host ::ng-deep .message-content__markdown p,
+      :host ::ng-deep .message-content__markdown li,
+      :host ::ng-deep .message-content__markdown blockquote {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
 
-    :host ::ng-deep .message-content__markdown--preserve-breaks p {
-      white-space: pre-wrap;
-    }
+      :host ::ng-deep .message-content__markdown--preserve-breaks p {
+        white-space: pre-wrap;
+      }
 
-    :host ::ng-deep pre {
-      overflow-x: hidden;
-      max-width: 100%;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-    }
+      :host ::ng-deep pre {
+        overflow-x: hidden;
+        max-width: 100%;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
 
-    /* KaTeX positions glyphs itself; the wrapping rules above would split formulas mid-symbol. */
-    :host ::ng-deep .katex {
-      overflow-wrap: normal;
-      word-break: normal;
-    }
+      /* KaTeX positions glyphs itself; the wrapping rules above would split formulas mid-symbol. */
+      :host ::ng-deep .katex {
+        overflow-wrap: normal;
+        word-break: normal;
+      }
 
-    :host ::ng-deep code {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-    }
-  `],
+      :host ::ng-deep code {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+    `,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class MessageContentComponent {
@@ -161,6 +164,7 @@ export class MessageContentComponent {
 
   onMarkdownReady(): void {
     void renderLatexMath(this.host.nativeElement);
+    void renderMermaid(this.host.nativeElement);
   }
 
   onCopy(event: ClipboardEvent): void {
@@ -189,6 +193,8 @@ export class MessageContentComponent {
   }
 
   downloadAttachment(attachment: FileAttachment): void {
-    this.files.downloadFileAttachment(attachment.id).subscribe(blob => saveBlobAsFile(blob, attachment.name || `attachment-${attachment.id}`));
+    this.files
+      .downloadFileAttachment(attachment.id)
+      .subscribe(blob => saveBlobAsFile(blob, attachment.name || `attachment-${attachment.id}`));
   }
 }

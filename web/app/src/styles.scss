@@ -101,6 +101,168 @@ html:has(.app-layout) body {
   overflow-y: hidden;
 }
 
+/* Mermaid diagrams in markdown (see core/utils/mermaid.helpers.ts): drawn in place of the code
+   block, with a small toolbar; a wide diagram scrolls on its own, as display math does. */
+.mermaid-diagram {
+  margin: 0.75rem 0;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg-card);
+  padding: 0.5rem;
+}
+
+.mermaid-diagram__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.mermaid-diagram__button {
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0.25rem 0.5rem;
+}
+
+.mermaid-diagram__button:hover,
+.mermaid-diagram__button[aria-pressed="true"] {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.mermaid-diagram__figure {
+  overflow-x: auto;
+  text-align: center;
+}
+
+/* A diagram is drawn at its own width (--mermaid-width, set when it is drawn), larger on wide
+   screens, never wider than its box nor taller than most of the screen. */
+:root {
+  --mermaid-scale: 1;
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --mermaid-scale: 1.25;
+  }
+}
+
+@media (min-width: 1800px) {
+  :root {
+    --mermaid-scale: 1.5;
+  }
+}
+
+.mermaid-diagram__figure svg {
+  height: auto;
+  max-height: 80vh;
+  max-width: 100%;
+  width: calc(var(--mermaid-width, 100%) * var(--mermaid-scale));
+}
+
+/* A message bubble resized by hand (features/chat/components/message-bubble/bubble-resize.directive.ts):
+   its diagrams grow with it, up to twice their drawing's width (and still within the screen's height). */
+.bubble--sized .mermaid-diagram__figure svg {
+  width: min(100%, calc(var(--mermaid-width, 100%) * 2));
+}
+
+/* The resize handle on a bubble's outer edge: desktop only, shown while the bubble is hovered or
+   the handle has focus. It is added by the directive, so it is styled here. */
+.bubble__resize {
+  bottom: 0;
+  cursor: col-resize;
+  display: none;
+  position: absolute;
+  top: 0;
+  touch-action: none;
+  width: 0.5rem;
+  z-index: 1;
+}
+
+.bubble__resize[data-edge="right"] {
+  right: 0;
+}
+
+.bubble__resize[data-edge="left"] {
+  left: 0;
+}
+
+.bubble__resize::after {
+  background: var(--accent);
+  border-radius: 999px;
+  bottom: 30%;
+  content: "";
+  left: 50%;
+  opacity: 0;
+  position: absolute;
+  top: 30%;
+  transform: translateX(-50%);
+  transition: opacity 120ms ease;
+  width: 3px;
+}
+
+@media (hover: hover) and (pointer: fine) and (min-width: 1024px) {
+  .bubble__resize {
+    display: block;
+  }
+
+  .bubble__body:hover > .bubble__resize::after,
+  .bubble__resize:focus-visible::after,
+  .bubble--resizing > .bubble__resize::after {
+    opacity: 0.7;
+  }
+}
+
+.bubble--resizing {
+  user-select: none;
+}
+
+.mermaid-diagram__dialog {
+  background: var(--bg-card);
+  inset: 0;
+  margin: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  height: 92vh;
+  max-height: none;
+  max-width: none;
+  padding: 2.75rem 1.5rem 1.5rem;
+  width: 94vw;
+}
+
+.mermaid-diagram__dialog::backdrop {
+  background: rgb(0 0 0 / 60%);
+}
+
+.mermaid-diagram__dialog svg {
+  display: block;
+  height: 100%;
+  margin: 0 auto;
+  max-width: 100%;
+  width: 100%;
+}
+
+.mermaid-diagram__close {
+  position: absolute;
+  right: 0.75rem;
+  top: 0.75rem;
+}
+
+.mermaid-diagram .mermaid-diagram__source {
+  margin: 0;
+}
+
+.mermaid-diagram__error {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  margin: 0.25rem 0 0;
+}
+
 // Commented text on a slide (ADR 0x045), painted with the CSS Custom Highlight API by the slide
 // canvas; highlights are document-wide, so their styles are global.
 ::highlight(whatiff-comment) {

@@ -5,6 +5,7 @@ import { MARKED_EXTENSIONS, SANITIZE, provideMarkdown } from 'ngx-markdown';
 
 import { routes } from './app.routes';
 import { latexMathExtension } from './core/utils/latex-math.helpers';
+import { mermaidExtension } from './core/utils/mermaid.helpers';
 import { authInterceptor } from './core/interceptors/auth.interceptor';
 import { extraHttpInterceptors } from './extensions/http-interceptors';
 import { ExternalAuthProvider } from './core/auth/external-auth.provider';
@@ -24,7 +25,10 @@ export const appConfig: ApplicationConfig = {
     provideHttpClient(withXhr(), withInterceptors([authInterceptor, ...extraHttpInterceptors])),
     provideMarkdown({
       sanitize: { provide: SANITIZE, useValue: SecurityContext.HTML },
-      markedExtensions: [{ provide: MARKED_EXTENSIONS, useFactory: latexMathExtension, multi: true }],
+      markedExtensions: [
+        { provide: MARKED_EXTENSIONS, useFactory: latexMathExtension, multi: true },
+        { provide: MARKED_EXTENSIONS, useFactory: mermaidExtension, multi: true },
+      ],
     }),
     ...externalAuthProviders,
     ...chatSendGateProviders,
@@ -45,5 +49,5 @@ export const appConfig: ApplicationConfig = {
       deps: [RemoteSyncWakeService],
       useFactory: (wake: RemoteSyncWakeService) => () => wake.start(),
     },
-  ]
+  ],
 };

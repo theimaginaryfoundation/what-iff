@@ -26,7 +26,15 @@
                 "input": "public"
               }
             ],
-            "allowedCommonJsDependencies": ["react", "react-dom"],
+            "allowedCommonJsDependencies": [
+              "react",
+              "react-dom",
+              "@braintree/sanitize-url",
+              "cytoscape-cose-bilkent",
+              "cytoscape-fcose",
+              "dayjs",
+              "fastdom"
+            ],
             "styles": [
               "src/styles.scss",
               {

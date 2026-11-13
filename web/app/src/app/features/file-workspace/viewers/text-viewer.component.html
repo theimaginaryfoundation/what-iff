@@ -6,7 +6,7 @@
       @if (canRender()) {
         <div class="text-viewer__segmented" role="group" aria-label="View as">
           <button type="button" [attr.aria-pressed]="rendered()" (click)="rendered.set(true)">
-            {{ kind() === "csv" ? "Table" : "Formatted" }}
+            {{ kind() === "csv" ? "Table" : kind() === "mermaid" ? "Diagram" : "Formatted" }}
           </button>
           <button type="button" [attr.aria-pressed]="!rendered()" (click)="rendered.set(false)">Raw</button>
         </div>
@@ -40,7 +40,7 @@
       }
       @if (data.truncated) {
         <span class="text-viewer__notice" role="status">Showing the first 1 MB. Download the file to see all of it.</span>
-      } @else if (kind() === "markdown" && markdownTooBig()) {
+      } @else if (asMarkdown() && markdownTooBig()) {
         <span class="text-viewer__notice" role="status">Too long to format, so it is shown as raw text.</span>
       } @else if (showRendered() && csv()?.truncated) {
         <span class="text-viewer__notice" role="status">
@@ -51,10 +51,10 @@
 
     <div class="text-viewer__main">
       <div class="text-viewer__body">
-        @if (showRendered() && kind() === "markdown") {
+        @if (showRendered() && asMarkdown()) {
           <markdown
             class="text-viewer__markdown prose prose-sm max-w-none dark:prose-invert"
-            [data]="text()"
+            [data]="markdown()"
             (ready)="onMarkdownReady()"
             (click)="onTextClick($event)"
             (contextmenu)="onTextContextMenu($event)"

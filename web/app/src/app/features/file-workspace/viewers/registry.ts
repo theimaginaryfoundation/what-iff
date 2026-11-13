@@ -42,6 +42,7 @@ const loadNotebookEditor = () => import('../../notebook/notebook-editor.componen
 const VIEWERS: Partial<Record<FilePreviewKind, ViewerEntry>> = {
   text: { load: loadTextViewer, phoneView: true, edit: loadCodeEditor },
   markdown: { load: loadTextViewer, phoneView: true, edit: loadCodeEditor },
+  mermaid: { load: loadTextViewer, phoneView: true, edit: loadCodeEditor },
   csv: { load: loadSheetsEditor, phoneView: true, edit: loadSheetsEditor, editInPlace: true },
   spreadsheet: { load: loadSheetsEditor, phoneView: true, edit: loadSheetsEditor, editInPlace: true },
   document: { load: loadDocsEditor, phoneView: true, edit: loadDocsEditor, editInPlace: true },

@@ -93,6 +93,17 @@ var fileTypes = map[string]FileTypeInfo{
 		Extension:     ".md",
 		VectorSupport: true,
 	},
+	// Mermaid diagram source: shown drawn in the file workspace, indexed as text.
+	".mermaid": {
+		ContentType:   "text/vnd.mermaid",
+		Extension:     ".mermaid",
+		VectorSupport: true,
+	},
+	".mmd": {
+		ContentType:   "text/vnd.mermaid",
+		Extension:     ".mmd",
+		VectorSupport: true,
+	},
 	".pdf": {
 		ContentType:   "application/pdf",
 		Extension:     ".pdf",

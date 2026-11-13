@@ -21,6 +21,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
 import { BrainIconComponent, ChevRightIconComponent, ClockIconComponent, StarIconComponent } from '../../../../shared/ui/icons/icons';
 import { MessageContentComponent } from '../message-content/message-content.component';
 import { AgentRunNotesComponent } from '../agent-run-notes/agent-run-notes.component';
+import { BubbleResizeDirective } from './bubble-resize.directive';
 import { AgentRunView, agentRunView } from '../../helpers/agent-run.helpers';
 
 interface JobChip {
@@ -48,6 +49,7 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
   selector: 'app-message-bubble',
   standalone: true,
   imports: [
+    BubbleResizeDirective,
     AgentRunNotesComponent,
     McpAppFrameComponent,
     MessageContentComponent,
@@ -121,7 +123,7 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
           }
         </div>
       }
-      <div class="bubble__body">
+      <div class="bubble__body" [appBubbleResize]="message().id" [resizeEdge]="message().origin === 'User' ? 'left' : 'right'">
         @if (showPendingDots()) {
           @if (message().pending_status; as status) {
             <span class="bubble__pending-status" role="status" aria-live="polite">{{ status }}</span>
@@ -240,6 +242,7 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
         min-width: 0;
         overflow: hidden;
         padding: 0.625rem 0.875rem;
+        position: relative;
       }
 
       .bubble--pending .bubble__body {
