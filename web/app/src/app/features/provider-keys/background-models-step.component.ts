@@ -3,17 +3,12 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 
 import { Model } from '../../core/models/model.model';
-import { UtilityModels, UtilityRole, UtilityRoleModel } from '../../core/models/utility-model.model';
+import { UtilityModels, UtilityRole } from '../../core/models/utility-model.model';
 import { ModelService } from '../../core/services/model.service';
 import { UtilityModelsService } from '../../core/services/utility-models.service';
 import { apiErrorMessage, hasErrorCode } from '../../core/utils/api-error.helpers';
 import { UTILITY_ROLE_COPY } from '../../core/utils/utility-role-copy';
-import { OFF_VALUE, backgroundModelLabel } from '../../core/utils/background-models';
-
-/** Whether a role has nothing chosen at any scope, so its work doesn't run. */
-export function roleNotSet(role: UtilityRoleModel): boolean {
-  return !role.account && !role.deployment;
-}
+import { OFF_VALUE, backgroundModelLabel, roleNotSet } from '../../core/utils/background-models';
 
 /**
  * The first-run step that chooses the models background work runs on (ADR 0x027 section 6):
