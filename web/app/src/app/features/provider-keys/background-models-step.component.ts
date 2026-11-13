@@ -61,7 +61,8 @@ export class BackgroundModelsStepComponent implements OnInit {
     if (this.models().length === 0) {
       try {
         await firstValueFrom(this.modelService.getModels());
-      } catch {
+      } catch (err) {
+        console.warn('Failed to load models for the background models step:', err);
         this.error.set("Your models couldn't be loaded. Close this and try again in a moment.");
       }
     }
