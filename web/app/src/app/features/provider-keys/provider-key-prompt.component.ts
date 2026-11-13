@@ -6,10 +6,11 @@ import { PersonalityPresenceService } from '../../core/services/personality-pres
 import { ProviderKeysService } from '../../core/services/provider-keys.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
 import { UtilityModelsService } from '../../core/services/utility-models.service';
+import { roleNotSet } from '../../core/utils/background-models';
 import { hasDefaultModel } from '../../core/utils/default-model';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { ProfileSettingsModalService } from '../profile-settings/profile-settings-modal.service';
-import { BackgroundModelsStepComponent, roleNotSet } from './background-models-step.component';
+import { BackgroundModelsStepComponent } from './background-models-step.component';
 
 /**
  * The first-run prompt: an account that brings its own provider keys and has
