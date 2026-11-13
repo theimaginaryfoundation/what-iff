@@ -22,11 +22,13 @@ var (
 )
 
 // Current is a file's threads as a change sees them: placed on Text, the file's text now (empty
-// for an image, whose threads are all on the whole file).
+// for an image, whose threads are all on the whole file; a diagram's XML, whose threads are on its
+// elements).
 type Current struct {
 	File    *models.FileAttachment
 	Text    string
 	Image   bool
+	Diagram bool
 	Threads []models.FileCommentThread
 }
 
@@ -42,7 +44,7 @@ func (s *Service) Update(ctx context.Context, userID, id uuid.UUID, change func(
 		if err != nil {
 			return nil, err
 		}
-		cur := &Current{File: file, Image: isImage(file), Threads: got.Threads}
+		cur := &Current{File: file, Image: isImage(file), Diagram: isDiagram(file), Threads: got.Threads}
 		if !cur.Image {
 			if cur.Text, err = s.text(ctx, userID, file); err != nil {
 				return nil, err

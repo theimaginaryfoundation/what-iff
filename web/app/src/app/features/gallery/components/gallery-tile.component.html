@@ -5,7 +5,8 @@
   [class.tile--selected]="selected()"
   [class.tile--file]="tile().isFile"
   (dragstart)="onDragStart($event)"
-  (dragend)="dragEnd.emit()">
+  (dragend)="dragEnd.emit()"
+>
   @if (selectable()) {
     <button
       type="button"
@@ -13,7 +14,8 @@
       role="checkbox"
       [attr.aria-checked]="selected()"
       [attr.aria-label]="'Select ' + noun() + ' ' + tile().name"
-      (click)="$event.stopPropagation(); toggleSelect.emit(tile().id)">
+      (click)="$event.stopPropagation(); toggleSelect.emit(tile().id)"
+    >
       <span class="tile__check-mark"></span>
     </button>
   } @else {
@@ -22,7 +24,8 @@
       class="tile__delete"
       [attr.aria-label]="'Delete ' + noun() + ' ' + tile().name"
       [uiTooltip]="'Delete this ' + noun()"
-      (click)="$event.stopPropagation(); delete.emit(tile().id)">
+      (click)="$event.stopPropagation(); delete.emit(tile().id)"
+    >
       ×
     </button>
   }
@@ -36,10 +39,18 @@
       truncatedOnly
       [truncationTarget]="fileName"
       placement="bottom"
-      (click)="selectable() ? toggleSelect.emit(tile().id) : open.emit(tile().id)">
-      <span class="tile__file-sheet" aria-hidden="true">
-        <span class="tile__file-badge">{{ tile().badge }}</span>
-      </span>
+      (click)="selectable() ? toggleSelect.emit(tile().id) : open.emit(tile().id)"
+    >
+      @if (tile().previewUrl | authImage | async; as preview) {
+        <span class="tile__file-preview" aria-hidden="true">
+          <img [src]="preview" alt="" loading="lazy" draggable="false" />
+          <span class="tile__file-badge">{{ tile().badge }}</span>
+        </span>
+      } @else {
+        <span class="tile__file-sheet" aria-hidden="true">
+          <span class="tile__file-badge">{{ tile().badge }}</span>
+        </span>
+      }
       <span #fileName class="tile__file-name">{{ tile().name }}</span>
       @if (tile().personalityName) {
         <span class="tile__file-meta">{{ tile().personalityName }}</span>
@@ -54,14 +65,16 @@
       truncatedOnly
       [truncationTarget]="overlayTitle"
       placement="bottom"
-      (click)="selectable() ? toggleSelect.emit(tile().id) : open.emit(tile().id)">
+      (click)="selectable() ? toggleSelect.emit(tile().id) : open.emit(tile().id)"
+    >
       <img [src]="src" [alt]="tile().name" class="tile__image" loading="lazy" draggable="false" />
     </button>
   } @else {
     <button
       type="button"
       class="tile__button tile__button--empty"
-      (click)="selectable() ? toggleSelect.emit(tile().id) : open.emit(tile().id)">
+      (click)="selectable() ? toggleSelect.emit(tile().id) : open.emit(tile().id)"
+    >
       Preview unavailable
     </button>
   }

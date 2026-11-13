@@ -16,6 +16,10 @@ describe('file-preview.helpers', () => {
       ['notes.md', 'text/plain', 'markdown'],
       ['notes', 'text/markdown', 'markdown'],
       ['flow.mmd', '', 'mermaid'],
+      ['flow.drawio', '', 'diagram'],
+      ['flow.drawio.xml', 'application/xml', 'diagram'],
+      ['flow', 'application/vnd.jgraph.mxfile', 'diagram'],
+      ['data.xml', 'application/xml', 'text'],
       ['flow.mermaid', 'application/octet-stream', 'mermaid'],
       ['flow', 'text/vnd.mermaid', 'mermaid'],
       ['data.csv', 'application/octet-stream', 'csv'],
@@ -62,6 +66,7 @@ describe('file-preview.helpers', () => {
   it('describes the type in plain words', () => {
     expect(fileTypeLabel(file('a.md'))).toBe('Markdown');
     expect(fileTypeLabel(file('flow.mmd'))).toBe('Mermaid diagram');
+    expect(fileTypeLabel(file('flow.drawio'))).toBe('Diagram');
     expect(fileTypeLabel(file('a.tsv'))).toBe('TSV table');
     expect(fileTypeLabel(file('a.go'))).toBe('GO file');
     expect(fileTypeLabel(file('a.zip', 'application/zip'))).toBe('ZIP file');

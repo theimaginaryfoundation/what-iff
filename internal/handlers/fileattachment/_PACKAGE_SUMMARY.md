@@ -7,6 +7,10 @@ HTTP API for **file attachments** metadata and download flows at `/api/file-atta
 ## Responsibilities
 
 - **`Handler`:** CRUD/list for attachments per OpenAPI; coordinates with datastore and storage presigned URLs as implemented.
+- **`GET`/`PUT /file-attachment/{id}/preview` (`preview.go`, ADR 0x049 §8):** a draw.io diagram's preview, a PNG the browser drew, stored with a JPEG thumbnail beside the file's object (`storage.FileKeyForPreview`).
+  A write names the `content_version` it shows (409 when that is no longer the file's, and when a save moved the file to a new object meanwhile); only diagrams, PNGs up to 8 MB, 4096 pixels a side and 8 megapixels (from the PNG's header, before it is decoded for the thumbnail).
+  A read is the PNG, or the thumbnail with `size=thumbnail`; 404 when there is none of the current version.
+  Its ETag is the preview's tag (`storage.PreviewTag`), so `If-None-Match` is answered 304 without downloading the picture, and a picture replaced at the same version is not served stale; a preview stored without a tag is hashed as it is read.
 - **`GET`/`PUT /file-attachment/{id}/comments` (`comments.go`):** the comment threads of a text, code or image file (ADR 0x045), through `internal/filecomments`.
   A read returns them placed on the file's current content; a write sends the `content_version` its anchors are placed on (412 when that is not the current content) and the `revision` it read (409 when the comments changed since); 415 for a file that is neither text nor an image.
 - **`PUT /file-attachment/{id}/content` (`content.go`):** replaces a file's content from the file workspace (ADR 0x043 §3).
@@ -36,6 +40,7 @@ HTTP API for **file attachments** metadata and download flows at `/api/file-atta
 
 - *(See chat handler tests for upload quotas; add here if standalone behaviors grow.)*
 - `cleanup_test.go` — delete removes an unreferenced object and thumbnail, keeps one a reference copy shares, survives an object-store failure; legacy chat document download without `s3_key`.
+- `preview_test.go` — a preview stored and read back with its thumbnail; an old version (409), a non-diagram and a non-PNG refused; none of the current object is 404.
 - `comments_test.go` — the comment routes: a write, a read that carries the anchors across a change made elsewhere, 412 for anchors placed on old content, 409 for a stale revision, 415 for binary, 404, 400.
 - `content_test.go` — the content route's statuses (200 with ETag, 412 with the current version, 400 If-Match, 404, 415) against stubs; the save itself is tested in `internal/filesave`.
 

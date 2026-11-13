@@ -21,6 +21,7 @@ function tile(id: string, overrides: Partial<GalleryTileVm> = {}): GalleryTileVm
     badge: '',
     thumbnailUrl: '',
     fullUrl: '',
+    previewUrl: '',
     ...overrides,
   };
 }
@@ -41,7 +42,10 @@ describe('GalleryListComponent', () => {
       emitted[name] = [];
       (component[name] as { subscribe(fn: (value: unknown) => void): void }).subscribe(value => emitted[name].push(value));
     }
-    fixture.componentRef.setInput('tiles', [tile('a', { folder: 'charts' }), tile('doc', { isFile: true, badge: 'PDF', name: 'notes.pdf' })]);
+    fixture.componentRef.setInput('tiles', [
+      tile('a', { folder: 'charts' }),
+      tile('doc', { isFile: true, badge: 'PDF', name: 'notes.pdf' }),
+    ]);
     fixture.componentRef.setInput('folderTiles', [{ path: 'charts/oura', name: 'oura', count: 2 }]);
     fixture.componentRef.setInput('selectedIds', new Set(['a']));
     fixture.componentRef.setInput('selectionState', 'some');

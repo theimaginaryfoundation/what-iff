@@ -4,6 +4,7 @@ import { FileAttachment, isImageAttachment } from '../../../core/models/file-att
  * How the in-tab file viewer shows a file. Everything is read-only.
  * - markdown / csv: rendered, with a toggle back to the raw text.
  * - mermaid: a Mermaid diagram's source (.mmd), drawn, with a toggle back to the raw text.
+ * - diagram: a draw.io diagram (.drawio), in the embedded draw.io editor (ADR 0x049).
  * - text: plain text or source code, never interpreted (HTML and SVG source included).
  * - pdf: the browser's own PDF viewer, where it has one.
  * - image: the bytes as an image (only reached by a direct ?file= link; the grid opens images in the image popup).
@@ -12,7 +13,7 @@ import { FileAttachment, isImageAttachment } from '../../../core/models/file-att
  * - none: no preview (archives, unknown binaries); download only.
  */
 export type FilePreviewKind =
-  'markdown' | 'mermaid' | 'csv' | 'text' | 'pdf' | 'image' | 'spreadsheet' | 'document' | 'slides' | 'notebook' | 'none';
+  'markdown' | 'mermaid' | 'diagram' | 'csv' | 'text' | 'pdf' | 'image' | 'spreadsheet' | 'document' | 'slides' | 'notebook' | 'none';
 
 /** Text bigger than this is cut off in the viewer (download for the rest). */
 export const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024;
@@ -23,6 +24,7 @@ export const MAX_CSV_TABLE_ROWS = 2_000;
 
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown', '.mdx']);
 const MERMAID_EXTENSIONS = new Set(['.mmd', '.mermaid']);
+const DIAGRAM_MIME_TYPES = new Set(['application/vnd.jgraph.mxfile']);
 const MERMAID_MIME_TYPES = new Set(['text/vnd.mermaid', 'text/x-mermaid', 'application/vnd.mermaid']);
 const SPREADSHEET_EXTENSIONS = new Set(['.xlsx', '.xlsm']);
 const DOCUMENT_EXTENSIONS = new Set(['.docx']);
@@ -132,6 +134,8 @@ export function previewKindFor(file: Pick<FileAttachment, 'name' | 'file_type'>)
   const mime = mimeOf(file);
   const ext = fileExtension(file.name);
   if (MARKDOWN_EXTENSIONS.has(ext) || mime === 'text/markdown' || mime === 'text/x-markdown') return 'markdown';
+  // `.drawio.xml` is how draw.io names a diagram saved for tools that want an .xml extension.
+  if (ext === '.drawio' || (file.name ?? '').toLowerCase().endsWith('.drawio.xml') || DIAGRAM_MIME_TYPES.has(mime)) return 'diagram';
   if (MERMAID_EXTENSIONS.has(ext) || MERMAID_MIME_TYPES.has(mime)) return 'mermaid';
   if (CSV_EXTENSIONS.has(ext) || mime === 'text/csv' || mime === 'text/tab-separated-values') return 'csv';
   if (mime === 'application/pdf' || ext === '.pdf') return 'pdf';
@@ -172,6 +176,8 @@ export function fileTypeLabel(file: Pick<FileAttachment, 'name' | 'file_type'>):
       return 'Markdown';
     case 'mermaid':
       return 'Mermaid diagram';
+    case 'diagram':
+      return 'Diagram';
     case 'csv':
       return csvDelimiterFor(file) === '\t' ? 'TSV table' : 'CSV table';
     case 'pdf':

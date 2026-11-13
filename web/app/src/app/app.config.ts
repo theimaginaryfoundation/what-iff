@@ -15,6 +15,7 @@ import { accessGateProviders } from './extensions/access-gate.providers';
 import { integrationTabProviders } from './extensions/integration-tabs.providers';
 import { threadAutomationProviders } from './extensions/thread-automations.providers';
 import { RemoteSyncWakeService } from './features/remote-sync/remote-sync-wake.service';
+import { MermaidDiagramOpener } from './features/diagrams/mermaid-to-drawio';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -48,6 +49,13 @@ export const appConfig: ApplicationConfig = {
       multi: true,
       deps: [RemoteSyncWakeService],
       useFactory: (wake: RemoteSyncWakeService) => () => wake.start(),
+    },
+    {
+      // "Edit" on drawn Mermaid diagrams opens them as draw.io diagrams, where there is an editor (ADR 0x049).
+      provide: APP_INITIALIZER,
+      multi: true,
+      deps: [MermaidDiagramOpener],
+      useFactory: (opener: MermaidDiagramOpener) => () => opener.start(),
     },
   ],
 };

@@ -20,6 +20,7 @@ function tile(id: string, folder = ''): GalleryTileVm {
     badge: '',
     thumbnailUrl: `/thumb/${id}`,
     fullUrl: `/full/${id}`,
+    previewUrl: '',
   };
 }
 

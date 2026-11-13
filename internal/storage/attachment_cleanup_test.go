@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 	"time"
@@ -179,4 +180,57 @@ func TestPurgeUserObjects_RemovesUserPrefixAndExportBundles(t *testing.T) {
 	for _, k := range theirs {
 		require.True(t, s.has(t, k), "other users' objects are untouched: "+k)
 	}
+}
+
+func TestPreviewsGoWithTheirObject(t *testing.T) {
+	ctx := context.Background()
+	userID := uuid.New()
+	s := newLocalTestStore(t)
+	diagram := models.FileAttachment{ID: uuid.New(), Name: "flow.drawio", FileType: "application/vnd.jgraph.mxfile"}
+	diagram.S3Key = path.Join("users", userID.String(), "files", "flow.drawio")
+	old := path.Join("users", userID.String(), "files", "flow-old.drawio")
+	for _, k := range []string{diagram.S3Key, old, FileKeyForPreview(diagram.S3Key), FileKeyForPreviewThumbnail(diagram.S3Key), FileKeyForPreview(old)} {
+		s.put(t, k, 0)
+	}
+
+	// A save released the old object: its preview goes, the current one's stays.
+	require.True(t, ReleaseReplacedObject(ctx, zap.NewNop(), s.FileStore, &fakeRefs{}, old, nil))
+	require.False(t, s.has(t, FileKeyForPreview(old)))
+	require.True(t, s.has(t, FileKeyForPreview(diagram.S3Key)))
+
+	// The file deleted: the object and its preview go.
+	ReleaseAttachmentObjects(ctx, zap.NewNop(), s.FileStore, &fakeRefs{}, userID, []models.FileAttachment{diagram})
+	require.False(t, s.has(t, diagram.S3Key))
+	require.False(t, s.has(t, FileKeyForPreview(diagram.S3Key)))
+	require.False(t, s.has(t, FileKeyForPreviewThumbnail(diagram.S3Key)))
+}
+
+func TestPreviewsGoWhateverTheObjectsKeyEndsWith(t *testing.T) {
+	ctx := context.Background()
+	userID := uuid.New()
+	s := newLocalTestStore(t)
+	// Renamed to .drawio after upload, and a diagram stored under another name by its media type:
+	// neither object's key ends like a diagram's.
+	renamed := models.FileAttachment{ID: uuid.New(), Name: "flow.drawio", FileType: "application/xml",
+		S3Key: path.Join("users", userID.String(), "files", "flow.xml")}
+	typed := models.FileAttachment{ID: uuid.New(), Name: "flow", FileType: "application/vnd.jgraph.mxfile",
+		S3Key: path.Join("users", userID.String(), "files", "flow")}
+	replaced := path.Join("users", userID.String(), "files", "old.xml")
+	for _, k := range []string{renamed.S3Key, typed.S3Key, replaced, FileKeyForPreview(renamed.S3Key), FileKeyForPreview(typed.S3Key), FileKeyForPreview(replaced)} {
+		s.put(t, k, 0)
+	}
+
+	require.True(t, ReleaseReplacedObject(ctx, zap.NewNop(), s.FileStore, &fakeRefs{}, replaced, &renamed))
+	require.False(t, s.has(t, FileKeyForPreview(replaced)))
+	ReleaseAttachmentObjects(ctx, zap.NewNop(), s.FileStore, &fakeRefs{}, userID, []models.FileAttachment{renamed, typed})
+	require.False(t, s.has(t, FileKeyForPreview(renamed.S3Key)))
+	require.False(t, s.has(t, FileKeyForPreview(typed.S3Key)))
+}
+
+func TestMayHavePreview(t *testing.T) {
+	require.True(t, mayHavePreview("users/u/files/a.drawio"))
+	require.True(t, mayHavePreview("users/u/files/a.DRAWIO.xml"))
+	require.False(t, mayHavePreview("users/u/files/a.xml"))
+	require.False(t, mayHavePreview("users/u/files/a.md", &models.FileAttachment{Name: "a.md", FileType: "text/markdown"}, nil))
+	require.True(t, mayHavePreview("users/u/files/a.md", &models.FileAttachment{Name: "a.drawio"}))
 }

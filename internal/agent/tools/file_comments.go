@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/drawio"
 	"github.com/theimaginaryfoundation/what-iff/internal/filecomments"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
@@ -30,12 +31,12 @@ const fileCommentsToolName = "file_comments"
 const fileCommentMaxText = 8000
 
 // FileCommentsDescription is the agent-facing description of file_comments.
-const FileCommentsDescription = `Read and write the comment threads on a file: remarks people leave on parts of it, as in a word processor, with replies. Works on text and code files, images (an image's threads are on the whole image), and Word, PowerPoint and Excel files (their comments are saved in the file, as a new version of it).
+const FileCommentsDescription = `Read and write the comment threads on a file: remarks people leave on parts of it, as in a word processor, with replies. Works on text and code files, images (an image's threads are on the whole image), draw.io diagrams (a thread is on one element, or the whole diagram), and Word, PowerPoint and Excel files (their comments are saved in the file, as a new version of it).
 
 action:
 - "list": the file's threads: each one's id, what it is on (the quoted text with its lines, or the whole file), whether it is resolved, and its comments.
 - "reply": add text to the thread thread_id.
-- "add": start a thread with text. quote is the exact text of the file the thread is about, copied from the file (a few words or a line, enough to be unique); when the same text appears more than once, occurrence picks one (1 = first). Leave quote empty for a thread on the whole file (not in Word, where a comment needs text). PowerPoint: quote is text in a shape, and slide (1-based) limits it to one slide; slide alone puts the thread on the slide. Excel: cell (e.g. "B3") on sheet (its name; empty for the first), one thread per cell (reply to an existing one instead).
+- "add": start a thread with text. quote is the exact text of the file the thread is about, copied from the file (a few words or a line, enough to be unique); when the same text appears more than once, occurrence picks one (1 = first). Leave quote empty for a thread on the whole file (not in Word, where a comment needs text). PowerPoint: quote is text in a shape, and slide (1-based) limits it to one slide; slide alone puts the thread on the slide. Excel: cell (e.g. "B3") on sheet (its name; empty for the first), one thread per cell (reply to an existing one instead). draw.io diagram (.drawio): cell is the id of the element the thread is on (the diagram tool lists them), with page (its id, name or number) when it is not on the first page; leave quote empty.
 - "resolve": mark thread_id resolved (resolved=true), or open it again (resolved=false).
 
 Comments are plain text, shown as written: no Markdown (no **bold**, lists or headings). Keep them short, like a reviewer's note.
@@ -58,7 +59,8 @@ var FileCommentsToolSpec = FunctionToolSpec{
 		"resolved":   map[string]interface{}{"type": "boolean", "description": "Resolve (true) or reopen (false) the thread (resolve)."},
 		"slide":      map[string]interface{}{"type": "integer", "minimum": 1, "description": "PowerPoint (add): the slide, 1-based."},
 		"sheet":      map[string]interface{}{"type": "string", "description": "Excel (add): the sheet's name; empty for the first sheet."},
-		"cell":       map[string]interface{}{"type": "string", "description": "Excel (add): the cell, e.g. 'B3'."},
+		"cell":       map[string]interface{}{"type": "string", "description": "Excel (add): the cell, e.g. 'B3'. Diagram (add): the element's id."},
+		"page":       map[string]interface{}{"type": "string", "description": "Diagram (add): the element's page (id, name or number from 1); empty for any page."},
 	},
 	Required: []string{"action", "file"},
 }
@@ -74,6 +76,7 @@ type fileCommentsArgs struct {
 	Slide      int    `json:"slide"`
 	Sheet      string `json:"sheet"`
 	Cell       string `json:"cell"`
+	Page       string `json:"page"`
 }
 
 type fileCommentView struct {
@@ -86,7 +89,8 @@ type fileThreadView struct {
 	ID string `json:"id"`
 	// On is what the thread is on: the quoted text, or "the whole file".
 	On string `json:"on"`
-	// Where is where that is in an Office file ("slide 2", "sheet Sheet1, cell B3").
+	// Where is where that is in an Office file ("slide 2", "sheet Sheet1, cell B3") or a diagram
+	// ("element a on page p1").
 	Where     string            `json:"where,omitempty"`
 	FirstLine int               `json:"first_line,omitempty"`
 	LastLine  int               `json:"last_line,omitempty"`
@@ -220,7 +224,12 @@ func refusalOf(err error) (string, bool) {
 	case errors.As(err, &refusal):
 		return refusal.Error(), true
 	case errors.Is(err, filecomments.ErrNotText):
-		return "comments can be read and written here only on images and on UTF-8 text and code files of at most 4 MB", true
+		return "comments can be read and written here only on images, draw.io diagrams and UTF-8 text and code files of at most 4 MB", true
+	case errors.Is(err, filecomments.ErrCellNotFound):
+		return err.Error() + "; list the diagram's elements with the diagram tool", true
+	case errors.Is(err, filecomments.ErrDiagramUnreadable), errors.Is(err, drawio.ErrNoPage):
+		// Says why, as the diagram tool does (a compressed diagram: open and save it in the editor).
+		return err.Error(), true
 	case errors.Is(err, filecomments.ErrQuoteNotFound):
 		return err.Error() + "; copy the quote exactly from the file (read it with agent_file_read)", true
 	case errors.Is(err, filecomments.ErrQuoteAmbiguous):
@@ -265,10 +274,17 @@ var errListed = errors.New("listed")
 
 func threadView(th models.FileCommentThread, text string) fileThreadView {
 	v := fileThreadView{ID: th.ID, On: "the whole file", Resolved: th.Resolved}
-	if th.Anchor != nil {
+	switch {
+	case th.Cell != nil:
+		v.On = "an element with no label"
+		if th.Quote != "" {
+			v.On = th.Quote
+		}
+		v.Where = fmt.Sprintf("element %s on page %s", th.Cell.ID, th.Cell.Page)
+	case th.Anchor != nil:
 		v.On = th.Quote
 		v.FirstLine, v.LastLine = filecomments.Lines(text, *th.Anchor)
-	} else if th.Quote != "" {
+	case th.Quote != "":
 		v.On = fmt.Sprintf("the whole file (it was on %q, which is gone)", th.Quote)
 	}
 	for _, c := range th.Comments {
@@ -295,7 +311,16 @@ func (t *FileCommentsTool) change(ctx context.Context, chat *models.Chat, att *m
 		switch args.Action {
 		case "add":
 			th := models.FileCommentThread{ID: comment.ID, Comments: []models.FileComment{comment}}
-			if q := args.Quote; strings.TrimSpace(q) != "" {
+			if cur.Diagram && strings.TrimSpace(args.Cell) != "" {
+				cell, label, err := filecomments.CellOn(cur.Text, strings.TrimSpace(args.Cell), strings.TrimSpace(args.Page))
+				if err != nil {
+					return nil, err
+				}
+				th.Cell, th.Quote = cell, label
+			} else if q := args.Quote; strings.TrimSpace(q) != "" {
+				if cur.Diagram {
+					return nil, fileRefusalf("a diagram's threads are on its elements: give cell (the element's id) instead of quote, or neither for the whole diagram")
+				}
 				if cur.Image {
 					return nil, fileRefusalf("an image's threads are on the whole image; leave quote empty")
 				}
@@ -341,7 +366,7 @@ func (t *FileCommentsTool) change(ctx context.Context, chat *models.Chat, att *m
 	// The written thread, as list shows it (its lines are read again on the next list).
 	view := threadView(th, "")
 	quote := ""
-	if th.Anchor != nil {
+	if th.Anchor != nil || th.Cell != nil {
 		quote = filecomments.ShortQuote(th.Quote)
 	}
 	return fileCommentsResult{

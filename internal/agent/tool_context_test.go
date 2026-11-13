@@ -28,6 +28,7 @@ func TestToolContextPolicyFor(t *testing.T) {
 		{"create_memory dropped", tools.CreateMemoryToolSpec.Name, false, 0, false},
 		{"update_scratchpad dropped", tools.UpdateScratchpadToolSpec.Name, false, 0, false},
 		{"agent_file_write ack persists", tools.AgentFileWriteToolSpec.Name, true, noTTL, false},
+		{"diagram results expire like file reads", tools.DiagramToolSpec.Name, true, agentStoreReadTTLTurns, false},
 		{"entity_write dropped", tools.EntityWriteToolSpec.Name, false, 0, false},
 		{"load_skill dropped: the skills segment carries the body", tools.LoadSkillToolSpec.Name, false, 0, false},
 		{"unload_skill dropped", tools.UnloadSkillToolSpec.Name, false, 0, false},

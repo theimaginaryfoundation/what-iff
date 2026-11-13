@@ -4,8 +4,10 @@ import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core
 
 import { FileAttachment } from '../../../../core/models/file-attachment.model';
 import { AuthImagePipe } from '../../../../core/pipes/auth-image.pipe';
+import { FileAttachmentService } from '../../../../core/services/file-attachment.service';
 import { ImageGalleryService } from '../../../../core/services/image-gallery.service';
 import { saveBlobAsFile } from '../../../../core/utils/download.helpers';
+import { DiagramPictures } from '../../../diagrams/diagram-pictures.service';
 import { FileWorkspaceService } from '../../../file-workspace/file-workspace.service';
 import { ImageIconComponent } from '../../../../shared/ui/icons/icons';
 
@@ -18,7 +20,11 @@ import { ImageIconComponent } from '../../../../shared/ui/icons/icons';
       @for (attachment of attachments(); track attachment.id) {
         <figure class="message-images__card">
           <button type="button" class="message-images__preview" [attr.aria-label]="'Open ' + attachment.name" (click)="open(attachment)">
-            @if (previewUrl(attachment) | authImage | async; as src) {
+            @if (kind() === 'diagram') {
+              @if (diagramPictures.picture(attachment) | async; as src) {
+                <img class="message-images__diagram" [src]="src" [alt]="attachment.name" loading="lazy" />
+              }
+            } @else if (previewUrl(attachment) | authImage | async; as src) {
               <img [src]="src" [alt]="attachment.name" loading="lazy" />
             }
           </button>
@@ -27,101 +33,107 @@ import { ImageIconComponent } from '../../../../shared/ui/icons/icons';
               <ui-image-icon [size]="14" />
               <span>{{ attachment.name }}</span>
             </span>
-            <button type="button" class="message-images__download" (click)="download(attachment)">
-              Download
-            </button>
+            <button type="button" class="message-images__download" (click)="download(attachment)">Download</button>
           </figcaption>
         </figure>
       }
     </div>
   `,
-  styles: [`
-    .message-images {
-      display: grid;
-      gap: 0.75rem;
-      margin-top: 0.75rem;
-    }
+  styles: [
+    `
+      .message-images {
+        display: grid;
+        gap: 0.75rem;
+        margin-top: 0.75rem;
+      }
 
-    .message-images__card {
-      background: var(--color-surface-base);
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.875rem;
-      margin: 0;
-      overflow: hidden;
-      max-width: min(28rem, 100%);
-    }
+      .message-images__card {
+        background: var(--color-surface-base);
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.875rem;
+        margin: 0;
+        overflow: hidden;
+        max-width: min(28rem, 100%);
+      }
 
-    .message-images__preview {
-      align-items: center;
-      background: var(--color-surface-muted);
-      border: 0;
-      cursor: zoom-in;
-      display: flex;
-      justify-content: center;
-      max-height: 18rem;
-      min-height: 8rem;
-      overflow: hidden;
-      padding: 0;
-      width: 100%;
-    }
+      .message-images__preview {
+        align-items: center;
+        background: var(--color-surface-muted);
+        border: 0;
+        cursor: zoom-in;
+        display: flex;
+        justify-content: center;
+        max-height: 18rem;
+        min-height: 8rem;
+        overflow: hidden;
+        padding: 0;
+        width: 100%;
+      }
 
-    .message-images__preview img {
-      display: block;
-      max-height: 18rem;
-      max-width: 100%;
-      object-fit: contain;
-      width: 100%;
-    }
+      .message-images__preview img {
+        display: block;
+        max-height: 18rem;
+        max-width: 100%;
+        object-fit: contain;
+        width: 100%;
+      }
 
-    /* Full-resolution images keep their natural size (never stretched), only shrinking to fit. */
-    .message-images--full .message-images__preview img {
-      height: auto;
-      max-height: 18rem;
-      max-width: 100%;
-      width: auto;
-    }
+      /* Full-resolution images keep their natural size (never stretched), only shrinking to fit. */
+      .message-images--full .message-images__preview img {
+        height: auto;
+        max-height: 18rem;
+        max-width: 100%;
+        width: auto;
+      }
 
-    .message-images__footer,
-    .message-images__name {
-      align-items: center;
-      display: flex;
-      min-width: 0;
-    }
+      /* A diagram's picture is drawn on white (ADR 0x049 §8), so it sits on white in both themes. */
+      .message-images__preview:has(.message-images__diagram) {
+        background: #ffffff;
+        padding: 0.75rem;
+      }
 
-    .message-images__footer {
-      gap: 0.625rem;
-      justify-content: space-between;
-      padding: 0.5rem 0.625rem;
-    }
+      .message-images__footer,
+      .message-images__name {
+        align-items: center;
+        display: flex;
+        min-width: 0;
+      }
 
-    .message-images__name {
-      color: var(--color-text-secondary);
-      flex: 1;
-      font-size: 0.75rem;
-      gap: 0.375rem;
-    }
+      .message-images__footer {
+        gap: 0.625rem;
+        justify-content: space-between;
+        padding: 0.5rem 0.625rem;
+      }
 
-    .message-images__name span:last-child {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
+      .message-images__name {
+        color: var(--color-text-secondary);
+        flex: 1;
+        font-size: 0.75rem;
+        gap: 0.375rem;
+      }
 
-    .message-images__download {
-      border: 1px solid var(--color-border-base);
-      border-radius: 999px;
-      color: var(--color-text-secondary);
-      flex-shrink: 0;
-      font-size: 0.6875rem;
-      font-weight: 700;
-      padding: 0.1875rem 0.5rem;
-    }
+      .message-images__name span:last-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
 
-    .message-images__download:hover,
-    .message-images__download:focus-visible {
-      color: var(--color-accent);
-    }
-  `],
+      .message-images__download {
+        border: 1px solid var(--color-border-base);
+        border-radius: 999px;
+        color: var(--color-text-secondary);
+        flex-shrink: 0;
+        font-size: 0.6875rem;
+        font-weight: 700;
+        padding: 0.1875rem 0.5rem;
+      }
+
+      .message-images__download:hover,
+      .message-images__download:focus-visible {
+        color: var(--color-accent);
+      }
+    `,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class MessageImageAttachmentsComponent {
@@ -131,10 +143,14 @@ export class MessageImageAttachmentsComponent {
    * the card; user turns ask for 'full' (the upload-normalized original) instead.
    */
   readonly size = input<'thumbnail' | 'full'>('thumbnail');
+  /** Images, or draw.io diagrams shown by their picture (DiagramPictures). */
+  readonly kind = input<'image' | 'diagram'>('image');
 
   private readonly http = inject(HttpClient);
   private readonly imageGallery = inject(ImageGalleryService);
   private readonly workspace = inject(FileWorkspaceService);
+  private readonly files = inject(FileAttachmentService);
+  readonly diagramPictures = inject(DiagramPictures);
 
   previewUrl(attachment: FileAttachment): string {
     return this.imageGallery.getImageUrl(attachment.id, this.size());
@@ -146,6 +162,14 @@ export class MessageImageAttachmentsComponent {
   }
 
   download(attachment: FileAttachment): void {
-    this.http.get(this.imageGallery.getImageUrl(attachment.id, 'full'), { responseType: 'blob' }).subscribe(blob => saveBlobAsFile(blob, attachment.name || `image-${attachment.id}`));
+    if (this.kind() === 'diagram') {
+      this.files
+        .downloadFileAttachment(attachment.id)
+        .subscribe(blob => saveBlobAsFile(blob, attachment.name || `diagram-${attachment.id}.drawio`));
+      return;
+    }
+    this.http
+      .get(this.imageGallery.getImageUrl(attachment.id, 'full'), { responseType: 'blob' })
+      .subscribe(blob => saveBlobAsFile(blob, attachment.name || `image-${attachment.id}`));
   }
 }

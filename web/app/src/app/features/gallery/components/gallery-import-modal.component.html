@@ -2,17 +2,17 @@
   <div modal-header class="gallery-import__header">
     <div>
       <h2 id="gallery-import-title" class="gallery-import__title">Import</h2>
-      <p class="gallery-import__subtitle">Add image to gallery</p>
+      <p class="gallery-import__subtitle">Add an image, diagram or other file to the gallery</p>
     </div>
   </div>
 
   <div class="gallery-import__body">
     <label class="gallery-import__dropzone" (dragover)="onDragOver($event)" (drop)="onDrop($event)">
-      <input #fileInput type="file" accept="image/*" class="sr-only" (change)="onFileInput($event)" />
+      <input #fileInput type="file" [accept]="accept" class="sr-only" (change)="onFileInput($event)" />
       @if (selectedFile(); as selected) {
         <span>{{ selected.name }}</span>
       } @else {
-        <span>Drop an image or click to browse</span>
+        <span>Drop a file or click to browse</span>
       }
     </label>
 
@@ -20,7 +20,7 @@
       <label class="gallery-import__field-label">Title *</label>
       <input
         type="text"
-        placeholder="Name this image"
+        placeholder="Name this file"
         class="gallery-import__input"
         [ngModel]="title()"
         (ngModelChange)="title.set($event)"
@@ -60,7 +60,7 @@
           <span class="gallery-import__scope-subtitle">Tied to one personality</span>
         </button>
       </div>
-      @if (scope() === 'personality') {
+      @if (scope() === "personality") {
         <div class="gallery-import__chips">
           @for (personality of personalities(); track personality.id) {
             <persona-accent-scope
@@ -97,15 +97,12 @@
       type="button"
       class="gallery-import__button gallery-import__button--secondary"
       [disabled]="submitting()"
-      (click)="close.emit(); clearState()">
+      (click)="close.emit(); clearState()"
+    >
       Cancel
     </button>
-    <button
-      type="button"
-      class="gallery-import__button gallery-import__button--primary"
-      [disabled]="submitting()"
-      (click)="onSubmitFile()">
-      {{ submitting() ? 'Importing…' : 'Import' }}
+    <button type="button" class="gallery-import__button gallery-import__button--primary" [disabled]="submitting()" (click)="onSubmitFile()">
+      {{ submitting() ? "Importing…" : "Import" }}
     </button>
   </div>
 </ui-modal>

@@ -102,6 +102,10 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			out, err := a.agentFileTool.Read(ctx, chatCtx.chat, input)
 			return out, nil, err
 		},
+		tools.DiagramToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.diagramTool.Run(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
 		tools.FileCommentsToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			out, err := a.fileCommentsTool.Run(ctx, chatCtx.chat, input)
 			return out, nil, err

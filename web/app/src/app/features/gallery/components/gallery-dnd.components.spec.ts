@@ -48,6 +48,7 @@ const tile: GalleryTileVm = {
   badge: '',
   thumbnailUrl: '/thumb',
   fullUrl: '/full',
+  previewUrl: '',
 };
 
 describe('gallery drag and drop components', () => {

@@ -107,9 +107,16 @@ type stubFileStore struct {
 	seenKeys     []string
 	deletedKeys  []string
 	deleteErr    error
+	uploaded     map[string][]byte
 }
 
-func (s *stubFileStore) UploadFile(context.Context, string, []byte, string) error { return nil }
+func (s *stubFileStore) UploadFile(_ context.Context, key string, content []byte, _ string) error {
+	if s.uploaded == nil {
+		s.uploaded = map[string][]byte{}
+	}
+	s.uploaded[key] = content
+	return nil
+}
 func (s *stubFileStore) DeleteFile(_ context.Context, key string) error {
 	s.deletedKeys = append(s.deletedKeys, key)
 	if s.deleteErr != nil {

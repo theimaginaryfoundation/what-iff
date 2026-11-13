@@ -9376,6 +9376,118 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /file-attachment/{id}/preview:
+    get:
+      summary: Get a diagram's preview
+      description: >-
+        A picture of the file as it is now (ADR 0x049 §8): the PNG the browser drew of a draw.io
+        diagram, or its JPEG thumbnail (`size=thumbnail`). 404 when there is none of the current
+        version: every save leaves the file without one until it is drawn again. The ETag changes
+        whenever the picture is replaced, also at the same content_version; send it back as
+        If-None-Match for a 304.
+      tags: [File Attachments]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: size
+          in: query
+          required: false
+          description: "`full` (the default, PNG) or `thumbnail` (JPEG)."
+          schema:
+            type: string
+            enum: [full, thumbnail]
+      responses:
+        '200':
+          description: The preview
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '304':
+          description: The cached copy is current
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such file, or no preview of its current version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Store a diagram's preview
+      description: >-
+        Stores a PNG of a draw.io diagram as it is at `version` (its content_version), with a
+        thumbnail, beside the stored file (ADR 0x049 §8). The browser that drew the diagram sends
+        it, after opening or saving it. At most 8 MB, 4096 pixels a side and 8 megapixels
+        (8,388,608 pixels).
+      tags: [File Attachments]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: query
+          required: true
+          description: The content_version the picture shows.
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          image/png:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '204':
+          description: Stored
+        '400':
+          description: Not a diagram, no version, or not a PNG of an allowed size
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The file changed since; details.content_version is the current version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The preview is too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /file-attachment/{id}/content:
     put:
       summary: Replace a file's content
@@ -12737,6 +12849,19 @@ components:
           type: integer
         end:
           type: integer
+    FileCommentCell:
+      type: object
+      description: >-
+        The element of a draw.io diagram a thread is on (ADR 0x049); a thread with a cell has a
+        null anchor.
+      required: [id]
+      properties:
+        id:
+          type: string
+          description: The cell's id.
+        page:
+          type: string
+          description: The id of the page (diagram) the cell is on.
     FileCommentMention:
       type: object
       required: [id, name]
@@ -12777,9 +12902,13 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/FileCommentRange'
+        cell:
+          $ref: '#/components/schemas/FileCommentCell'
         quote:
           type: string
-          description: The text the thread is on (or was on, for a thread on the whole file).
+          description: >-
+            The text the thread is on (or was on, for a thread on the whole file); on a diagram,
+            the label of the element it is on.
         resolved:
           type: boolean
         comments:

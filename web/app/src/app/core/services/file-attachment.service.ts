@@ -1,9 +1,10 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable, catchError, map, of, switchMap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { FileAttachment, FileAttachmentFilters, ChatContextFilesResponse } from '../models/file-attachment.model';
 import { PaginatedResponse } from '../models/common.model';
+import { DiagramUploads, titleFor } from '../../features/diagrams/diagram-uploads';
 
 @Injectable({
   providedIn: 'root',
@@ -11,6 +12,8 @@ import { PaginatedResponse } from '../models/common.model';
 export class FileAttachmentService {
   private http = inject(HttpClient);
   private apiUrl = `${environment.apiUrl}`;
+  /** A Visio drawing is uploaded as the .drawio diagram it converts to (ADR 0x049 §7). */
+  private diagramUploads = inject(DiagramUploads);
 
   /**
    * Upload a file attachment to a specific chat
@@ -19,6 +22,10 @@ export class FileAttachmentService {
    * @returns Observable of the created file attachment
    */
   uploadChatFileAttachment(chatId: string, file: File, folder?: string, description?: string): Observable<FileAttachment> {
+    return this.diagramUploads.prepare(file).pipe(switchMap(prepared => this.postChatFile(chatId, prepared, folder, description)));
+  }
+
+  private postChatFile(chatId: string, file: File, folder?: string, description?: string): Observable<FileAttachment> {
     const formData = new FormData();
     formData.append('attachment', file);
     if (folder?.trim()) {
@@ -55,6 +62,26 @@ export class FileAttachmentService {
     return this.http.put<FileAttachment>(`${this.apiUrl}/file-attachment/${attachmentId}/content`, content, { headers, params });
   }
 
+  /** Where a diagram's preview is (ADR 0x049 §8): its PNG, or its JPEG thumbnail. 404 when it has none of its current version. */
+  previewUrl(attachmentId: string, size: 'full' | 'thumbnail' = 'full'): string {
+    return `${this.apiUrl}/file-attachment/${attachmentId}/preview?size=${size}`;
+  }
+
+  /** Whether the file has a preview of its current version. */
+  hasPreview(attachmentId: string): Observable<boolean> {
+    return this.http.get(this.previewUrl(attachmentId, 'thumbnail'), { responseType: 'blob' }).pipe(
+      map(() => true),
+      catchError(() => of(false)),
+    );
+  }
+
+  /** Stores a PNG of a diagram as it is at content_version `version`; a 409 means it changed since. */
+  putPreview(attachmentId: string, version: number, png: Blob): Observable<void> {
+    const params = new HttpParams().set('version', String(version));
+    const headers = new HttpHeaders({ 'Content-Type': 'image/png' });
+    return this.http.put<void>(`${this.apiUrl}/file-attachment/${attachmentId}/preview`, png, { headers, params });
+  }
+
   /**
    * List file attachments with optional filtering
    * @param page Page number (default 1)
@@ -89,6 +116,20 @@ export class FileAttachmentService {
    * @returns Observable of the created file attachment
    */
   uploadPersonalityFileAttachment(
+    personalityId: string,
+    file: File,
+    metadata?: { title?: string; description?: string },
+  ): Observable<FileAttachment> {
+    return this.diagramUploads
+      .prepare(file)
+      .pipe(
+        switchMap(prepared =>
+          this.postPersonalityFile(personalityId, prepared, metadata && { ...metadata, title: titleFor(metadata.title, prepared) }),
+        ),
+      );
+  }
+
+  private postPersonalityFile(
     personalityId: string,
     file: File,
     metadata?: { title?: string; description?: string },

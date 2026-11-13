@@ -93,6 +93,13 @@ var fileTypes = map[string]FileTypeInfo{
 		Extension:     ".md",
 		VectorSupport: true,
 	},
+	// draw.io diagrams (ADR 0x049): plain XML, opened in the embedded draw.io editor. Not indexed:
+	// the XML is mostly geometry and style, not words.
+	".drawio": {
+		ContentType:   "application/vnd.jgraph.mxfile",
+		Extension:     ".drawio",
+		VectorSupport: false,
+	},
 	// Mermaid diagram source: shown drawn in the file workspace, indexed as text.
 	".mermaid": {
 		ContentType:   "text/vnd.mermaid",

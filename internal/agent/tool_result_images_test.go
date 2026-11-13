@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -40,4 +41,15 @@ func TestToolResultImagesFromAttachments_PrefersTheThumbnail(t *testing.T) {
 	require.Equal(t, []byte("jpeg"), imgs[0].RawBytes)
 	require.Equal(t, "image/jpeg", imgs[0].MediaType)
 	require.Equal(t, full, imgs[1].RawBytes)
+}
+
+func TestShownToolImages_OnlyForModelsThatTakeImages(t *testing.T) {
+	t.Parallel()
+	shown := []tools.ResultImage{{Data: []byte("png"), MediaType: "image/png"}}
+	require.Nil(t, shownToolImages(&chatContext{modelVisionSupport: false}, shown))
+	require.Nil(t, shownToolImages(nil, shown))
+	imgs := shownToolImages(&chatContext{modelVisionSupport: true}, shown)
+	require.Len(t, imgs, 1)
+	require.Equal(t, []byte("png"), imgs[0].RawBytes)
+	require.Equal(t, "image/png", imgs[0].MediaType)
 }

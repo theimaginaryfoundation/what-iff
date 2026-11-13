@@ -12,7 +12,13 @@ import { CommentThread, DocComment } from '../../office/comments/comment-threads
 
 /** A range of the file's text in UTF-16 code units (JavaScript string offsets); null for the whole file. */
 export type TextCommentAnchor = { start: number; end: number } | null;
-export type TextCommentThread = CommentThread<TextCommentAnchor>;
+/** The element of a draw.io diagram a thread is on (ADR 0x049): the cell's id, on the page with id `page`. */
+export interface DiagramCell {
+  id: string;
+  page?: string;
+}
+/** A thread on a range of the text, or the whole file; on a diagram, on one of its elements (`cell`, anchor null). */
+export type TextCommentThread = CommentThread<TextCommentAnchor> & { cell?: DiagramCell };
 
 export interface TextComments {
   threads: TextCommentThread[];
@@ -34,6 +40,7 @@ interface ApiComment {
 interface ApiThread {
   id: string;
   anchor: { start: number; end: number } | null;
+  cell?: DiagramCell;
   quote: string;
   resolved: boolean;
   comments: ApiComment[];
@@ -60,6 +67,7 @@ function fromApi(body: ApiComments): TextComments {
           return comment;
         }),
       };
+      if (t.cell?.id) thread.cell = t.cell.page ? { id: t.cell.id, page: t.cell.page } : { id: t.cell.id };
       if (t.resolved) thread.resolved = true;
       return thread;
     }),
@@ -70,6 +78,7 @@ function toApi(threads: readonly TextCommentThread[]): ApiThread[] {
   return threads.map(t => ({
     id: t.id,
     anchor: t.anchor,
+    ...(t.cell ? { cell: t.cell } : {}),
     quote: t.quote ?? '',
     resolved: !!t.resolved,
     comments: t.comments.map(c => ({

@@ -227,7 +227,7 @@ func (h *Handler) storeSkillFile(ctx context.Context, userID uuid.UUID, ritual *
 		return nil, err
 	}
 	if oldKey != "" && oldKey != obj.Key {
-		storage.ReleaseReplacedObject(context.WithoutCancel(ctx), h.logger, h.files, h.ds, oldKey)
+		storage.ReleaseReplacedObject(context.WithoutCancel(ctx), h.logger, h.files, h.ds, oldKey, nil)
 	}
 	return stored, nil
 }

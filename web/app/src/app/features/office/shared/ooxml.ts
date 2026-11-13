@@ -1,5 +1,7 @@
 import JSZip from 'jszip';
 
+import { base64ToBytes } from '../../../core/utils/base64';
+
 /**
  * The Open Packaging Conventions container and the XML helpers the OOXML converters share:
  * parts, relationships, content types and the unit conversions between Word's twips, EMUs and
@@ -277,18 +279,7 @@ export function highlightName(rgb: string | null | undefined): string | null {
   return Object.entries(HIGHLIGHTS).find(([, v]) => v === hex)?.[0] ?? null;
 }
 
-export function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(binary);
-}
-
-export function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-  return out;
-}
+export { base64ToBytes, bytesToBase64 } from '../../../core/utils/base64';
 
 export function mimeForExtension(ext: string): string {
   switch (ext.toLowerCase()) {

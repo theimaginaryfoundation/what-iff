@@ -40,6 +40,7 @@ var agentFileTypes = map[string]string{
 	".md":      "text/markdown",
 	".mmd":     "text/vnd.mermaid",
 	".mermaid": "text/vnd.mermaid",
+	".drawio":  "application/vnd.jgraph.mxfile",
 	".txt":     "text/plain",
 	".json":    "application/json",
 	".jsonl":   "application/jsonl",

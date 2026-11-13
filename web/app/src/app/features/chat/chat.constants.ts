@@ -64,7 +64,8 @@ export const ALLOWED_FILE_TYPES = [
 export type AllowedFileType = (typeof ALLOWED_FILE_TYPES)[number];
 
 /**
- * Extensions accepted by the API (`internal/utils/fileutils.go` fileTypes map).
+ * Extensions accepted by the API (`internal/utils/fileutils.go` fileTypes map), plus `.vsdx`: a
+ * Visio drawing is converted to a .drawio diagram before it is uploaded (DiagramUploads, ADR 0x049 §7).
  * Browsers often omit or misreport `File.type`; we fall back to the filename suffix.
  */
 export const ALLOWED_UPLOAD_EXTENSIONS = [
@@ -75,6 +76,7 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
   '.csv',
   '.doc',
   '.docx',
+  '.drawio',
   '.gif',
   '.go',
   '.html',
@@ -99,6 +101,7 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
   '.tgz',
   '.ts',
   '.txt',
+  '.vsdx',
   '.webp',
   '.xlsx',
   '.xml',
