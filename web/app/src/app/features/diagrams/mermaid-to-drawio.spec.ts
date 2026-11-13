@@ -18,14 +18,14 @@ describe('mermaidFileName', () => {
 });
 
 describe('MermaidDiagramOpener', () => {
-  function setup(url: string) {
+  function setup(url: string, site: string | null = 'https://diagrams.example.test/index.html') {
     const files = { uploadChatFileAttachment: vi.fn((_chat: string, f: File) => of({ id: 'chat-file', name: f.name })) };
     const gallery = { importImage: vi.fn((f: File) => of({ id: 'gallery-file', name: f.name })) };
     const requestComposerAttachment = vi.fn();
     TestBed.configureTestingModule({
       providers: [
         provideRouter([]),
-        { provide: DIAGRAMS_URL, useValue: 'https://diagrams.example.test/index.html' },
+        { provide: DIAGRAMS_URL, useValue: site },
         { provide: FileAttachmentService, useValue: files },
         { provide: ImageGalleryService, useValue: gallery },
         { provide: ContextPanelService, useValue: { requestComposerAttachment } },
@@ -47,6 +47,15 @@ describe('MermaidDiagramOpener', () => {
     expect(gallery.importImage).not.toHaveBeenCalled();
     expect(requestComposerAttachment).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-file' }));
     expect(navigate).toHaveBeenCalledWith(['/chat', 'c1'], { queryParams: { file: 'chat-file' } });
+  });
+
+  it('does nothing where there is no diagram editor', async () => {
+    const { opener, files, gallery, navigate } = setup('/chat/c1', null);
+    await opener.open('flowchart LR\n A --> B');
+    expect(opener.convert).not.toHaveBeenCalled();
+    expect(files.uploadChatFileAttachment).not.toHaveBeenCalled();
+    expect(gallery.importImage).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it('anywhere else, saves it in the gallery and opens it there', async () => {

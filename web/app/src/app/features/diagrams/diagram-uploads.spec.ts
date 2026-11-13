@@ -42,6 +42,7 @@ describe('DiagramUploads', () => {
 describe('Visio names', () => {
   it('names the .drawio after the drawing, and the title with it', () => {
     expect(drawioNameFor('flow.VSDX')).toBe('flow.drawio');
+    expect(drawioNameFor('.vsdx')).toBe('diagram.drawio');
     const drawio = new File([''], 'flow.drawio');
     expect(titleFor('My flow.vsdx', drawio)).toBe('My flow.drawio');
     expect(titleFor('My flow', drawio)).toBe('My flow');

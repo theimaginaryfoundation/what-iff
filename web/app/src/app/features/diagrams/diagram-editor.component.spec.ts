@@ -122,6 +122,20 @@ describe('DiagramEditorComponent', () => {
     for (const spy of [createUrl, revokeUrl, click]) spy.mockRestore();
   });
 
+  it('says the download failed when the editor gives back no image', async () => {
+    await open(true);
+    await fromEditor({ event: 'init' });
+    await fromEditor({ event: 'load', xml: XML });
+    posted.length = 0;
+    const done = fixture.componentInstance.download('svg');
+    const request = posted[0].message;
+    expect(request).toMatchObject({ action: 'export', format: 'xmlsvg' });
+    await fromEditor({ event: 'export', format: 'xmlsvg', data: 'not a data URL', message: request });
+    await done;
+    expect(fixture.componentInstance.exportFailed()).toBe(true);
+    expect(fixture.componentInstance.exporting()).toBeNull();
+  });
+
   it('comments on an element while viewing, written at once, and marks it in the editor', async () => {
     await open(true);
     await fromEditor({ event: 'init' });
@@ -149,6 +163,61 @@ describe('DiagramEditorComponent', () => {
     posted.length = 0;
     editor.cellComments.selectThread(threadId);
     expect(posted.map(p => p.message)).toContainEqual({ action: 'whatiff-reveal', cell: 'a', page: 'p1' });
+  });
+
+  it('replies to and deletes threads from the menu, and marks only the page shown', async () => {
+    await open(true);
+    await fromEditor({ event: 'init' });
+    await fromEditor({ event: 'load', xml: XML });
+    await fromEditor({ event: 'whatiff-page', page: 'p1' });
+    await fromEditor({ event: 'whatiff-menu', item: 'new', cell: 'a', page: 'p1', label: 'User' });
+    const editor = fixture.componentInstance;
+    editor.comments.create({ text: 'Who is this?', mentions: [] });
+    await fixture.whenStable();
+    const threadId = textComments.state.puts[0].threads[0].id;
+    editor.comments.activeId.set(null);
+
+    // Another page shows none of this page's marks; back on it, the thread's element is marked.
+    await fromEditor({ event: 'whatiff-page', page: 'p2' });
+    expect(posted.at(-1)?.message).toEqual({ action: 'whatiff-marks', page: 'p2', marks: {} });
+    await fromEditor({ event: 'whatiff-page', page: 'p1' });
+    expect(posted.at(-1)?.message).toEqual({ action: 'whatiff-marks', page: 'p1', marks: { a: 'open' } });
+
+    editor.closeComments();
+    expect(editor.commentsOpen()).toBe(false);
+    // Reply on an element with no thread does nothing; on the User box it opens that thread's reply.
+    await fromEditor({ event: 'whatiff-menu', item: 'reply', cell: 'z', page: 'p1' });
+    expect(editor.cellComments.replyRequest()).toBeNull();
+    await fromEditor({ event: 'whatiff-menu', item: 'reply', cell: 'a', page: 'p1' });
+    expect(editor.comments.activeId()).toBe(threadId);
+    expect(editor.cellComments.replyRequest()).toEqual({ threadId });
+    expect(editor.commentsOpen()).toBe(true);
+    editor.toggleComments();
+    expect(editor.commentsOpen()).toBe(false);
+
+    await fromEditor({ event: 'whatiff-menu', item: 'delete', cell: 'a', page: 'p1' });
+    await new Promise(resolve => setTimeout(resolve));
+    expect(textComments.state.puts.at(-1)?.threads).toEqual([]);
+    expect(editor.comments.activeId()).toBeNull();
+  });
+
+  it('comments on the whole diagram when no single element is chosen', async () => {
+    await open(true);
+    await fromEditor({ event: 'init' });
+    await fromEditor({ event: 'load', xml: XML });
+    await fromEditor({
+      event: 'whatiff-selection',
+      page: 'p1',
+      cells: [
+        { id: 'a', label: 'User' },
+        { id: 'b', label: 'Agent' },
+      ],
+    });
+    const editor = fixture.componentInstance;
+    editor.cellComments.startComment();
+    expect(editor.comments.draft()).toBeTruthy();
+    expect(editor.comments.draft()?.cell).toBeUndefined();
+    expect(editor.commentsOpen()).toBe(true);
   });
 
   it('writes comments made while editing once the save has stored the diagram', async () => {

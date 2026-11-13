@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
@@ -22,11 +22,12 @@ function attachment(overrides: Partial<FileAttachment>): FileAttachment {
 describe('PersonalityAttachmentsListComponent', () => {
   let fixture: ComponentFixture<PersonalityAttachmentsListComponent>;
   let listFileAttachments: ReturnType<typeof vi.fn>;
+  let upload: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
-    listFileAttachments = vi.fn().mockReturnValue(
-      of({ results: [attachment({ id: 'doc-1', name: 'lore.md' })], total_count: 1, page: 1, page_size: 40 }),
-    );
+    listFileAttachments = vi
+      .fn()
+      .mockReturnValue(of({ results: [attachment({ id: 'doc-1', name: 'lore.md' })], total_count: 1, page: 1, page_size: 40 }));
 
     await TestBed.configureTestingModule({
       imports: [PersonalityAttachmentsListComponent],
@@ -37,7 +38,7 @@ describe('PersonalityAttachmentsListComponent', () => {
           provide: FileAttachmentService,
           useValue: {
             listFileAttachments,
-            uploadPersonalityFileAttachment: vi.fn(),
+            uploadPersonalityFileAttachment: (upload = vi.fn()),
             deleteFileAttachment: vi.fn(),
           },
         },
@@ -69,5 +70,46 @@ describe('PersonalityAttachmentsListComponent', () => {
     const view = (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('a[aria-label="View lore.md"]');
     expect(view).not.toBeNull();
     expect(view!.getAttribute('href')).toBe('/gallery?file=doc-1');
+  });
+
+  async function choose(file: File) {
+    fixture.componentRef.setInput('personalityId', 'p-1');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const input = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change'));
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
+  it('takes diagrams, and says why one could not be added, with Retry and Discard', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    // Other types are refused before anything is uploaded; the diagram types below are taken.
+    await choose(new File(['x'], 'tool.exe'));
+    expect(upload).not.toHaveBeenCalled();
+
+    const reason = "Visio files are converted in the diagram editor, which this server doesn't have.";
+    upload.mockReturnValueOnce(throwError(() => new Error(reason)));
+    await choose(new File(['vsdx'], 'Network.vsdx'));
+    const text = () => (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text()).toContain(`Failed to upload "Network.vsdx": ${reason}`);
+    expect(fixture.componentInstance.pending()).toMatchObject([{ isUploading: false, uploadError: reason }]);
+
+    // Retry uploads it again; it is listed once that works.
+    upload.mockReturnValueOnce(of(attachment({ id: 'doc-2', name: 'Network.drawio' })));
+    const retry = [...(fixture.nativeElement as HTMLElement).querySelectorAll('button')].find(b => b.textContent?.trim() === 'Retry')!;
+    retry.click();
+    fixture.detectChanges();
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(fixture.componentInstance.pending()).toEqual([]);
+    expect(text()).toContain('Network.drawio');
+
+    // Discard drops a failed one.
+    upload.mockReturnValueOnce(throwError(() => new Error('nope')));
+    await choose(new File(['x'], 'Other.drawio'));
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button[aria-label="Discard Other.drawio"]')!.click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.pending()).toEqual([]);
   });
 });

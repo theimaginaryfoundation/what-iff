@@ -42,6 +42,10 @@ describe('gallery-vm.helpers', () => {
     );
     const notes = makeAttachment({ name: 'notes.md', file_type: 'text/markdown' });
     expect(toGalleryTileVm(notes, () => '/never', {}, getPreviewUrl).previewUrl).toBe('');
+    // A diagram not yet versioned is at version 0; without a preview URL there is none.
+    const fresh = makeAttachment({ id: 'd2', name: 'new.drawio', file_type: 'application/vnd.jgraph.mxfile' });
+    expect(toGalleryTileVm(fresh, () => '/never', {}, getPreviewUrl).previewUrl).toBe('/api/file-attachment/d2/preview?size=thumbnail&v=0');
+    expect(toGalleryTileVm(diagram, () => '/never', {}).previewUrl).toBe('');
   });
 
   it('filters by personality without applying local query filtering', () => {

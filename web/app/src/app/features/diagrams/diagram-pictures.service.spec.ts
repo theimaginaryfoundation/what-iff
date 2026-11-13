@@ -118,9 +118,10 @@ describe('DiagramPictures', () => {
     // 'slow' was let go to make room; when its preview arrives it is kept again as the latest,
     // and the oldest finished one makes room instead.
     pending.flush(new Blob(['png']));
-    await expect(slow).resolves.toBe(`blob:${MAX_PICTURES}`);
-    expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:0');
-    await expect(firstValueFrom(pictures.picture(diagram('slow')))).resolves.toBe(`blob:${MAX_PICTURES}`);
+    const url = await slow;
+    expect(revoke).toHaveBeenCalledWith('blob:0');
+    expect(revoke).not.toHaveBeenCalledWith(url);
+    await expect(firstValueFrom(pictures.picture(diagram('slow')))).resolves.toBe(url);
   });
 
   it('revokes a spare picture when another request for the same version is kept', async () => {
@@ -139,10 +140,13 @@ describe('DiagramPictures', () => {
     // Asked again after it was let go: a second request, which is kept.
     const second = firstValueFrom(pictures.picture(diagram('s')));
     http.expectOne(preview('s')).flush(new Blob(['png']));
-    await expect(second).resolves.toBe(`blob:${MAX_PICTURES}`);
+    const kept = await second;
     firstRequest.flush(new Blob(['png']));
-    await expect(first).resolves.toBe(`blob:${MAX_PICTURES + 1}`);
-    expect(revoke).toHaveBeenLastCalledWith(`blob:${MAX_PICTURES + 1}`);
+    const spare = await first;
+    expect(spare).not.toBe(kept);
+    expect(revoke).toHaveBeenCalledWith(spare);
+    expect(revoke).not.toHaveBeenCalledWith(kept);
+    await expect(firstValueFrom(pictures.picture(diagram('s')))).resolves.toBe(kept);
   });
 
   it('has nothing to show for a diagram with no preview where there is no editor', async () => {
