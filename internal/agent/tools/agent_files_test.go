@@ -586,3 +586,15 @@ func TestAgentFiles_AGrantedEditKeepsWhitespaceAndWorksOnAnEmptyFile(t *testing.
 	delete(fx.objects.objs, fx.store.rows[code.ID].S3Key)
 	requireRefused(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "append", "file": "src/main.py", "content": "x"}), "missing")
 }
+
+func TestAgentFileWriteDescription_ListsEveryType(t *testing.T) {
+	listed := agentFileExtensions()
+	require.Len(t, strings.Fields(listed), len(agentFileTypes))
+	require.Contains(t, AgentFileWriteDescription, "("+listed+")")
+	require.True(t, strings.HasPrefix(listed, ".md "))
+	for _, ext := range []string{".mmd", ".mermaid"} {
+		if agentFileTypes[ext] != "text/vnd.mermaid" {
+			t.Errorf("%s is stored as %q, want text/vnd.mermaid", ext, agentFileTypes[ext])
+		}
+	}
+}
