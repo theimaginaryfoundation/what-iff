@@ -100,9 +100,8 @@ export async function giveBackgroundModels(accessToken: string): Promise<void> {
   if (!utility.accounts_choose || !defaultModel || defaultModel === NIL_UUID) {
     return;
   }
-  for (const r of utility.roles) {
-    if (!r.account && !r.deployment) {
-      await chooseUtilityModel(client, r.role, defaultModel);
-    }
-  }
+  // Each role is its own setting, so the writes don't depend on one another.
+  await Promise.all(
+    utility.roles.filter(r => !r.account && !r.deployment).map(r => chooseUtilityModel(client, r.role, defaultModel)),
+  );
 }
