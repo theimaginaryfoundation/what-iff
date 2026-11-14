@@ -69,10 +69,17 @@ And a thread is anchored on a range of the file's text, which the server carries
   Rewriting each module as it is served needs no scan of the project first, which an import map in the page would.
   Nothing is installed; the site's policy allows `esm.sh` and `cdn.jsdelivr.net`.
   This needs the internet, as the notebook kernel's packages do, and is on by default.
-- **TypeScript, JSX and SCSS are compiled in the browser.** Where the page asks for `app.tsx` or `styles.scss`, the app compiles it with `esbuild-wasm` or `sass` in a web worker before answering; compiled files are cached by content.
-  This is a later step (see Later) and adds nothing to a project of plain HTML, CSS and JavaScript.
-- **Real toolchains run in the conversation's container.** A project with a `vite.config.*` or a build script is built where agents run commands, and its output folder is what the site serves; nothing of Node runs in the browser.
-  This is for deployments that run containers, as the diagram workshop is (ADR 0x049 §3), and a later step.
+- **TypeScript, JSX and SCSS are compiled in the browser.** Where the page asks for a `.ts`, `.mts`, `.tsx` or `.jsx` file, the app compiles it with `esbuild-wasm` before answering; a `.scss` or `.sass` file, with `sass`.
+  Each file is compiled on its own, as a dev server does, not bundled: its imports stay imports, which the page asks for in turn.
+  JSX uses the automatic runtime of `react`, or of `preact` when the project depends on Preact and not React, and the compiled module's bare imports are rewritten as any module's are.
+  Both load the first time a page needs them, on the app's thread (transforming one file is quick, and a worker made from a blob is one the app's policy may refuse), so a project of plain HTML, CSS and JavaScript loads neither.
+  Compiled files are kept by file version, a few hundred at most.
+  A stylesheet's `@use`, `@forward` and `@import` resolve inside the project as sass does on disk: partials, the extension left out, a folder's `index`.
+- **Imports resolve as a bundler's do.** An import without an extension (`./App`, `./components`) is answered with a redirect to the first of `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.mts` and then the folder's `index` of each that the project has, so the file's own imports resolve from where it is.
+  A script that imports a stylesheet, JSON or another file (`import './app.scss'`, `import data from './data.json'`) gets a module standing for it: the stylesheet (compiled, if it is SCSS) is added to the page, JSON is its value, anything else is its URL.
+  The service worker passes on what the page asked for a file as (`script`, `style`, ...), which is how the app tells a module import from a `<link>`.
+- **A compile error shows on the page.** A script that does not compile is served as one that logs the error, with its file, line and column, and throws it; a stylesheet, as one that puts the error at the top of the page.
+- **Uploads accept a web project's sources:** `.tsx`, `.mts`, `.jsx`, `.mjs`, `.scss` and `.sass`, as text, searchable like the rest of a project's code.
 
 ### 5. Comments on elements
 
@@ -115,6 +122,16 @@ A file's path is the same in the agent's file tools, in the Files tab, in a proj
 - The file tools say it in one sentence, and nothing else about layout: a file's path is the same everywhere, and `/workspace/<path>` in the container.
 - A deployment that runs the workspace in a container must let commands write into folders its uploads created, or an agent cannot add a file to a folder the app put there; that is the deployment's to arrange before paths change.
 
+### 8. A picture of each page
+
+A page has a picture, as a diagram has (ADR 0x049 §8), so an agent can see what it built and the gallery can show it.
+
+- The page draws it: when a page is shown and has settled, the app asks the bridge script (§5) for a picture, and the bridge draws its document with `modern-screenshot` (MIT, loaded from jsDelivr when first asked) at the frame's width and up to 3000 pixels of its height.
+  Nothing outside the page sees into it, which keeps the preview site's origin of its own (§3) intact.
+- The app stores it as the file's preview, as for a diagram, when the page's file has a new version; a page that does not answer in 20 seconds, or cannot draw itself, has none.
+- `agent_file_read` shows an HTML file's picture with its text, from the stored preview; the gallery's tile shows it too.
+- It is the page as the user's browser drew it, last time someone looked: an agent that changed a page sees the new picture only once the page is shown again.
+
 ## Alternatives considered
 
 - **Rendering in a `srcdoc` frame only**, with every reference rewritten to a `blob:` URL.
@@ -136,12 +153,13 @@ A file's path is the same in the agent's file tools, in the Files tab, in a proj
 - Users see the pages agents build, as they are, and comment on the parts; agents see the same comments at the code.
 - The page runs on the preview site's origin with no credentials of the user's: a page that calls the API gets a 401, which is the point.
 - The app gains a small static site to build and host, as it has two already, and a service worker of its own, which has lifecycle to test: the first load before the worker controls the page, a frame closed with its tree, an update of the worker itself.
-- Projects that import from a CDN need the internet; the rest works without it.
+- Projects that import from a CDN need the internet, as does a page's picture (§8); the rest, compiling included, works without it.
 - Paths with folders in the container change what agents see at `/workspace`; existing containers take the new layout at their next hydration.
 
 ## Later
 
-- **Compiling in the browser** (§4): `esbuild-wasm` for TypeScript and JSX, `sass` for SCSS, on demand, in a worker; source positions added to compiled components for §5.
-- **Builds in the container** (§4), and a built project's output served as the site.
-- **A picture of the page for agents**, drawn where a browser runs beside the conversation, as diagrams have a preview (ADR 0x049 §8): the `diagram` tool's shape, for pages.
+- **Builds in the container**: a project with a `vite.config.*` or a build script built where agents run commands, and its output folder served as the site.
+  The container has no network and no Node today, so this waits on both; nothing of Node runs in the browser either way.
+- **Comments on elements a compiled script made** (§5): such a thread keeps its element anchor but not a code anchor, as the call site the bridge records is in the compiled module; mapping it through the module's source map would place it on the `.tsx` line.
+- **A picture drawn without a viewer**, so an agent sees a page it changed before anyone opens it.
 - **Hosting**: the deployed site's bucket, distribution, response headers and the deploy workflow's build.

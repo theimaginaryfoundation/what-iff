@@ -24,6 +24,11 @@
               {
                 "glob": "**/*",
                 "input": "public"
+              },
+              {
+                "glob": "esbuild.wasm",
+                "input": "node_modules/esbuild-wasm",
+                "output": "assets/esbuild"
               }
             ],
             "allowedCommonJsDependencies": [
@@ -170,6 +175,11 @@
                   "glob": "**/*",
                   "input": "preview-site",
                   "output": "preview"
+                },
+                {
+                  "glob": "esbuild.wasm",
+                  "input": "node_modules/esbuild-wasm",
+                  "output": "assets/esbuild"
                 }
               ]
             }

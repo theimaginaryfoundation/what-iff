@@ -191,7 +191,7 @@ func (t *FileCommentsTool) Run(ctx context.Context, chat *models.Chat, input []b
 				return "", err
 			}
 		}
-		if !isHTMLPage(page) {
+		if !models.IsHTMLFile(page.Name, page.FileType) {
 			return t.refuse("selector is for an element of a web page: page must be an HTML file (empty when file is one)")
 		}
 		args.pageID = page.ID.String()
@@ -516,11 +516,4 @@ func officeThreadView(th officecomments.Thread) fileThreadView {
 		v.Comments = append(v.Comments, fileCommentView{ID: c.ID, Author: c.AuthorName, Text: c.Text})
 	}
 	return v
-}
-
-// isHTMLPage reports whether the file is a web page a thread's element can be on (ADR 0x050 §5).
-func isHTMLPage(file *models.FileAttachment) bool {
-	name := strings.ToLower(file.Name)
-	kind := strings.ToLower(strings.TrimSpace(strings.Split(file.FileType, ";")[0]))
-	return strings.HasSuffix(name, ".html") || strings.HasSuffix(name, ".htm") || kind == "text/html" || kind == "application/xhtml+xml"
 }

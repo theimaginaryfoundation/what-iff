@@ -233,4 +233,7 @@ func TestMayHavePreview(t *testing.T) {
 	require.False(t, mayHavePreview("users/u/files/a.xml"))
 	require.False(t, mayHavePreview("users/u/files/a.md", &models.FileAttachment{Name: "a.md", FileType: "text/markdown"}, nil))
 	require.True(t, mayHavePreview("users/u/files/a.md", &models.FileAttachment{Name: "a.drawio"}))
+	// A web page has one too (ADR 0x050), by its key or a row.
+	require.True(t, mayHavePreview("users/u/files/index.html"))
+	require.True(t, mayHavePreview("users/u/files/page", &models.FileAttachment{Name: "page", FileType: "text/html; charset=utf-8"}))
 }

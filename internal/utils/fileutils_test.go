@@ -16,3 +16,22 @@ func TestFileTypesHasNoScriptableImageTypes(t *testing.T) {
 		}
 	}
 }
+
+// TestGetFileType_WebProjectSources covers the sources a web project's preview compiles (ADR 0x050 §4).
+func TestGetFileType_WebProjectSources(t *testing.T) {
+	t.Parallel()
+
+	for name, want := range map[string]string{
+		"App.tsx":  "application/typescript",
+		"util.mts": "application/typescript",
+		"Card.jsx": "text/javascript",
+		"main.mjs": "text/javascript",
+		"app.SCSS": "text/x-scss",
+		"old.sass": "text/x-sass",
+	} {
+		info, err := GetFileType(name)
+		if err != nil || info.ContentType != want || !info.VectorSupport {
+			t.Errorf("GetFileType(%q) = %+v, %v; want %s, searchable", name, info, err, want)
+		}
+	}
+}

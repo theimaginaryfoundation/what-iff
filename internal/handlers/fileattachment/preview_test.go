@@ -61,6 +61,15 @@ func TestPutFilePreview_StoresThePictureAndAThumbnailBesideTheObject(t *testing.
 	require.Equal(t, "image/jpeg", rr.Header().Get("Content-Type"))
 }
 
+func TestPutFilePreview_AWebPageTakesOne(t *testing.T) {
+	row := &models.FileAttachment{ID: uuid.New(), Name: "index.html", FileType: "text/html", S3Key: "users/u/files/index.html", ContentVersion: 2}
+	h, files := contentHandler(row, true)
+	pic := pngOf(t, 64, 40)
+	rr := previewRequest(t, h, http.MethodPut, "/file-attachment/"+row.ID.String()+"/preview?version=2", pic)
+	require.Equal(t, http.StatusNoContent, rr.Code, rr.Body.String())
+	require.Equal(t, pic, files.uploaded[storage.FileKeyForPreview(row.S3Key)])
+}
+
 func TestPutFilePreview_RefusesAnOldVersionNonDiagramsAndNonPNGs(t *testing.T) {
 	row := diagramRow()
 	h, files := contentHandler(row, true)

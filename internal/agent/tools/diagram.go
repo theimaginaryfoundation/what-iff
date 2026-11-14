@@ -429,15 +429,30 @@ func (t *DiagramTool) showPreview(ctx context.Context, att *models.FileAttachmen
 	if t.files.files == nil || att.S3Key == "" {
 		return ""
 	}
-	data, err := t.files.files.DownloadFile(ctx, storage.FileKeyForPreview(att.S3Key))
-	var thumb []byte
-	if err == nil && len(data) > 0 && !fitsFullSize(data) {
-		thumb, err = t.files.files.DownloadFile(ctx, storage.FileKeyForPreviewThumbnail(att.S3Key))
-	}
-	if err != nil || !addDiagramPicture(ctx, data, thumb) {
+	if !showStoredPreview(ctx, t.files.files, att) {
 		return "No picture of this version yet: one is drawn when the user next opens the diagram."
 	}
 	return "A picture of this version, as the user's editor drew it, follows this result (if you can see images)."
+}
+
+// showStoredPreview shows the model the file's stored preview (a picture the user's browser drew of
+// its current content: a diagram's, ADR 0x049 §8, or a web page's, ADR 0x050) with the result, full
+// size when it fits, else its thumbnail. It reports whether it showed one.
+func showStoredPreview(ctx context.Context, files previewFiles, att *models.FileAttachment) bool {
+	if files == nil || att.S3Key == "" {
+		return false
+	}
+	data, err := files.DownloadFile(ctx, storage.FileKeyForPreview(att.S3Key))
+	var thumb []byte
+	if err == nil && len(data) > 0 && !fitsFullSize(data) {
+		thumb, err = files.DownloadFile(ctx, storage.FileKeyForPreviewThumbnail(att.S3Key))
+	}
+	return err == nil && addDiagramPicture(ctx, data, thumb)
+}
+
+// previewFiles is the part of the file store a stored preview is read from.
+type previewFiles interface {
+	DownloadFile(ctx context.Context, key string) ([]byte, error)
 }
 
 // pickPage is the one page ref names (drawio.FindPage), keeping its number.

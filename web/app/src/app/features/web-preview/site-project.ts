@@ -1,4 +1,5 @@
 import { FileAttachment } from '../../core/models/file-attachment.model';
+import { CompileError, assetModule, compileScript, compileStyle, compiledAs, moduleCandidates } from './compile';
 import { FolderFiles } from './folder-files.service';
 import { packageVersions, rewriteBareImports } from './module-imports';
 import { servedType } from './page-assets';
@@ -11,9 +12,15 @@ export interface SiteAnswer {
   contentType?: string;
   body?: ArrayBuffer;
   message?: string;
+  /** For a redirect (302): the project path to ask for instead. */
+  location?: string;
 }
 
 const MODULE_EXTENSIONS = ['.js', '.mjs'];
+/** Files a script may import as themselves; anything else imported from a script is served as a module standing for it. */
+const SCRIPT_EXTENSIONS = /\.(m?js|m?ts|tsx|jsx)$/i;
+/** How many compiled files are kept, by file version. */
+const MAX_COMPILED = 300;
 const HTML_EXTENSIONS = ['.html', '.htm'];
 
 /** A conversation's files by workspace path (ADR 0x050 §7); `fresh` lists them again now. */
@@ -38,6 +45,8 @@ export class SiteProject {
   private versions: Promise<Map<string, string>> | null = null;
   /** A page of the project brought its own import map: bare imports are then the page's to resolve. */
   private ownImportMap = false;
+  /** Compiled files by file version and how they were asked for, least recently used first. */
+  private readonly compiled = new Map<string, Promise<{ text: string; contentType: string }>>();
 
   constructor(
     private readonly folders: FolderFiles,
@@ -49,16 +58,29 @@ export class SiteProject {
     private readonly parseHtml: (html: string) => Document,
     /** The conversation's files, when the page is open in one. */
     private readonly conversation: ConversationFiles | null = null,
+    /** Where esbuild's WebAssembly is, for compiling TypeScript and JSX (§4). */
+    private readonly wasmUrl = 'assets/esbuild/esbuild.wasm',
   ) {}
 
-  /** The file at `path` in the project, ready to serve. */
-  async get(path: string): Promise<SiteAnswer> {
+  /**
+   * The file at `path` in the project, ready to serve. `destination` is what the page asked for it
+   * as (`script` for a module import, `style`, `document`, ...), from the request.
+   */
+  async get(path: string, destination = ''): Promise<SiteAnswer> {
     const place = this.place(path);
     if (!place) return { status: 400, message: `${path} is not a path in this project.` };
     const unsaved = this.unsaved.get(path);
-    if (unsaved !== undefined) return this.serve(path, place.name, unsaved.file, null, new TextEncoder().encode(unsaved.text));
+    if (unsaved !== undefined) return this.serve(path, place.name, unsaved.file, null, new TextEncoder().encode(unsaved.text), destination);
     const file = await this.find(place, this.lookups(false));
     if (!file) {
+      // A module import without an extension (`./App`): the file a bundler would take, by redirect,
+      // so its own relative imports resolve from where it is.
+      if (destination === 'script' || !place.name.includes('.')) {
+        for (const candidate of moduleCandidates(path)) {
+          const at = this.place(candidate);
+          if (at && (await this.find(at, this.lookups(false)))) return { status: 302, location: candidate };
+        }
+      }
       this.missing.set(path, place);
       this.served.delete(path);
       return { status: 404, message: `${path} is not in this project.` };
@@ -66,7 +88,7 @@ export class SiteProject {
     this.missing.delete(path);
     this.served.set(path, { ...place, version: versionOf(file), file });
     const bytes = new Uint8Array(await (await this.folders.download(file)).arrayBuffer());
-    return this.serve(path, place.name, file.id, file, bytes);
+    return this.serve(path, place.name, file.id, file, bytes, destination);
   }
 
   /** The project's files the page has loaded, by path (stored ones; the page being edited is not among them). */
@@ -115,10 +137,28 @@ export class SiteProject {
     return { folder, name };
   }
 
-  private async serve(path: string, name: string, fileId: string, file: FileAttachment | null, bytes: Uint8Array): Promise<SiteAnswer> {
+  private async serve(
+    path: string,
+    name: string,
+    fileId: string,
+    file: FileAttachment | null,
+    bytes: Uint8Array,
+    destination: string,
+  ): Promise<SiteAnswer> {
     const lower = name.toLowerCase();
     let contentType = servedType(name, file?.file_type);
-    if (MODULE_EXTENSIONS.some(ext => lower.endsWith(ext)) && !this.ownImportMap) {
+    const compile = compiledAs(name);
+    if (destination === 'script' && !SCRIPT_EXTENSIONS.test(lower)) {
+      // A stylesheet, data or an asset a script imports: a module standing for it.
+      const styles = compile?.kind === 'style' ? await this.compiledOnce(path, file, bytes, destination) : null;
+      const text = styles ? styles.text : /\.(css|json)$/.test(lower) ? new TextDecoder().decode(bytes) : null;
+      bytes = new TextEncoder().encode(assetModule(name, text, contentType));
+      contentType = 'text/javascript';
+    } else if (compile) {
+      const out = await this.compiledOnce(path, file, bytes, destination);
+      bytes = new TextEncoder().encode(out.text);
+      contentType = out.contentType;
+    } else if (MODULE_EXTENSIONS.some(ext => lower.endsWith(ext)) && !this.ownImportMap) {
       const source = new TextDecoder().decode(bytes);
       bytes = new TextEncoder().encode(await rewriteBareImports(source, await this.packageVersions()));
     } else if (HTML_EXTENSIONS.some(ext => lower.endsWith(ext))) {
@@ -128,6 +168,66 @@ export class SiteProject {
     }
     if (/^text\/|javascript|json|svg/.test(contentType) && !/charset=/i.test(contentType)) contentType += '; charset=utf-8';
     return { status: 200, contentType, body: bytes.slice().buffer };
+  }
+
+  /**
+   * A TypeScript, JSX or SCSS file compiled (§4), once per version. A compile error is served so it
+   * shows: a script that throws it, a stylesheet that puts it at the top of the page.
+   */
+  private compiledOnce(
+    path: string,
+    file: FileAttachment | null,
+    bytes: Uint8Array,
+    destination: string,
+  ): Promise<{ text: string; contentType: string }> {
+    const key = `${file ? versionOf(file) : path}:${destination === 'script' ? 'module' : 'file'}`;
+    let out = this.compiled.get(key);
+    if (out) {
+      this.compiled.delete(key);
+    } else {
+      out = this.compile(path, new TextDecoder().decode(bytes));
+      out.catch(() => this.compiled.get(key) === out && this.compiled.delete(key));
+    }
+    this.compiled.set(key, out);
+    for (const oldest of this.compiled.keys()) {
+      if (this.compiled.size <= MAX_COMPILED) break;
+      this.compiled.delete(oldest);
+    }
+    return out;
+  }
+
+  private async compile(path: string, source: string): Promise<{ text: string; contentType: string }> {
+    const how = compiledAs(path)!;
+    try {
+      if (how.kind === 'script') {
+        const versions = await this.packageVersions();
+        const jsxImportSource = versions.has('preact') && !versions.has('react') ? 'preact' : 'react';
+        const code = await compileScript(source, path, how.loader, { wasmUrl: this.wasmUrl, jsxImportSource });
+        return { text: this.ownImportMap ? code : await rewriteBareImports(code, versions), contentType: 'text/javascript; charset=utf-8' };
+      }
+      const css = await compileStyle(source, path, how.syntax, p => this.rawText(p));
+      return { text: css, contentType: 'text/css; charset=utf-8' };
+    } catch (error) {
+      const message = error instanceof CompileError ? error.message : `${path}: ${String(error)}`;
+      if (how.kind === 'script') {
+        return {
+          text: `const message = ${JSON.stringify(message)};\nconsole.error(message);\nthrow new Error(message);\n`,
+          contentType: 'text/javascript; charset=utf-8',
+        };
+      }
+      const shown = message.replace(/[\\"]/g, '\\$&').replace(/\n/g, '\\A ');
+      return {
+        text: `body::before { content: "${shown}"; display: block; white-space: pre-wrap; font: 12px/1.4 monospace; color: #b00020; background: #fff0f0; padding: 8px; border-bottom: 1px solid #b00020; }\n`,
+        contentType: 'text/css; charset=utf-8',
+      };
+    }
+  }
+
+  /** A project file's text as it is stored, for a stylesheet's imports; null when there is none. */
+  private async rawText(path: string): Promise<string | null> {
+    const place = this.place(path);
+    const file = place ? await this.find(place, this.lookups(false)) : undefined;
+    return file ? (await this.folders.download(file)).text() : null;
   }
 
   /** The page with its inline module scripts' bare imports rewritten, unless it brings its own import map. */

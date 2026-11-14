@@ -28,7 +28,7 @@ action:
 - "read": the file's text from start_line (default 1), up to %d lines or about %d characters. When there is more, the result gives next_start_line; call again with it to continue.
 - "search": the section under the Markdown heading that best matches heading (exact title first, then close matches), down to the next heading of the same or higher level, with its line numbers. Leave heading empty to get the file's outline.
 
-file is a file id, or a path such as "notes/journal.md". Find files with list (kind="files"); origin="agent" lists files agents made. The result says whether you can change the file (editable).`, agentFileReadMaxLines, agentFileReadMaxChars)
+file is a file id, or a path such as "notes/journal.md". Find files with list (kind="files"); origin="agent" lists files agents made. The result says whether you can change the file (editable). Reading a web page (.html) also shows you a picture of it as the user's browser last drew it, when there is one of its current version.`, agentFileReadMaxLines, agentFileReadMaxChars)
 
 // AgentFileReadToolSpec is the shared function-tool shape for agent_file_read.
 var AgentFileReadToolSpec = FunctionToolSpec{
@@ -80,7 +80,9 @@ type agentFileReadResult struct {
 	OtherMatches  []agentFileHeading `json:"other_matches,omitempty"`
 	Outline       []agentFileHeading `json:"outline,omitempty"`
 	Note          string             `json:"note,omitempty"`
-	Error         string             `json:"error,omitempty"`
+	// Preview says whether a picture of a web page follows the result (ADR 0x050).
+	Preview string `json:"preview,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // Read executes an agent_file_read call.
@@ -121,6 +123,11 @@ func (t *AgentFileTool) read(ctx context.Context, chat *models.Chat, a agentFile
 	ref := t.refEditable(ctx, chat, att, text)
 	lines := splitLines(text)
 	res := agentFileReadResult{File: &ref, TotalLines: len(lines)}
+	// A web page's picture, once per read of it (its first stretch or its outline), as the user's
+	// browser last drew this version.
+	if models.IsHTMLFile(att.Name, att.FileType) && (a.Action != "read" || a.StartLine <= 1) {
+		res.Preview = t.pagePreview(ctx, att)
+	}
 	if len(lines) == 0 {
 		res.Note = "The file is empty."
 		return res, nil
@@ -296,4 +303,16 @@ func wordOverlap(a, b []string) float64 {
 		}
 	}
 	return float64(both) / float64(len(set))
+}
+
+// pagePreview shows the model a picture of a web page with the result and says so, or says there is
+// none of this version yet.
+func (t *AgentFileTool) pagePreview(ctx context.Context, att *models.FileAttachment) string {
+	if t.files == nil {
+		return ""
+	}
+	if !showStoredPreview(ctx, t.files, att) {
+		return "No picture of this version yet: one is drawn when the user next views the page."
+	}
+	return "A picture of the page, as the user's browser drew this version, follows this result (if you can see images)."
 }

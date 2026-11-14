@@ -7,7 +7,7 @@
  * Messages from the app:   { type: 'file', id, status, contentType?, body?, message? }  (an answer)
  *                          { type: 'reload' } | { type: 'navigate', entry }
  *                          { type: 'bridge', data }  (for the page's bridge script, ADR 0x050 §5)
- * Messages to the app:     { type: 'ready' } | { type: 'get', id, path } | { type: 'loaded', path }
+ * Messages to the app:     { type: 'ready' } | { type: 'get', id, path, destination } | { type: 'loaded', path }
  *                          | { type: 'failed', message } | { type: 'bridge', data }  (from the bridge)
  */
 'use strict';
@@ -58,7 +58,7 @@
     }
     const id = nextId++;
     pending.set(id, reply);
-    app.postMessage({ type: 'get', id, path: data.path });
+    app.postMessage({ type: 'get', id, path: data.path, destination: data.destination || '' });
   };
 
   window.addEventListener('message', event => {
@@ -87,7 +87,7 @@
       if (!reply) return;
       pending.delete(data.id);
       const body = data.body instanceof ArrayBuffer ? data.body : null;
-      reply.postMessage({ status: data.status, contentType: data.contentType, body, message: data.message }, body ? [body] : []);
+      reply.postMessage({ status: data.status, contentType: data.contentType, body, message: data.message, location: data.location }, body ? [body] : []);
     } else if (data.type === 'reload') {
       reload();
     } else if (data.type === 'bridge' && data.data) {

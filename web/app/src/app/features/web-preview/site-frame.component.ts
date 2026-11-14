@@ -29,7 +29,7 @@ export const SITE_POLL_MS = 3_000;
 
 /** Messages from the site's host page (web/preview/site/host.js). */
 type HostMessage =
-  | { type: 'get'; id: number; path: string }
+  | { type: 'get'; id: number; path: string; destination?: string }
   | { type: 'loaded'; path: string }
   | { type: 'failed'; message: string }
   | { type: 'bridge'; data: unknown };
@@ -159,7 +159,9 @@ export class SiteFrameComponent {
     const parse = (html: string) => new (this.document.defaultView?.DOMParser ?? DOMParser)().parseFromString(html, 'text/html');
     const chatId = this.workspace?.chatId() ?? null;
     const conversation = chatId ? (fresh: boolean) => this.folders.conversation(chatId, fresh) : null;
-    this.project = new SiteProject(this.folders, file.folder ?? '', this.unsaved, parse, conversation);
+    // esbuild's WebAssembly, served with the app (§4).
+    const wasmUrl = new URL('assets/esbuild/esbuild.wasm', this.document.baseURI).href;
+    this.project = new SiteProject(this.folders, file.folder ?? '', this.unsaved, parse, conversation, wasmUrl);
     this.unreachable.set(false);
     this.failure.set(null);
     this.loadTimer = setTimeout(() => this.unreachable.set(true), SITE_LOAD_TIMEOUT_MS);
@@ -192,7 +194,7 @@ export class SiteFrameComponent {
     if (message.type === 'get' && typeof message.path === 'string') {
       let answer;
       try {
-        answer = await project.get(message.path);
+        answer = await project.get(message.path, typeof message.destination === 'string' ? message.destination : '');
       } catch {
         answer = { status: 502, message: `${message.path} could not be read.` };
       }

@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
-	"github.com/theimaginaryfoundation/what-iff/internal/drawio"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
@@ -21,8 +20,9 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 )
 
-// Previews (ADR 0x049 §8): a picture of a file the server cannot draw, a draw.io diagram, sent by
-// the browser that drew it and kept beside the stored object it shows (storage.FileKeyForPreview).
+// Previews (ADR 0x049 §8, ADR 0x050): a picture of a file the server cannot draw, a draw.io diagram
+// or a web page, sent by the browser that drew it and kept beside the stored object it shows
+// (storage.FileKeyForPreview).
 
 const (
 	// maxPreviewBytes caps an uploaded preview.
@@ -36,14 +36,14 @@ const (
 
 // PutFilePreview handles PUT /file-attachment/{id}/preview?version=N: the body is a PNG of the file
 // as it is at content_version N, stored with a JPEG thumbnail. A version that is no longer the
-// file's is a 409 whose details say the current one. Only diagrams take a preview.
+// file's is a 409 whose details say the current one. Only diagrams and web pages take a preview.
 func (h *Handler) PutFilePreview(w http.ResponseWriter, r *http.Request) {
 	userID, att, ok := h.previewFile(w, r)
 	if !ok {
 		return
 	}
-	if !drawio.IsDiagramFile(att.Name, att.FileType) {
-		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Only diagrams have a preview", nil)
+	if !storage.TakesPreview(att.Name, att.FileType) {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Only diagrams and web pages have a preview", nil)
 		return
 	}
 	version, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("version")))

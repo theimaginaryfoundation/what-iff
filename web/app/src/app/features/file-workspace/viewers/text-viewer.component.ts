@@ -22,6 +22,9 @@ import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.componen
 import { HtmlPreviewComponent } from '../../web-preview/html-preview.component';
 import { PageComments } from '../../web-preview/page-comments';
 import { PageBridgeEvent } from '../../web-preview/page-bridge';
+import { PageSnapshot } from '../../web-preview/page-snapshot';
+import { FileAttachmentService } from '../../../core/services/file-attachment.service';
+import { FilePreview } from '../file-preview';
 import { CommentAgentService } from '../../office/comments/comment-agent.service';
 import { CommentPeopleService } from '../../office/comments/comment-people.service';
 import { CommentsPanelComponent } from '../../office/comments/comments-panel.component';
@@ -44,6 +47,9 @@ import {
   previewKindFor,
   rendersAsMarkdown,
 } from '../../gallery/helpers/file-preview.helpers';
+
+/** How long a page that loaded is given to draw itself before its picture is taken. */
+const PAGE_PICTURE_DELAY_MS = 1500;
 
 /** Code longer than this is shown plain: tokenizing it would stall the viewer. */
 const MAX_HIGHLIGHT_CHARS = 200_000;
@@ -341,9 +347,22 @@ export class TextViewerComponent {
     if (menu?.range) this.startComment(menu.range);
   }
 
-  /** What the rendered page reports: its comments' events, and a mark's right-click menu. */
+  /** Pictures of the rendered page, stored as its preview for agents and the gallery (ADR 0x050 §8). */
+  private readonly pageSnapshot = new PageSnapshot(action => this.preview()?.sendToPage(action));
+  private readonly pagePreview = new FilePreview(inject(FileAttachmentService), () => this.pageSnapshot.draw());
+
+  /** What the rendered page reports: its comments' events, a picture of it, and a mark's right-click menu. */
   onPageMessage(event: PageBridgeEvent): void {
     this.pageComments.handle(event);
+    this.pageSnapshot.handle(event);
+    // The stored page is shown: draw its preview if this version has none, once its scripts had a
+    // moment to draw.
+    if (event.type === 'ready' && this.pageMode()) {
+      const file = this.file();
+      setTimeout(() => {
+        if (this.file() === file && this.pageMode()) void this.pagePreview.shown(file);
+      }, PAGE_PICTURE_DELAY_MS);
+    }
     if (event.type !== 'menu' || !this.canComment()) return;
     const frame = this.host.nativeElement.querySelector('app-html-preview')?.getBoundingClientRect();
     const box = this.host.nativeElement.getBoundingClientRect();

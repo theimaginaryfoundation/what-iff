@@ -76,9 +76,10 @@ export function toGalleryTileVm(
     badge: isFile ? fileBadge(image) : '',
     thumbnailUrl: isFile ? '' : getImageUrl(image.id, 'thumbnail'),
     fullUrl: isFile ? '' : getImageUrl(image.id, 'full'),
-    // The version in the URL, so a saved diagram's new picture is not taken for the old one's.
+    // A diagram's or a web page's picture (ADR 0x049 §8, 0x050 §8), with the version in the URL so a
+    // saved file's new picture is not taken for the old one's.
     previewUrl:
-      isFile && getPreviewUrl && previewKindFor(image) === 'diagram'
+      isFile && getPreviewUrl && (previewKindFor(image) === 'diagram' || previewKindFor(image) === 'html')
         ? `${getPreviewUrl(image.id, 'thumbnail')}&v=${image.content_version ?? 0}`
         : '',
   };

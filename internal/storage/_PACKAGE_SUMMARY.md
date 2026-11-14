@@ -10,10 +10,10 @@
 - **Attachment object cleanup** (`attachment_cleanup.go`):
   ent cascades delete attachment rows without touching the store, so callers read the affected rows first and release them after the delete.
   - `ReleaseAttachmentObjects` deletes a deleted row's object (its `s3_key`, or the legacy derived keys when empty) only when `AttachmentKeyRefs` reports no remaining row references it, plus the row's own thumbnail.
-  - Both release paths also delete a deleted object's preview (`DeletePreviews`) when the object may have one: its key, or a row pointing at it, is a diagram's (`drawio.IsDiagramFile`).
+  - Both release paths also delete a deleted object's preview (`DeletePreviews`) when the object may have one: its key, or a row pointing at it, is a diagram's or a web page's (`TakesPreview`, `takes_preview.go`).
     Asking both catches a file renamed to or from `.drawio`, or stored as a diagram by its media type, without two extra deletes for every object released.
     `ReleaseReplacedObject` takes the row whose object was replaced for this (nil for one that cannot be a diagram).
-- **Previews** (`preview.go`, ADR 0x049 §8): a picture of a diagram the browser drew, keyed by the stored object it shows (`FileKeyForPreview`, `FileKeyForPreviewThumbnail`: `users/{id}/previews/{hash of the object key}.png` and `.thumb.jpg`).
+- **Previews** (`preview.go`, ADR 0x049 §8, ADR 0x050 §8): a picture of a diagram or an HTML page the browser drew, keyed by the stored object it shows (`FileKeyForPreview`, `FileKeyForPreviewThumbnail`: `users/{id}/previews/{hash of the object key}.png` and `.thumb.jpg`).
   Keying by object means a preview matches the content it was drawn from, rows sharing the object share it, and a save (always a new object) leaves the file with none until it is drawn again.
   `PutPreview` stores the picture, its thumbnail and its tag (a hash of the picture, `.tag`); `PreviewTag` reads the tag, so a reader can tell whether a cached copy is current without downloading the picture.
   The tag is removed before the picture is replaced and written after, so it never names an older picture.

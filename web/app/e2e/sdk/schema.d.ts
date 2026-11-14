@@ -13991,8 +13991,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get a diagram's preview
-         * @description A picture of the file as it is now (ADR 0x049 §8): the PNG the browser drew of a draw.io diagram, or its JPEG thumbnail (`size=thumbnail`). 404 when there is none of the current version: every save leaves the file without one until it is drawn again. The ETag changes whenever the picture is replaced, also at the same content_version; send it back as If-None-Match for a 304.
+         * Get a diagram's or web page's preview
+         * @description A picture of the file as it is now (ADR 0x049 §8, ADR 0x050 §8): the PNG the browser drew of a draw.io diagram or an HTML page, or its JPEG thumbnail (`size=thumbnail`). 404 when there is none of the current version: every save leaves the file without one until it is drawn again. The ETag changes whenever the picture is replaced, also at the same content_version; send it back as If-None-Match for a 304.
          */
         get: {
             parameters: {
@@ -14046,8 +14046,8 @@ export interface paths {
             };
         };
         /**
-         * Store a diagram's preview
-         * @description Stores a PNG of a draw.io diagram as it is at `version` (its content_version), with a thumbnail, beside the stored file (ADR 0x049 §8). The browser that drew the diagram sends it, after opening or saving it. At most 8 MB, 4096 pixels a side and 8 megapixels (8,388,608 pixels).
+         * Store a diagram's or web page's preview
+         * @description Stores a PNG of a draw.io diagram or an HTML page as it is at `version` (its content_version), with a thumbnail, beside the stored file (ADR 0x049 §8, ADR 0x050 §8). The browser that drew it sends it: a diagram after opening or saving it, a page once it has been shown and settled. At most 8 MB, 4096 pixels a side and 8 megapixels (8,388,608 pixels).
          */
         put: {
             parameters: {
@@ -14074,7 +14074,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Not a diagram, no version, or not a PNG of an allowed size */
+                /** @description Not a diagram or web page, no version, or not a PNG of an allowed size */
                 400: {
                     headers: {
                         [name: string]: unknown;

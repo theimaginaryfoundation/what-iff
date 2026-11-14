@@ -37,7 +37,7 @@ self.addEventListener('fetch', event => {
     return;
   }
   if (path === '' || path.endsWith('/')) path += 'index.html';
-  event.respondWith(answer(token, path, event.request.method));
+  event.respondWith(answer(token, path, event.request.method, event.request.destination));
 });
 
 function decodePath(raw) {
@@ -53,14 +53,19 @@ function decodePath(raw) {
   }
 }
 
-async function answer(token, path, method) {
+async function answer(token, path, method, destination) {
   if (method !== 'GET' && method !== 'HEAD') {
     return new Response('The preview serves files only.', { status: 405 });
   }
   const host = await hostFor(token);
   if (!host) return new Response('This preview has closed.', { status: 410, headers: { 'Content-Type': 'text/plain' } });
-  const reply = await ask(host, { type: 'whatiff-preview-get', token, path });
+  const reply = await ask(host, { type: 'whatiff-preview-get', token, path, destination });
   if (!reply) return new Response('The app did not answer.', { status: 504, headers: { 'Content-Type': 'text/plain' } });
+  // A module import without its extension: the file it names, so its own imports resolve from there.
+  if (reply.status === 302 && typeof reply.location === 'string') {
+    const to = PREFIX + token + '/' + reply.location.split('/').map(encodeURIComponent).join('/');
+    return Response.redirect(new URL(to, self.location.origin).href, 302);
+  }
   if (reply.status !== 200) {
     return new Response(reply.message || `${path} is not in this project.`, {
       status: reply.status || 404,

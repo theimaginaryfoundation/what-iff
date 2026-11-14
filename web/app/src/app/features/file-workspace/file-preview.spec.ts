@@ -2,7 +2,7 @@ import { of, throwError } from 'rxjs';
 import { describe, expect, it, vi } from 'vitest';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
-import { DiagramPreview } from './diagram-preview';
+import { FilePreview } from './file-preview';
 
 const PNG = 'data:image/png;base64,iVBORw0KGgo=';
 
@@ -12,12 +12,12 @@ function setup(has: boolean) {
     putPreview: vi.fn((_id: string, _v: number, _png: Blob) => of(undefined as void)),
   };
   const draw = vi.fn(async () => PNG as string | null);
-  return { files, draw, preview: new DiagramPreview(files, draw) };
+  return { files, draw, preview: new FilePreview(files, draw) };
 }
 
 const file = (version: number) => ({ id: 'f1', name: 'flow.drawio', content_version: version }) as FileAttachment;
 
-describe('DiagramPreview', () => {
+describe('FilePreview', () => {
   it('draws a shown diagram that has no preview of its version, once', async () => {
     const { files, draw, preview } = setup(false);
     await preview.shown(file(3));

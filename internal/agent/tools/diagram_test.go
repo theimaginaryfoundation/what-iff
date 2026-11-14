@@ -230,3 +230,33 @@ func TestDiagram_ListOnePageKeepsItsNumber(t *testing.T) {
 	}
 	requireRefused(t, callJSON(t, tool.Run, chat, map[string]any{"action": "list", "file": "two.drawio", "page": "3"}), `the pages are "Flow", "Later"`)
 }
+
+func TestAgentFileRead_ShowsAWebPagesPicture(t *testing.T) {
+	fx, _ := newDiagramFixture()
+	chat := fx.chat(uuid.New())
+	page := fx.userUpload("site", "index.html", "<h1>Hi</h1>\n<p>Second line</p>")
+	read := func(args string) (map[string]any, []ResultImage) {
+		ctx, shown := WithResultImages(appTurn)
+		out, err := fx.tool.Read(ctx, chat, []byte(args))
+		require.NoError(t, err)
+		var res map[string]any
+		require.NoError(t, json.Unmarshal([]byte(out), &res))
+		return res, shown.Images()
+	}
+
+	res, images := read(`{"action":"read","file":"site/index.html"}`)
+	require.Contains(t, res["preview"], "No picture of this version yet")
+	require.Empty(t, images)
+
+	var pic bytes.Buffer
+	require.NoError(t, png.Encode(&pic, image.NewRGBA(image.Rect(0, 0, 8, 6))))
+	fx.objects.objs[storage.FileKeyForPreview(page.S3Key)] = pic.Bytes()
+	res, images = read(`{"action":"read","file":"site/index.html"}`)
+	require.Contains(t, res["preview"], "A picture of the page")
+	require.Equal(t, []ResultImage{{Data: pic.Bytes(), MediaType: "image/png"}}, images)
+
+	// Once per read: not with a later stretch of the file, and never for other files.
+	res, images = read(`{"action":"read","file":"site/index.html","start_line":2}`)
+	require.Nil(t, res["preview"])
+	require.Empty(t, images)
+}

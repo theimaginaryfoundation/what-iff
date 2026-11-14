@@ -13,6 +13,9 @@
  *   through scrolling, resizing and the page's own changes; a click on a mark chooses its thread, and
  *   right-clicking a marked element (or its mark) asks the app for the thread's menu.
  *
+ * - Draws a picture of the page on request (the file's preview, for agents and the gallery: ADR
+ *   0x050 §8), with a pinned modern-screenshot (MIT) loaded from jsDelivr when it is first asked for.
+ *
  * It is plain JavaScript in a string, as it runs in pages we do not build. It must not contain the
  * sequence that ends a script element.
  */
@@ -360,6 +363,26 @@ export const PAGE_BRIDGE_SCRIPT = String.raw`(function () {
     }
   }
 
+  // --- A picture of the page --------------------------------------------------------------------
+  var SCREENSHOT = 'https://cdn.jsdelivr.net/npm/modern-screenshot@4.7.0/+esm';
+  var MAX_PICTURE_HEIGHT = 3000;
+  function snapshot() {
+    var root = document.documentElement;
+    var height = Math.min(Math.max(root.scrollHeight, innerHeight), MAX_PICTURE_HEIGHT);
+    var background = getComputedStyle(document.body || root).backgroundColor;
+    if (!background || background === 'rgba(0, 0, 0, 0)' || background === 'transparent') background = '#ffffff';
+    import(SCREENSHOT)
+      .then(function (lib) {
+        return lib.domToPng(root, {
+          width: innerWidth, height: height, scale: 1, backgroundColor: background,
+          // Our marks and picker are not the page.
+          filter: function (node) { return !isOurs(node); }
+        });
+      })
+      .then(function (png) { post({ type: 'snapshot', png: png }); })
+      .catch(function (error) { post({ type: 'snapshot-failed', message: String(error && error.message || error) }); });
+  }
+
   window.addEventListener('message', function (event) {
     if (event.source !== window.parent || !event.data || !event.data.wiApp) return;
     var m = event.data.wiApp;
@@ -367,6 +390,7 @@ export const PAGE_BRIDGE_SCRIPT = String.raw`(function () {
     else if (m.type === 'pick') startPicking();
     else if (m.type === 'stop-pick') stopPicking();
     else if (m.type === 'reveal') reveal(m.id);
+    else if (m.type === 'snapshot') snapshot();
   });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { post({ type: 'ready' }); });
   else post({ type: 'ready' });
@@ -387,6 +411,9 @@ export type PageBridgeEvent =
     }
   | { type: 'pick-cancelled' }
   | { type: 'select'; id: string }
+  /** A picture of the page as a PNG data URL, as asked for; or why there is none. */
+  | { type: 'snapshot'; png: string }
+  | { type: 'snapshot-failed'; message: string }
   /** A marked element (or its mark) was right-clicked, at x, y in the page's viewport. */
   | { type: 'menu'; id: string; x: number; y: number }
   | { type: 'unplaced'; ids: string[] };
@@ -402,7 +429,7 @@ export interface PageMark {
 
 /** What the app tells the bridge. */
 export type PageBridgeAction =
-  { type: 'marks'; marks: PageMark[] } | { type: 'pick' } | { type: 'stop-pick' } | { type: 'reveal'; id: string };
+  { type: 'marks'; marks: PageMark[] } | { type: 'pick' } | { type: 'stop-pick' } | { type: 'reveal'; id: string } | { type: 'snapshot' };
 
 /** A bridge event from a message's data, or null for anything else. */
 export function readBridgeEvent(data: unknown): PageBridgeEvent | null {
