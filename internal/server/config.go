@@ -92,6 +92,10 @@ type Config struct {
 	MCPOAuthMaxFailures          int
 	AllowedEmails                []string
 	RequireBilling               bool // Feature flag to enable/disable billing
+	// ClientIPHeader names a header the deployment's proxy sets to the visitor's address and a
+	// visitor cannot set (CLIENT_IP_HEADER, e.g. CloudFront-Viewer-Address); share-link unlock
+	// limits use it (ADR 0x051 §4). Empty uses the connection's address.
+	ClientIPHeader string
 	// EnableAgentJobsScheduler starts the in-process AgentJob scheduler (single-server MVP).
 	EnableAgentJobsScheduler bool
 	// AgentJobsSchedulerDistributed enables Postgres-backed leader election so only one
@@ -398,6 +402,7 @@ func NewConfig() *Config {
 		MCPOAuthMaxFailures:                 mcpOAuthMaxFailures,
 		AllowedEmails:                       allowedEmails,
 		RequireBilling:                      requireBilling,
+		ClientIPHeader:                      strings.TrimSpace(os.Getenv("CLIENT_IP_HEADER")),
 		EnableAgentJobsScheduler:            enableAgentJobsScheduler,
 		AgentJobsSchedulerDistributed:       agentJobsSchedulerDistributed,
 		AgentJobsSchedulerLockKey:           agentJobsSchedulerLockKey,

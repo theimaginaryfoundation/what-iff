@@ -124,6 +124,10 @@ func (FileAttachment) Edges() []ent.Edge {
 		// Chats whose agent may change the file (ADR 0x046).
 		edge.To("edit_grants", FileEditGrant.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
+		// Its public link (ADR 0x051), which goes with the file.
+		edge.To("share_link", ShareLink.Type).
+			Unique().
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }
 
