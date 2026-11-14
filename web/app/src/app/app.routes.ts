@@ -14,7 +14,7 @@ export const routes: Routes = [
     canActivate: [guestGuard],
     // Auth screens (local sign-in/registration), defined in the extensions
     // module and assigned as this route's children.
-    children: authChildRoutes
+    children: authChildRoutes,
   },
   {
     path: '',
@@ -24,58 +24,51 @@ export const routes: Routes = [
       {
         path: '',
         redirectTo: 'chat',
-        pathMatch: 'full'
+        pathMatch: 'full',
       },
       {
         path: 'dashboard',
-        loadComponent: () => import('./features/dashboard/dashboard.component')
-          .then(m => m.DashboardComponent)
+        loadComponent: () => import('./features/dashboard/dashboard.component').then(m => m.DashboardComponent),
       },
       {
         path: 'chat',
         children: [
           {
             path: '',
-            loadComponent: () => import('./features/chat/chat-page.component')
-              .then(m => m.ChatPageComponent),
+            loadComponent: () => import('./features/chat/chat-page.component').then(m => m.ChatPageComponent),
             runGuardsAndResolvers: 'pathParamsOrQueryParamsChange',
-            canDeactivate: [unsavedWorkspaceGuard]
+            canDeactivate: [unsavedWorkspaceGuard],
           },
           {
             path: ':id',
-            loadComponent: () => import('./features/chat/chat-page.component')
-              .then(m => m.ChatPageComponent),
+            loadComponent: () => import('./features/chat/chat-page.component').then(m => m.ChatPageComponent),
             runGuardsAndResolvers: 'pathParamsOrQueryParamsChange',
-            canDeactivate: [unsavedWorkspaceGuard]
-          }
-        ]
+            canDeactivate: [unsavedWorkspaceGuard],
+          },
+        ],
       },
       {
         path: 'memories',
         children: [
           {
             path: '',
-            loadComponent: () => import('./features/memory/memories-page.component')
-              .then(m => m.MemoriesPageComponent)
+            loadComponent: () => import('./features/memory/memories-page.component').then(m => m.MemoriesPageComponent),
           },
           {
             path: 'merge-history',
-            redirectTo: () =>
-              inject(Router).createUrlTree(['/memories'], { queryParams: { tab: 'merge-history' } }),
+            redirectTo: () => inject(Router).createUrlTree(['/memories'], { queryParams: { tab: 'merge-history' } }),
             pathMatch: 'full',
           },
           {
             path: 'compaction-log',
-            redirectTo: () =>
-              inject(Router).createUrlTree(['/memories'], { queryParams: { tab: 'compaction-log' } }),
+            redirectTo: () => inject(Router).createUrlTree(['/memories'], { queryParams: { tab: 'compaction-log' } }),
             pathMatch: 'full',
           },
           {
             path: ':id',
-            loadComponent: () => import('./features/memory/memory-detail-page.component')
-              .then(m => m.MemoryDetailPageComponent)
-          }
-        ]
+            loadComponent: () => import('./features/memory/memory-detail-page.component').then(m => m.MemoryDetailPageComponent),
+          },
+        ],
       },
       {
         path: 'memory',
@@ -91,27 +84,28 @@ export const routes: Routes = [
         children: [
           {
             path: '',
-            loadComponent: () => import('./features/personality/personalities-page.component')
-              .then(m => m.PersonalitiesPageComponent)
+            loadComponent: () => import('./features/personality/personalities-page.component').then(m => m.PersonalitiesPageComponent),
           },
           {
             // The old standalone getting-started page was superseded by the first-run welcome on
             // the personalities page; keep the URL working for any old links.
             path: 'getting-started',
             redirectTo: '',
-            pathMatch: 'full'
+            pathMatch: 'full',
           },
           {
             path: 'generate',
-            loadComponent: () => import('./features/personality/personality-generate/personality-generate.component')
-              .then(m => m.PersonalityGenerateComponent)
+            loadComponent: () =>
+              import('./features/personality/personality-generate/personality-generate.component').then(
+                m => m.PersonalityGenerateComponent,
+              ),
           },
           {
             path: ':id',
-            loadComponent: () => import('./features/personality/detail/personality-detail-page.component')
-              .then(m => m.PersonalityDetailPageComponent)
-          }
-        ]
+            loadComponent: () =>
+              import('./features/personality/detail/personality-detail-page.component').then(m => m.PersonalityDetailPageComponent),
+          },
+        ],
       },
       {
         path: 'personalities',
@@ -123,15 +117,13 @@ export const routes: Routes = [
         children: [
           {
             path: '',
-            loadComponent: () => import('./features/ritual/rituals-page.component')
-              .then(m => m.RitualsPageComponent)
+            loadComponent: () => import('./features/ritual/rituals-page.component').then(m => m.RitualsPageComponent),
           },
           {
             path: ':id',
-            loadComponent: () => import('./features/ritual/ritual-detail-page.component')
-              .then(m => m.RitualDetailPageComponent)
-          }
-        ]
+            loadComponent: () => import('./features/ritual/ritual-detail-page.component').then(m => m.RitualDetailPageComponent),
+          },
+        ],
       },
       {
         path: 'rituals',
@@ -156,75 +148,73 @@ export const routes: Routes = [
         children: [
           {
             path: '',
-            loadComponent: () => import('./features/mood/mood-list.component')
-              .then(m => m.MoodListComponent)
+            loadComponent: () => import('./features/mood/mood-list.component').then(m => m.MoodListComponent),
           },
           {
             path: ':id',
-            loadComponent: () => import('./features/mood/mood-list.component')
-              .then(m => m.MoodListComponent)
-          }
-        ]
+            loadComponent: () => import('./features/mood/mood-list.component').then(m => m.MoodListComponent),
+          },
+        ],
       },
       {
         path: 'agent-jobs',
         children: [
           {
             path: '',
-            loadComponent: () => import('./features/agent-job/jobs-page.component')
-              .then(m => m.JobsPageComponent)
+            loadComponent: () => import('./features/agent-job/jobs-page.component').then(m => m.JobsPageComponent),
           },
           {
             path: ':id',
-            loadComponent: () => import('./features/agent-job/job-detail-page.component')
-              .then(m => m.JobDetailPageComponent),
-            canDeactivate: [confirmLeaveGuard]
-          }
-        ]
+            loadComponent: () => import('./features/agent-job/job-detail-page.component').then(m => m.JobDetailPageComponent),
+            canDeactivate: [confirmLeaveGuard],
+          },
+        ],
       },
       {
         path: 'profile',
-        loadComponent: () => import('./features/profile/profile.component')
-          .then(m => m.ProfileComponent)
+        loadComponent: () => import('./features/profile/profile.component').then(m => m.ProfileComponent),
       },
       // Privately-maintained routes (billing/subscription/usage, etc.) compose
       // in here from the overlay; empty in the open-source build.
       ...privateChildRoutes,
       {
+        // Share links (ADR 0x051): every file the user has shared.
+        path: 'shared-links',
+        loadComponent: () => import('./features/sharing/shared-links-page.component').then(m => m.SharedLinksPageComponent),
+      },
+      {
         path: 'integrations',
-        loadComponent: () => import('./features/integrations/integrations.component')
-          .then(m => m.IntegrationsComponent)
+        loadComponent: () => import('./features/integrations/integrations.component').then(m => m.IntegrationsComponent),
       },
       {
         path: 'gallery',
-        loadComponent: () => import('./features/gallery/gallery-page.component')
-          .then(m => m.GalleryPageComponent),
+        loadComponent: () => import('./features/gallery/gallery-page.component').then(m => m.GalleryPageComponent),
         runGuardsAndResolvers: 'pathParamsOrQueryParamsChange',
-        canDeactivate: [unsavedWorkspaceGuard]
+        canDeactivate: [unsavedWorkspaceGuard],
       },
       {
         // Unified Import & Export ("your data") screen: account export + restore,
         // reachable from settings and the fresh-user empty state.
         path: 'data',
-        loadComponent: () => import('./features/data-portability/data-portability-page.component')
-          .then(m => m.DataPortabilityPageComponent)
+        loadComponent: () =>
+          import('./features/data-portability/data-portability-page.component').then(m => m.DataPortabilityPageComponent),
       },
       {
         // Account export/import graduated from here to /data; keep the old
         // direct URL working for anyone who bookmarked it.
         path: 'experimental',
         redirectTo: '/data',
-        pathMatch: 'full'
+        pathMatch: 'full',
       },
       {
         path: 'image-gallery',
         redirectTo: '/gallery',
-        pathMatch: 'full'
-      }
-    ]
+        pathMatch: 'full',
+      },
+    ],
   },
   {
     path: '**',
-    redirectTo: '/chat'
-  }
+    redirectTo: '/chat',
+  },
 ];
