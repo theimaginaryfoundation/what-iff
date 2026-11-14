@@ -177,8 +177,10 @@ export class FileAttachmentService {
   }
 
   /** The files in a thread's context (ADR 0x043 §4), newest first, with why each is there. */
-  listChatContextFiles(chatId: string): Observable<ChatContextFilesResponse> {
-    return this.http.get<ChatContextFilesResponse>(`${this.apiUrl}/chat/${chatId}/context-files`);
+  /** `container: false` leaves out the container's status, which costs a call to the container service (for frequent polls). */
+  listChatContextFiles(chatId: string, options: { container?: boolean } = {}): Observable<ChatContextFilesResponse> {
+    const query = options.container === false ? '?container=0' : '';
+    return this.http.get<ChatContextFilesResponse>(`${this.apiUrl}/chat/${chatId}/context-files${query}`);
   }
 
   /** Whether the chat's agent may change the file, because the user mentioned it in a comment on it there (ADR 0x046). */

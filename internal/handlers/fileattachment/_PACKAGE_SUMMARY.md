@@ -8,7 +8,7 @@ HTTP API for **file attachments** metadata and download flows at `/api/file-atta
 
 - **`Handler`:** CRUD/list for attachments per OpenAPI; coordinates with datastore and storage presigned URLs as implemented.
 - **`GET`/`PUT /file-attachment/{id}/preview` (`preview.go`, ADR 0x049 §8, ADR 0x050 §8):** a draw.io diagram's or HTML page's preview (`storage.TakesPreview`); a page's `PUT` takes its `sources` and a `GET` with `current=1` is 404 once one of them changed (`previewIsStale`), a PNG the browser drew, stored with a JPEG thumbnail beside the file's object (`storage.FileKeyForPreview`).
-  A write names the `content_version` it shows (409 when that is no longer the file's, and when a save moved the file to a new object meanwhile); only diagrams, PNGs up to 8 MB, 4096 pixels a side and 8 megapixels (from the PNG's header, before it is decoded for the thumbnail).
+  A write names the `content_version` it shows (409 when that is no longer the file's, and when a save moved the file to a new object meanwhile); only diagrams and web pages (`storage.TakesPreview`), PNGs up to 8 MB, 4096 pixels a side and 8 megapixels (from the PNG's header, before it is decoded for the thumbnail).
   A read is the PNG, or the thumbnail with `size=thumbnail`; 404 when there is none of the current version.
   Its ETag is the preview's tag (`storage.PreviewTag`), so `If-None-Match` is answered 304 without downloading the picture, and a picture replaced at the same version is not served stale; a preview stored without a tag is hashed as it is read.
 - **`GET`/`PUT /file-attachment/{id}/comments` (`comments.go`):** the comment threads of a text, code or image file (ADR 0x045), through `internal/filecomments`.

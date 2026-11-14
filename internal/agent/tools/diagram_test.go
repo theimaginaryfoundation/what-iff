@@ -251,7 +251,7 @@ func TestAgentFileRead_ShowsAWebPagesPicture(t *testing.T) {
 
 	var pic bytes.Buffer
 	require.NoError(t, png.Encode(&pic, image.NewRGBA(image.Rect(0, 0, 8, 6))))
-	fx.objects.objs[storage.FileKeyForPreview(page.S3Key)] = pic.Bytes()
+	require.NoError(t, storage.PutPreview(context.Background(), nil, fx.objects, page.S3Key, pic.Bytes(), nil))
 	res, images = read(`{"action":"read","file":"site/index.html"}`)
 	require.Contains(t, res["preview"], "as the user's browser drew this version")
 	require.Equal(t, []ResultImage{{Data: pic.Bytes(), MediaType: "image/png"}}, images)
@@ -261,7 +261,7 @@ func TestAgentFileRead_ShowsAWebPagesPicture(t *testing.T) {
 	css := fx.userUpload("site/css", "app.css", "h1{}")
 	js := fx.userUpload("site", "app.js", "")
 	fx.store.rows[css.ID].ContentVersion, fx.store.rows[js.ID].ContentVersion = 2, 1
-	require.NoError(t, storage.PutPreviewSources(context.Background(), fx.objects, page.S3Key, []storage.PreviewSource{{ID: css.ID, ContentVersion: 2}, {ID: js.ID, ContentVersion: 1}}))
+	require.NoError(t, storage.PutPreviewSources(context.Background(), fx.objects, page.S3Key, pic.Bytes(), []storage.PreviewSource{{ID: css.ID, ContentVersion: 2}, {ID: js.ID, ContentVersion: 1}}))
 	res, _ = read(`{"action":"read","file":"site/index.html"}`)
 	require.Contains(t, res["preview"], "with the current version of every file it loads")
 	fx.store.rows[css.ID].ContentVersion = 3
@@ -271,6 +271,18 @@ func TestAgentFileRead_ShowsAWebPagesPicture(t *testing.T) {
 	require.Contains(t, res["preview"], "site/css/app.css changed and 1 file(s) it loaded were deleted")
 	require.Contains(t, res["preview"], "ask the user to open it")
 	require.Len(t, images, 1, "the old picture is still shown, marked as such")
+
+	// Sources stored with another picture (two browsers storing at once) are not this one's.
+	other := append([]byte(nil), pic.Bytes()...)
+	other = append(other, 0)
+	require.NoError(t, storage.PutPreviewSources(context.Background(), fx.objects, page.S3Key, other, []storage.PreviewSource{{ID: css.ID, ContentVersion: 1}}))
+	res, _ = read(`{"action":"read","file":"site/index.html"}`)
+	require.Contains(t, res["preview"], "as the user's browser drew this version", "judged by its own file alone")
+
+	// A search of a heading is not a read of the page: no picture again.
+	res, images = read(`{"action":"search","file":"site/index.html","heading":"Hi"}`)
+	require.Nil(t, res["preview"])
+	require.Empty(t, images)
 
 	// Once per read: not with a later stretch of the file, and never for other files.
 	res, images = read(`{"action":"read","file":"site/index.html","start_line":2}`)

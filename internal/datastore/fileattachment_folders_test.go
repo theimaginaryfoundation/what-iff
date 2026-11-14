@@ -353,3 +353,25 @@ func TestListFileAttachmentsCarriesTheContentVersion(t *testing.T) {
 	}
 	t.Fatal("notes.txt was not listed")
 }
+
+// TestFileAttachmentVersions: many files' versions in one query (a page picture's sources, ADR 0x050
+// §8), only the user's own, with their folder for naming what changed.
+func TestFileAttachmentVersions(t *testing.T) {
+	f := newFolderFixture(t)
+	ctx := context.Background()
+	hrv, root := f.ids["hrv.png"], f.ids["root.png"]
+	got, err := f.ds.FileAttachmentVersions(ctx, f.user, []uuid.UUID{hrv, root, uuid.New()})
+	require.NoError(t, err)
+	require.Len(t, got, 2, "an id that is not one of the user's files is absent")
+	assert.Equal(t, "hrv.png", got[hrv].Name)
+	assert.Equal(t, "charts/oura", got[hrv].Folder)
+	assert.Equal(t, 1, got[hrv].ContentVersion)
+
+	other, err := f.ds.FileAttachmentVersions(ctx, uuid.New(), []uuid.UUID{hrv})
+	require.NoError(t, err)
+	assert.Empty(t, other, "another user's id reveals nothing")
+
+	none, err := f.ds.FileAttachmentVersions(ctx, f.user, nil)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+}

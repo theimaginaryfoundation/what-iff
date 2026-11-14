@@ -59,6 +59,16 @@ func (m *memRows) GetFileAttachment(_ context.Context, _ uuid.UUID, id uuid.UUID
 	return &r, nil
 }
 
+func (m *memRows) FileAttachmentVersions(_ context.Context, _ uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*models.FileAttachment, error) {
+	out := map[uuid.UUID]*models.FileAttachment{}
+	for _, id := range ids {
+		if r, ok := m.rows[id]; ok {
+			out[id] = &r
+		}
+	}
+	return out, nil
+}
+
 func (m *memRows) DeleteFileAttachment(_ context.Context, _ uuid.UUID, id uuid.UUID) error {
 	delete(m.rows, id)
 	return nil

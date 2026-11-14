@@ -95,7 +95,7 @@ func (h *Handler) PutFilePreview(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to store the preview", err)
 		return
 	}
-	if err := storage.PutPreviewSources(r.Context(), store, object, sources); err != nil {
+	if err := storage.PutPreviewSources(r.Context(), store, object, body, sources); err != nil {
 		// The picture stands; without its sources it is checked by its own file alone.
 		h.logger.Warn("preview: sources upload failed", zap.Error(err))
 	}
@@ -174,12 +174,8 @@ func (h *Handler) previewIsStale(ctx context.Context, userID uuid.UUID, store st
 	if err != nil || len(sources) == 0 {
 		return false
 	}
-	return storage.ComparePreviewSources(ctx, sources, func(ctx context.Context, id uuid.UUID) (*models.FileAttachment, error) {
-		f, err := h.ds.GetFileAttachment(ctx, userID, id)
-		if errors.Is(err, datastore.ErrFileAttachmentNotFound) {
-			return nil, nil
-		}
-		return f, err
+	return storage.ComparePreviewSources(ctx, sources, func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*models.FileAttachment, error) {
+		return h.ds.FileAttachmentVersions(ctx, userID, ids)
 	}).Stale()
 }
 

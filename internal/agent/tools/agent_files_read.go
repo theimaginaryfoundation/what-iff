@@ -3,14 +3,12 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
@@ -129,7 +127,7 @@ func (t *AgentFileTool) read(ctx context.Context, chat *models.Chat, a agentFile
 	res := agentFileReadResult{File: &ref, TotalLines: len(lines)}
 	// A web page's picture, once per read of it (its first stretch or its outline), as the user's
 	// browser last drew this version.
-	if models.IsHTMLFile(att.Name, att.FileType) && (a.Action != "read" || a.StartLine <= 1) {
+	if models.IsHTMLFile(att.Name, att.FileType) && ((a.Action == "read" && a.StartLine <= 1) || (a.Action == "search" && strings.TrimSpace(a.Heading) == "")) {
 		res.Preview = t.pagePreview(ctx, chat.UserID, att)
 	}
 	if len(lines) == 0 {
@@ -325,12 +323,8 @@ func (t *AgentFileTool) pagePreview(ctx context.Context, userID uuid.UUID, att *
 	if err != nil || len(sources) == 0 {
 		return "A picture of the page, as the user's browser drew this version, follows this result (if you can see images)."
 	}
-	changes := storage.ComparePreviewSources(ctx, sources, func(ctx context.Context, id uuid.UUID) (*models.FileAttachment, error) {
-		f, err := t.store.GetFileAttachment(ctx, userID, id)
-		if errors.Is(err, datastore.ErrFileAttachmentNotFound) {
-			return nil, nil
-		}
-		return f, err
+	changes := storage.ComparePreviewSources(ctx, sources, func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*models.FileAttachment, error) {
+		return t.store.FileAttachmentVersions(ctx, userID, ids)
 	})
 	if !changes.Stale() {
 		return "A picture of the page, as the user's browser drew it with the current version of every file it loads, follows this result (if you can see images)."

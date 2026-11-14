@@ -78,6 +78,8 @@ type agentFileStore interface {
 	MoveFileAttachmentsToFolder(ctx context.Context, userID uuid.UUID, ids []uuid.UUID, folder string) (int, error)
 	RenameGalleryFile(ctx context.Context, userID, id uuid.UUID, name string) (string, error)
 	CountAgentFiles(ctx context.Context, userID uuid.UUID) (int, error)
+	// FileAttachmentVersions: many files' versions in one lookup (a page picture's sources).
+	FileAttachmentVersions(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*models.FileAttachment, error)
 	// HasFileEditGrant: the user mentioned the chat's agent in a comment on the file (ADR 0x046).
 	HasFileEditGrant(ctx context.Context, userID, chatID, fileID uuid.UUID) (bool, error)
 	storage.AttachmentKeyRefs

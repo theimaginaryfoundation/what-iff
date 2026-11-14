@@ -62,20 +62,29 @@ func ParsePreviewSources(s string) ([]PreviewSource, error) {
 	return out, nil
 }
 
-// PutPreviewSources stores the sources of the object's preview, after PutPreview (which removes any
-// it had).
-func PutPreviewSources(ctx context.Context, store FileStore, objectKey string, sources []PreviewSource) error {
+// previewSourcesFile is what is kept beside a picture: its sources, and the tag of the picture they
+// belong to, so a picture another browser stored meanwhile is never judged by these.
+type previewSourcesFile struct {
+	Tag     string          `json:"tag"`
+	Sources []PreviewSource `json:"sources"`
+}
+
+// PutPreviewSources stores the sources of the object's preview, whose PNG is png, after PutPreview
+// (which removes any it had).
+func PutPreviewSources(ctx context.Context, store FileStore, objectKey string, png []byte, sources []PreviewSource) error {
 	if len(sources) == 0 {
 		return nil
 	}
-	data, err := json.Marshal(sources)
+	data, err := json.Marshal(previewSourcesFile{Tag: PreviewTagOf(png), Sources: sources})
 	if err != nil {
 		return err
 	}
 	return store.UploadFile(ctx, fileKeyForPreviewSources(objectKey), data, "application/json")
 }
 
-// PreviewSources are the sources stored with the object's preview; none (nil, nil) when it has none.
+// PreviewSources are the sources stored with the object's preview; none (nil, nil) when it has
+// none, or when the ones stored belong to another picture than the one there now (two browsers
+// storing at once, each writing its picture and then its sources).
 func PreviewSources(ctx context.Context, store FileStore, objectKey string) ([]PreviewSource, error) {
 	data, err := store.DownloadFile(ctx, fileKeyForPreviewSources(objectKey))
 	if err != nil || len(data) == 0 {
@@ -83,11 +92,18 @@ func PreviewSources(ctx context.Context, store FileStore, objectKey string) ([]P
 		// checked by its own file alone.
 		return nil, err
 	}
-	var sources []PreviewSource
-	if err := json.Unmarshal(data, &sources); err != nil {
+	var kept previewSourcesFile
+	if err := json.Unmarshal(data, &kept); err != nil {
 		return nil, err
 	}
-	return sources, nil
+	tag, err := PreviewTag(ctx, store, objectKey)
+	if err != nil {
+		return nil, err
+	}
+	if tag == "" || tag != kept.Tag {
+		return nil, nil
+	}
+	return kept.Sources, nil
 }
 
 // PreviewChanges is how a preview's sources differ from the files now.
@@ -101,14 +117,28 @@ type PreviewChanges struct {
 // Stale reports whether anything the picture shows has changed.
 func (c PreviewChanges) Stale() bool { return len(c.Changed) > 0 || c.Gone > 0 }
 
-// ComparePreviewSources compares sources with the files as they are now. lookup gives a file, nil
-// for one that no longer exists, or an error, after which that source is not counted either way.
-func ComparePreviewSources(ctx context.Context, sources []PreviewSource, lookup func(context.Context, uuid.UUID) (*models.FileAttachment, error)) PreviewChanges {
+// FileVersions gives the user's files among ids (their name, folder and content version) in one
+// lookup; one that no longer exists is absent. datastore.FileAttachmentVersions is one.
+type FileVersions func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*models.FileAttachment, error)
+
+// ComparePreviewSources compares sources with the files as they are now. A lookup that fails says
+// nothing either way: no change is reported.
+func ComparePreviewSources(ctx context.Context, sources []PreviewSource, versions FileVersions) PreviewChanges {
 	var out PreviewChanges
+	if len(sources) == 0 {
+		return out
+	}
+	ids := make([]uuid.UUID, len(sources))
+	for i, s := range sources {
+		ids[i] = s.ID
+	}
+	now, err := versions(ctx, ids)
+	if err != nil {
+		return out
+	}
 	for _, s := range sources {
-		att, err := lookup(ctx, s.ID)
+		att := now[s.ID]
 		switch {
-		case err != nil:
 		case att == nil:
 			out.Gone++
 		case att.ContentVersion != s.ContentVersion:

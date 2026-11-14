@@ -42,8 +42,9 @@ const (
 // ContextFile is one file in the conversation's context.
 type ContextFile struct {
 	Attachment *models.FileAttachment `json:"file"`
-	// WorkspacePath is where a container mounts it, relative to /workspace: a message attachment or
-	// agent file by its name alone (folders are gallery labels), a bundle file under skills/<slug>/.
+	// WorkspacePath is where a container mounts it, relative to /workspace: its folder and name
+	// (ContextWorkspacePath, ADR 0x050 §7), the same path the file tools and the Files tab use; a
+	// bundle file is under skills/<slug>/.
 	WorkspacePath string          `json:"workspace_path"`
 	Reasons       []ContextReason `json:"reasons"`
 	// ShadowedBy names the newer file that takes the same workspace path, so this one is not

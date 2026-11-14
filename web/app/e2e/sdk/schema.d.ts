@@ -13410,7 +13410,10 @@ export interface paths {
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description `0` leaves out `container` (the thread's container status), which asks the container service; for a caller that only needs the files and asks often, as a preview polling for changes does (ADR 0x050 §6). */
+                    container?: "0";
+                };
                 header?: never;
                 path: {
                     chatId: string;

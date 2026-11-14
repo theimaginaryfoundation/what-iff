@@ -16,7 +16,7 @@ func TestCleanElement(t *testing.T) {
 	require.Nil(t, cleanElement(nil))
 	require.Nil(t, cleanElement(&models.FileCommentElement{Page: "index.html", Selector: "#hero"}), "a page is an HTML file's id")
 	require.Nil(t, cleanElement(&models.FileCommentElement{Page: page, Selector: "  "}))
-	require.Nil(t, cleanElement(&models.FileCommentElement{Page: page, Selector: strings.Repeat("a", maxElementSelectorRunes+1)}))
+	require.Nil(t, cleanElement(&models.FileCommentElement{Page: page, Selector: strings.Repeat("a", MaxElementSelectorRunes+1)}))
 
 	attrs := map[string]string{"data-testid": "signup", "class": strings.Repeat("x", 500), "": "dropped"}
 	for i := 0; i < 20; i++ {
@@ -29,9 +29,13 @@ func TestCleanElement(t *testing.T) {
 	})
 	require.Equal(t, page, got.Page)
 	require.Equal(t, `[data-testid="signup"]`, got.Selector)
-	require.Equal(t, "button", got.Fingerprint.Tag)
+	require.Equal(t, "BUTTON", got.Fingerprint.Tag, "kept as the page reported it: SVG names have capitals (foreignObject)")
 	require.Equal(t, maxElementTextRunes, len([]rune(got.Fingerprint.Text)))
 	require.LessOrEqual(t, len(got.Fingerprint.Attrs), maxElementAttrs)
+	// The attributes kept past the limit are the first by name, every time.
+	again := cleanElement(&models.FileCommentElement{Page: page, Selector: "x", Fingerprint: &models.FileCommentElementFingerprint{Tag: "p", Attrs: attrs}})
+	require.Equal(t, got.Fingerprint.Attrs, again.Fingerprint.Attrs)
+	require.Contains(t, got.Fingerprint.Attrs, "class")
 	require.NotContains(t, got.Fingerprint.Attrs, "")
 	if class, ok := got.Fingerprint.Attrs["class"]; ok {
 		require.Len(t, class, maxElementAttrRunes)

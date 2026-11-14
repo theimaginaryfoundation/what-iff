@@ -187,7 +187,7 @@ func TestFileCommentsTool_WebPageElements(t *testing.T) {
 	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": page.ID.String(), "selector": "main", "text": "Spacing"})
 	require.Empty(t, res.Error)
 	res = runComments(t, tool, chat, map[string]any{"action": "list", "file": page.ID.String()})
-	require.Equal(t, `element "#signup" on the page `+page.ID.String(), res.Threads[0].Where)
+	require.Equal(t, `element "#signup" on the page site/index.html`, res.Threads[0].Where, "the page by its path, as the agent addresses files")
 	require.Equal(t, "an element of the page", res.Threads[1].On)
 
 	// A selector needs a web page.
@@ -195,6 +195,9 @@ func TestFileCommentsTool_WebPageElements(t *testing.T) {
 	require.Contains(t, res.Error, "page must be an HTML file")
 	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": page.ID.String(), "page": "nowhere.html", "selector": "h1", "text": "?"})
 	require.Contains(t, res.Error, "page:")
+	// A selector is bounded, and says how to make a shorter one.
+	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": page.ID.String(), "selector": strings.Repeat("div > ", 200) + "p", "text": "?"})
+	require.Contains(t, res.Error, "selector can be at most")
 }
 
 func TestCommentRefsFromCalls(t *testing.T) {

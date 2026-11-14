@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
@@ -194,6 +195,12 @@ func (t *FileCommentsTool) Run(ctx context.Context, chat *models.Chat, input []b
 		if !models.IsHTMLFile(page.Name, page.FileType) {
 			return t.refuse("selector is for an element of a web page: page must be an HTML file (empty when file is one)")
 		}
+		if t.office != nil && t.office.FormatOf(att) != nil {
+			return t.refuse("selector is for a thread on a web page's element; Word, PowerPoint and Excel threads cannot be on one")
+		}
+		if utf8.RuneCountInString(strings.TrimSpace(args.Selector)) > filecomments.MaxElementSelectorRunes {
+			return t.refuse(fmt.Sprintf("selector can be at most %d characters: use an id, a data-testid or a class rather than a long path", filecomments.MaxElementSelectorRunes))
+		}
 		args.pageID = page.ID.String()
 	}
 	var res fileCommentsResult
@@ -276,10 +283,11 @@ func refusalOf(err error) (string, bool) {
 
 func (t *FileCommentsTool) list(ctx context.Context, chat *models.Chat, att *models.FileAttachment) (fileCommentsResult, error) {
 	var res fileCommentsResult
+	pagePath := t.pagePaths(ctx, chat.UserID)
 	_, err := t.comments.Update(ctx, chat.UserID, att.ID, func(cur *filecomments.Current) ([]models.FileCommentThread, error) {
 		res.Threads = make([]fileThreadView, 0, len(cur.Threads))
 		for _, th := range cur.Threads {
-			res.Threads = append(res.Threads, threadView(th, cur.Text))
+			res.Threads = append(res.Threads, threadView(th, cur.Text, pagePath))
 		}
 		return nil, errListed
 	})
@@ -292,7 +300,27 @@ func (t *FileCommentsTool) list(ctx context.Context, chat *models.Chat, att *mod
 // errListed ends a list's Update before it writes anything.
 var errListed = errors.New("listed")
 
-func threadView(th models.FileCommentThread, text string) fileThreadView {
+// pagePaths names a web page by its path, as the agent addresses files, from the id an element
+// anchor keeps; each page is looked up once, and one that cannot be read keeps its id.
+func (t *FileCommentsTool) pagePaths(ctx context.Context, userID uuid.UUID) func(string) string {
+	known := map[string]string{}
+	return func(id string) string {
+		if p, ok := known[id]; ok {
+			return p
+		}
+		p := id
+		if pageID, err := uuid.Parse(id); err == nil && t.files != nil {
+			if page, err := t.files.GetFileAttachment(ctx, userID, pageID); err == nil {
+				p = FilePath(page)
+			}
+		}
+		known[id] = p
+		return p
+	}
+}
+
+// threadView is a thread as the tool shows it; pagePath names an element's page (nil: its id).
+func threadView(th models.FileCommentThread, text string, pagePath func(string) string) fileThreadView {
 	v := fileThreadView{ID: th.ID, On: "the whole file", Resolved: th.Resolved}
 	switch {
 	case th.Cell != nil:
@@ -308,7 +336,11 @@ func threadView(th models.FileCommentThread, text string) fileThreadView {
 		v.On = fmt.Sprintf("the whole file (it was on %q, which is gone)", th.Quote)
 	}
 	if th.Element != nil {
-		v.Where = fmt.Sprintf("element %q on the page %s", th.Element.Selector, th.Element.Page)
+		page := th.Element.Page
+		if pagePath != nil {
+			page = pagePath(page)
+		}
+		v.Where = fmt.Sprintf("element %q on the page %s", th.Element.Selector, page)
 		if th.Anchor == nil && th.Quote == "" {
 			v.On = "an element of the page"
 		}
@@ -396,7 +428,7 @@ func (t *FileCommentsTool) change(ctx context.Context, chat *models.Chat, att *m
 	}
 	th := got.Threads[i]
 	// The written thread, as list shows it (its lines are read again on the next list).
-	view := threadView(th, "")
+	view := threadView(th, "", t.pagePaths(ctx, chat.UserID))
 	quote := ""
 	if th.Anchor != nil || th.Cell != nil {
 		quote = filecomments.ShortQuote(th.Quote)

@@ -77,6 +77,22 @@ func (s stubStore) GetFileAttachment(ctx context.Context, userID, id uuid.UUID) 
 	return s.getFn(ctx, userID, id)
 }
 
+// FileAttachmentVersions answers through getFn, one id at a time, as the real query would in one.
+func (s stubStore) FileAttachmentVersions(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*models.FileAttachment, error) {
+	out := map[uuid.UUID]*models.FileAttachment{}
+	for _, id := range ids {
+		if s.getFn == nil {
+			break
+		}
+		if f, err := s.getFn(ctx, userID, id); err == nil {
+			out[id] = f
+		} else if !errors.Is(err, datastore.ErrFileAttachmentNotFound) {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 func (s stubStore) DeleteFileAttachment(ctx context.Context, userID, id uuid.UUID) error {
 	return s.deleteFn(ctx, userID, id)
 }
