@@ -18,7 +18,7 @@ import { DomSanitizer } from '@angular/platform-browser';
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { WORKSPACE_CONTEXT } from '../file-workspace/editors/file-editor';
 import { FolderFiles } from './folder-files.service';
-import { PageBridgeAction, PageBridgeEvent, readBridgeEvent } from './page-bridge';
+import { PageBridgeAction, PageBridgeEvent, PageProject, readBridgeEvent } from './page-bridge';
 import { PREVIEW_URL } from './preview-site.config';
 import { SiteProject } from './site-project';
 
@@ -204,6 +204,17 @@ export class SiteFrameComponent {
     } else if (message.type === 'failed') {
       this.failure.set(String(message.message ?? 'unknown error'));
     }
+  }
+
+  /** The project the page is served from, for its comments; null before it opened. */
+  pageProject(): PageProject | null {
+    const project = this.project;
+    if (!project) return null;
+    return {
+      servedFiles: () => project.servedFiles(),
+      fileAt: path => project.fileAt(path),
+      text: async file => (await this.folders.download(file)).text(),
+    };
   }
 
   /** Tells the page's bridge script something, through the host page. */

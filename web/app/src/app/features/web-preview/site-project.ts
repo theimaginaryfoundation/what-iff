@@ -32,7 +32,7 @@ export type ConversationFiles = (fresh: boolean) => Promise<Map<string, FileAtta
  */
 export class SiteProject {
   /** What each served path was, by its folder and name and the version served. */
-  private readonly served = new Map<string, { folder: string; name: string; version: string }>();
+  private readonly served = new Map<string, { folder: string; name: string; version: string; file: FileAttachment }>();
   /** Paths asked for that were not there. */
   private readonly missing = new Map<string, { folder: string; name: string }>();
   private versions: Promise<Map<string, string>> | null = null;
@@ -64,9 +64,20 @@ export class SiteProject {
       return { status: 404, message: `${path} is not in this project.` };
     }
     this.missing.delete(path);
-    this.served.set(path, { ...place, version: versionOf(file) });
+    this.served.set(path, { ...place, version: versionOf(file), file });
     const bytes = new Uint8Array(await (await this.folders.download(file)).arrayBuffer());
     return this.serve(path, place.name, file.id, file, bytes);
+  }
+
+  /** The project's files the page has loaded, by path (stored ones; the page being edited is not among them). */
+  servedFiles(): ReadonlyMap<string, FileAttachment> {
+    return new Map([...this.served].map(([path, s]) => [path, s.file]));
+  }
+
+  /** The file at a project path, as a request for it would find it. */
+  async fileAt(path: string): Promise<FileAttachment | null> {
+    const place = this.place(path);
+    return place ? ((await this.find(place, this.lookups(false))) ?? null) : null;
   }
 
   /** Whether anything served, or asked for and missing, is different now. */

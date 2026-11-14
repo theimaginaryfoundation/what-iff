@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, input, output, viewChild } 
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { HtmlPageFrameComponent } from './html-page-frame.component';
-import { PageBridgeAction, PageBridgeEvent } from './page-bridge';
+import { PageBridgeAction, PageBridgeEvent, PageProject } from './page-bridge';
 import { PREVIEW_URL } from './preview-site.config';
 import { SiteFrameComponent } from './site-frame.component';
 
@@ -34,6 +34,11 @@ export class HtmlPreviewComponent {
   readonly pageMessage = output<PageBridgeEvent>();
   private readonly site = viewChild(SiteFrameComponent);
   private readonly lone = viewChild(HtmlPageFrameComponent);
+
+  /** The project the page is served from; null for a page on its own (§1). */
+  pageProject(): PageProject | null {
+    return this.site()?.pageProject() ?? null;
+  }
 
   /** Tells the page's bridge script something. */
   sendToPage(action: PageBridgeAction): void {

@@ -21,6 +21,7 @@ import { asMermaidMarkdown, renderMermaid } from '../../../core/utils/mermaid.he
 import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 import { HtmlPreviewComponent } from '../../web-preview/html-preview.component';
 import { PageComments } from '../../web-preview/page-comments';
+import { PageBridgeEvent } from '../../web-preview/page-bridge';
 import { CommentAgentService } from '../../office/comments/comment-agent.service';
 import { CommentPeopleService } from '../../office/comments/comment-people.service';
 import { CommentsPanelComponent } from '../../office/comments/comments-panel.component';
@@ -98,12 +99,14 @@ export class TextViewerComponent {
   // --- comments (ADR 0x045): on the text, kept beside the file, written as they are made --------
   private readonly saver = inject(COMMENT_SAVER, { optional: true });
   readonly me = inject(CommentPeopleService).me;
+  private readonly commentsApi = inject(TextCommentsService);
+  private readonly commentAgent = inject(CommentAgentService);
   readonly comments = new TextCommentsState(
-    inject(TextCommentsService),
+    this.commentsApi,
     this.me,
     () => this.comments.autosave(),
     () => this.saver?.showCurrentContent(),
-    inject(CommentAgentService).hooks(() => this.file()),
+    this.commentAgent.hooks(() => this.file()),
   );
   private readonly panel = inject(CommentsPanelState);
   /** Text, Markdown and HTML carry comments; a file shown only in part (over 1 MB) does not. */
@@ -115,7 +118,10 @@ export class TextViewerComponent {
   /** Comments are shown once they have loaded: the server keeps none for some files it is shown (over 4 MB). */
   readonly showsComments = computed(() => this.hasComments() && this.comments.available());
   readonly canComment = computed(() => this.showsComments() && !!this.saver?.canComment());
-  readonly commentsOpen = computed(() => this.showsComments() && (this.panel.open() ?? this.comments.openCount() > 0));
+  /** An HTML file shown as its page, whose comments are on its elements (ADR 0x050 §5). */
+  readonly pageMode = computed(() => this.showRendered() && this.isHtml());
+  readonly openCount = computed(() => (this.pageMode() ? this.pageComments.openCount() : this.comments.openCount()));
+  readonly commentsOpen = computed(() => this.showsComments() && (this.panel.open() ?? this.openCount() > 0));
   readonly replyRequest = signal<{ threadId: string } | null>(null);
   /** The right-click menu over the text: where it opened, and on what. */
   readonly contextMenu = signal<{
@@ -134,6 +140,18 @@ export class TextViewerComponent {
     () => this.panel.open.set(true),
     () => this.canComment(),
     () => this.file(),
+    () => this.preview()?.pageProject() ?? null,
+    // A script's threads on the page's elements are kept with the script, saved as they change.
+    file => {
+      const state: TextCommentsState = new TextCommentsState(
+        this.commentsApi,
+        this.me,
+        () => state.autosave(),
+        undefined,
+        this.commentAgent.hooks(() => file),
+      );
+      return state;
+    },
   );
   private map: CommentTextMap | null = null;
   /** A thread chosen while the text was shown formatted, to show once the raw text is. */
@@ -287,9 +305,8 @@ export class TextViewerComponent {
 
   /** A thread chosen in the panel: shown where its words are, or in the raw text when the formatting hides them. */
   selectThread(threadId: string): void {
-    if (this.showRendered() && this.isHtml()) {
-      this.comments.select(threadId);
-      this.pageComments.reveal(threadId);
+    if (this.pageMode()) {
+      this.pageComments.select(threadId);
       return;
     }
     const at = this.comments.positions().get(threadId);
@@ -324,11 +341,22 @@ export class TextViewerComponent {
     if (menu?.range) this.startComment(menu.range);
   }
 
+  /** What the rendered page reports: its comments' events, and a mark's right-click menu. */
+  onPageMessage(event: PageBridgeEvent): void {
+    this.pageComments.handle(event);
+    if (event.type !== 'menu' || !this.canComment()) return;
+    const frame = this.host.nativeElement.querySelector('app-html-preview')?.getBoundingClientRect();
+    const box = this.host.nativeElement.getBoundingClientRect();
+    if (!frame) return;
+    this.contextMenu.set({ left: frame.left - box.left + event.x, top: frame.top - box.top + event.y, threadId: event.id, range: null });
+  }
+
   menuReply(): void {
     const threadId = this.contextMenu()?.threadId;
     this.contextMenu.set(null);
     if (!threadId) return;
-    this.comments.select(threadId);
+    if (this.pageMode()) this.pageComments.select(threadId);
+    else this.comments.select(threadId);
     this.panel.open.set(true);
     this.replyRequest.set({ threadId });
   }
@@ -336,7 +364,9 @@ export class TextViewerComponent {
   menuDelete(): void {
     const threadId = this.contextMenu()?.threadId;
     this.contextMenu.set(null);
-    if (threadId) this.comments.remove({ threadId, commentId: threadId });
+    if (!threadId) return;
+    if (this.pageMode()) this.pageComments.remove({ threadId, commentId: threadId });
+    else this.comments.remove({ threadId, commentId: threadId });
   }
 
   private offsetAt(event: MouseEvent): number | null {

@@ -89,11 +89,13 @@ An element thread has up to two anchors, each best effort, and falls to the whol
   The server only bounds the anchor; it does not depend on the text, so it is kept as it is across edits.
 - **The code behind a scripted element** is recorded, best effort, as the page runs: the bridge script wraps `createElement`, `innerHTML`, `outerHTML` and `insertAdjacentHTML` and keeps the first project file on the stack for each element made.
   That finds hand-written DOM code and template libraries; it does not find the component behind a framework's own DOM building, and a prebuilt bundle gives nothing better than its own call site.
-  It travels with a pick, but a thread on a scripted element is made on the element alone for now: keeping it with the script that made it is in Later.
+  Frames in the page itself (the bridge, and the page's inline scripts) are skipped, so the first project script on the stack is where the element was made.
 - **Picking and marking.** Comment, on the rendered page, enters a picker: the element under the pointer is outlined with its tag and size, as a browser's element picker does, a click picks it, Esc leaves.
-  A pick on an element of the page's own file starts a thread on its tag and on the element; any other pick starts one on the element alone, labelled with its tag and the start of its text.
+  A thread lives with the file its code anchor is in: a pick on an element the page's own file declares starts a thread there, on its tag and on the element; one on an element a project script made starts it in that script, on the line that made it (without its indentation) and on the element; any other pick starts one in the page's file on the element alone, labelled with its tag and the start of its text.
+  So the page shows its own file's threads and those of the project's scripts that name it, loaded as it loads them, and the panel shows them together, a script's named after it (`js/main.js · …`); each thread's reply, edit, resolve and delete goes to the file it lives in, and a script's are written at once, as a viewer writes them.
   The bridge script (`page-bridge.ts`, first in every served page's head, in a layer of its own out of the page's styles) draws the marks of open threads on their elements, the active one more strongly, keeps them in place through scrolling, resizing and the page's own changes, and reports picks and clicks on marks to the app; the host page relays both ways.
-  A click on a mark chooses its thread, and choosing one in the panel scrolls the page to it.
+  A click on a mark chooses its thread, and choosing one in the panel scrolls the page to it; right-clicking a marked element (or its mark) offers Reply and Delete, as every other format has.
+- The same works while editing: Pick on page, over the page beside the source, starts a thread from it; the page file's threads are written with the next save, a script's at once.
 - Threads on CSS and script files stay where they are: in the code editor.
 - Agents comment with `file_comments` as on any text file, quoting the tag or the code; `add` takes `selector` (and `page`, the HTML file, when it is not `file`) for an element, alone or beside a quote, and `list` says which element of which page a thread is on.
 
@@ -141,7 +143,5 @@ A file's path is the same in the agent's file tools, in the Files tab, in a proj
 
 - **Compiling in the browser** (§4): `esbuild-wasm` for TypeScript and JSX, `sass` for SCSS, on demand, in a worker; source positions added to compiled components for §5.
 - **Builds in the container** (§4), and a built project's output served as the site.
-- **Threads kept with the script that made an element**: the recorded call site as the code anchor in that file, and the page showing the threads of every project file that name it.
-- **Reply and Delete on a mark's right-click menu**, as the other formats have; the panel has both meanwhile.
 - **A picture of the page for agents**, drawn where a browser runs beside the conversation, as diagrams have a preview (ADR 0x049 §8): the `diagram` tool's shape, for pages.
 - **Hosting**: the deployed site's bucket, distribution, response headers and the deploy workflow's build.

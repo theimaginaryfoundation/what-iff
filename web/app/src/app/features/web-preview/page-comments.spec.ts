@@ -5,8 +5,8 @@ import { FileAttachment } from '../../core/models/file-attachment.model';
 import { fakeTextComments } from '../file-workspace/text-comments/fake-text-comments.spec-helper';
 import { TextCommentSurface, TextCommentsState } from '../file-workspace/text-comments/text-comments-state';
 import { TextCommentThread, TextCommentsService } from '../file-workspace/text-comments/text-comments.service';
-import { PageBridgeAction } from './page-bridge';
-import { PageComments } from './page-comments';
+import { PageBridgeAction, PageProject } from './page-bridge';
+import { PageComments, lineRange } from './page-comments';
 
 const HTML = '<main><h1 id="title">Hello</h1><ul id="data"></ul></main>';
 const TAG = { start: 6, end: 21 }; // <h1 id="title">
@@ -76,7 +76,9 @@ describe('PageComments', () => {
     });
     expect(comments.picking()).toBe(false);
     expect(openPanel).toHaveBeenCalled();
-    expect(state.draft()).toMatchObject({ range: TAG, quote: '<h1 id="title">', element: { page: 'page-1', selector: '#title' } });
+    await vi.waitFor(() =>
+      expect(state.draft()).toMatchObject({ range: TAG, quote: '<h1 id="title">', element: { page: 'page-1', selector: '#title' } }),
+    );
     // The draft is marked on the page as the active thread.
     expect(comments.marks()).toEqual([
       {
@@ -102,9 +104,12 @@ describe('PageComments', () => {
       created: { path: 'app.js', line: 3, column: 9 },
       label: 'li “Two”',
     });
-    expect(state.draft()).toMatchObject({ range: null, quote: 'On the page · li “Two”', element: { selector: 'li' } });
+    // No project to find the script in (a page on its own): on the element alone, kept with the page.
+    await vi.waitFor(() =>
+      expect(state.draft()).toMatchObject({ range: null, quote: 'On the page · li “Two”', element: { selector: 'li' } }),
+    );
     comments.handle({ type: 'picked', selector: 'p', fingerprint: { tag: 'p' }, src: 'other-file:0-3', created: null, label: 'p' });
-    expect(state.draft()).toMatchObject({ range: null, element: { selector: 'p' } });
+    await vi.waitFor(() => expect(state.draft()).toMatchObject({ range: null, element: { selector: 'p' } }));
   });
 
   it('cannot pick where the user may not comment, and leaves picking on a second click or Esc', async () => {
@@ -132,5 +137,81 @@ describe('PageComments', () => {
     expect([...comments.unplaced()]).toEqual(['tag']);
     comments.reveal('tag');
     expect(sent.at(-1)).toEqual({ type: 'reveal', id: 'tag' });
+  });
+
+  it('keeps a thread on an element a script made with the script, on the line that made it', async () => {
+    const { state } = await setup();
+    const script = { id: 'js-1', name: 'app.js', folder: 'site' } as FileAttachment;
+    const SCRIPT = 'const ul = document.querySelector("#data");\n  ul.innerHTML = items.map(li).join("");\n';
+    const scriptApi = fakeTextComments({ contentVersion: 1, revision: 0, threads: [] });
+    let scriptState: TextCommentsState | null = null;
+    const project: PageProject = {
+      servedFiles: () => new Map([['js/app.js', script]]),
+      fileAt: async path => (path === 'js/app.js' ? script : null),
+      text: async () => SCRIPT,
+    };
+    const sent: PageBridgeAction[] = [];
+    const comments = new PageComments(
+      state,
+      a => sent.push(a),
+      () => undefined,
+      () => true,
+      () => page,
+      () => project,
+      () =>
+        (scriptState = new TextCommentsState(scriptApi as unknown as TextCommentsService, signal({ id: 'user:u-1', name: 'Pat Lee' }), () =>
+          scriptState!.autosave(),
+        )),
+    );
+    comments.handle({
+      type: 'picked',
+      selector: '#data > li:nth-of-type(2)',
+      fingerprint: { tag: 'li', text: 'Two' },
+      src: null,
+      created: { path: 'js/app.js', line: 2, column: 6 },
+      label: 'li “Two”',
+    });
+    await vi.waitFor(() => expect(scriptState?.draft()).toBeTruthy());
+    // On the call-site line, without its indentation, and on the element.
+    expect(scriptState!.draft()).toMatchObject({
+      range: { start: 46, end: 84 },
+      element: { page: 'page-1', selector: '#data > li:nth-of-type(2)' },
+    });
+    expect(comments.draftQuote()).toBe('ul.innerHTML = items.map(li).join("");');
+    expect(state.draft()).toBeNull();
+    // The draft is marked on the page by its element: its code is in the script.
+    expect(comments.marks()).toEqual([
+      { id: 'draft', state: 'active', selector: '#data > li:nth-of-type(2)', fingerprint: { tag: 'li', text: 'Two' } },
+    ]);
+
+    comments.create({ text: 'Typo?', mentions: [] });
+    await vi.waitFor(() => expect(scriptApi.state.puts).toHaveLength(1));
+    const thread = scriptApi.state.puts[0].threads[0];
+    expect(thread).toMatchObject({ anchor: { start: 46, end: 84 }, element: { page: 'page-1' } });
+    // The panel lists it with its file; a reply goes to the script's comments.
+    expect(comments.shown().map(t => t.quote)).toEqual(['js/app.js · ul.innerHTML = items.map(li).join("");']);
+    comments.reply({ threadId: thread.id, draft: { text: 'Fixed', mentions: [] } });
+    await vi.waitFor(() => expect(scriptApi.state.puts.at(-1)?.threads[0].comments).toHaveLength(2));
+    expect(comments.activeId()).toBe(thread.id);
+    expect(comments.marks()).toEqual([
+      { id: thread.id, state: 'active', selector: '#data > li:nth-of-type(2)', fingerprint: { tag: 'li', text: 'Two' } },
+    ]);
+  });
+
+  it('adopts a draft started on the page’s own text', async () => {
+    const { comments, state } = await setup();
+    state.start({ ...TAG });
+    expect(comments.draftQuote()).toBe('<h1 id="title">');
+    comments.create({ text: 'From the source', mentions: [] });
+    expect(state.threads()[0]).toMatchObject({ anchor: TAG });
+  });
+});
+
+describe('lineRange', () => {
+  it('is a line without its indentation, or null for a blank or missing one', () => {
+    expect(lineRange('a\n  bc  \r\nd', 2)).toEqual({ start: 4, end: 6 });
+    expect(lineRange('a\n   \nb', 2)).toBeNull();
+    expect(lineRange('a', 3)).toBeNull();
+    expect(lineRange('a', 0)).toBeNull();
   });
 });

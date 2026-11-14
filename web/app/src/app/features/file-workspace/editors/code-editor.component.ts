@@ -32,6 +32,8 @@ import { TextCommentThread, TextCommentsService } from '../text-comments/text-co
 import { MONACO_LOADER, type Monaco, monacoLanguageFor, vfsUriFor } from './monaco/monaco-loader';
 import { appTheme, followAppTheme, monacoThemeFor } from './monaco/monaco-themes';
 import { HtmlPreviewComponent } from '../../web-preview/html-preview.component';
+import { PageBridgeEvent } from '../../web-preview/page-bridge';
+import { PageComments } from '../../web-preview/page-comments';
 
 const PREVIEW_DEBOUNCE_MS = 250;
 /** A page is rebuilt after a longer pause: each rebuild runs its scripts again. */
@@ -77,16 +79,43 @@ export class CodeEditorComponent implements FileEditor {
 
   // --- comments (ADR 0x045): kept beside the file, written once a save has stored the text ---------
   readonly me = inject(CommentPeopleService).me;
+  private readonly commentsApi = inject(TextCommentsService);
+  private readonly commentAgent = inject(CommentAgentService);
   readonly comments = new TextCommentsState(
-    inject(TextCommentsService),
+    this.commentsApi,
     this.me,
     () => this.commentsChanged(),
     undefined,
-    inject(CommentAgentService).hooks(() => this.file()),
+    this.commentAgent.hooks(() => this.file()),
+  );
+  /** The page beside an HTML file's source. */
+  private readonly preview = viewChild(HtmlPreviewComponent);
+  /**
+   * Comments on the page's elements (ADR 0x050 §5): the page file's own are this editor's, written
+   * with the next save; a script's, on an element it made, are the script's, written at once.
+   */
+  readonly pageComments = new PageComments(
+    this.comments,
+    action => this.preview()?.sendToPage(action),
+    () => this.panel.open.set(true),
+    () => this.canStartComment(),
+    () => this.file(),
+    () => this.preview()?.pageProject() ?? null,
+    file => {
+      const state: TextCommentsState = new TextCommentsState(
+        this.commentsApi,
+        this.me,
+        () => state.autosave(),
+        undefined,
+        this.commentAgent.hooks(() => file),
+      );
+      return state;
+    },
   );
   private readonly panel = inject(CommentsPanelState);
   /** The panel opens by itself on a file with open threads, until the user opens or closes it. */
-  readonly commentsOpen = computed(() => this.panel.open() ?? this.comments.openCount() > 0);
+  readonly openCount = computed(() => (this.isHtml() ? this.pageComments.openCount() : this.comments.openCount()));
+  readonly commentsOpen = computed(() => this.panel.open() ?? this.openCount() > 0);
   /** Opens a thread's reply box in the panel (the right-click menu's "Reply to comment"). */
   readonly replyRequest = signal<{ threadId: string } | null>(null);
   /** Comments changed since they were last written. */
@@ -140,6 +169,12 @@ export class CodeEditorComponent implements FileEditor {
         this.surface?.paint(state);
         this.paintPreview();
       });
+    });
+    // The page beside an HTML file's source marks the threads' elements as they change.
+    effect(() => {
+      const marks = this.pageComments.marks();
+      if (!this.isHtml() || !this.showPreview()) return;
+      untracked(() => this.preview()?.sendToPage({ type: 'marks', marks }));
     });
     const stopTheme = followAppTheme(this.document, theme => this.monaco?.editor.setTheme(theme));
     inject(DestroyRef).onDestroy(stopTheme);
@@ -196,7 +231,20 @@ export class CodeEditorComponent implements FileEditor {
     this.panel.open.set(true);
   }
 
+  /** What the page beside the source reports; a mark's right-click opens its thread. */
+  onPageMessage(event: PageBridgeEvent): void {
+    this.pageComments.handle(event);
+    if (event.type === 'menu') {
+      this.pageComments.select(event.id);
+      this.panel.open.set(true);
+    }
+  }
+
   selectThread(threadId: string): void {
+    if (this.isHtml()) {
+      this.pageComments.select(threadId);
+      return;
+    }
     this.comments.select(threadId);
     const at = this.comments.positions().get(threadId);
     if (at) this.previewComments.reveal(at);

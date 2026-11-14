@@ -10,7 +10,8 @@
  *   fingerprint, its source range (`data-wi-src`) when the HTML parser read it from a file, and,
  *   for one a script made, where in the project's scripts that happened.
  * - Marks the elements threads are on, the active one more strongly, and keeps the marks in place
- *   through scrolling, resizing and the page's own changes; a click on a mark chooses its thread.
+ *   through scrolling, resizing and the page's own changes; a click on a mark chooses its thread, and
+ *   right-clicking a marked element (or its mark) asks the app for the thread's menu.
  *
  * It is plain JavaScript in a string, as it runs in pages we do not build. It must not contain the
  * sequence that ends a script element.
@@ -37,6 +38,10 @@ export const PAGE_BRIDGE_SCRIPT = String.raw`(function () {
       var url;
       try { url = new URL(m[1]); } catch (e) { continue; }
       if (url.origin !== location.origin || url.pathname.indexOf(tokenRoot) !== 0) continue;
+      // Frames in the page itself are this bridge's own (it is inline in the page) or the page's
+      // inline scripts, whose code has no place a thread can be kept on: the first project file
+      // after them is where the element was made.
+      if (url.pathname === location.pathname) continue;
       return { path: decodeURIComponent(url.pathname.slice(tokenRoot.length)), line: +m[2], column: +m[3] };
     }
     return null;
@@ -248,6 +253,8 @@ export const PAGE_BRIDGE_SCRIPT = String.raw`(function () {
   // --- Marks ----------------------------------------------------------------------------------
   var marks = [];
   var shown = [];
+  /** The thread each marked element shows, as last drawn (for its right-click menu). */
+  var markedElements = new Map();
   /** The element a mark is on: by its source range, then its selector if the fingerprint still fits, then its fingerprint. */
   function find(mark) {
     if (mark.src) {
@@ -294,11 +301,13 @@ export const PAGE_BRIDGE_SCRIPT = String.raw`(function () {
     ensureLayer();
     for (var k = 0; k < shown.length; k++) shown[k].remove();
     shown = [];
+    markedElements = new Map();
     var unplaced = [];
     for (var i = 0; i < marks.length; i++) {
       var mark = marks[i];
       var el = find(mark);
       if (!el) { unplaced.push(mark.id); continue; }
+      if (!markedElements.has(el) || mark.state === 'active') markedElements.set(el, mark.id);
       var r = el.getBoundingClientRect();
       if (r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth || (!r.width && !r.height)) continue;
       var ring = document.createElement('div');
@@ -311,6 +320,7 @@ export const PAGE_BRIDGE_SCRIPT = String.raw`(function () {
       dot.style.left = Math.min(innerWidth - 12, r.right) + 'px';
       dot.style.top = Math.max(12, r.top) + 'px';
       dot.addEventListener('click', (function (id) { return function (e) { e.preventDefault(); e.stopPropagation(); post({ type: 'select', id: id }); }; })(mark.id));
+      dot.addEventListener('contextmenu', (function (id) { return function (e) { e.preventDefault(); e.stopPropagation(); post({ type: 'menu', id: id, x: e.clientX, y: e.clientY }); }; })(mark.id));
       layer.appendChild(ring); layer.appendChild(dot);
       shown.push(ring, dot);
     }
@@ -323,6 +333,18 @@ export const PAGE_BRIDGE_SCRIPT = String.raw`(function () {
     scheduled = true;
     requestAnimationFrame(render);
   }
+  // Right-clicking a marked element offers its thread's Reply and Delete, as every other format does.
+  window.addEventListener('contextmenu', function (event) {
+    if (picking) return;
+    for (var node = event.target; node && node.nodeType === 1; node = node.parentElement) {
+      var id = markedElements.get(node);
+      if (id) {
+        event.preventDefault();
+        post({ type: 'menu', id: id, x: event.clientX, y: event.clientY });
+        return;
+      }
+    }
+  }, true);
   window.addEventListener('scroll', schedule, true);
   window.addEventListener('resize', schedule);
   new MutationObserver(function (records) {
@@ -365,6 +387,8 @@ export type PageBridgeEvent =
     }
   | { type: 'pick-cancelled' }
   | { type: 'select'; id: string }
+  /** A marked element (or its mark) was right-clicked, at x, y in the page's viewport. */
+  | { type: 'menu'; id: string; x: number; y: number }
   | { type: 'unplaced'; ids: string[] };
 
 /** A thread's mark on the page: its code anchor as a source range, its element anchor, or both. */
@@ -384,4 +408,14 @@ export type PageBridgeAction =
 export function readBridgeEvent(data: unknown): PageBridgeEvent | null {
   const event = data && typeof data === 'object' ? (data as { type?: unknown }) : null;
   return event && typeof event.type === 'string' ? (event as PageBridgeEvent) : null;
+}
+
+/**
+ * The project a page is served from, as its comments need it (ADR 0x050 §5): the files the page
+ * loaded, a project path's file, and a file's text. A page on its own has none.
+ */
+export interface PageProject {
+  servedFiles(): ReadonlyMap<string, import('../../core/models/file-attachment.model').FileAttachment>;
+  fileAt(path: string): Promise<import('../../core/models/file-attachment.model').FileAttachment | null>;
+  text(file: import('../../core/models/file-attachment.model').FileAttachment): Promise<string>;
 }
