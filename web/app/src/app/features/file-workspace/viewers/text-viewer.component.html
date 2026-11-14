@@ -6,9 +6,9 @@
       @if (canRender()) {
         <div class="text-viewer__segmented" role="group" aria-label="View as">
           <button type="button" [attr.aria-pressed]="rendered()" (click)="rendered.set(true)">
-            {{ kind() === "csv" ? "Table" : kind() === "mermaid" ? "Diagram" : "Formatted" }}
+            {{ kind() === "csv" ? "Table" : kind() === "mermaid" ? "Diagram" : isHtml() ? "Page" : "Formatted" }}
           </button>
-          <button type="button" [attr.aria-pressed]="!rendered()" (click)="rendered.set(false)">Raw</button>
+          <button type="button" [attr.aria-pressed]="!rendered()" (click)="rendered.set(false)">{{ isHtml() ? "Source" : "Raw" }}</button>
         </div>
       }
       @if (!showRendered()) {
@@ -50,8 +50,10 @@
     </div>
 
     <div class="text-viewer__main">
-      <div class="text-viewer__body">
-        @if (showRendered() && asMarkdown()) {
+      <div class="text-viewer__body" [class.text-viewer__body--page]="showRendered() && isHtml()">
+        @if (showRendered() && isHtml()) {
+          <app-html-page-frame class="text-viewer__page" [file]="file()" [html]="text()" />
+        } @else if (showRendered() && asMarkdown()) {
           <markdown
             class="text-viewer__markdown prose prose-sm max-w-none dark:prose-invert"
             [data]="markdown()"

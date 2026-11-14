@@ -12,6 +12,7 @@ import { latexMathExtension } from '../../../core/utils/latex-math.helpers';
 import { mermaidExtension } from '../../../core/utils/mermaid.helpers';
 import { fakeMonaco } from '../editors/fake-monaco.spec-helper';
 import { MONACO_LOADER } from '../editors/monaco/monaco-loader';
+import { PageFiles } from '../../web-preview/page-files.service';
 import { TextViewerComponent } from './text-viewer.component';
 
 function file(overrides: Partial<FileAttachment> = {}): FileAttachment {
@@ -44,6 +45,12 @@ describe('TextViewerComponent', () => {
         { provide: CommentPeopleService, useValue: { me: signal({ id: 'user:u-1', name: 'Pat Lee' }) } },
         { provide: TextCommentsService, useValue: textComments },
         { provide: COMMENT_SAVER, useValue: saver },
+        {
+          provide: PageFiles,
+          useValue: {
+            build: vi.fn(async (_file: FileAttachment, html: string) => ({ html, missing: [], skipped: [] })),
+          },
+        },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(TextViewerComponent);
@@ -64,10 +71,28 @@ describe('TextViewerComponent', () => {
     [...el.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 
   it('shows a text file as text, never as markup', async () => {
-    const el = await show(file({ name: 'page.html', file_type: 'text/html' }), '<b>bold?</b>\nline two');
+    const el = await show(file({ name: 'notes.txt', file_type: 'text/plain' }), '<b>bold?</b>\nline two');
     expect(el.querySelector('pre.text-viewer__text')?.textContent).toBe('<b>bold?</b>\nline two');
     expect(el.querySelector('b')).toBeNull();
-    expect(fake.state.colorized).toEqual([]);
+  });
+
+  it('renders an HTML page in a sandboxed frame, with its source a click away', async () => {
+    const html = '<!doctype html><html><body><b>bold</b><script>document.title = "x"</script></body></html>';
+    const el = await show(file({ name: 'index.html', file_type: 'text/html' }), html);
+    await vi.waitFor(() => expect(el.querySelector('iframe')).not.toBeNull());
+    const frame = el.querySelector('iframe')!;
+    // Scripts run, in an opaque origin: nothing else is allowed.
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(frame.getAttribute('srcdoc')).toBe(html);
+    // The page is in the frame, never in the app's own DOM.
+    expect(el.querySelector('b')).toBeNull();
+    expect(button(el, 'Page')?.getAttribute('aria-pressed')).toBe('true');
+
+    button(el, 'Source')!.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(el.querySelector('iframe')).toBeNull();
+    expect(el.querySelector('pre.text-viewer__text')?.textContent).toBe(html);
   });
 
   it('highlights code with a known language into static spans', async () => {

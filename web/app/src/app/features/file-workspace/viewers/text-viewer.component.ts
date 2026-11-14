@@ -18,6 +18,7 @@ import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { renderLatexMath } from '../../../core/utils/latex-math.helpers';
 import { asMermaidMarkdown, renderMermaid } from '../../../core/utils/mermaid.helpers';
 import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
+import { HtmlPageFrameComponent } from '../../web-preview/html-page-frame.component';
 import { CommentAgentService } from '../../office/comments/comment-agent.service';
 import { CommentPeopleService } from '../../office/comments/comment-people.service';
 import { CommentsPanelComponent } from '../../office/comments/comments-panel.component';
@@ -45,14 +46,14 @@ import {
 const MAX_HIGHLIGHT_CHARS = 200_000;
 
 /**
- * Text, code, Markdown and CSV, read-only (ADR 0x043 §2): Markdown and CSV rendered with the raw
- * text a click away, everything else as text and never as markup. The Monaco editor replaces the
- * raw view in a later step.
+ * Text, code, Markdown, CSV and HTML, read-only (ADR 0x043 §2): Markdown and CSV rendered, an HTML
+ * page rendered in a sandboxed frame (ADR 0x050 §1), each with the raw text a click away; everything
+ * else as text and never as markup.
  */
 @Component({
   selector: 'app-text-viewer',
   standalone: true,
-  imports: [MarkdownModule, CheckboxComponent, CommentsPanelComponent],
+  imports: [MarkdownModule, CheckboxComponent, CommentsPanelComponent, HtmlPageFrameComponent],
   templateUrl: './text-viewer.component.html',
   styleUrl: './text-viewer.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -68,7 +69,7 @@ export class TextViewerComponent {
   readonly kind = computed<FilePreviewKind>(() => previewKindFor(this.file()));
   readonly decoded = signal<DecodedText | null>(null);
   readonly failed = signal(false);
-  /** Markdown and CSV: the rendered view (true) or the raw text. */
+  /** Markdown, CSV and HTML: the rendered view (true) or the raw text. */
   readonly rendered = signal(true);
   readonly wrapLines = signal(true);
 
@@ -81,7 +82,10 @@ export class TextViewerComponent {
   readonly highlighted = signal<string | null>(null);
   readonly markdownTooBig = computed(() => this.text().length > MAX_MARKDOWN_RENDER_CHARS);
   readonly csv = computed(() => (this.kind() === 'csv' && this.decoded() ? parseCsv(this.text(), csvDelimiterFor(this.file())) : null));
-  readonly canRender = computed(() => this.kind() === 'csv' || (rendersAsMarkdown(this.kind()) && !this.markdownTooBig()));
+  readonly isHtml = computed(() => this.kind() === 'html');
+  readonly canRender = computed(
+    () => this.kind() === 'csv' || (this.isHtml() && this.text() !== '') || (rendersAsMarkdown(this.kind()) && !this.markdownTooBig()),
+  );
   /** What the formatted view renders: the text, or a Mermaid file's source as a diagram fence. */
   readonly markdown = computed(() => (this.kind() === 'mermaid' ? asMermaidMarkdown(this.text()) : this.text()));
   readonly asMarkdown = computed(() => rendersAsMarkdown(this.kind()));
@@ -100,10 +104,10 @@ export class TextViewerComponent {
     inject(CommentAgentService).hooks(() => this.file()),
   );
   private readonly panel = inject(CommentsPanelState);
-  /** Text and Markdown carry comments; a file shown only in part (over 1 MB) does not. */
+  /** Text, Markdown and HTML carry comments; a file shown only in part (over 1 MB) does not. */
   readonly hasComments = computed(() => {
     const data = this.decoded();
-    return (this.kind() === 'text' || rendersAsMarkdown(this.kind())) && !!data && !data.binary && !data.truncated;
+    return (this.kind() === 'text' || this.isHtml() || rendersAsMarkdown(this.kind())) && !!data && !data.binary && !data.truncated;
   });
   /** Whether comments can be written here (the user may change the file), or only read. */
   /** Comments are shown once they have loaded: the server keeps none for some files it is shown (over 4 MB). */
@@ -131,8 +135,12 @@ export class TextViewerComponent {
       this.showRendered();
       this.text();
       this.commentsOpen();
-      // Formatted Markdown is mapped once it has rendered (onMarkdownReady).
-      if (this.showRendered()) return;
+      // Formatted Markdown is mapped once it has rendered (onMarkdownReady); a rendered page is in
+      // its frame, where threads are not shown yet, so they are found in the source.
+      if (this.showRendered()) {
+        if (this.isHtml()) this.map = null;
+        return;
+      }
       const pre = this.host.nativeElement.querySelector<HTMLElement>('pre.text-viewer__text');
       this.map = pre && this.hasComments() ? TextDomMap.build(pre, this.text()) : null;
       if (pre && !this.map && html && this.hasComments()) {
@@ -181,7 +189,12 @@ export class TextViewerComponent {
       this.decoded.set(decoded);
       this.highlighted.set(null);
       void this.loadComments(decoded.text, generation);
-      if (this.kind() === 'text' && !decoded.binary && decoded.text.length > 0 && decoded.text.length <= MAX_HIGHLIGHT_CHARS) {
+      if (
+        (this.kind() === 'text' || this.isHtml()) &&
+        !decoded.binary &&
+        decoded.text.length > 0 &&
+        decoded.text.length <= MAX_HIGHLIGHT_CHARS
+      ) {
         void this.highlight(decoded.text, generation);
       }
     } catch {

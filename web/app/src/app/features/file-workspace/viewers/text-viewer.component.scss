@@ -120,6 +120,16 @@
 
 // Comments (ADR 0x045): their buttons at the end of the toolbar, the panel beside the text, and the
 // right-click menu over it.
+.text-viewer__body--page {
+  // The page fills the body edge to edge; its frame scrolls itself.
+  overflow: hidden;
+  padding: 0;
+}
+
+.text-viewer__page {
+  height: 100%;
+}
+
 .text-viewer__main {
   display: flex;
   flex: 1 1 auto;

@@ -84,6 +84,16 @@
   padding: 1rem;
 }
 
+.code-editor__preview--page {
+  // The page fills the pane; its frame scrolls itself.
+  overflow: hidden;
+  padding: 0;
+}
+
+.code-editor__page {
+  height: 100%;
+}
+
 .code-editor__monaco {
   flex: 1 1 auto;
   min-height: 0;
