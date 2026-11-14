@@ -82,7 +82,7 @@ describe('SiteFrameComponent', () => {
     const port = initMessages[0].port;
     const reply = await ask(port, { type: 'get', id: 7, path: 'index.html' });
     expect(reply).toMatchObject({ type: 'file', id: 7, status: 200, contentType: 'text/html; charset=utf-8' });
-    expect(new TextDecoder().decode(reply['body'] as ArrayBuffer)).toBe('<h1>typed</h1>');
+    expect(new TextDecoder().decode(reply['body'] as ArrayBuffer)).toContain('>typed</h1>');
     expect(await ask(port, { type: 'get', id: 8, path: 'missing.css' })).toMatchObject({ type: 'file', id: 8, status: 404 });
   });
 

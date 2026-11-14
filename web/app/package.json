@@ -94,6 +94,7 @@
     "mermaid": "^11.17.2",
     "monaco-editor": "^0.57.0",
     "ngx-markdown": "^22.0.0",
+    "parse5": "8.0.1",
     "pdfjs-dist": "^6.5.438",
     "postcss": "^8.5.26",
     "pptxgenjs": "^4.0.1",

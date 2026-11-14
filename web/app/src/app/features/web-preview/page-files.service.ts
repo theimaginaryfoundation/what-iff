@@ -4,6 +4,8 @@ import { Injectable, inject } from '@angular/core';
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { bytesToBase64 } from '../../core/utils/base64';
 import { FolderFiles } from './folder-files.service';
+import { PAGE_BRIDGE_SCRIPT } from './page-bridge';
+import { withSourcePositions } from './source-positions';
 import { cssReferences, isStylesheet, pageReferences, rewriteCss, rewritePage, serializePage, servedType } from './page-assets';
 
 /** What a lone page may pull from its folder: beyond this the rest stay unresolved. */
@@ -24,14 +26,17 @@ export interface BuiltPage {
  * Builds a lone `.html` file's page (ADR 0x050 §1): the files it names beside it in its folder are
  * fetched, stylesheets are rewritten to point at their own files, and every reference is swapped for
  * a `data:` URL. Not a `blob:` URL: the frame's origin is opaque, and a browser refuses it another
- * origin's blobs. A page that names no file is returned as it is, without a request.
+ * origin's blobs. Each element's source range and our bridge script are added first (ADR 0x050 §5);
+ * a page that names no file gets only those, without a request.
  */
 @Injectable({ providedIn: 'root' })
 export class PageFiles {
   private readonly document = inject(DOCUMENT);
   private readonly folders = inject(FolderFiles);
 
-  async build(page: FileAttachment, html: string): Promise<BuiltPage> {
+  async build(page: FileAttachment, source: string): Promise<BuiltPage> {
+    // Each element's source range and our bridge script first (ADR 0x050 §5).
+    const html = withSourcePositions(source, page.id, PAGE_BRIDGE_SCRIPT);
     const view = this.document.defaultView;
     const doc = new (view?.DOMParser ?? DOMParser)().parseFromString(html, 'text/html');
     const wanted = [...pageReferences(doc)];

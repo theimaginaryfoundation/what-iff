@@ -76,29 +76,26 @@ And a thread is anchored on a range of the file's text, which the server carries
 
 ### 5. Comments on elements
 
-A page's comments are kept beside its files as a text file's are (ADR 0x045 §4), in the same panel; a thread on an element shows on the rendered page and in the source.
+A page's comments are kept with its HTML file as a text file's are (ADR 0x045 §4), in the same panel; a thread on an element shows on the rendered page, and in the source when it has a code anchor.
 An element thread has up to two anchors, each best effort, and falls to the whole file when both are lost:
 
 - **The code anchor is a range of the source, as every text thread has.** For an element written in the HTML, it is its opening tag.
-  The served page carries, on every element the HTML parser read, the tag's offsets in its file (`data-wi-src="<file>:<start>-<end>"`, added by the app as the file is sent, from a location-aware parse); a pick on the page reads them back, and the thread is made as a text thread on that tag, with the tag as its quote.
+  The served page carries, on every element the HTML parser read, the tag's offsets in its file (`data-wi-src="<file>:<start>-<end>"`, in the units comment anchors use), added by the app as the file is sent from a location-aware parse (parse5) and inserted into the text as it is; a pick on the page reads them back, and the thread is made as a text thread on that tag, with the tag as its quote.
   So it shows in the code editor at the tag, the server carries it across edits made anywhere, and `file_comments` reads and writes it with nothing new.
-- **The element anchor is a selector for the element on the page** (`element: { page, selector, fingerprint }`, beside `anchor` as `cell` is for diagrams), so a thread stays on the element when the code around it is reshaped, and so an element the page made with scripts, which has no tag in the HTML, can carry a thread at all.
-  The selector is chosen from the most stable thing the element has, in this order: an `id` that does not look generated; `data-testid`, `data-id`, `name` or `aria-label`; a class combination unique on the page that is not utility classes; last, a structural path with positions.
-  The fingerprint (tag, trimmed text, the attributes the selector used) travels with it: when the page is shown, the selector is checked against the fingerprint, and a selector that no longer points at the same thing is remade from the next strategy before the thread is given up.
-- **Finding the code that made a scripted element** is layered by what the app can know.
-  An element from the HTML has its tag.
-  A JSX, TSX or Vue component the app compiled (§4) has the element's source position added by that compile, the same attribute.
-  A scripted element the app did not compile gets, best effort, the first project file on the stack when it was created: the served page wraps `createElement`, `innerHTML` and `insertAdjacentHTML` to record it.
-  That finds hand-written DOM code and template libraries; it does not find the component behind a framework's own DOM building, which leaves such an element with only its element anchor.
-  A prebuilt bundle gives nothing better than its own call site.
-- A thread lives with the file its code anchor is in (the HTML, or the script that made the element), and names the page it shows on.
-  The rendered page shows the threads of every file in the project that name it; the panel shows the entry file's threads and switches to another file's when a pick lands there.
-- **Picking and marking.** Add comment on the rendered page enters a select mode: the element under the pointer is outlined with its tag and size, as a browser's element picker does, a click picks it, Esc leaves.
-  A small script of ours in the served page draws the markers of open threads on their elements (the active one more strongly), keeps them in place through scrolling, resizing and the page's own changes, and reports picks and clicks on markers to the app in messages under names of ours, as the draw.io plugin does (ADR 0x049 §6).
-  Right-clicking a marked element offers Reply and Delete, as every other format has.
-- Threads on CSS and script files that have no element stay where they are: in the code editor.
-- Agents comment with `file_comments` as on any text file, quoting the tag or the code; `list` says which page and element a thread is on when it has one.
-  An agent writing a thread on an element it cannot quote (one a framework made) gives its selector.
+  A thread made on a stretch of the source marks the element whose tag holds its start, or the first tag inside it.
+- **The element anchor is a selector for the element on the page** (`element: { page, selector, fingerprint }`, `page` the HTML file's id, beside `anchor` as `cell` is for diagrams), so a thread stays on the element when the code around it is reshaped, and so an element the page made with scripts, which has no tag in the HTML, can carry a thread at all.
+  The selector is chosen from the most stable thing the element has, in this order: an `id` that does not look generated; `data-testid`, `data-test`, `data-cy`, `data-id`, `name` or `aria-label`; one or two classes, unique on the page, that are neither utility classes nor hashed; last, a path of positions from the nearest ancestor with a stable id.
+  The fingerprint (tag, the start of its text, the attributes the selector used) travels with it: the page shows a thread on the element its selector finds when its tag and text still match, else on the element of that tag whose text is the fingerprint's.
+  The server only bounds the anchor; it does not depend on the text, so it is kept as it is across edits.
+- **The code behind a scripted element** is recorded, best effort, as the page runs: the bridge script wraps `createElement`, `innerHTML`, `outerHTML` and `insertAdjacentHTML` and keeps the first project file on the stack for each element made.
+  That finds hand-written DOM code and template libraries; it does not find the component behind a framework's own DOM building, and a prebuilt bundle gives nothing better than its own call site.
+  It travels with a pick, but a thread on a scripted element is made on the element alone for now: keeping it with the script that made it is in Later.
+- **Picking and marking.** Comment, on the rendered page, enters a picker: the element under the pointer is outlined with its tag and size, as a browser's element picker does, a click picks it, Esc leaves.
+  A pick on an element of the page's own file starts a thread on its tag and on the element; any other pick starts one on the element alone, labelled with its tag and the start of its text.
+  The bridge script (`page-bridge.ts`, first in every served page's head, in a layer of its own out of the page's styles) draws the marks of open threads on their elements, the active one more strongly, keeps them in place through scrolling, resizing and the page's own changes, and reports picks and clicks on marks to the app; the host page relays both ways.
+  A click on a mark chooses its thread, and choosing one in the panel scrolls the page to it.
+- Threads on CSS and script files stay where they are: in the code editor.
+- Agents comment with `file_comments` as on any text file, quoting the tag or the code; `add` takes `selector` (and `page`, the HTML file, when it is not `file`) for an element, alone or beside a quote, and `list` says which element of which page a thread is on.
 
 ### 6. Keeping the page current
 
@@ -144,5 +141,7 @@ A file's path is the same in the agent's file tools, in the Files tab, in a proj
 
 - **Compiling in the browser** (§4): `esbuild-wasm` for TypeScript and JSX, `sass` for SCSS, on demand, in a worker; source positions added to compiled components for §5.
 - **Builds in the container** (§4), and a built project's output served as the site.
+- **Threads kept with the script that made an element**: the recorded call site as the code anchor in that file, and the page showing the threads of every project file that name it.
+- **Reply and Delete on a mark's right-click menu**, as the other formats have; the panel has both meanwhile.
 - **A picture of the page for agents**, drawn where a browser runs beside the conversation, as diagrams have a preview (ADR 0x049 §8): the `diagram` tool's shape, for pages.
 - **Hosting**: the deployed site's bucket, distribution, response headers and the deploy workflow's build.

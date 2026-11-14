@@ -6,8 +6,9 @@
  *
  * Messages from the app:   { type: 'file', id, status, contentType?, body?, message? }  (an answer)
  *                          { type: 'reload' } | { type: 'navigate', entry }
+ *                          { type: 'bridge', data }  (for the page's bridge script, ADR 0x050 §5)
  * Messages to the app:     { type: 'ready' } | { type: 'get', id, path } | { type: 'loaded', path }
- *                          | { type: 'failed', message }
+ *                          | { type: 'failed', message } | { type: 'bridge', data }  (from the bridge)
  */
 'use strict';
 
@@ -61,6 +62,11 @@
   };
 
   window.addEventListener('message', event => {
+    // The page's bridge script, relayed to the app as it is.
+    if (event.source === frame.contentWindow && event.origin === location.origin) {
+      if (app && event.data && event.data.wiBridge) app.postMessage({ type: 'bridge', data: event.data.wiBridge });
+      return;
+    }
     if (event.source !== window.parent || !originAllowed(event.origin)) return;
     const data = event.data || {};
     if (data.type !== 'whatiff-preview-init' || app || !event.ports || !event.ports[0]) return;
@@ -84,6 +90,12 @@
       reply.postMessage({ status: data.status, contentType: data.contentType, body, message: data.message }, body ? [body] : []);
     } else if (data.type === 'reload') {
       reload();
+    } else if (data.type === 'bridge' && data.data) {
+      try {
+        frame.contentWindow.postMessage({ wiApp: data.data }, location.origin);
+      } catch {
+        // A page that navigated off the site has no bridge of ours.
+      }
     } else if (data.type === 'navigate' && typeof data.entry === 'string') {
       entry = data.entry;
       start();

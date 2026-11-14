@@ -2,6 +2,8 @@ import { FileAttachment } from '../../core/models/file-attachment.model';
 import { FolderFiles } from './folder-files.service';
 import { packageVersions, rewriteBareImports } from './module-imports';
 import { servedType } from './page-assets';
+import { PAGE_BRIDGE_SCRIPT } from './page-bridge';
+import { withSourcePositions } from './source-positions';
 
 /** An answer to the preview site's worker: a file, or why there is none. */
 export interface SiteAnswer {
@@ -41,8 +43,8 @@ export class SiteProject {
     private readonly folders: FolderFiles,
     /** The gallery folder that is the site's root ("" for the top level). */
     readonly root: string,
-    /** Unsaved text by path (the page being edited), served instead of the stored file. */
-    private readonly unsaved: ReadonlyMap<string, string>,
+    /** Unsaved text by path (the page being edited) and the file it is, served instead of the stored file. */
+    private readonly unsaved: ReadonlyMap<string, { text: string; file: string }>,
     /** Parses HTML (the document's DOMParser). */
     private readonly parseHtml: (html: string) => Document,
     /** The conversation's files, when the page is open in one. */
@@ -53,8 +55,8 @@ export class SiteProject {
   async get(path: string): Promise<SiteAnswer> {
     const place = this.place(path);
     if (!place) return { status: 400, message: `${path} is not a path in this project.` };
-    const text = this.unsaved.get(path);
-    if (text !== undefined) return this.serve(path, place.name, null, new TextEncoder().encode(text));
+    const unsaved = this.unsaved.get(path);
+    if (unsaved !== undefined) return this.serve(path, place.name, unsaved.file, null, new TextEncoder().encode(unsaved.text));
     const file = await this.find(place, this.lookups(false));
     if (!file) {
       this.missing.set(path, place);
@@ -64,7 +66,7 @@ export class SiteProject {
     this.missing.delete(path);
     this.served.set(path, { ...place, version: versionOf(file) });
     const bytes = new Uint8Array(await (await this.folders.download(file)).arrayBuffer());
-    return this.serve(path, place.name, file, bytes);
+    return this.serve(path, place.name, file.id, file, bytes);
   }
 
   /** Whether anything served, or asked for and missing, is different now. */
@@ -102,14 +104,16 @@ export class SiteProject {
     return { folder, name };
   }
 
-  private async serve(path: string, name: string, file: FileAttachment | null, bytes: Uint8Array): Promise<SiteAnswer> {
+  private async serve(path: string, name: string, fileId: string, file: FileAttachment | null, bytes: Uint8Array): Promise<SiteAnswer> {
     const lower = name.toLowerCase();
     let contentType = servedType(name, file?.file_type);
     if (MODULE_EXTENSIONS.some(ext => lower.endsWith(ext)) && !this.ownImportMap) {
       const source = new TextDecoder().decode(bytes);
       bytes = new TextEncoder().encode(await rewriteBareImports(source, await this.packageVersions()));
     } else if (HTML_EXTENSIONS.some(ext => lower.endsWith(ext))) {
-      bytes = new TextEncoder().encode(await this.withInlineModules(new TextDecoder().decode(bytes)));
+      // Each element's source range and our bridge script first (ADR 0x050 §5), then the modules.
+      const page = withSourcePositions(new TextDecoder().decode(bytes), fileId, PAGE_BRIDGE_SCRIPT);
+      bytes = new TextEncoder().encode(await this.withInlineModules(page));
     }
     if (/^text\/|javascript|json|svg/.test(contentType) && !/charset=/i.test(contentType)) contentType += '; charset=utf-8';
     return { status: 200, contentType, body: bytes.slice().buffer };

@@ -11,6 +11,7 @@ import {
   input,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 import { MarkdownModule } from 'ngx-markdown';
 
@@ -19,6 +20,7 @@ import { renderLatexMath } from '../../../core/utils/latex-math.helpers';
 import { asMermaidMarkdown, renderMermaid } from '../../../core/utils/mermaid.helpers';
 import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 import { HtmlPreviewComponent } from '../../web-preview/html-preview.component';
+import { PageComments } from '../../web-preview/page-comments';
 import { CommentAgentService } from '../../office/comments/comment-agent.service';
 import { CommentPeopleService } from '../../office/comments/comment-people.service';
 import { CommentsPanelComponent } from '../../office/comments/comments-panel.component';
@@ -123,6 +125,16 @@ export class TextViewerComponent {
     range: { start: number; end: number } | null;
   } | null>(null);
   private surface: ViewerCommentSurface | null = null;
+  /** The rendered page, when an HTML file is shown as one. */
+  private readonly preview = viewChild(HtmlPreviewComponent);
+  /** Comments on the rendered page's elements (ADR 0x050 §5). */
+  readonly pageComments = new PageComments(
+    this.comments,
+    action => this.preview()?.sendToPage(action),
+    () => this.panel.open.set(true),
+    () => this.canComment(),
+    () => this.file(),
+  );
   private map: CommentTextMap | null = null;
   /** A thread chosen while the text was shown formatted, to show once the raw text is. */
   private revealAfterRender: string | null = null;
@@ -157,6 +169,12 @@ export class TextViewerComponent {
     effect(() => {
       const state = this.comments.paintState();
       untracked(() => this.surface?.paint(state));
+    });
+    // The rendered page marks the threads' elements as they change.
+    effect(() => {
+      const marks = this.pageComments.marks();
+      if (!this.showRendered() || !this.isHtml()) return;
+      untracked(() => this.preview()?.sendToPage({ type: 'marks', marks }));
     });
     inject(DestroyRef).onDestroy(() => this.surface?.dispose());
     effect(() => {
@@ -254,6 +272,11 @@ export class TextViewerComponent {
    */
   startComment(range = this.selectedRange()): void {
     if (!this.canComment()) return;
+    // On a rendered page, a comment is on an element: pick it.
+    if (this.showRendered() && this.isHtml()) {
+      this.pageComments.togglePick();
+      return;
+    }
     this.panel.open.set(true);
     if (range) {
       this.comments.start(range);
@@ -264,6 +287,11 @@ export class TextViewerComponent {
 
   /** A thread chosen in the panel: shown where its words are, or in the raw text when the formatting hides them. */
   selectThread(threadId: string): void {
+    if (this.showRendered() && this.isHtml()) {
+      this.comments.select(threadId);
+      this.pageComments.reveal(threadId);
+      return;
+    }
     const at = this.comments.positions().get(threadId);
     if (this.showRendered() && at && !this.map?.range(at.start, at.end)) {
       this.revealAfterRender = threadId;

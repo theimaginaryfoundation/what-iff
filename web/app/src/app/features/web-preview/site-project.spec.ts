@@ -52,12 +52,16 @@ describe('SiteProject', () => {
         'main.js': { text: `import { h } from 'preact'; import './util.js';` },
       },
     };
-    const unsaved = new Map([['index.html', `<script type="module">import { marked } from 'marked';</script><p>draft</p>`]]);
+    const unsaved = new Map([
+      ['index.html', { text: `<script type="module">import { marked } from 'marked';</script><p>draft</p>`, file: 'page-id' }],
+    ]);
     const project = new SiteProject(folders(tree), 'site', unsaved, parse);
     expect(text((await project.get('main.js')).body)).toBe(`import { h } from 'https://esm.sh/preact@10.19.0'; import './util.js';`);
     const page = text((await project.get('index.html')).body);
     expect(page).toContain(`import { marked } from 'https://esm.sh/marked';`);
-    expect(page).toContain('<p>draft</p>');
+    // Its elements carry their source ranges in the unsaved text, and our bridge comes first.
+    expect(page).toMatch(/<p data-wi-src="page-id:\d+-\d+">draft<\/p>/);
+    expect(page.indexOf('__whatiffBridge')).toBeLessThan(page.indexOf('marked'));
   });
 
   it('leaves bare imports to a page that brings its own import map', async () => {
@@ -94,9 +98,9 @@ describe('SiteProject', () => {
 
   it('does not count the page being edited as changed elsewhere', async () => {
     const tree: Tree = { site: { 'index.html': { text: 'stored' } } };
-    const unsaved = new Map([['index.html', 'typed']]);
+    const unsaved = new Map([['index.html', { text: 'typed', file: 'page-id' }]]);
     const project = new SiteProject(folders(tree), 'site', unsaved, parse);
-    expect(text((await project.get('index.html')).body)).toBe('typed');
+    expect(text((await project.get('index.html')).body)).toContain('typed');
     tree['site']['index.html'] = { text: 'saved', version: 2 };
     expect(await project.changed()).toBe(false);
   });

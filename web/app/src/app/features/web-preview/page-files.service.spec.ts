@@ -43,10 +43,13 @@ function decoded(url: string): { type: string; text: string } {
 describe('PageFiles', () => {
   afterEach(() => TestBed.resetTestingModule());
 
-  it('returns a page that names no file as it is, without a request', async () => {
+  it('builds a page that names no file without a request: its elements’ source ranges and our bridge only', async () => {
     const { pages, gallery } = setup({});
     const html = '<p>Hello</p><script>document.body.append("hi")</script>';
-    await expect(pages.build(page, html)).resolves.toEqual({ html, missing: [], skipped: [] });
+    const built = await pages.build(page, html);
+    expect(built).toMatchObject({ missing: [], skipped: [] });
+    expect(built.html).toMatch(/^<script>\(function \(\) \{/);
+    expect(built.html).toContain('<p data-wi-src="page:0-3">Hello</p>');
     expect(gallery.listImages).not.toHaveBeenCalled();
   });
 
@@ -63,7 +66,7 @@ describe('PageFiles', () => {
     expect(built.html).toContain('src="gone.png"');
     // data: URLs, as an opaque-origin frame may not load the app's blob: URLs.
     const doc = new DOMParser().parseFromString(built.html, 'text/html');
-    expect(decoded(doc.querySelector('script')!.getAttribute('src')!)).toEqual({ type: 'text/javascript', text: 'console.log(1)' });
+    expect(decoded(doc.querySelector('script[src]')!.getAttribute('src')!)).toEqual({ type: 'text/javascript', text: 'console.log(1)' });
     const styles = decoded(doc.querySelector('link')!.getAttribute('href')!);
     expect(styles.type).toBe('text/css');
     // The stylesheet points at its own import's and image's URLs.

@@ -8,6 +8,7 @@ import {
   effect,
   inject,
   input,
+  output,
   signal,
   untracked,
   viewChild,
@@ -17,6 +18,7 @@ import { DomSanitizer } from '@angular/platform-browser';
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { WORKSPACE_CONTEXT } from '../file-workspace/editors/file-editor';
 import { FolderFiles } from './folder-files.service';
+import { PageBridgeAction, PageBridgeEvent, readBridgeEvent } from './page-bridge';
 import { PREVIEW_URL } from './preview-site.config';
 import { SiteProject } from './site-project';
 
@@ -26,7 +28,11 @@ export const SITE_LOAD_TIMEOUT_MS = 20_000;
 export const SITE_POLL_MS = 3_000;
 
 /** Messages from the site's host page (web/preview/site/host.js). */
-type HostMessage = { type: 'get'; id: number; path: string } | { type: 'loaded'; path: string } | { type: 'failed'; message: string };
+type HostMessage =
+  | { type: 'get'; id: number; path: string }
+  | { type: 'loaded'; path: string }
+  | { type: 'failed'; message: string }
+  | { type: 'bridge'; data: unknown };
 
 /**
  * An `.html` file's page served by the preview site (ADR 0x050 §3), with its folder as the site's
@@ -98,6 +104,8 @@ export class SiteFrameComponent {
   readonly file = input.required<FileAttachment>();
   /** The page's text as it is now, an editor's unsaved text included; null serves the stored file. */
   readonly html = input<string | null>(null);
+  /** What the page's bridge script reports (ADR 0x050 §5). */
+  readonly pageMessage = output<PageBridgeEvent>();
 
   /** Each opening of a page has a key of its own, which the site's worker serves it under. */
   private readonly token = signal(newToken());
@@ -111,7 +119,7 @@ export class SiteFrameComponent {
 
   private port: MessagePort | null = null;
   private project: SiteProject | null = null;
-  private readonly unsaved = new Map<string, string>();
+  private readonly unsaved = new Map<string, { text: string; file: string }>();
   private loadTimer: ReturnType<typeof setTimeout> | null = null;
   private polling = false;
 
@@ -128,7 +136,7 @@ export class SiteFrameComponent {
       untracked(() => {
         const entry = this.file().name;
         if (html === null) this.unsaved.delete(entry);
-        else this.unsaved.set(entry, html);
+        else this.unsaved.set(entry, { text: html, file: this.file().id });
         if (first) first = false;
         else this.port?.postMessage({ type: 'reload' });
       });
@@ -190,9 +198,17 @@ export class SiteFrameComponent {
       }
       if (this.port !== port) return;
       port.postMessage({ type: 'file', id: message.id, ...answer }, answer.body ? [answer.body] : []);
+    } else if (message.type === 'bridge') {
+      const event = readBridgeEvent(message.data);
+      if (event) this.pageMessage.emit(event);
     } else if (message.type === 'failed') {
       this.failure.set(String(message.message ?? 'unknown error'));
     }
+  }
+
+  /** Tells the page's bridge script something, through the host page. */
+  sendToPage(action: PageBridgeAction): void {
+    this.port?.postMessage({ type: 'bridge', data: action });
   }
 
   /** Reloads the page when a file it uses changed elsewhere. */
