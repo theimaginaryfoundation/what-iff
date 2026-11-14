@@ -15,12 +15,12 @@
 
 ## Non-obvious decisions
 
-- **Manual `ResponseNewParams`** for one-off LLM schedule interpretation is called out in the architecture doc as an acceptable pattern — if this package invokes the model, keep that doc link accurate.
+- **Schedule interpretation is a utility call:** `Parse` sends a `provider.UtilityRequest` on the simple role through a `provider.UtilityCaller` (the agent), which picks the model and its API.
 
 ## Testing
 
 - `parse_test.go` — cron minimum-interval validation.
-- `parse_no_temperature_test.go` — `Parse` sends the utility model with no temperature (recording `openAICaller`).
+- `parse_request_test.go` — `Parse` asks the simple role for the `AgentJobSchedule` structured output (recording `UtilityCaller`).
 
 ## Related documentation
 

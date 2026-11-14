@@ -13,6 +13,10 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
   OpenAI sends every image to the edit endpoint with the mask turned into its alpha form (`alphaMaskPNG`); Gemini, which has no mask parameter, gets a guide image with the area tinted magenta (`maskGuidePNG`).
   `PrepareEdit` checks a request and builds that vendor's form of the mask once; `EditImage` takes the prepared request, so a request for several images decodes and encodes the mask once, and a bad mask is caught before the caller bills it.
   z.ai and Qwen do not edit yet.
+- **Utility requests** (`utility.go`, `utility_params.go`): `UtilityRequest` describes a background call in provider-neutral terms: role, instructions, an optional conversation (`Context`, or a stored `PreviousResponseID`), `History` turns typed by `UtilityMessageRole` (user or developer), and last `Input`, the user turn that asks for the work, with an optional image; plus an optional JSON `UtilitySchema`, output cap, safety id and `UtilityServiceTier` (default, priority or flex).
+  `Validate` holds a request to its rules (a known role, turn roles and tier; at most one of `Context` and `PreviousResponseID`; an ask, meaning `Input` with text or an image; a base64 `data:` image), returning `ErrInvalidUtilityRequest`, so no field is silently left out.
+  `UtilityResponsesParams`, `UtilityClaudeParams` and `UtilityChatCompletionParams` render it for each API; the Responses rendering matches what each call site built by hand before, except that a lone user turn goes as plain string input, which the API treats the same as a one-message list, and a conversation sent as `Context` drops images the API rejects (`SanitizeImagesForOpenAIInput`), as the checkpoint summary already did; `OpenAIRejectedImages` counts those drops (no bytes to inline, or a rejected media type) so a caller can report them.
+  APIs without a developer role get developer turns as system text, an image-only turn sends no empty text part (Anthropic rejects one), and no rendering carries sampling settings.
 - **OpenAI:** `RenderOpenAIInputItems`, `ModelContext.BuildOpenAIResponseParams`, `OpenAIProvider`, `OpenAIAdapter`, `ProcessResponseOutput` (assistant text extraction / dedup), `BuildOpenAITools`, image generation helpers, file-attachment upload helpers.
   **`SegmentKindUserMessage` with `RoleDeveloper` and images** (expression continuity portrait) is rendered as **two** input items—developer text plus a **user** message carrying `input_image`, because the Responses API allows images only under the user role for message parts.
 - **Claude:** `BuildClaudeParams`, `ClaudeProvider`, `ClaudeAdapter`, `ClaudeFunctionTool`, `ExtractClaudeText`, `ExtractClaudeBetaText`, `UnmarshalClaudeTextJSON`.
@@ -122,7 +126,7 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 
 ## Dependencies
 
-- **Inbound:** `internal/agent` (message handling, loops), `internal/agentjobs/schedule` (schedule parsing via `CallWithRetry`).
+- **Inbound:** `internal/agent` (message handling, loops), `internal/agentjobs/schedule` (schedule parsing via `UtilityCaller`).
 - **Outbound:** `internal/datastore` (OpenAI provider for some ops), OpenAI and Anthropic SDKs, `go.uber.org/zap`.
 
 ## Mock directives
@@ -195,6 +199,7 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 - `mistral_content_test.go` — Mistral thinking chunks in streamed and non-streamed content, and chunk replay on tool rounds.
   `call_timeouts_test.go` — each limit against `httptest` servers (slow response, stalled and endless streams), a healthy stream outliving `Request`, caller cancel staying a cancel, and a stalled Claude stream timing out after one attempt.
   `deny_transport_test.go` — proves an `httptest` server is never reached, including through a real openai-go client built on the deny client.
+- `utility_params_test.go` — each request shape's Responses rendering against the hand-built params it replaced, a conversation continued from a `ModelContext`, the Messages and Chat Completions renderings (developer turns, images, structured output), no sampling settings on any API, and data URL splitting.
 - `model_context_test.go`, `model_context_hydrate_test.go`, `model_context_openai_test.go` — segment assembly, hydration helpers, OpenAI/Claude rendering (including Claude text fallback when image bytes absent).
 - `model_context_breakdown_test.go` — `SegmentBreakdown` aggregation, first-appearance ordering, cacheable-any / image counting, and nil-receiver/nil-counter guards.
 - `openai_test.go`, `openai_tools_test.go`, `claude_test.go`, `claude_adapter_test.go`, `claude_adapter_more_test.go` — output shape and tool compatibility (including Beta MCP adapter mode).
