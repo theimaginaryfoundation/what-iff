@@ -23,6 +23,25 @@ type FileCommentCell struct {
 	Page string `json:"page,omitempty"`
 }
 
+// FileCommentElement is the element of a rendered page a thread is on (ADR 0x050 §5): the page (an
+// HTML file's id) and a selector for the element there, with what the element looked like when the
+// thread was made, so a page can tell whether the selector still finds the same thing. It is the
+// thread's element anchor; its range of the text (Anchor), when it has one, is its code anchor, in
+// the file the thread is kept with. Either may be lost; a thread with neither is on the whole file.
+type FileCommentElement struct {
+	Page        string                         `json:"page"`
+	Selector    string                         `json:"selector"`
+	Fingerprint *FileCommentElementFingerprint `json:"fingerprint,omitempty"`
+}
+
+// FileCommentElementFingerprint is what an element looked like: its tag, the start of its text and
+// the attributes its selector used.
+type FileCommentElementFingerprint struct {
+	Tag   string            `json:"tag"`
+	Text  string            `json:"text,omitempty"`
+	Attrs map[string]string `json:"attrs,omitempty"`
+}
+
 // FileCommentMention is someone a comment mentions: their `@Name` is written into its text.
 type FileCommentMention struct {
 	ID   string `json:"id"`
@@ -42,12 +61,14 @@ type FileComment struct {
 // FileCommentThread is a thread on a range of the file, or on the whole file when Anchor is nil;
 // on a diagram, on one of its elements (Cell, Anchor nil, Quote the element's label) or the whole file.
 type FileCommentThread struct {
-	ID       string            `json:"id"`
-	Anchor   *FileCommentRange `json:"anchor"`
-	Cell     *FileCommentCell  `json:"cell,omitempty"`
-	Quote    string            `json:"quote"`
-	Resolved bool              `json:"resolved"`
-	Comments []FileComment     `json:"comments"`
+	ID     string            `json:"id"`
+	Anchor *FileCommentRange `json:"anchor"`
+	Cell   *FileCommentCell  `json:"cell,omitempty"`
+	// Element is the element of a rendered page the thread is on, beside its code anchor (ADR 0x050 §5).
+	Element  *FileCommentElement `json:"element,omitempty"`
+	Quote    string              `json:"quote"`
+	Resolved bool                `json:"resolved"`
+	Comments []FileComment       `json:"comments"`
 }
 
 // FileComments is a file's comment threads, placed on the text of ContentVersion.

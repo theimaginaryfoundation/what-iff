@@ -12891,6 +12891,40 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FileCommentMention'
+    FileCommentElement:
+      type: object
+      description: >-
+        The element of a rendered page a thread is on (ADR 0x050 §5): its element anchor, beside
+        the thread's code anchor (its range of the text, when it has one). Best effort: a page shows
+        the thread on the element its selector finds when that still matches the fingerprint, and
+        a thread with neither anchor is on the whole file.
+      required: [page, selector]
+      properties:
+        page:
+          type: string
+          format: uuid
+          description: The HTML file the element is on
+        selector:
+          type: string
+          maxLength: 1000
+          description: A CSS selector for the element on that page
+        fingerprint:
+          type: object
+          description: What the element looked like when the thread was made
+          required: [tag]
+          properties:
+            tag:
+              type: string
+            text:
+              type: string
+              maxLength: 200
+              description: The start of its text
+            attrs:
+              type: object
+              maxProperties: 8
+              additionalProperties:
+                type: string
+              description: The attributes its selector used
     FileCommentThread:
       type: object
       required: [id, anchor, quote, resolved, comments]
@@ -12904,6 +12938,8 @@ components:
             - $ref: '#/components/schemas/FileCommentRange'
         cell:
           $ref: '#/components/schemas/FileCommentCell'
+        element:
+          $ref: '#/components/schemas/FileCommentElement'
         quote:
           type: string
           description: >-

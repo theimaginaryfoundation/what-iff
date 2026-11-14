@@ -16695,11 +16695,32 @@ export interface components {
             text: string;
             mentions?: components["schemas"]["FileCommentMention"][];
         };
+        /** @description The element of a rendered page a thread is on (ADR 0x050 §5): its element anchor, beside the thread's code anchor (its range of the text, when it has one). Best effort: a page shows the thread on the element its selector finds when that still matches the fingerprint, and a thread with neither anchor is on the whole file. */
+        FileCommentElement: {
+            /**
+             * Format: uuid
+             * @description The HTML file the element is on
+             */
+            page: string;
+            /** @description A CSS selector for the element on that page */
+            selector: string;
+            /** @description What the element looked like when the thread was made */
+            fingerprint?: {
+                tag: string;
+                /** @description The start of its text */
+                text?: string;
+                /** @description The attributes its selector used */
+                attrs?: {
+                    [key: string]: string;
+                };
+            };
+        };
         FileCommentThread: {
             id: string;
             /** @description The range the thread is on, or null when it is on the whole file. */
             anchor: components["schemas"]["FileCommentRange"] | null;
             cell?: components["schemas"]["FileCommentCell"];
+            element?: components["schemas"]["FileCommentElement"];
             /** @description The text the thread is on (or was on, for a thread on the whole file); on a diagram, the label of the element it is on. */
             quote: string;
             resolved: boolean;

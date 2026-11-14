@@ -36,7 +36,7 @@ const FileCommentsDescription = `Read and write the comment threads on a file: r
 action:
 - "list": the file's threads: each one's id, what it is on (the quoted text with its lines, or the whole file), whether it is resolved, and its comments.
 - "reply": add text to the thread thread_id.
-- "add": start a thread with text. quote is the exact text of the file the thread is about, copied from the file (a few words or a line, enough to be unique); when the same text appears more than once, occurrence picks one (1 = first). Leave quote empty for a thread on the whole file (not in Word, where a comment needs text). PowerPoint: quote is text in a shape, and slide (1-based) limits it to one slide; slide alone puts the thread on the slide. Excel: cell (e.g. "B3") on sheet (its name; empty for the first), one thread per cell (reply to an existing one instead). draw.io diagram (.drawio): cell is the id of the element the thread is on (the diagram tool lists them), with page (its id, name or number) when it is not on the first page; leave quote empty.
+- "add": start a thread with text. quote is the exact text of the file the thread is about, copied from the file (a few words or a line, enough to be unique); when the same text appears more than once, occurrence picks one (1 = first). Leave quote empty for a thread on the whole file (not in Word, where a comment needs text). PowerPoint: quote is text in a shape, and slide (1-based) limits it to one slide; slide alone puts the thread on the slide. Excel: cell (e.g. "B3") on sheet (its name; empty for the first), one thread per cell (reply to an existing one instead). draw.io diagram (.drawio): cell is the id of the element the thread is on (the diagram tool lists them), with page (its id, name or number) when it is not on the first page; leave quote empty. Web page: selector (a CSS selector, as stable as you can make it: an id, a data-testid, then classes) puts the thread on that element of the rendered page, with page the HTML file it is on (empty when file is that page); give quote too when the element's code is in file (its tag, or the script that makes it), so the thread also shows there.
 - "resolve": mark thread_id resolved (resolved=true), or open it again (resolved=false).
 
 Comments are plain text, shown as written: no Markdown (no **bold**, lists or headings). Keep them short, like a reviewer's note.
@@ -60,7 +60,8 @@ var FileCommentsToolSpec = FunctionToolSpec{
 		"slide":      map[string]interface{}{"type": "integer", "minimum": 1, "description": "PowerPoint (add): the slide, 1-based."},
 		"sheet":      map[string]interface{}{"type": "string", "description": "Excel (add): the sheet's name; empty for the first sheet."},
 		"cell":       map[string]interface{}{"type": "string", "description": "Excel (add): the cell, e.g. 'B3'. Diagram (add): the element's id."},
-		"page":       map[string]interface{}{"type": "string", "description": "Diagram (add): the element's page (id, name or number from 1); empty for any page."},
+		"page":       map[string]interface{}{"type": "string", "description": "Diagram (add): the element's page (id, name or number from 1); empty for any page. Web page (add): the HTML file the element is on (id or path); empty when file is that page."},
+		"selector":   map[string]interface{}{"type": "string", "description": "Web page (add): a CSS selector for the element of the rendered page the thread is on."},
 	},
 	Required: []string{"action", "file"},
 }
@@ -77,6 +78,9 @@ type fileCommentsArgs struct {
 	Sheet      string `json:"sheet"`
 	Cell       string `json:"cell"`
 	Page       string `json:"page"`
+	Selector   string `json:"selector"`
+	// pageID is the HTML file a selector's element is on, resolved from Page by Run.
+	pageID string
 }
 
 type fileCommentView struct {
@@ -176,6 +180,22 @@ func (t *FileCommentsTool) Run(ctx context.Context, chat *models.Chat, input []b
 		return "", err
 	}
 	ref := &agentFileRef{ID: att.ID.String(), Path: FilePath(att)}
+	if args.Action == "add" && strings.TrimSpace(args.Selector) != "" {
+		page := att
+		if strings.TrimSpace(args.Page) != "" {
+			if page, err = ResolveUserFile(ctx, t.files, chat.UserID, args.Page, nil); err != nil {
+				var refusal FileRefusal
+				if errors.As(err, &refusal) {
+					return t.refuse("page: " + refusal.Error())
+				}
+				return "", err
+			}
+		}
+		if !isHTMLPage(page) {
+			return t.refuse("selector is for an element of a web page: page must be an HTML file (empty when file is one)")
+		}
+		args.pageID = page.ID.String()
+	}
 	var res fileCommentsResult
 	if t.office != nil && t.office.FormatOf(att) != nil {
 		// A comment in an Office file is part of the file: changing one writes a new version of
@@ -287,6 +307,12 @@ func threadView(th models.FileCommentThread, text string) fileThreadView {
 	case th.Quote != "":
 		v.On = fmt.Sprintf("the whole file (it was on %q, which is gone)", th.Quote)
 	}
+	if th.Element != nil {
+		v.Where = fmt.Sprintf("element %q on the page %s", th.Element.Selector, th.Element.Page)
+		if th.Anchor == nil && th.Quote == "" {
+			v.On = "an element of the page"
+		}
+	}
 	for _, c := range th.Comments {
 		v.Comments = append(v.Comments, fileCommentView{ID: c.ID, Author: c.AuthorName, Text: c.Text})
 	}
@@ -311,6 +337,12 @@ func (t *FileCommentsTool) change(ctx context.Context, chat *models.Chat, att *m
 		switch args.Action {
 		case "add":
 			th := models.FileCommentThread{ID: comment.ID, Comments: []models.FileComment{comment}}
+			if args.pageID != "" {
+				if cur.Diagram || cur.Image {
+					return nil, fileRefusalf("selector is for a thread on a web page's element; this file's threads cannot be on one")
+				}
+				th.Element = &models.FileCommentElement{Page: args.pageID, Selector: strings.TrimSpace(args.Selector)}
+			}
 			if cur.Diagram && strings.TrimSpace(args.Cell) != "" {
 				cell, label, err := filecomments.CellOn(cur.Text, strings.TrimSpace(args.Cell), strings.TrimSpace(args.Page))
 				if err != nil {
@@ -484,4 +516,11 @@ func officeThreadView(th officecomments.Thread) fileThreadView {
 		v.Comments = append(v.Comments, fileCommentView{ID: c.ID, Author: c.AuthorName, Text: c.Text})
 	}
 	return v
+}
+
+// isHTMLPage reports whether the file is a web page a thread's element can be on (ADR 0x050 §5).
+func isHTMLPage(file *models.FileAttachment) bool {
+	name := strings.ToLower(file.Name)
+	kind := strings.ToLower(strings.TrimSpace(strings.Split(file.FileType, ";")[0]))
+	return strings.HasSuffix(name, ".html") || strings.HasSuffix(name, ".htm") || kind == "text/html" || kind == "application/xhtml+xml"
 }

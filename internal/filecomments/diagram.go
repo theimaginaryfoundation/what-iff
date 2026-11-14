@@ -34,6 +34,7 @@ func OnCells(threads []models.FileCommentThread, xml string) []models.FileCommen
 			t.Comments = []models.FileComment{}
 		}
 		t.Anchor = nil
+		t.Element = nil
 		if t.Cell != nil && err == nil {
 			if page, el, ok := findCell(pages, *t.Cell); ok {
 				t.Cell = &models.FileCommentCell{ID: el.ID, Page: page}
