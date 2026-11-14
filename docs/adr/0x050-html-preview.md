@@ -34,32 +34,37 @@ And a thread is anchored on a range of the file's text, which the server carries
 ### 2. A folder opens as a site
 
 - A project is a gallery folder: its files and those of the folders beneath it, with their paths relative to it (`index.html`, `css/app.css`, `img/logo.png`).
-  Open as site on a folder, or on an `.html` file in one, opens the project with that file as its entry (`index.html` when a folder was opened).
+  Where the app has a preview site (§3), an `.html` file always opens this way, with its own folder as the project's root, so a page finds its other files as it would on a web server; Open as site, in a folder that has an `index.html`, opens that page.
 - Paths in the project are the gallery's: folder segments are lower case (the gallery normalizes them), file names keep their case.
-  A reference whose folder case differs from the gallery's still resolves, matched case-insensitively on folder segments, so `Assets/logo.png` finds `assets/logo.png`; a name must match exactly.
-- A conversation's files are a project too: the files in its context (ADR 0x043 §4), at their workspace paths (§7).
-  A page open from a conversation finds its stylesheet and its script there the same way.
-- The project's files are the text and image files the workspace already serves; anything else (a notebook, a spreadsheet) is served as bytes with its type and no more.
-  A project is at most a few hundred files and a few tens of MB; past that, Open as site says so.
+  A reference whose folder case differs from the gallery's still resolves, as folder segments are matched without case, so `Assets/logo.png` finds `assets/logo.png`; a name must match exactly.
+- Files are found as the page asks for them, a folder at a time, so a project has no size limit of its own; a folder's listing is reused for a few seconds and each file version is downloaded once.
+- A page an agent builds in a folder (`site/index.html`) opens from the conversation as from the gallery.
+  Files attached to messages have no folder; once paths are the same everywhere (§7), a conversation's files at their workspace paths are a project too.
 
-### 3. The preview site: an origin of its own, serving what the app sends it
+### 3. The preview site: an origin of its own, asking the app for each file
 
-- `make preview-site` builds a small static site of ours, served as the diagrams site is (ADR 0x049 §1): locally by the app's dev server at `/preview/` on `127.0.0.1`, deployed on a host of its own.
-  The app's `previewUrl` names it; a URL on the app's own origin, or plain http off localhost, leaves projects off (a lone `.html` still renders as §1).
-- The site's page registers a service worker and waits for the app.
-  The app opens it in an iframe, hands it a `MessagePort`, and sends the project's files; the worker answers every request under `/p/<token>/<path>` from that tree, with the file's type, and a 404 for what is not there.
-  The token is random per frame, so two previews open in one tab never see each other's files, and a frame's tree is dropped when its frame closes.
-- The app pushes a file again when it is saved and tells the frame to reload; the page's own state (scroll, typed input) is lost, which is accepted.
-- The site's response headers: `frame-ancestors` the app only, a content security policy that allows the page's own files, inline scripts and styles (a project's pages have them), `data:` and `blob:`, and the CDNs of §4; nothing else.
-  The service worker and the site's page are the only code of ours there; the page it serves is the user's.
-- Messages between the app and the frame are taken only from the configured origin and that frame's window, as for the notebooks and diagrams sites.
+- The site is three small files of ours (`web/preview/site`: a host page, its script and a service worker), served as the diagrams site is (ADR 0x049 §1): locally by the app's dev server at `/preview/` on `127.0.0.1`, deployed on a host of its own, built by `make preview-site`.
+  The app's `previewUrl` names it; a URL on the app's own origin, or plain http off localhost, leaves projects off and an `.html` file renders on its own (§1).
+- The app frames the host page with a random key (`index.html?t=<key>`), one per opening of a page.
+  Once the host page's service worker is ready it says so; the app answers with a `MessagePort` and the entry path, and the host page opens the user's page in a frame of its own at `p/<key>/<path>`.
+- **Nothing is kept on the site.** Every request under `p/<key>/` reaches the worker, which asks the host page that owns the key, which asks the app over its port; the app finds the file (§2) and answers with its bytes and type, or a 404.
+  A browser stops an idle worker and drops what it holds, so a worker given the files would lose them; asking each time keeps it stateless, and a request being answered keeps it alive.
+  The host page empties the origin's local and session storage when it starts, as the page it shows may be another project's.
+- The page is reloaded when the text being edited changes, and when a file it used changed elsewhere: while it is shown, the app lists the folders it served from every few seconds and compares each served file's content version; a file that was missing and now exists counts too (§6).
+  The page's own state (scroll, typed input) is lost, which is accepted.
+- The user's page shares the host page's origin (a worker serves only same-origin documents); that origin holds nothing of the app's, and the app's frame has the sandbox the diagrams frame has.
+- The host page takes the app's first message only from its parent window, on an origin listed in its `config.js` (`PREVIEW_HOST_ORIGINS` at build time); the app takes messages only from that frame's window on the configured origin.
+- The site's response headers: `frame-ancestors` the app only, a content security policy that allows the page's own files, inline scripts and styles (a project's pages have them), `data:` and `blob:`, and the CDNs of §4; and no caching of the host page or the worker, so a frame never runs an old worker against the app.
 
 ### 4. Dependencies
 
-- **Bare imports resolve through an import map.** `import { h } from 'preact'` in the project's modules is resolved by a map the app injects into the served page: each bare specifier to `https://esm.sh/<name>@<version>`, the version from the project's `package.json` when it has one, else the latest.
-  Nothing is installed; the site's policy allows `esm.sh` and `cdn.jsdelivr.net`, the two hosts people's pages already use.
-  This needs the internet, as the notebook kernel's packages do; the app is on by default and says so where the import map is explained.
-- **TypeScript, JSX and SCSS are compiled in the browser.** Where the served page asks for `app.tsx` or `styles.scss`, the worker asks the app, which compiles it with `esbuild-wasm` or `sass` in a web worker and answers; compiled files are cached by content.
+- **Bare imports load from esm.sh.** `import { h } from 'preact'` names a package, which a browser cannot resolve; as each module is served (a `.js` or `.mjs` file, or an inline `<script type="module">`), its bare imports are rewritten to `https://esm.sh/<name>@<version><path>`, with the version or range the project's root `package.json` asks for, else the latest.
+  Imports are found by `es-module-lexer`, so a string or a comment that looks like one is left alone, and a script that is not a module is served as it is.
+  A page that brings its own import map keeps it: the project's modules are then served unchanged.
+  Rewriting each module as it is served needs no scan of the project first, which an import map in the page would.
+  Nothing is installed; the site's policy allows `esm.sh` and `cdn.jsdelivr.net`.
+  This needs the internet, as the notebook kernel's packages do, and is on by default.
+- **TypeScript, JSX and SCSS are compiled in the browser.** Where the page asks for `app.tsx` or `styles.scss`, the app compiles it with `esbuild-wasm` or `sass` in a web worker before answering; compiled files are cached by content.
   This is a later step (see Later) and adds nothing to a project of plain HTML, CSS and JavaScript.
 - **Real toolchains run in the conversation's container.** A project with a `vite.config.*` or a build script is built where agents run commands, and its output folder is what the site serves; nothing of Node runs in the browser.
   This is for deployments that run containers, as the diagram workshop is (ADR 0x049 §3), and a later step.
@@ -92,8 +97,9 @@ An element thread has up to two anchors, each best effort, and falls to the whol
 
 ### 6. Keeping the page current
 
-- A save in the editor pushes the file and reloads the frame.
-- While a preview is open, the app asks for the project's files every few seconds and pushes any whose `content_version` moved, so an agent's edit in the conversation shows without a click; the list is one request, which the Files tab already makes.
+- New text in the editor (once typing pauses) is served in place of the stored page, which reloads.
+- While a preview is shown, the app lists the folders it served from every few seconds and reloads the page when a file it used has a new `content_version`, or a missing one appears, so an agent's edit shows without a click (§3).
+  Gallery lists carry each file's content version for this, as diagram tiles need it for their preview (ADR 0x049 §8).
   A change event from the server replaces the polling when there is one.
 
 ### 7. One path, everywhere
