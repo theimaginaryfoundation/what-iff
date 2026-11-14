@@ -153,7 +153,8 @@ export class TextViewerComponent {
         this.commentsApi,
         this.me,
         () => state.autosave(),
-        undefined,
+        // A save that finds the script changed since its comments were read reads it again.
+        () => void this.pageComments.reload(file.id),
         this.commentAgent.hooks(() => file),
       );
       return state;
@@ -200,7 +201,15 @@ export class TextViewerComponent {
       if (!this.showRendered() || !this.isHtml()) return;
       untracked(() => this.preview()?.sendToPage({ type: 'marks', marks }));
     });
-    inject(DestroyRef).onDestroy(() => this.surface?.dispose());
+    inject(DestroyRef).onDestroy(() => {
+      this.surface?.dispose();
+      if (this.pictureTimer) clearTimeout(this.pictureTimer);
+    });
+    // The viewer is reused from file to file: nothing of one page's comments carries over.
+    effect(() => {
+      this.file();
+      untracked(() => this.pageComments.reset());
+    });
     effect(() => {
       const blob = this.blob();
       const generation = ++this.generation;
@@ -348,6 +357,7 @@ export class TextViewerComponent {
   }
 
   /** Pictures of the rendered page, stored as its preview for agents and the gallery (ADR 0x050 §8). */
+  private pictureTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly pageSnapshot = new PageSnapshot(action => this.preview()?.sendToPage(action));
   private readonly pagePreview = new FilePreview(
     inject(FileAttachmentService),
@@ -370,9 +380,12 @@ export class TextViewerComponent {
     // The stored page is shown: draw its preview if it has none of this version and of the files
     // it loaded, once its scripts had a moment to draw. A page that reloads because a file it
     // loads changed (an agent's edit) is drawn again the same way.
-    if (event.type === 'ready' && this.pageMode()) {
+    // Only of the page itself, not one the user followed a link to in its frame.
+    if (event.type === 'ready' && this.pageMode() && (event.path === null || event.path === this.file().name)) {
       const file = this.file();
-      setTimeout(() => {
+      if (this.pictureTimer) clearTimeout(this.pictureTimer);
+      this.pictureTimer = setTimeout(() => {
+        this.pictureTimer = null;
         if (this.file() === file && this.pageMode()) void this.pagePreview.shown(file);
       }, PAGE_PICTURE_DELAY_MS);
     }

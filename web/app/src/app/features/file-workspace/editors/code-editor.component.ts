@@ -106,7 +106,8 @@ export class CodeEditorComponent implements FileEditor {
         this.commentsApi,
         this.me,
         () => state.autosave(),
-        undefined,
+        // A save that finds the script changed since its comments were read reads it again.
+        () => void this.pageComments.reload(file.id),
         this.commentAgent.hooks(() => file),
       );
       return state;
@@ -150,6 +151,11 @@ export class CodeEditorComponent implements FileEditor {
     afterNextRender(() => {
       this.rendered = true;
       void this.mount();
+    });
+    // The editor is reused from file to file: nothing of one page's comments carries over.
+    effect(() => {
+      this.file();
+      untracked(() => this.pageComments.reset());
     });
     effect(() => {
       // Only new bytes reload the text. A rename or move changes file() and must not touch edits.

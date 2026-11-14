@@ -31,6 +31,16 @@ describe('withSourcePositions', () => {
     ]);
   });
 
+  it('never changes an attribute: an unquoted value ending in a slash keeps it, and a script is left as it is', () => {
+    const html = `<a href=/docs/>Docs</a><IMG SRC=a.png/><script data-key="k" src="w.js"></script>`;
+    const out = withSourcePositions(html, 'f1');
+    const doc = new DOMParser().parseFromString(out, 'text/html');
+    expect(doc.querySelector('a')!.getAttribute('href')).toBe('/docs/');
+    expect(doc.querySelector('img')!.getAttribute('src')).toBe('a.png/');
+    expect(doc.querySelector('script')!.hasAttribute(SOURCE_ATTRIBUTE)).toBe(false);
+    expect(tagsAt(html, out)).toEqual(['<a href=/docs/>', '<IMG SRC=a.png/>']);
+  });
+
   it('leaves elements the parser made up unmarked, and finds a template’s', () => {
     const html = `<p>One<template><span>Two</span></template></p>`;
     const out = withSourcePositions(html, 'f1');

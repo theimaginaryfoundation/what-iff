@@ -174,6 +174,11 @@ export class TextCommentsState {
     return this.agent ? this.agent.people(people) : people;
   });
 
+  /** The surface's text in a range, or null with no surface (to check a range read elsewhere still names that text). */
+  textAt(range: Range): string | null {
+    return this.surface ? this.surface.text(range) : null;
+  }
+
   /** Loads a file's threads; they are placed on the surface once it is attached. */
   async load(fileId: string): Promise<void> {
     this.fileId = fileId;

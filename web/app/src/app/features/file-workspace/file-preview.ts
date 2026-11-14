@@ -51,7 +51,9 @@ export class FilePreview {
     try {
       const data = await this.drawPng();
       const png = data ? dataUrlToBlob(data) : null;
-      if (png) await firstValueFrom(this.files.putPreview(id, version, png, sources));
+      // Nothing drawn (the page did not answer in time, or could not draw itself): drawn when next shown.
+      if (!png) this.sentFor = null;
+      else await firstValueFrom(this.files.putPreview(id, version, png, sources));
     } catch {
       // The file changed meanwhile (409), or it could not be drawn: drawn when next shown.
       this.sentFor = null;

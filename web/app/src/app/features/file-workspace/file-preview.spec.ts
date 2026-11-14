@@ -65,4 +65,13 @@ describe('FilePreview', () => {
     expect(files.hasPreview).toHaveBeenCalledTimes(2);
     expect(files.putPreview).toHaveBeenLastCalledWith('f1', 3, expect.any(Blob), [{ id: 'css', content_version: 3 }]);
   });
+
+  it('tries again next time when nothing could be drawn', async () => {
+    const { files, draw, preview } = setup(false);
+    draw.mockResolvedValueOnce(null);
+    await preview.shown(file(3));
+    expect(files.putPreview).not.toHaveBeenCalled();
+    await preview.shown(file(3));
+    expect(files.putPreview).toHaveBeenCalledTimes(1);
+  });
 });

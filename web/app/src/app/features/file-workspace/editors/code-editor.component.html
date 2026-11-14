@@ -52,7 +52,13 @@
     </div>
     @if (isHtml() && showPreview()) {
       <div class="code-editor__pane code-editor__preview code-editor__preview--page" aria-label="Preview">
-        <app-html-preview class="code-editor__page" [file]="file()" [html]="previewText()" (pageMessage)="onPageMessage($event)" />
+        <app-html-preview
+          class="code-editor__page"
+          [file]="file()"
+          [html]="previewText()"
+          (pageMessage)="onPageMessage($event)"
+          (scriptServed)="pageComments.scriptsChanged()"
+        />
       </div>
     } @else if (isMarkdown() && showPreview()) {
       <div class="code-editor__pane code-editor__preview" aria-label="Preview">

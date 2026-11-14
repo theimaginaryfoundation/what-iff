@@ -58,9 +58,13 @@ export function withSourcePositions(html: string, file: string, headScript?: str
     if ('tagName' in node) {
       const tag = node.sourceCodeLocation?.startTag;
       if (tag) {
-        // Before the tag's closing `>`, or `/>` for a self-closing one.
-        const at = text[tag.endOffset - 2] === '/' ? tag.endOffset - 2 : tag.endOffset - 1;
-        if (!node.attrs.some(a => a.name === SOURCE_ATTRIBUTE)) {
+        // Right after the tag's name, as written: never inside an attribute's value, as before the
+        // closing `>` can be (`<a href=/docs/>` would lose the URL's last slash).
+        const name = /^[^\s/>]+/.exec(text.slice(tag.startOffset + 1))?.[0] ?? node.tagName;
+        const at = tag.startOffset + 1 + name.length;
+        // Not on a script: widgets read their own script's data attributes (currentScript.dataset)
+        // as their settings, and a script is no element a thread could be shown on.
+        if (node.tagName !== 'script' && !node.attrs.some(a => a.name === SOURCE_ATTRIBUTE)) {
           inserts.push({
             at,
             text: ` ${SOURCE_ATTRIBUTE}="${escapeAttribute(formatSourceRange({ file, start: tag.startOffset, end: tag.endOffset }))}"`,

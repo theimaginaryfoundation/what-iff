@@ -128,15 +128,70 @@ describe('PageComments', () => {
 
   it('shows the marks again to a page that reloaded, and chooses a thread from its mark', async () => {
     const { comments, state, sent, openPanel } = await setup([{ id: 'tag', anchor: { ...TAG }, quote: '<h1 id="title">', comments: [] }]);
-    comments.handle({ type: 'ready' });
+    comments.handle({ type: 'ready', path: 'index.html' });
     expect(sent).toEqual([{ type: 'marks', marks: [{ id: 'tag', state: 'open', src: 'page-1:6-21' }] }]);
     comments.handle({ type: 'select', id: 'tag' });
     expect(state.activeId()).toBe('tag');
     expect(openPanel).toHaveBeenCalled();
-    comments.handle({ type: 'unplaced', ids: ['tag', 'draft'] });
-    expect([...comments.unplaced()]).toEqual(['tag']);
     comments.reveal('tag');
     expect(sent.at(-1)).toEqual({ type: 'reveal', id: 'tag' });
+  });
+
+  it('marks nothing and picks nothing on another page the user followed a link to', async () => {
+    const { comments, state, sent } = await setup([{ id: 'tag', anchor: { ...TAG }, quote: '<h1 id="title">', comments: [] }]);
+    comments.handle({ type: 'ready', path: 'about.html' });
+    expect(sent).toEqual([{ type: 'marks', marks: [] }]);
+    expect(comments.marks()).toEqual([]);
+    comments.togglePick();
+    expect(comments.picking()).toBe(false);
+    comments.handle({ type: 'picked', selector: '#title', fingerprint: { tag: 'h1' }, src: 'about-id:0-4', created: null, label: 'h1' });
+    await Promise.resolve();
+    expect(state.draft()).toBeNull();
+    // Back on the page: its marks again.
+    comments.handle({ type: 'ready', path: 'index.html' });
+    expect(comments.marks()).toHaveLength(1);
+  });
+
+  it('takes a picked range only while it still names the element’s tag in the text shown', async () => {
+    const { comments, state } = await setup();
+    // The page was served from text where 6-21 was the h1; here it is something else.
+    comments.handle({ type: 'picked', selector: 'p', fingerprint: { tag: 'p' }, src: 'page-1:6-21', created: null, label: 'p' });
+    await vi.waitFor(() => expect(state.draft()).toMatchObject({ range: null, element: { selector: 'p' } }));
+  });
+
+  it('drops a pick that a later one overtook', async () => {
+    const { comments, state } = await setup();
+    let release: () => void = () => undefined;
+    const slow = new Promise<FileAttachment | null>(resolve => (release = () => resolve(null)));
+    const project: PageProject = {
+      servedFiles: () => new Map(),
+      fileAt: () => slow,
+      text: async () => '',
+      sourceLine: async (_p, line) => line,
+    };
+    const raced = new PageComments(
+      state,
+      () => undefined,
+      () => undefined,
+      () => true,
+      () => page,
+      () => project,
+      () => state,
+    );
+    raced.handle({
+      type: 'picked',
+      selector: 'li',
+      fingerprint: { tag: 'li' },
+      src: null,
+      created: { path: 'a.js', line: 1, column: 1 },
+      label: 'first',
+    });
+    raced.handle({ type: 'picked', selector: '#title', fingerprint: { tag: 'h1' }, src: 'page-1:6-21', created: null, label: 'second' });
+    await vi.waitFor(() => expect(state.draft()).toMatchObject({ element: { selector: '#title' } }));
+    release();
+    await new Promise(r => setTimeout(r, 0));
+    expect(state.draft()).toMatchObject({ element: { selector: '#title' } });
+    void comments;
   });
 
   it('keeps a thread on an element a script made with the script, on the line that made it', async () => {

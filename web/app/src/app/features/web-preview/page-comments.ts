@@ -36,8 +36,13 @@ interface ScriptComments {
 export class PageComments {
   /** Whether the page is waiting for an element to be picked. */
   readonly picking = signal(false);
-  /** Threads with an anchor on the page whose element the page did not find, as it last said. */
-  readonly unplaced = signal<ReadonlySet<string>>(new Set());
+  /**
+   * Whether the frame shows the page these comments are on, not another the user followed a link
+   * to: on another page, nothing is marked and nothing can be picked.
+   */
+  readonly onPage = signal(true);
+  /** The latest pick; one that finishes after a later one is dropped. */
+  private pickSeq = 0;
   /** The project's scripts whose comments are loaded, by file id. */
   private readonly scripts = signal<ReadonlyMap<string, ScriptComments>>(new Map());
   /** The state the thread being started is in. */
@@ -71,6 +76,7 @@ export class PageComments {
 
   /** The marks for the page: open threads' elements, and the active (or new) thread's more strongly. */
   readonly marks = computed<PageMark[]>(() => {
+    if (!this.onPage()) return [];
     const page = this.page().id;
     const activeId = this.activeId();
     const marks: PageMark[] = [];
@@ -138,7 +144,12 @@ export class PageComments {
     for (const s of this.scripts().values()) for (const p of s.state.people()) if (!byId.has(p.id)) byId.set(p.id, p);
     return [...byId.values()];
   });
-  readonly status = computed(() => this.state.status());
+  /** How saving goes, across the page's file and the scripts': a conflict or a failure anywhere shows. */
+  readonly status = computed(() => {
+    const all = this.states().map(s => s.status());
+    for (const worst of ['conflict', 'failed', 'saving'] as const) if (all.includes(worst)) return worst;
+    return this.state.status();
+  });
 
   /** Chooses a thread: its own file's state makes it active, the others none; the page shows it. */
   select(threadId: string): void {
@@ -194,7 +205,7 @@ export class PageComments {
       this.send({ type: 'stop-pick' });
       return;
     }
-    if (!this.canComment()) return;
+    if (!this.canComment() || !this.onPage()) return;
     this.picking.set(true);
     this.send({ type: 'pick' });
   }
@@ -208,14 +219,21 @@ export class PageComments {
   handle(event: PageBridgeEvent): void {
     switch (event.type) {
       case 'ready':
-        // A page that (re)loaded has no marks and is not picking; its scripts may have changed.
+        // A page that (re)loaded has no marks and is not picking; its scripts may have changed. A page
+        // the user followed a link to is not the one these comments are on.
+        this.onPage.set(event.path === null || event.path === this.page().name);
+        if (!this.onPage()) {
+          this.picking.set(false);
+          this.send({ type: 'marks', marks: [] });
+          return;
+        }
         if (this.picking()) this.send({ type: 'pick' });
         this.send(this.marksAction());
-        void this.loadScripts();
+        void this.refreshScripts().then(() => this.loadScripts());
         break;
       case 'picked':
         this.picking.set(false);
-        if (this.canComment()) void this.startOnPick(event);
+        if (this.canComment() && this.onPage()) void this.startOnPick(event);
         break;
       case 'pick-cancelled':
         this.picking.set(false);
@@ -228,9 +246,6 @@ export class PageComments {
       case 'menu':
         // The viewer shows the menu; nothing to do here.
         break;
-      case 'unplaced':
-        this.unplaced.set(new Set(event.ids.filter(id => id !== DRAFT)));
-        break;
     }
   }
 
@@ -241,14 +256,22 @@ export class PageComments {
    * element alone.
    */
   private async startOnPick(event: Extract<PageBridgeEvent, { type: 'picked' }>): Promise<void> {
+    const seq = ++this.pickSeq;
     const page = this.page().id;
     const element: PageElement = { page, selector: event.selector, fingerprint: event.fingerprint };
     const src = parseSourceRange(event.src);
+    const tag = event.fingerprint.tag;
     let state = this.state;
-    let range: { start: number; end: number } | null = src && src.file === page ? { start: src.start, end: src.end } : null;
-    if (!range && src) {
+    // The range the page carries names the text it was served from; the text shown here may be
+    // another (a page served before the editor's last change reached it, or one an agent changed
+    // since it was opened), so the range must still be the element's tag here.
+    let range: { start: number; end: number } | null =
+      src && src.file === page && isTagOf(this.state.textAt({ start: src.start, end: src.end }), tag)
+        ? { start: src.start, end: src.end }
+        : null;
+    if (!range && src && src.file !== page) {
       const script = await this.scriptWithId(src.file);
-      if (script && src.end <= script.text.length) {
+      if (script && isTagOf(script.text.slice(src.start, src.end), tag)) {
         state = script.state;
         range = { start: src.start, end: src.end };
       }
@@ -263,12 +286,59 @@ export class PageComments {
         range = lines;
       }
     }
+    // A later pick, or another page shown meanwhile, wins.
+    if (seq !== this.pickSeq || page !== this.page().id) return;
     for (const s of this.states()) {
       if (s !== state) s.cancelDraft();
     }
     state.startOnElement(element, range, event.label);
     this.draftIn.set(state);
     this.openPanel();
+  }
+
+  /** A file the page loaded may be a script whose comments are not loaded yet (one it imported later). */
+  scriptsChanged(): void {
+    if (this.onPage()) void this.loadScripts();
+  }
+
+  /** Another file is shown: nothing of this one's scripts, drafts or picks carries over. */
+  reset(): void {
+    this.pickSeq++;
+    this.picking.set(false);
+    this.onPage.set(true);
+    this.draftIn.set(null);
+    this.scripts.set(new Map());
+  }
+
+  /**
+   * Reads again each loaded script that has another version now than its comments were read at (an
+   * agent changed it, and the page reloaded), so threads are placed on its text as it is.
+   */
+  private async refreshScripts(): Promise<void> {
+    const project = this.project();
+    if (!project) return;
+    const now = new Map([...project.servedFiles()].map(([path, f]) => [f.id, { path, file: f }]));
+    for (const script of [...this.scripts().values()]) {
+      const served = now.get(script.file.id);
+      if (served && served.file.content_version !== script.file.content_version)
+        await this.reload(script.file.id, served.path, served.file);
+    }
+  }
+
+  /** Reads a script's text and comments again (after it changed, or a save found it had). */
+  async reload(fileId: string, path?: string, file?: FileAttachment): Promise<void> {
+    const project = this.project();
+    const was = this.scripts().get(fileId);
+    if (!project || !was) return;
+    const at = path ?? was.path;
+    const fresh = file ?? (await project.fileAt(at));
+    this.scripts.update(all => {
+      const next = new Map(all);
+      next.delete(fileId);
+      return next;
+    });
+    if (this.draftIn() === was.state) this.draftIn.set(null);
+    if (fresh) await this.load(project, at, fresh);
   }
 
   /** Loads the comments of every script the page loaded that are not loaded yet. */
@@ -322,6 +392,13 @@ export class PageComments {
   private ownerOf(threadId: string): TextCommentsState | null {
     return this.states().find(s => s.threads().some((t: TextCommentThread) => t.id === threadId)) ?? null;
   }
+}
+
+/** Whether text is the opening tag of an element with this name (`<h1 id="t">` for h1; JSX as HTML). */
+function isTagOf(text: string | null, tag: string): boolean {
+  if (!text || !tag) return false;
+  const m = /^<([A-Za-z][\w:.-]*)/.exec(text);
+  return !!m && m[1].toLowerCase() === tag.toLowerCase() && text.endsWith('>');
 }
 
 /** A line of text as a range, without its indentation (1-based); null for a blank or missing line. */
