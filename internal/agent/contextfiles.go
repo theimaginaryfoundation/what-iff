@@ -230,13 +230,18 @@ func (a *Agent) listChatMessagesForContext(ctx context.Context, chat *models.Cha
 }
 
 // ContextWorkspacePath is where a message attachment or agent file mounts in a container: its
-// name, relative to /workspace, with traversal and absolute paths refused. The gallery folder is
-// a label and plays no part (the rule the private build has always used).
+// gallery folder and name (`notes/journal.md`, or `journal.md` at the top level), relative to
+// /workspace, with traversal and absolute paths refused. It is the same path the file tools take
+// and the Files tab shows, so a file has one path everywhere (ADR 0x050 §7).
 func ContextWorkspacePath(att *models.FileAttachment) (string, error) {
 	if att == nil {
 		return "", fmt.Errorf("attachment is nil")
 	}
-	return validatedWorkspaceRelPath(att.Name)
+	name := strings.TrimSpace(att.Name)
+	if folder := strings.Trim(strings.TrimSpace(att.Folder), "/"); folder != "" && name != "" {
+		return validatedWorkspaceRelPath(folder + "/" + name)
+	}
+	return validatedWorkspaceRelPath(name)
 }
 
 // SkillBundleWorkspacePath is a bundle file's path inside the workspace: skills/<slug>/<rel>.

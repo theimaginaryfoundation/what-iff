@@ -15,6 +15,7 @@ import {
 import { DomSanitizer } from '@angular/platform-browser';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
+import { WORKSPACE_CONTEXT } from '../file-workspace/editors/file-editor';
 import { FolderFiles } from './folder-files.service';
 import { PREVIEW_URL } from './preview-site.config';
 import { SiteProject } from './site-project';
@@ -87,6 +88,8 @@ export class SiteFrameComponent {
   private readonly document = inject(DOCUMENT);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly folders = inject(FolderFiles);
+  /** The conversation the workspace is open in, whose files the page finds first (ADR 0x050 §2). */
+  private readonly workspace = inject(WORKSPACE_CONTEXT, { optional: true });
   private readonly site = inject(PREVIEW_URL)!;
   readonly siteOrigin = new URL(this.site).origin;
   private readonly frame = viewChild<ElementRef<HTMLIFrameElement>>('frame');
@@ -146,7 +149,9 @@ export class SiteFrameComponent {
     // The first page keeps the key the frame was made with; another page gets a new one.
     if (this.project) this.token.set(newToken());
     const parse = (html: string) => new (this.document.defaultView?.DOMParser ?? DOMParser)().parseFromString(html, 'text/html');
-    this.project = new SiteProject(this.folders, file.folder ?? '', this.unsaved, parse);
+    const chatId = this.workspace?.chatId() ?? null;
+    const conversation = chatId ? (fresh: boolean) => this.folders.conversation(chatId, fresh) : null;
+    this.project = new SiteProject(this.folders, file.folder ?? '', this.unsaved, parse, conversation);
     this.unreachable.set(false);
     this.failure.set(null);
     this.loadTimer = setTimeout(() => this.unreachable.set(true), SITE_LOAD_TIMEOUT_MS);

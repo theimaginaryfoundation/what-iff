@@ -50,3 +50,11 @@ export interface CommentSaver {
 export type CommentSaveResult = 'saved' | 'cancelled' | 'conflict' | 'failed';
 
 export const COMMENT_SAVER = new InjectionToken<CommentSaver>('COMMENT_SAVER');
+
+/** Where the workspace is open: the conversation whose files it shows, when it is in one. */
+export interface WorkspaceContext {
+  readonly chatId: Signal<string | null>;
+}
+
+/** The workspace's context, for viewers that resolve files the way the conversation does (ADR 0x050 §2). */
+export const WORKSPACE_CONTEXT = new InjectionToken<WorkspaceContext>('WORKSPACE_CONTEXT');

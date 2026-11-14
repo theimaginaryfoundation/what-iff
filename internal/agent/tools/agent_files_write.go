@@ -43,6 +43,7 @@ Pick the action first, then send only its fields:
 - "move": move or rename file to path.
 
 Paths look like "notes/journal.md": folders, then a name. Names without an extension get ".md"; text types only (%s). Keep your files in a folder of your own, such as "notes/", rather than at the top level.
+A file's path is the same everywhere: in these tools, in the Files tab, and at /workspace/<path> where you run commands. Folder names are lower case.
 
 A file holds at most %d KB, and one call sends at most %d KB.
 
