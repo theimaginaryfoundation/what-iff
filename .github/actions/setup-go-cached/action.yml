@@ -1,0 +1,69 @@
+name: 'Set up Go with a build cache that stays current'
+description: >-
+  Installs Go from go.mod and restores this job's module and build caches.
+  Pair it with a save step at the end of the job (see `save` below).
+
+  setup-go's own cache keys on go.sum alone, so after the first hit it never
+  saves again: the compiled packages stay frozen at whatever main looked like
+  when go.sum last changed, and everything changed since is recompiled on every
+  run. Here the key also carries the commit, so each run on main saves what it
+  built, and a run restores the newest entry for its go.sum (or, failing that,
+  any entry for the job).
+
+  Only runs on main save (`save` is 'true'). A pull request restores main's
+  entries but never saves its own: a PR's caches are visible only to that PR,
+  and at several hundred MB each they would crowd main's out of the repository's
+  10 GB cache.
+inputs:
+  name:
+    description: >-
+      The job's cache, e.g. validate, mock-e2e, e2e-api. Jobs that build
+      differently (race, -cover, plain) keep separate caches, so one job's
+      entries never stand in for another's.
+    required: true
+outputs:
+  key:
+    description: 'The key to save this run''s cache under'
+    value: ${{ steps.key.outputs.key }}
+  paths:
+    description: 'The cached directories (GOMODCACHE and GOCACHE)'
+    value: ${{ steps.key.outputs.paths }}
+  save:
+    description: '"true" when this run should save the cache: a run on main, unless its key was already saved'
+    value: ${{ steps.key.outputs.save-allowed == 'true' && steps.restore.outputs.cache-hit != 'true' }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v7
+      with:
+        # go-version-file, not a literal: setup-go exports GOTOOLCHAIN=local, so
+        # a pin below go.mod's `go` directive cannot self-upgrade.
+        go-version-file: go.mod
+        cache: false
+
+    - id: key
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+        SUM: ${{ hashFiles('go.sum') }}
+        SAVE: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+      run: |
+        prefix="go-${NAME}-${RUNNER_OS}-$(go env GOARCH)-$(go env GOVERSION)"
+        {
+          echo "prefix=${prefix}"
+          echo "key=${prefix}-${SUM}-${GITHUB_SHA}"
+          echo "restore-sum=${prefix}-${SUM}-"
+          echo "paths<<EOF"
+          go env GOMODCACHE GOCACHE
+          echo "EOF"
+          echo "save-allowed=${SAVE}"
+        } >> "$GITHUB_OUTPUT"
+
+    - id: restore
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.key.outputs.paths }}
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: |
+          ${{ steps.key.outputs.restore-sum }}
+          ${{ steps.key.outputs.prefix }}-

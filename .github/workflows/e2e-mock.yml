@@ -205,10 +205,12 @@ jobs:
       image: ${{ needs.version.outputs.image }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      # Go from go.mod, and this job's own build cache, saved on main by the
+      # last step (see the action).
+      - id: go
+        uses: ./.github/actions/setup-go-cached
         with:
-          go-version-file: go.mod
-          cache: true
+          name: e2e-build-api
       # -buildvcs=false because the container user does not own the checkout,
       # so the `git` call Go makes to stamp VCS metadata trips "dubious
       # ownership" and exits 128. A throwaway test binary has no use for that
@@ -223,6 +225,12 @@ jobs:
           name: api-server-binary
           path: /tmp/api-server
           retention-days: 1
+      - name: Save Go cache
+        if: steps.go.outputs.save == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.go.outputs.paths }}
+          key: ${{ steps.go.outputs.key }}
 
   test:
     # NOTE the ternary shape here, for the reason spelled out on PROJECTS
@@ -305,12 +313,14 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: 'web/app/package-lock.json'
 
+      # node_modules from the last install of this lockfile in this image, or
+      # npm ci (see the action).
       - name: Install dependencies
-        working-directory: web/app
-        run: npm ci
+        uses: ./.github/actions/npm-ci-cached
+        with:
+          working-directory: web/app
+          environment: ${{ needs.version.outputs.image }}
 
       # No browser install step, and no browser env var: the container ships
       # browsers matching its own Playwright version, which is the point of
@@ -585,6 +595,9 @@ jobs:
   api:
     name: api suite
     if: ${{ github.event.action != 'labeled' || github.event.label.name == 'e2e-full' }}
+    # The API binary build-api makes for the shards (the same `go build -cover`
+    # this job used to repeat), so this job needs no Go.
+    needs: [build-api]
     runs-on: ubuntu-latest
     # No browser is ever launched (e2e/api-tests/ never touches Playwright's
     # `page` fixture — see playwright.config.mock-llm.api.ts), so this runs on
@@ -608,20 +621,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
       - uses: actions/setup-node@v7
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: 'web/app/package-lock.json'
 
       - name: Install dependencies
-        working-directory: web/app
-        run: npm ci
+        uses: ./.github/actions/npm-ci-cached
+        with:
+          working-directory: web/app
 
       # A bare runner has no postgres client, so run the statement with the
       # psql inside the pgvector service container. Installing
@@ -636,10 +643,13 @@ jobs:
           mkdir -p "$RUNNER_TEMP/gocov"
           echo "GOCOVERDIR=$RUNNER_TEMP/gocov" >> "$GITHUB_ENV"
 
-      - name: Generate Ent code
-        run: go generate ./ent
-      - name: Build API
-        run: go build -cover -buildvcs=false -o /tmp/api-server ./cmd/api-server
+      # Built in the e2e image (Ubuntu 24.04); it runs on this newer runner too.
+      - name: Download API binary
+        uses: actions/download-artifact@v8
+        with:
+          name: api-server-binary
+          path: /tmp
+      - run: chmod +x /tmp/api-server
 
       # Same pattern as the `test` job's "Start API (mock LLM)", but DB_HOST
       # is 127.0.0.1: a bare runner, not a container job, reaches the service
@@ -761,12 +771,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: 'web/app/package-lock.json'
 
       - name: Install dependencies
-        working-directory: web/app
-        run: npm ci
+        uses: ./.github/actions/npm-ci-cached
+        with:
+          working-directory: web/app
 
       - name: Download shard blobs
         uses: actions/download-artifact@v8

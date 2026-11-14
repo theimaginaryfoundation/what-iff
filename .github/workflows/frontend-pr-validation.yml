@@ -51,15 +51,12 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: 'web/app/package-lock.json'
 
+      # node_modules from the last install of this lockfile, or npm ci (see the action).
       - name: Install dependencies
-        working-directory: web/app
-        run: |
-          echo "Installing dependencies..."
-          npm ci
-          echo "✅ Dependencies installed"
+        uses: ./.github/actions/npm-ci-cached
+        with:
+          working-directory: web/app
 
       # The e2e suite's typed SDK only guarantees that a spec/API mismatch is a
       # compile error while the committed schema matches openapi.yaml. Nothing
