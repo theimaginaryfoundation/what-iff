@@ -12,6 +12,34 @@ import { cssReferences, isStylesheet, pageReferences, rewriteCss, rewritePage, s
 export const MAX_PAGE_FILES = 200;
 export const MAX_PAGE_BYTES = 30 * 1024 * 1024;
 
+/**
+ * The policy a lone page runs under (ADR 0x050 §1), as the preview site's pages do under the site's:
+ * scripts only inline (its own, and ours), from `data:` and `blob:` URLs (its folder's files) and the
+ * two package CDNs; styles, images, fonts, media and fetch from anywhere https; nothing else. The
+ * frame's origin is opaque, so there is no 'self'.
+ */
+export const LONE_PAGE_POLICY = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline' 'unsafe-eval' data: blob: https://esm.sh https://cdn.jsdelivr.net",
+  "style-src 'unsafe-inline' data: blob: https:",
+  'img-src data: blob: https:',
+  'font-src data: https:',
+  'media-src data: blob: https:',
+  'connect-src data: blob: https:',
+  'worker-src data: blob:',
+  'frame-src data: blob:',
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join('; ');
+
+/** The page with LONE_PAGE_POLICY first in its head, ahead of every script (ours is first). */
+function withPolicy(html: string): string {
+  const at = html.indexOf(`<script>${PAGE_BRIDGE_SCRIPT.slice(0, 40)}`);
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${LONE_PAGE_POLICY}">`;
+  return at < 0 ? meta + html : html.slice(0, at) + meta + html.slice(at);
+}
+
 /** A page ready for its frame. */
 export interface BuiltPage {
   /** The page, its sibling references swapped for `data:` URLs. */
@@ -36,7 +64,7 @@ export class PageFiles {
 
   async build(page: FileAttachment, source: string): Promise<BuiltPage> {
     // Each element's source range and our bridge script first (ADR 0x050 §5).
-    const html = withSourcePositions(source, page.id, PAGE_BRIDGE_SCRIPT);
+    const html = withPolicy(withSourcePositions(source, page.id, PAGE_BRIDGE_SCRIPT));
     const view = this.document.defaultView;
     const doc = new (view?.DOMParser ?? DOMParser)().parseFromString(html, 'text/html');
     const wanted = [...pageReferences(doc)];
@@ -57,7 +85,8 @@ export class PageFiles {
         missing.add(name);
         continue;
       }
-      if (fetched.size >= MAX_PAGE_FILES || bytes >= MAX_PAGE_BYTES) {
+      // Its size from the listing, before downloading it: one huge file is never fetched.
+      if (fetched.size >= MAX_PAGE_FILES || bytes + (file.size_bytes ?? 0) > MAX_PAGE_BYTES) {
         skipped.push(name);
         continue;
       }

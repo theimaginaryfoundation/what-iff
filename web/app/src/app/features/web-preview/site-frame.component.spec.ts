@@ -57,15 +57,16 @@ describe('SiteFrameComponent', () => {
 
   it('frames the site with a key of its own and introduces itself once the site is ready', () => {
     const iframe = fixture.nativeElement.querySelector('iframe') as HTMLIFrameElement;
-    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads');
+    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin allow-forms allow-popups allow-downloads');
     expect(token()).toMatch(/^[A-Za-z0-9_-]{24}$/);
     ready();
     expect(initMessages).toHaveLength(1);
     expect(initMessages[0].message).toEqual({ type: 'whatiff-preview-init', entry: 'index.html' });
     expect(initMessages[0].origin).toBe(ORIGIN);
-    // Once only.
+    // Ready again: the host page reloaded (its old port is dead), so it is introduced again, on a new port.
     ready();
-    expect(initMessages).toHaveLength(1);
+    expect(initMessages).toHaveLength(2);
+    expect(initMessages[1].message).toEqual({ type: 'whatiff-preview-init', entry: 'index.html' });
   });
 
   it('ignores messages from another origin, another window or with another key', () => {

@@ -5,11 +5,13 @@ import {
   assetModule,
   compileStyle,
   compiledAs,
+  importCandidates,
   jsxDevRuntime,
   moduleCandidates,
   openingTagEnd,
   withSourceRanges,
 } from './compile';
+import { cssString } from './site-project';
 
 describe('compiledAs', () => {
   it('compiles TypeScript, JSX and SCSS, and serves everything else as it is', () => {
@@ -80,6 +82,9 @@ describe('JSX source ranges (§5)', () => {
   it('gives each element the range of its opening tag, keeping the lines, and imports the shim', () => {
     const out = withSourceRanges(COMPILED, SOURCE, 'f-1', 'react/jsx-dev-runtime', '../__whatiff/jsx-dev-runtime.js');
     expect(out.split('\n')).toHaveLength(COMPILED.split('\n').length);
+    // And the columns of what follows each source argument, so the source map still holds there.
+    const tail = (text: string) => text.split('\n').map(l => (l.includes(', this') ? l.indexOf(', this') : -1));
+    expect(tail(out)).toEqual(tail(COMPILED));
     expect(out).toContain('import { jsxDEV } from "../__whatiff/jsx-dev-runtime.js";');
     const h1 = SOURCE.indexOf('<h1');
     const main = SOURCE.indexOf('<main');
@@ -91,6 +96,9 @@ describe('JSX source ranges (§5)', () => {
     const text = '<a b={x > 1 ? "}" : `>`} c="d>e">';
     expect(openingTagEnd(text, 0)).toBe(text.length);
     expect(openingTagEnd('<br/>rest', 0)).toBe(5);
+    // JSX strings have no escapes; comments inside braces are not code.
+    expect(openingTagEnd('<a t="C:\\">x', 0)).toBe('<a t="C:\\">'.length);
+    expect(openingTagEnd("<a b={/* don't > */ 1}>x", 0)).toBe("<a b={/* don't > */ 1}>".length);
     expect(openingTagEnd('<unclosed', 0)).toBe(9);
   });
 
@@ -98,5 +106,21 @@ describe('JSX source ranges (§5)', () => {
     const shim = jsxDevRuntime('preact');
     expect(shim).toContain('from "preact/jsx-runtime"');
     expect(shim).toContain("typeof type === 'string'");
+  });
+});
+
+describe('importCandidates', () => {
+  it('tries a bundler’s guesses for an import that found nothing', () => {
+    expect(importCandidates('lib/util.js')).toEqual(['lib/util.ts', 'lib/util.tsx']);
+    expect(importCandidates('a.mjs')).toEqual(['a.mts']);
+    expect(importCandidates('Card.jsx')).toEqual(['Card.tsx']);
+    expect(importCandidates('App')).toEqual(moduleCandidates('App'));
+    expect(importCandidates('data.json')).toEqual([]);
+  });
+});
+
+describe('cssString', () => {
+  it('escapes quotes, backslashes and every control character', () => {
+    expect(cssString('a "b" \\ c\r\nd\f')).toBe('a \\"b\\" \\\\ c\\d \\A d\\c ');
   });
 });

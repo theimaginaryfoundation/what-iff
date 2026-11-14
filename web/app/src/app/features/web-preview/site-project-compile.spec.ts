@@ -2,10 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { FolderFiles } from './folder-files.service';
+import { inlineCompiler } from './compiler';
 import { SiteProject } from './site-project';
 
 // esbuild's WebAssembly does not load under jsdom: its transform is stood in for; sass runs.
-const esbuild = vi.hoisted(() => ({ initialize: vi.fn(async () => undefined), transform: vi.fn() }));
+const esbuild = vi.hoisted(() => ({ version: '0.28.2', initialize: vi.fn(async () => undefined), transform: vi.fn() }));
 vi.mock('esbuild-wasm', () => esbuild);
 
 type Tree = Record<string, Record<string, string>>;
@@ -29,11 +30,12 @@ describe('SiteProject compiling (§4)', () => {
       .mockReset()
       .mockResolvedValue({ code: `import { jsx } from "preact/jsx-runtime";\nexport default () => jsx("h1", {});\n` });
     const tree: Tree = { site: { 'App.tsx': 'export default () => <h1/>;', 'package.json': '{"dependencies": {"preact": "^10.0.0"}}' } };
-    const project = new SiteProject(folders(tree), 'site', new Map(), parse, null, 'wasm-url');
+    const project = new SiteProject(folders(tree), 'site', new Map(), parse, null, inlineCompiler('https://app.test/assets/esbuild/'));
     const first = await project.get('App.tsx', 'script');
     expect(first).toMatchObject({ status: 200, contentType: 'text/javascript; charset=utf-8' });
     expect(text(first.body)).toContain('https://esm.sh/preact@%5E10.0.0/jsx-runtime');
-    expect(esbuild.initialize).toHaveBeenCalledWith({ wasmURL: 'wasm-url', worker: false });
+    // From the folder of its version: a browser holding another version's file never meets it.
+    expect(esbuild.initialize).toHaveBeenCalledWith({ wasmURL: 'https://app.test/assets/esbuild/0.28.2/esbuild.wasm', worker: false });
     expect(esbuild.transform).toHaveBeenCalledWith(
       'export default () => <h1/>;',
       expect.objectContaining({ loader: 'tsx', jsx: 'automatic', jsxImportSource: 'preact', sourcefile: 'App.tsx' }),

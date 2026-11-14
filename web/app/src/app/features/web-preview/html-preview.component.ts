@@ -19,7 +19,7 @@ import { SiteFrameComponent } from './site-frame.component';
   host: { style: 'display: block; height: 100%;' },
   template: `
     @if (hasSite) {
-      <app-site-frame [file]="file()" [html]="html()" (pageMessage)="pageMessage.emit($event)" />
+      <app-site-frame [file]="file()" [html]="html()" (pageMessage)="pageMessage.emit($event)" (scriptServed)="scriptServed.emit($event)" />
     } @else {
       <app-html-page-frame [file]="file()" [html]="html()" (pageMessage)="pageMessage.emit($event)" />
     }
@@ -32,6 +32,8 @@ export class HtmlPreviewComponent {
   readonly html = input.required<string>();
   /** What the page's bridge script reports (ADR 0x050 §5). */
   readonly pageMessage = output<PageBridgeEvent>();
+  /** The page loaded a project script it had not before (a project page only). */
+  readonly scriptServed = output<string>();
   private readonly site = viewChild(SiteFrameComponent);
   private readonly lone = viewChild(HtmlPageFrameComponent);
 

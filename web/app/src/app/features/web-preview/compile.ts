@@ -34,17 +34,31 @@ export class CompileError extends Error {}
 type Esbuild = typeof import('esbuild-wasm');
 let esbuild: Promise<Esbuild> | null = null;
 
-function loadEsbuild(wasmUrl: string): Promise<Esbuild> {
+/**
+ * esbuild, started. `wasmBase` is the folder the app serves its WebAssembly from, by version
+ * (`assets/esbuild/<version>/esbuild.wasm`, angular.json): a browser that cached another version's
+ * file under a fixed name would fail to start this one, as esbuild refuses a binary of another version.
+ */
+function loadEsbuild(wasmBase: string): Promise<Esbuild> {
   esbuild ??= (async () => {
     const mod = await import('esbuild-wasm');
-    // On the page's thread: a worker made from a blob is something the app's own policy may refuse,
-    // and transforming one file is quick.
-    await mod.initialize({ wasmURL: wasmUrl, worker: false });
+    // Inside the compile worker already (compiler.ts): no worker of esbuild's own, which it would
+    // make from a blob the app's policy may refuse.
+    const base = wasmBase.endsWith('/') ? wasmBase : `${wasmBase}/`;
+    await mod.initialize({ wasmURL: new URL(`${mod.version}/esbuild.wasm`, new URL(base, self.location.href)).href, worker: false });
     return mod;
   })();
   // A failed load is not kept, so the next file tries again.
   esbuild.catch(() => (esbuild = null));
   return esbuild;
+}
+
+/** Starts loading esbuild now, so the first file a page asks for does not wait for its download. */
+export function warmUpEsbuild(wasmBase: string): Promise<void> {
+  return loadEsbuild(wasmBase).then(
+    () => undefined,
+    () => undefined,
+  );
 }
 
 /**
@@ -56,7 +70,8 @@ export async function compileScript(
   path: string,
   loader: 'ts' | 'tsx' | 'jsx',
   options: {
-    wasmUrl: string;
+    /** The folder the esbuild WebAssembly is served from, by version (loadEsbuild). */
+    wasmBase: string;
     jsxImportSource: string;
     /**
      * For JSX: the file's id and where the page finds the dev runtime shim (JSX_DEV_RUNTIME), so each
@@ -65,7 +80,7 @@ export async function compileScript(
     sourceRanges?: { fileId: string; runtime: string };
   },
 ): Promise<string> {
-  const mod = await loadEsbuild(options.wasmUrl);
+  const mod = await loadEsbuild(options.wasmBase);
   const ranges = loader !== 'ts' ? options.sourceRanges : undefined;
   try {
     const result = await mod.transform(source, {
@@ -117,12 +132,23 @@ export function withSourceRanges(code: string, source: string, fileId: string, d
   for (let i = source.indexOf('\n'); i >= 0; i = source.indexOf('\n', i + 1)) lineStarts.push(i + 1);
   const out = code.replace(JSX_SOURCE, (match, line: string, column: string) => {
     const lineStart = lineStarts[+line - 1];
-    const newlines = '\n'.repeat(match.split('\n').length - 1);
-    if (lineStart === undefined) return 'void 0' + newlines;
-    const start = lineStart + +column - 1;
-    return JSON.stringify(`${fileId}:${start}-${openingTagEnd(source, start)}`) + newlines;
+    const value =
+      lineStart === undefined
+        ? 'void 0'
+        : JSON.stringify(`${fileId}:${lineStart + +column - 1}-${openingTagEnd(source, lineStart + +column - 1)}`);
+    return keepingPlaces(match, value);
   });
   return out.split(JSON.stringify(devRuntime)).join(JSON.stringify(shim));
+}
+
+/**
+ * `value` in place of `match`, taking up the same lines and the same columns on the last of them,
+ * so every place after it in the compiled code is where the source map says it is.
+ */
+function keepingPlaces(match: string, value: string): string {
+  const lines = match.split('\n');
+  if (lines.length === 1) return value.length <= match.length ? value.padEnd(match.length, ' ') : value;
+  return value + '\n'.repeat(lines.length - 1) + ' '.repeat(lines[lines.length - 1].length);
 }
 
 /**
@@ -136,8 +162,16 @@ export function openingTagEnd(source: string, start: number): number {
   for (let i = start + 1; i < source.length; i++) {
     const c = source[i];
     if (quote) {
-      if (c === '\\') i++;
+      // Inside braces a string is JavaScript's, with escapes; an attribute's is JSX's, which has none.
+      if (c === '\\' && depth > 0) i++;
       else if (c === quote) quote = '';
+      continue;
+    }
+    if (depth > 0 && c === '/' && (source[i + 1] === '*' || source[i + 1] === '/')) {
+      // A comment inside braces (`{/* don't */}`): its quotes and braces are not code.
+      const close = source[i + 1] === '*' ? source.indexOf('*/', i + 2) : source.indexOf('\n', i + 2);
+      if (close < 0) return source.length;
+      i = source[i + 1] === '*' ? close + 1 : close;
       continue;
     }
     if (c === '"' || c === "'" || (c === '`' && depth > 0)) quote = c;
@@ -222,6 +256,21 @@ function candidates(wanted: string): string[] {
   for (const ext of ['.scss', '.sass', '.css']) out.push(`${dir}${base}${ext}`, `${dir}_${base}${ext}`);
   for (const ext of ['.scss', '.sass', '.css']) out.push(`${wanted}/index${ext}`, `${wanted}/_index${ext}`);
   return out;
+}
+
+/**
+ * The files a module import that found nothing may mean, in the order a bundler tries them: for a
+ * name without an extension, the extensions and then a folder's index; for `./util.js`, TypeScript's
+ * convention of naming the compiled file, `./util.ts` (`.mjs` is `.mts`, `.jsx` is `.tsx`).
+ */
+export function importCandidates(path: string): string[] {
+  const named = /\.(js|mjs|jsx)$/i.exec(path);
+  if (named) {
+    const base = path.slice(0, -named[0].length);
+    const ext = named[1].toLowerCase();
+    return ext === 'mjs' ? [`${base}.mts`] : ext === 'jsx' ? [`${base}.tsx`] : [`${base}.ts`, `${base}.tsx`];
+  }
+  return /\.[^/.]+$/.test(path) ? [] : moduleCandidates(path);
 }
 
 /** The files a module import without an extension may name, in the order a bundler tries them. */

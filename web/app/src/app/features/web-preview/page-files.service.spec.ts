@@ -6,11 +6,11 @@ import { FileAttachment } from '../../core/models/file-attachment.model';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { FolderFiles } from './folder-files.service';
-import { PageFiles } from './page-files.service';
+import { MAX_PAGE_BYTES, PageFiles } from './page-files.service';
 
 const page = { id: 'page', name: 'index.html', folder: 'site', file_type: 'text/html' } as FileAttachment;
 
-function setup(contents: Record<string, string>) {
+function setup(contents: Record<string, string>, sizes: Record<string, number> = {}) {
   const folder = Object.keys(contents).map(
     (name, i) =>
       ({
@@ -20,6 +20,7 @@ function setup(contents: Record<string, string>) {
         file_type: name.endsWith('.png') ? 'image/png' : '',
         content_version: 1,
         created_at: `2026-11-0${i + 1}`,
+        size_bytes: sizes[name],
       }) as FileAttachment,
   );
   const gallery = { listImages: vi.fn(() => of({ results: folder, total_count: folder.length, page: 1 })) };
@@ -48,9 +49,19 @@ describe('PageFiles', () => {
     const html = '<p>Hello</p><script>document.body.append("hi")</script>';
     const built = await pages.build(page, html);
     expect(built).toMatchObject({ missing: [], skipped: [] });
-    expect(built.html).toMatch(/^<script>\(function \(\) \{/);
+    // Its policy first, ahead of every script.
+    expect(built.html).toMatch(
+      /^<meta http-equiv="Content-Security-Policy" content="default-src 'none'; [^"]*"><script>\(function \(\) \{/,
+    );
     expect(built.html).toContain('<p data-wi-src="page:0-3">Hello</p>');
     expect(gallery.listImages).not.toHaveBeenCalled();
+  });
+
+  it('never downloads a file larger than a lone page may load, by its size in the listing', async () => {
+    const { pages, files } = setup({ 'movie.mp4': '', 'a.css': 'p{}' }, { 'movie.mp4': MAX_PAGE_BYTES + 1 });
+    const built = await pages.build(page, '<link rel="stylesheet" href="a.css"><video src="movie.mp4"></video>');
+    expect(built.skipped).toEqual(['movie.mp4']);
+    expect(files.downloadFileAttachment.mock.calls.map(c => c[0])).toEqual(['f-a.css']);
   });
 
   it('loads the files a page names in its folder, stylesheets with their own files, and says what is missing', async () => {

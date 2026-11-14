@@ -28,7 +28,7 @@
               {
                 "glob": "esbuild.wasm",
                 "input": "node_modules/esbuild-wasm",
-                "output": "assets/esbuild"
+                "output": "assets/esbuild/0.28.2"
               }
             ],
             "allowedCommonJsDependencies": [
@@ -179,7 +179,7 @@
                 {
                   "glob": "esbuild.wasm",
                   "input": "node_modules/esbuild-wasm",
-                  "output": "assets/esbuild"
+                  "output": "assets/esbuild/0.28.2"
                 }
               ]
             }

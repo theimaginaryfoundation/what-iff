@@ -38,7 +38,8 @@ describe('FolderFiles', () => {
     expect(listChatContextFiles).toHaveBeenCalledTimes(1);
     await folders.conversation('c1', true);
     expect(listChatContextFiles).toHaveBeenCalledTimes(2);
-    expect(listChatContextFiles).toHaveBeenCalledWith('c1');
+    // Without the container's status: a preview polls this every few seconds.
+    expect(listChatContextFiles).toHaveBeenCalledWith('c1', { container: false });
     now = 10_000;
     await folders.conversation('c1');
     expect(listChatContextFiles).toHaveBeenCalledTimes(3);
