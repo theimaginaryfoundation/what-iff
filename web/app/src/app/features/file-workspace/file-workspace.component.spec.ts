@@ -9,7 +9,9 @@ import { CommentAutosave } from '../office/comments/comment-autosave';
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
+import { FolderFiles } from '../web-preview/folder-files.service';
 import { FileWorkspaceComponent } from './file-workspace.component';
+import { FileWorkspaceService } from './file-workspace.service';
 import { FileEditor } from './editors/file-editor';
 import { EDITOR_LOADER, VIEWER_LOADER } from './viewers/registry';
 
@@ -63,11 +65,14 @@ describe('FileWorkspaceComponent', () => {
   let loadViewer: ReturnType<typeof vi.fn<(kind: string) => Promise<unknown> | null>>;
   /** The chat/file pairs whose chat agent may change the file (ADR 0x046). */
   let granted: Set<string>;
+  /** The gallery's folders, by name, as the project page is looked for in them. */
+  let folderFiles: Map<string, Map<string, FileAttachment>>;
 
   beforeEach(async () => {
     download = vi.fn().mockReturnValue(of(textBlob('hello')));
     downloadVersion = null;
     granted = new Set();
+    folderFiles = new Map();
     alert = vi.fn().mockResolvedValue(undefined);
     replaceContent = vi.fn().mockImplementation((id: string) => of(file({ id, content_version: 2 })));
     confirmDiscard = vi.fn().mockResolvedValue(true);
@@ -95,6 +100,10 @@ describe('FileWorkspaceComponent', () => {
         { provide: ConfirmationService, useValue: { alert, confirmDiscardChanges: confirmDiscard, confirm } },
         { provide: VIEWER_LOADER, useValue: (kind: string) => loadViewer(kind) },
         { provide: EDITOR_LOADER, useValue: (kind: string) => (kind === 'none' ? null : Promise.resolve(FakeEditorComponent)) },
+        {
+          provide: FolderFiles,
+          useValue: { list: async (folder: string) => folderFiles.get(folder) ?? new Map(), conversation: async () => new Map() },
+        },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(FileWorkspaceComponent);
@@ -235,6 +244,19 @@ describe('FileWorkspaceComponent', () => {
     fixture.componentRef.setInput('personalityName', 'Aster');
     const el = await show(file({ personality_id: 'p-1', source: 'imported' }));
     expect(el.querySelector('.file-workspace__meta')?.textContent).toContain('Document of Aster');
+  });
+
+  it('opens the page of the project a script is part of, from its folder or the nearest one above', async () => {
+    const page = file({ id: 'page-1', name: 'index.html', folder: 'site' });
+    folderFiles.set('site', new Map([['index.html', page]]));
+    const open = vi.spyOn(TestBed.inject(FileWorkspaceService), 'requestOpen').mockImplementation(() => undefined);
+    const el = await show(file({ name: 'app.js', folder: 'site/src' }));
+    button(el, 'Open page')!.click();
+    expect(open).toHaveBeenCalledWith('page-1');
+
+    // The page itself, or a file in a folder with no page, has none.
+    expect(button(await show(page), 'Open page')).toBeUndefined();
+    expect(button(await show(file({ id: 'n-1', name: 'notes.md', folder: 'notes' })), 'Open page')).toBeUndefined();
   });
 
   it('shows the host-specific controls it is asked for', async () => {

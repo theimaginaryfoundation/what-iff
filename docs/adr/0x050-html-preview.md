@@ -35,6 +35,8 @@ And a thread is anchored on a range of the file's text, which the server carries
 
 - A project is a gallery folder: its files and those of the folders beneath it, with their paths relative to it (`index.html`, `css/app.css`, `img/logo.png`).
   Where the app has a preview site (§3), an `.html` file always opens this way, with its own folder as the project's root, so a page finds its other files as it would on a web server; Open as site, in a folder that has an `index.html`, opens that page.
+- **Any other file of a project opens its page.** A script, stylesheet or image whose folder, or a folder above it, has a page (its `index.html`, else its only `.html` file) shows Open page beside the file's name, so a thread kept with a script (§5), followed from the chat, is one click from the page it is on.
+  The gallery's top level is no project, so it is not looked in; a file with no folder of its own in a conversation is looked for by its path among the conversation's files.
 - Paths in the project are the gallery's: folder segments are lower case (the gallery normalizes them), file names keep their case.
   A reference whose folder case differs from the gallery's still resolves, as folder segments are matched without case, so `Assets/logo.png` finds `assets/logo.png`; a name must match exactly.
 - Files are found as the page asks for them, a folder at a time, so a project has no size limit of its own; a folder's listing is reused for a few seconds and each file version is downloaded once.
