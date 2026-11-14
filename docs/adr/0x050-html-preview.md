@@ -54,7 +54,12 @@ And a thread is anchored on a range of the file's text, which the server carries
   The page's own state (scroll, typed input) is lost, which is accepted.
 - The user's page shares the host page's origin (a worker serves only same-origin documents); that origin holds nothing of the app's, and the app's frame has the sandbox the diagrams frame has.
 - The host page takes the app's first message only from its parent window, on an origin listed in its `config.js` (`PREVIEW_HOST_ORIGINS` at build time); the app takes messages only from that frame's window on the configured origin.
-- The site's response headers: `frame-ancestors` the app only, a content security policy that allows the page's own files, inline scripts and styles (a project's pages have them), `data:` and `blob:`, and the CDNs of §4; and no caching of the host page or the worker, so a frame never runs an old worker against the app.
+- The site's response headers: `frame-ancestors` the app only; no caching of the host page or the worker, so a frame never runs an old worker against the app; and a content security policy.
+  Scripts may come only from the site itself (inline and `eval` included) and the CDNs of §4, as scripts are where code comes from.
+  Styles, images, fonts, media and `fetch` may come from any https host: pages agents build use remote images and public APIs, and the origin holds nothing but the project's own files.
+  No plugins, `<base>` only to the site, forms only to the site.
+- The host's headers reach the host page only, so the worker reads the site's policy from the host page's headers and sends it on every page it serves, with `'self'` added to `frame-ancestors`, as the host page frames them.
+  Where the site sends no policy (local development), neither do its pages.
 
 ### 4. Dependencies
 

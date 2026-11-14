@@ -7,12 +7,19 @@
  * request keeps it alive until it is answered.
  *
  * The host page is the window client whose URL carries `t=<token>` (index.html?t=<token>).
+ *
+ * The site's content security policy (set where it is hosted) reaches the host page only; the pages
+ * this worker builds carry the same policy, read from the host page's headers, with 'self' added to
+ * frame-ancestors, as the user's page is framed by the host page. Where the site has none (local
+ * development), neither do the pages.
  */
 'use strict';
 
 const PREFIX = new URL('./p/', self.registration.scope).pathname;
 /** How long a request may wait for the app before it is answered 504. */
 const ANSWER_TIMEOUT_MS = 20000;
+/** The site's policy for the pages it serves, once read ('' when the site has none). */
+let pagePolicy = null;
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
@@ -60,10 +67,33 @@ async function answer(token, path, method) {
       headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
     });
   }
-  return new Response(method === 'HEAD' ? null : reply.body, {
-    status: 200,
-    headers: { 'Content-Type': reply.contentType || 'application/octet-stream', 'Cache-Control': 'no-store' },
-  });
+  const headers = { 'Content-Type': reply.contentType || 'application/octet-stream', 'Cache-Control': 'no-store' };
+  const policy = await sitePolicy();
+  if (policy) headers['Content-Security-Policy'] = policy;
+  return new Response(method === 'HEAD' ? null : reply.body, { status: 200, headers });
+}
+
+/** The site's content security policy, as the pages it serves need it. */
+async function sitePolicy() {
+  if (pagePolicy !== null) return pagePolicy;
+  try {
+    const response = await fetch(new URL('./index.html', self.registration.scope), { method: 'HEAD', cache: 'no-store' });
+    pagePolicy = framedBySelf(response.headers.get('Content-Security-Policy') || '');
+  } catch {
+    // Unread this time: the next request tries again.
+    return '';
+  }
+  return pagePolicy;
+}
+
+/** The policy with 'self' among its frame ancestors, as the host page frames the user's page. */
+function framedBySelf(policy) {
+  return policy
+    .split(';')
+    .map(directive => directive.trim())
+    .filter(Boolean)
+    .map(directive => (/^frame-ancestors\s/i.test(directive) && !/'self'/.test(directive) ? `frame-ancestors 'self' ${directive.slice('frame-ancestors'.length).trim()}` : directive))
+    .join('; ');
 }
 
 async function hostFor(token) {
