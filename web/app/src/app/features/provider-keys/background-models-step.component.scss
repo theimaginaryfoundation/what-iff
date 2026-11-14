@@ -1,0 +1,71 @@
+// Sits inside the first-run prompt (provider-key-prompt.component.scss) and matches its type.
+:host {
+  display: block;
+}
+
+.bg-step {
+  display: grid;
+  gap: 0.625rem;
+}
+
+.bg-step__role {
+  display: grid;
+  gap: 0.1875rem;
+
+  small {
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+    line-height: 1.4;
+  }
+}
+
+.bg-step__label {
+  color: var(--color-text-primary);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+select {
+  background: var(--bg-input, var(--bg-primary));
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  margin-top: 0.125rem;
+  outline: none;
+  padding: 0.55rem 0.65rem;
+  width: 100%;
+
+  &:focus-visible {
+    border-color: var(--accent, #8c87ff);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #8c87ff) 35%, transparent);
+  }
+}
+
+.bg-step__off {
+  color: var(--warning);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.bg-step__note {
+  background: var(--cta-bg);
+  border: 1px solid color-mix(in srgb, var(--cta) 25%, transparent);
+  border-radius: 0.5rem;
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  margin: 0.25rem 0 0;
+  padding: 0.6rem 0.75rem;
+
+  strong {
+    color: var(--color-text-primary);
+    font-weight: 600;
+  }
+}
+
+.bg-step__error {
+  color: var(--danger);
+  font-size: 0.8125rem;
+  margin: 0;
+}

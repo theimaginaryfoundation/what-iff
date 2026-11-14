@@ -1,4 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
+import type { components } from '../sdk/schema.d.ts';
+
+type UtilityRole = components['schemas']['UtilityRole'];
 
 /**
  * The first-run "add your OpenAI key" prompt (provider-key-prompt.component).
@@ -12,6 +15,24 @@ export class ProviderKeyPrompt {
   constructor(private readonly page: Page) {
     this.root = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Add your OpenAI key to get started' }) });
     this.addKeyButton = this.root.getByRole('button', { name: 'Add your OpenAI key' });
+  }
+}
+
+/**
+ * The first-run prompt's background-models step (background-models-step.component): one
+ * select per role with nothing chosen, and the button that saves them all.
+ */
+export class BackgroundModelsStep {
+  readonly root: Locator;
+  readonly saveButton: Locator;
+
+  constructor(private readonly page: Page) {
+    this.root = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Choose your background models' }) });
+    this.saveButton = this.root.getByTestId('background-models-step-save');
+  }
+
+  select(role: UtilityRole): Locator {
+    return this.root.getByTestId(`onboarding-background-model-${role}`);
   }
 }
 

@@ -2,8 +2,8 @@ import type { Page } from '@playwright/test';
 
 import { test, expect, signInAs, authenticateAsNewUser, attachCoverage } from '../../../fixtures';
 import { deleteUser, type TestUser } from '../../../fixtures/api';
-import { ProfileSettingsModal, ProviderKeyPrompt, ProvidersTab } from '../../../poms';
-import { getProviderAccess, listModels } from '../../../sdk/client';
+import { BackgroundModelsStep, ProfileSettingsModal, ProviderKeyPrompt, ProvidersTab } from '../../../poms';
+import { createApiClient, getProviderAccess, getUtilityModels, listModels } from '../../../sdk/client';
 
 /**
  * Connecting providers (ADR 0x027): the first-run prompt, the Providers tab in
@@ -73,10 +73,28 @@ test.describe('first run without a provider', () => {
       await expect(providers.connectOpenAIButton).toHaveCount(0);
     });
 
-    await test.step('onboarding goes on to creating a personality', async () => {
+    const background = new BackgroundModelsStep(page);
+
+    await test.step('onboarding goes on to background models, each role starting on the default model', async () => {
       await providers.nextStepButton.click();
       await expect(page).toHaveURL(/\/personality/);
       await expect(prompt.root).toBeHidden();
+      await expect(background.root).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(background.root).toBeVisible();
+      for (const role of ['memory', 'memory_merge', 'simple', 'personality'] as const) {
+        await expect(background.select(role)).not.toHaveValue('off');
+      }
+    });
+
+    await test.step('saving them, one switched off, ends the prompt, and the choices stick', async () => {
+      await background.select('memory_merge').selectOption('off');
+      await expect(background.root).toContainText('Duplicates pile up');
+      await background.saveButton.click();
+      await expect(background.root).toBeHidden();
+      const roles = (await getUtilityModels(createApiClient(registered.accessToken))).roles;
+      expect(roles.find(r => r.role === 'memory_merge')?.account).toMatchObject({ off: true });
+      expect(roles.filter(r => r.role !== 'memory_merge').every(r => r.account?.model_id)).toBe(true);
     });
 
     await attachCoverage(page, testInfo);

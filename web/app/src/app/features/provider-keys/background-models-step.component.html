@@ -1,0 +1,28 @@
+<div class="bg-step" data-testid="background-models-step">
+  @for (row of rows(); track row.role) {
+    <label class="bg-step__role">
+      <span class="bg-step__label">{{ row.label }}</span>
+      <small>{{ row.covers }}</small>
+      <select
+        [attr.data-testid]="'onboarding-background-model-' + row.role"
+        [disabled]="saving()"
+        (change)="pick(row.role, $any($event.target))"
+      >
+        @for (model of models(); track model.id) {
+          <option [value]="model.id" [selected]="model.id === row.value">{{ modelLabel(model) }}</option>
+        }
+        <option [value]="offValue" [selected]="row.value === offValue">Off</option>
+      </select>
+      @if (row.value === offValue) {
+        <span class="bg-step__off" data-testid="onboarding-background-off">Off. {{ row.stops }}</span>
+      }
+    </label>
+  }
+  <p class="bg-step__note">
+    <strong>Background work can use a smaller, cheaper model.</strong> Most providers offer one, often named mini, flash or
+    lite. You can change these any time in Settings.
+  </p>
+  @if (error()) {
+    <p class="bg-step__error" role="alert" data-testid="background-models-step-error">{{ error() }}</p>
+  }
+</div>

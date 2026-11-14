@@ -1,23 +1,49 @@
 <ui-modal [open]="open()" [dismissible]="false" size="md" labelledBy="provider-key-prompt-title">
   <div modal-header class="key-prompt__header">
-    <p class="key-prompt__eyebrow">Welcome to WhatIff</p>
+    <p class="key-prompt__eyebrow">{{ step() === 2 && pastOnboarding() ? 'Something new' : 'Welcome to WhatIff' }}</p>
     <h2 id="provider-key-prompt-title" class="key-prompt__title">
-      {{ step() === 0 ? 'Add your OpenAI key to get started' : "Choose the models you'll chat with" }}
+      @switch (step()) {
+        @case (0) {
+          Add your OpenAI key to get started
+        }
+        @case (1) {
+          Choose the models you'll chat with
+        }
+        @default {
+          Choose your background models
+        }
+      }
     </h2>
   </div>
-  <section class="key-prompt" data-testid="provider-key-prompt" [attr.data-step]="step() === 0 ? 'key' : 'models'">
+  <section class="key-prompt" data-testid="provider-key-prompt" [attr.data-step]="['key', 'models', 'background'][step()]">
     @if (step() === 0) {
       <p class="key-prompt__lead">
         WhatIff runs on your own AI provider account, so it needs a key before it can chat, remember or create
         anything.
       </p>
-    } @else {
+    } @else if (step() === 1) {
       <p class="key-prompt__lead">
         Your key is connected. Now pick which of its models show up in your model picker; the first one you choose
         becomes your default.
       </p>
+    } @else if (pastOnboarding()) {
+      <p class="key-prompt__lead">
+        WhatIff no longer picks the models for its background work: memories, summaries, thread names and new
+        personalities run on models you choose. Memories and summaries start again once you've chosen.
+      </p>
+    } @else {
+      <p class="key-prompt__lead">Each kind of background work runs on one of your models, starting with your default.</p>
     }
 
+    @if (step() === 2 && utility(); as roles) {
+      <app-background-models-step
+        [utility]="roles"
+        [defaultModelId]="defaultModelId()"
+        (saved)="backgroundModelsSaved($event)"
+      />
+    }
+
+    @if (!(step() === 2 && pastOnboarding())) {
     <ol class="key-prompt__steps">
       @for (s of steps; track s.title; let i = $index) {
         <li class="key-prompt__step" [class.key-prompt__step--current]="i === step()" [class.key-prompt__step--done]="i < step()">
@@ -27,10 +53,13 @@
             }
             {{ s.title }}
           </span>
-          <span class="key-prompt__step-body">{{ s.body }}</span>
+          @if (i >= step()) {
+            <span class="key-prompt__step-body">{{ s.body }}</span>
+          }
         </li>
       }
     </ol>
+    }
 
     @if (step() === 0) {
       <p class="key-prompt__hint">You'll confirm with your WhatIff password. The key is stored encrypted.</p>
@@ -39,8 +68,18 @@
   <div modal-footer class="key-prompt__actions">
     @if (step() === 0) {
       <button type="button" class="key-prompt__primary" (click)="addKey()">Add your OpenAI key</button>
-    } @else {
+    } @else if (step() === 1) {
       <button type="button" class="key-prompt__primary" (click)="chooseModels()">Choose models</button>
+    } @else {
+      <button
+        type="button"
+        class="key-prompt__primary"
+        data-testid="background-models-step-save"
+        [disabled]="backgroundSaving()"
+        (click)="saveBackgroundModels()"
+      >
+        {{ pastOnboarding() ? 'Save' : 'Save and continue' }}
+      </button>
     }
   </div>
 </ui-modal>
