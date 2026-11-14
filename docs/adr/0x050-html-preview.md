@@ -64,8 +64,8 @@ And a thread is anchored on a range of the file's text, which the server carries
   So nothing on the site is trusted: the app checks every request and every message it is sent (a pick names a file the page loaded, a picture must be a PNG, a path must be in the project), and a page that took over its host page gets no more than it could already fetch.
   The key per opening tells the app's previews apart; it does not keep two previews in one tab from each other's files, which a host per project would.
   That origin holds nothing of the app's; the app's frame and the page's frame allow scripts, forms, popups and downloads, but no modal dialogs, as an endless `alert()` would lock the app's tab.
-- The host page takes the app's first message only from its parent window, on an origin listed in its `config.js` (`PREVIEW_HOST_ORIGINS` at build time); the app takes messages only from that frame's window on the configured origin.
-- The site's response headers: `frame-ancestors` the app only; no caching of the host page or the worker, so a frame never runs an old worker against the app; and a content security policy.
+- The host page takes the app's first message only from its parent window, on an origin listed in its `config.js` (`PREVIEW_HOST_ORIGINS` at build time: the app's, and the share site's, which shows shared web apps the same way, ADR 0x051 §7); the app takes messages only from that frame's window on the configured origin.
+- The site's response headers: `frame-ancestors` the app (and the share site) only; no caching of the host page or the worker, so a frame never runs an old worker against the app; and a content security policy.
   Scripts may come only from the site itself (inline and `eval` included) and the CDNs of §4, as scripts are where code comes from.
   Styles, images, fonts, media and `fetch` may come from any https host: pages agents build use remote images and public APIs, and the origin holds nothing but the project's own files.
   No plugins, `<base>` only to the site, forms only to the site.
