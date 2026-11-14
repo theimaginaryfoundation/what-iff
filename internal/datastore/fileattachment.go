@@ -575,6 +575,10 @@ func (d *Datastore) ListFileAttachments(ctx context.Context, userID uuid.UUID, p
 		entfileattachment.FieldS3Key,
 		entfileattachment.FieldFolder,
 		entfileattachment.FieldCreatedAt,
+		// What a list shows changes by: a diagram tile's preview URL and a page's files
+		// (ADR 0x050 §6) are keyed by the content version.
+		entfileattachment.FieldContentVersion,
+		entfileattachment.FieldUpdatedAt,
 	).All(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T1("list.failed", "Entity", "file attachments"), zap.Error(err))
