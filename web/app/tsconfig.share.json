@@ -1,0 +1,9 @@
+/* The share site (ADR 0x051 §5): a second application built from this workspace's code. */
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/share"
+  },
+  "files": ["src/share/main.ts"],
+  "include": ["src/**/*.d.ts"]
+}

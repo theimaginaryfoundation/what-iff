@@ -120,9 +120,7 @@
                 "inject": false
               }
             ],
-            "scripts": [
-              "node_modules/clipboard/dist/clipboard.min.js"
-            ],
+            "scripts": ["node_modules/clipboard/dist/clipboard.min.js"],
             "webWorkerTsConfig": "tsconfig.worker.json",
             "loader": {
               ".ttf": "file"
@@ -206,17 +204,194 @@
           "options": {
             "runner": "vitest",
             "tsConfig": "tsconfig.spec.json",
-            "setupFiles": [
-              "src/test-setup.ts"
-            ],
-            "coverageExclude": [
-              "**/*.html"
-            ],
-            "coverageReporters": [
-              "lcovonly",
-              "text-summary"
-            ]
+            "setupFiles": ["src/test-setup.ts"],
+            "coverageExclude": ["**/*.html"],
+            "coverageReporters": ["lcovonly", "text-summary"]
           }
+        }
+      }
+    },
+    "share": {
+      "projectType": "application",
+      "root": "src/share",
+      "sourceRoot": "src",
+      "prefix": "share",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "browser": "src/share/main.ts",
+            "tsConfig": "tsconfig.share.json",
+            "inlineStyleLanguage": "scss",
+            "assets": [
+              {
+                "glob": "favicon.ico",
+                "input": "public"
+              },
+              {
+                "glob": "esbuild.wasm",
+                "input": "node_modules/esbuild-wasm",
+                "output": "assets/esbuild/0.28.2"
+              }
+            ],
+            "allowedCommonJsDependencies": [
+              "react",
+              "react-dom",
+              "@braintree/sanitize-url",
+              "cytoscape-cose-bilkent",
+              "cytoscape-fcose",
+              "dayjs",
+              "fastdom"
+            ],
+            "styles": [
+              "src/styles.scss",
+              {
+                "input": "src/styles/office-fonts.scss",
+                "bundleName": "office-fonts",
+                "inject": false
+              },
+              "node_modules/katex/dist/katex.min.css",
+              {
+                "input": "node_modules/pdfjs-dist/web/pdf_viewer.css",
+                "bundleName": "pdfjs",
+                "inject": false
+              },
+              {
+                "input": "node_modules/monaco-editor/min/vs/editor/editor.main.css",
+                "bundleName": "monaco",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-core/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-data-validation/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-conditional-formatting/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-filter/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-hyper-link/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-drawing/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-sort/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-find-replace/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-sheets-note/lib/index.css",
+                "bundleName": "univer-sheets",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-docs-core/lib/index.css",
+                "bundleName": "univer-docs",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-docs-hyper-link/lib/index.css",
+                "bundleName": "univer-docs",
+                "inject": false
+              },
+              {
+                "input": "node_modules/@univerjs/preset-docs-drawing/lib/index.css",
+                "bundleName": "univer-docs",
+                "inject": false
+              }
+            ],
+            "webWorkerTsConfig": "tsconfig.worker.json",
+            "loader": {
+              ".ttf": "file"
+            },
+            "index": "src/share/index.html",
+            "outputPath": "dist/share"
+          },
+          "configurations": {
+            "production": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "1.5MB",
+                  "maximumError": "2.5MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "4kB",
+                  "maximumError": "30kB"
+                }
+              ],
+              "outputHashing": "all",
+              "sourceMap": {
+                "scripts": true,
+                "hidden": true
+              }
+            },
+            "docker": {
+              "outputHashing": "all",
+              "fileReplacements": [
+                {
+                  "replace": "src/share/share-environment.ts",
+                  "with": "src/share/share-environment.docker.ts"
+                }
+              ]
+            },
+            "development": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true,
+              "assets": [
+                {
+                  "glob": "favicon.ico",
+                  "input": "public"
+                },
+                {
+                  "glob": "esbuild.wasm",
+                  "input": "node_modules/esbuild-wasm",
+                  "output": "assets/esbuild/0.28.2"
+                }
+              ]
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@angular/build:dev-server",
+          "options": {
+            "port": 4204,
+            "proxyConfig": "share.proxy.json"
+          },
+          "configurations": {
+            "production": {
+              "buildTarget": "share:build:production"
+            },
+            "development": {
+              "buildTarget": "share:build:development"
+            }
+          },
+          "defaultConfiguration": "development"
         }
       }
     }

@@ -1,0 +1,54 @@
+:host {
+  display: block;
+}
+
+.share-message {
+  max-width: 28rem;
+  margin: 12vh auto 0;
+  padding: 0 1rem;
+  text-align: center;
+  color: var(--text-primary);
+}
+
+.share-message__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.share-message__text {
+  margin: 0 0 1rem;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.share-message__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  text-align: left;
+}
+
+.share-message__label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.share-message__input {
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--color-border-base);
+  border-radius: 0.375rem;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+}
+
+.share-message__error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.8125rem;
+}

@@ -260,9 +260,9 @@ diagrams-site: ## Build the draw.io site for .drawio files into web/diagrams/dis
 	@scripts/build-diagrams-site.sh $(DRAWIO_VERSION) $(DRAWIO_SHA256)
 
 # The preview site that serves web projects (ADR 0x050 §3): our host page and service worker,
-# served from an origin other than the app's. PREVIEW_HOST_ORIGINS lists the app origins that may
+# served from an origin other than the app's. PREVIEW_HOST_ORIGINS lists the app (and share site, ADR 0x051) origins that may
 # frame it (comma-separated); the checked-in web/preview/site/config.js is the local one.
-PREVIEW_HOST_ORIGINS ?= http://localhost:4200
+PREVIEW_HOST_ORIGINS ?= http://localhost:4200,http://localhost:4204
 
 .PHONY: preview-site
 preview-site: ## Build the preview site for web projects into web/preview/dist (PREVIEW_HOST_ORIGINS=...)
