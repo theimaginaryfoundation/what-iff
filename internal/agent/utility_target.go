@@ -18,12 +18,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// ErrUtilityRoleOff is a utility call whose role is switched off: its work doesn't run.
-var ErrUtilityRoleOff = errors.New("this utility role is switched off")
-
-// ErrUtilityRoleNotSet is a utility call whose role has no model chosen at any scope: its work
-// doesn't run until one is.
-var ErrUtilityRoleNotSet = errors.New("no model is chosen for this utility role")
+// ErrUtilityRoleOff and ErrUtilityRoleNotSet are a utility call that didn't run because of its
+// role's choice; the call fails with a models.UtilityRoleUnavailableError naming the role.
+var (
+	ErrUtilityRoleOff    = models.ErrUtilityRoleOff
+	ErrUtilityRoleNotSet = models.ErrUtilityRoleNotSet
+)
 
 // utilityTarget is the model a utility call runs on.
 type utilityTarget struct {
@@ -68,7 +68,7 @@ func (t utilityTarget) usesResponsesAPI() bool {
 // failed read of the settings fails the call.
 func (a *Agent) resolveUtilityTarget(ctx context.Context, role provider.UtilityRole) (utilityTarget, error) {
 	if a.ds == nil {
-		return utilityTarget{}, ErrUtilityRoleNotSet
+		return utilityTarget{}, &models.UtilityRoleUnavailableError{Role: role, Err: ErrUtilityRoleNotSet}
 	}
 	userID, _ := middleware.GetUserIDFromContext(ctx)
 	settings, err := a.ds.ListUtilityModelSettings(ctx, userID)
@@ -77,26 +77,45 @@ func (a *Agent) resolveUtilityTarget(ctx context.Context, role provider.UtilityR
 		return utilityTarget{}, fmt.Errorf("read utility model settings: %w", err)
 	}
 	var unusable error
+	// settle tells the run how the role's choice went: a fallback notice only when an unusable
+	// choice was passed over for one that ran, and a cleared one otherwise. A role whose every
+	// choice was unusable says so through its steps' own notices instead.
+	settle := func(ranOnFallback bool) {
+		run := backgroundRunFrom(ctx)
+		if ranOnFallback && choiceUnusable(unusable) && ctx.Err() == nil {
+			run.failed(models.BackgroundNotice{Step: models.BackgroundFallbackStep(role), Code: models.BackgroundNoticeModelUnavailable})
+			return
+		}
+		run.succeeded(models.BackgroundFallbackStep(role))
+	}
 	for _, scope := range a.utilityScopes() {
 		for _, s := range settings {
 			if s.Role != role || s.Scope != scope {
 				continue
 			}
 			if s.Off() {
-				return utilityTarget{}, ErrUtilityRoleOff
+				settle(false)
+				return utilityTarget{}, &models.UtilityRoleUnavailableError{Role: role, Err: ErrUtilityRoleOff}
 			}
 			t, err := a.settingTarget(ctx, userID, s)
 			if err == nil {
+				settle(unusable != nil)
 				return t, nil
 			}
 			a.recordUtilityFallback(ctx, role, scope, *s.ModelID, err)
 			unusable = err
 		}
 	}
-	if unusable != nil {
-		return utilityTarget{}, unusable
+	settle(false)
+	if unusable != nil && !choiceUnusable(unusable) {
+		// The last choice couldn't be checked (a database error, say): that says nothing about
+		// the choice, so it isn't the account's to fix.
+		return utilityTarget{}, fmt.Errorf("resolve %s model: %w", role, unusable)
 	}
-	return utilityTarget{}, ErrUtilityRoleNotSet
+	if unusable != nil {
+		return utilityTarget{}, &models.UtilityRoleUnavailableError{Role: role, Err: fmt.Errorf("%w: %w", models.ErrUtilityModelUnavailable, unusable)}
+	}
+	return utilityTarget{}, &models.UtilityRoleUnavailableError{Role: role, Err: ErrUtilityRoleNotSet}
 }
 
 // utilityScopes are the scopes whose choices count, first wins. An account chooses only where it
@@ -133,6 +152,14 @@ func (a *Agent) settingTarget(ctx context.Context, userID uuid.UUID, s models.Ut
 		t.provider = conn.Preset
 	}
 	return t, nil
+}
+
+// choiceUnusable reports whether err says a chosen model can't be used, rather than that the
+// settings couldn't be read: the account can fix the first by choosing again.
+func choiceUnusable(err error) bool {
+	var missing *providerkeys.NotConfiguredError
+	return errors.Is(err, ErrModelDisabled) || errors.Is(err, ErrConnectionUnavailable) ||
+		errors.Is(err, datastore.ErrExperimentalModelNotAllowed) || errors.As(err, &missing)
 }
 
 // recordUtilityFallback logs and counts a role passing over a choice it couldn't use, or

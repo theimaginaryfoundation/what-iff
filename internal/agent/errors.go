@@ -22,6 +22,12 @@ func failureCode(err error) string {
 	switch {
 	case errors.As(err, &notConfigured):
 		return models.ErrCodeProviderNotConfigured
+	case errors.Is(err, ErrUtilityRoleNotSet):
+		return models.ErrCodeUtilityModelNotSet
+	case errors.Is(err, ErrUtilityRoleOff):
+		return models.ErrCodeUtilityRoleOff
+	case errors.Is(err, models.ErrUtilityModelUnavailable):
+		return models.ErrCodeUtilityModelUnavailable
 	case errors.Is(err, ErrQuotaExceeded):
 		return models.ErrCodeQuotaExceeded
 	case errors.Is(err, ErrNoModelSelected):

@@ -1548,6 +1548,17 @@ func (a *Agent) generateAssistantForMessageOpenAI(ctx context.Context, userID uu
 	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, first, opts)
 }
 
+// providerNotConfiguredError is a model whose provider has no client on this deployment, which
+// adding the provider's key fixes; any other failure to pick a client is a routing bug.
+type providerNotConfiguredError struct{ msg string }
+
+func (e *providerNotConfiguredError) Error() string { return e.msg }
+
+// providerNotConfigured formats a providerNotConfiguredError.
+func providerNotConfigured(format string, args ...any) error {
+	return &providerNotConfiguredError{msg: fmt.Sprintf(format, args...)}
+}
+
 // claudeProviderForModel selects the Anthropic-Messages-API provider for the model
 // and reports whether it is native Anthropic. z.ai GLM models share the wire format
 // but use a different client (a.ZAIProvider) and do not support Anthropic-native tool
@@ -1558,12 +1569,12 @@ func (a *Agent) claudeProviderForModel(chatCtx *chatContext) (prov *provider.Cla
 	}
 	if models.IsZAIModel(chatCtx.modelProvider, chatCtx.model) {
 		if a.ZAIProvider == nil {
-			return nil, false, fmt.Errorf("z.ai model %q requested but ZAI_API_KEY is not configured", chatCtx.model)
+			return nil, false, providerNotConfigured("z.ai model %q requested but ZAI_API_KEY is not configured", chatCtx.model)
 		}
 		return a.ZAIProvider, false, nil
 	}
 	if a.ClaudeProvider == nil {
-		return nil, false, fmt.Errorf("Claude model %q requested but ANTHROPIC_API_KEY is not configured", chatCtx.model)
+		return nil, false, providerNotConfigured("Claude model %q requested but ANTHROPIC_API_KEY is not configured", chatCtx.model)
 	}
 	return a.ClaudeProvider, true, nil
 }
@@ -1777,25 +1788,25 @@ func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai
 	switch models.ProviderForModel(chatCtx.modelProvider, chatCtx.model) {
 	case models.ModelProviderMistral:
 		if a.MistralProvider == nil {
-			return nil, fmt.Errorf("Mistral model %q requested but MISTRAL_API_KEY is not configured", chatCtx.model)
+			return nil, providerNotConfigured("Mistral model %q requested but MISTRAL_API_KEY is not configured", chatCtx.model)
 		}
 		provider.ApplyMistralReasoning(&params, chatCtx.reasoningEffort)
 		return provider.NewMistralAdapter(a.MistralProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderDeepSeek:
 		if a.DeepSeekProvider == nil {
-			return nil, fmt.Errorf("DeepSeek model %q requested but DEEPSEEK_API_KEY is not configured", chatCtx.model)
+			return nil, providerNotConfigured("DeepSeek model %q requested but DEEPSEEK_API_KEY is not configured", chatCtx.model)
 		}
 		provider.ApplyDeepSeekReasoning(&params, chatCtx.reasoningEffort)
 		return provider.NewDeepSeekAdapter(a.DeepSeekProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderQwen:
 		if a.QwenProvider == nil {
-			return nil, fmt.Errorf("Qwen model %q requested but QWEN_API_KEY is not configured", chatCtx.model)
+			return nil, providerNotConfigured("Qwen model %q requested but QWEN_API_KEY is not configured", chatCtx.model)
 		}
 		provider.ApplyQwenReasoning(&params, chatCtx.reasoningEffort)
 		return provider.NewQwenAdapter(a.QwenProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderXiaomi:
 		if a.XiaomiProvider == nil {
-			return nil, fmt.Errorf("Xiaomi model %q requested but XIAOMI_API_KEY is not configured", chatCtx.model)
+			return nil, providerNotConfigured("Xiaomi model %q requested but XIAOMI_API_KEY is not configured", chatCtx.model)
 		}
 		adapter := provider.NewXiaomiAdapter(a.XiaomiProvider, params, functionTools, disabledTools)
 		// MiMo's only reasoning control: an effort of off turns thinking off (ADR 0x026).
@@ -2972,6 +2983,7 @@ func (a *Agent) finalizeChat(ctx context.Context, userID uuid.UUID, chatMessage,
 		chatName, err := a.generateChatName(nameCtx, chatMessage.Message)
 		cancelName()
 		doneChatName()
+		a.recordTurnUtility(ctx, userID, chatCtx.chat.ID, models.BackgroundStepChatName, err)
 		if err != nil {
 			a.logger.Error("failed to generate chat name", zap.Error(err))
 		} else {
@@ -3133,24 +3145,45 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	// The memory model is resolved once and pinned for the whole checkpoint. Its steps would
 	// otherwise each resolve it again, and a choice saved mid-checkpoint, or a settings read
 	// that failed only the first time, would send a step that continues the stored response
-	// to a model that can't.
-	memory, err := a.utilityTargetFor(checkpointCtx, provider.UtilityRoleMemory)
-	if err != nil {
-		// Every step runs on the memory role's model: with none to use, none runs.
-		a.logCheckpointSkipped(chatMessage.ChatID, err)
-		return
-	}
-	checkpointCtx = withUtilityTarget(checkpointCtx, provider.UtilityRoleMemory, memory)
-	if !checkpointChainsResponses(chatCtx, memory) {
-		a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
-	} else {
-		a.runCheckpointOpenAI(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
-	}
+	// to a model that can't. It is resolved inside the run, so a fallback becomes its notice.
+	a.withBackgroundNotices(checkpointCtx, userID, chatMessage.ChatID, func(checkpointCtx context.Context) {
+		memory, err := a.utilityTargetFor(checkpointCtx, provider.UtilityRoleMemory)
+		if err != nil {
+			// Every step runs on the memory role's model: with none to use, none runs, and each
+			// says why (or, for a role switched off, clears what it said before).
+			a.logCheckpointSkipped(chatMessage.ChatID, err)
+			run := backgroundRunFrom(checkpointCtx)
+			for _, step := range checkpointNoticeSteps(chatCtx.chat) {
+				run.step(step, err)
+			}
+			return
+		}
+		checkpointCtx = withUtilityTarget(checkpointCtx, provider.UtilityRoleMemory, memory)
+		if !checkpointChainsResponses(chatCtx, memory) {
+			a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
+		} else {
+			a.runCheckpointOpenAI(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
+		}
+	})
 	if errors.Is(checkpointCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
 		a.logger.Warn("checkpoint ran out of time; the next checkpoint will retry it",
 			zap.String("chat_id", chatMessage.ChatID.String()),
 			zap.Duration("budget", checkpointTimeout))
 	}
+}
+
+// checkpointNoticeSteps are the steps a checkpoint on chat would run with a memory model, so a
+// skipped checkpoint leaves notices only for steps whose later success can clear them.
+func checkpointNoticeSteps(chat *models.Chat) []models.BackgroundStep {
+	steps := []models.BackgroundStep{models.BackgroundStepSummary}
+	runScratchpad, _ := checkpointSteps(chat, false)
+	if runScratchpad {
+		steps = append(steps, models.BackgroundStepScratchpad)
+	}
+	if _, runExtraction := checkpointSteps(chat, runScratchpad); runExtraction {
+		steps = append(steps, models.BackgroundStepMemory)
+	}
+	return steps
 }
 
 // logCheckpointSkipped logs a checkpoint that can't run because its memory model can't be
@@ -3194,6 +3227,7 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpad(ctx, userID, agentMessage.ResponseID, chatCtx)
 		doneScratchpad()
+		backgroundRunFrom(ctx).step(models.BackgroundStepScratchpad, err)
 		if err != nil {
 			a.logger.Error("failed to update scratchpad during checkpoint", zap.Error(err))
 		} else {
@@ -3216,8 +3250,9 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	}
 	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction {
 		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
-		a.extractMemoriesWithScratchpadDelta(ctx, userID, chatMessage.ChatID, newScratchpadResponseID, inferenceModelContext, chatCtx, compactionEventID)
+		err := a.extractMemoriesWithScratchpadDelta(ctx, userID, chatMessage.ChatID, newScratchpadResponseID, inferenceModelContext, chatCtx, compactionEventID)
 		doneMemory()
+		backgroundRunFrom(ctx).step(models.BackgroundStepMemory, err)
 	}
 
 	// 3) Conversation summarization
@@ -3226,6 +3261,7 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 		PreviousResponseID: agentMessage.ResponseID,
 	})
 	doneSummary()
+	backgroundRunFrom(ctx).step(models.BackgroundStepSummary, err)
 	if err != nil {
 		a.logger.Error("failed to summarize conversation for checkpoint", zap.Error(err))
 		return
@@ -3276,6 +3312,7 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpadClaude(ctx, userID, chatCtx, scratchpadCtx)
 		doneScratchpad()
+		backgroundRunFrom(ctx).step(models.BackgroundStepScratchpad, err)
 		if err != nil {
 			a.logger.Error("failed to update scratchpad during Claude checkpoint", zap.Error(err))
 		} else {
@@ -3294,7 +3331,9 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	// that delta, and a later checkpoint safely retries it.
 	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction {
 		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
-		if err := a.extractMemoriesWithScratchpadDeltaClaude(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID); err != nil {
+		err := a.extractMemoriesWithScratchpadDeltaClaude(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID)
+		backgroundRunFrom(ctx).step(models.BackgroundStepMemory, err)
+		if err != nil {
 			a.logger.Error("failed to extract memories during Claude checkpoint", zap.Error(err))
 		}
 		doneMemory()
@@ -3308,6 +3347,7 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 		AssistantReply: agentMessage.Message,
 	})
 	doneSummary()
+	backgroundRunFrom(ctx).step(models.BackgroundStepSummary, err)
 	if err != nil {
 		a.logger.Error("failed to summarize conversation for Claude checkpoint", zap.Error(err))
 		return

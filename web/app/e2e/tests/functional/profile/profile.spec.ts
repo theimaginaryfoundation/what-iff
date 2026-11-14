@@ -230,3 +230,37 @@ test(
     await expect(page).not.toHaveURL(/\/auth\/login/);
   },
 );
+
+/**
+ * @mutates-account — changes which model the account's memory tidying runs on, the least
+ * consequential role: off, only exact duplicates are folded. A fresh account in mock/local; a
+ * deployed account ends with the role on the model it had, or off if it had none (a choice can't
+ * be cleared).
+ */
+test(
+  'choosing a background model persists, and Off switches the role off',
+  { tag: '@mutates-account' },
+  async ({ page, profileSettingsModal, testUser }) => {
+    await signInAs(page, testUser);
+    let modal = await openProfileSettings(profileSettingsModal);
+    const merge = modal.backgroundModelSelect('memory_merge');
+    await expect(modal.backgroundModels).toBeVisible();
+    const before = await merge.inputValue();
+
+    const chosen = (await merge.locator('option:not([value=""]):not([value="off"])').first().getAttribute('value')) ?? '';
+    await modal.chooseBackgroundModelById('memory_merge', chosen);
+    await expect(merge).toHaveValue(chosen);
+
+    await page.reload();
+    modal = await openProfileSettings(profileSettingsModal);
+    await expect(modal.backgroundModelSelect('memory_merge')).toHaveValue(chosen);
+    await expect(modal.backgroundModelSelect('memory_merge').locator('option[value=""]')).toHaveCount(0);
+
+    await modal.chooseBackgroundModel('memory_merge', 'off');
+    await page.reload();
+    modal = await openProfileSettings(profileSettingsModal);
+    await expect(modal.backgroundModelSelect('memory_merge')).toHaveValue('off');
+
+    await modal.restoreBackgroundModel('memory_merge', before);
+  },
+);

@@ -12,6 +12,8 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
   The file must be the user's (404 otherwise); the chat's agent is granted the file (`GrantFileEdit`; what the grant changed is put back if the turn cannot start (`UndoFileEditGrant`)), and the message gets a `comment_refs` link to the thread and a `FILE_COMMENT` context item (`filecomments.MentionContext`) with what the thread is on and the thread before the comment.
   `GET /chat/{chatId}/file-edit-grants`, and `GET`/`DELETE /chat/{chatId}/file-edit-grants/{fileId}`, list, read and revoke a chat agent's grants (`comment_message.go`).
 - **MCP Apps** (`mcp_apps.go`, ADR 0x042): `GET /chat/{chatId}/tool-calls/{toolCallId}/app` returns a tool call's view (HTML with its CSP, the tool's input and result, `Cache-Control: no-store`) and `POST .../app/tools/call` runs the view's tool calls on its own connector (403 for a tool not visible to apps), through `MCPAppAgent`.
+- **Background notices** (`background_notices.go`, ADR 0x027 section 6): `GET /chat/{chatId}/background-notices` lists the chat's background work that failed or fell back and that the account hasn't dismissed, and `POST /chat/{chatId}/background-notices/{noticeId}/dismiss` hides one until its cause changes.
+  A notice states the step, the role it runs on (`role`, from the step) and the cause; the client says what to do about it, and shows a role's notices together.
 - **Loaded skills** (`skills.go`, ADR 0x035): `GET /chat/{chatId}/loaded-skills` lists the skills the agent loaded in the thread with `load_skill` (mode and message skills are not loaded state) and `DELETE /chat/{chatId}/loaded-skills/{ritualId}` unloads one, for the thread's Tools panel.
 - **Files in context** (`contextfiles.go`, ADR 0x043 §4): `GET /chat/{chatId}/context-files` returns `agent.ContextFilesForChat` for the thread's Files tab, plus the container status the private build reports; without an agent it returns an empty list.
 
@@ -76,6 +78,7 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 - `update_patch_test.go`, `mark_read_test.go`, `export_test.go`, `free_tier_quota_test.go`, `chatmessage_quota_test.go` — HTTP and quota behavior (including list `archived` query parsing and PATCH `archived`).
 - `chat_retry_test.go` covers `GetActiveChatJob`: a user turn with its message, a scheduled run with no message and its `job_run`, a chat-keyed run with no `job_run`, 204, 400 and 500.
 - `welcome_message_test.go` covers onboarding welcome endpoint eligibility and job enqueue behavior.
+- `background_notices_test.go` — listing a chat's notices, nothing for another account's chat, dismissing (404 for another account's), and bad IDs and no account refused.
 - `import_metrics_test.go` checks the chat import job outcome (including a timed-out run), stage timings, payload size and item counts.
 - `import_test.go` exercises the async import pipeline end-to-end (202 handoff, OpenAI + Anthropic happy paths, terminal job status on datastore failure); `import_unit_test.go` and `anthropic_import_test.go` cover the parsers and format detection.
 
