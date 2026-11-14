@@ -413,3 +413,35 @@ func TestHandOverCopies_ACopyHoldingCommentsAfterItsOriginalWentHandsThemOn(t *t
 	require.Nil(t, set.Threads[1].Anchor, "the joined ones go on the whole file, quote kept")
 	require.Equal(t, "hi", set.Threads[1].Quote)
 }
+
+func TestFolderFileIDs_AreThePageProjectsFiles(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID, other := createFATestUser(t, ds), createFATestUser(t, ds)
+	add := func(owner uuid.UUID, name, folder string) uuid.UUID {
+		f, err := ds.CreateFileAttachment(ctx, owner, models.FileAttachment{Name: name, FileType: "text/plain", S3Key: "users/u/" + name, Folder: folder})
+		require.NoError(t, err)
+		return f.ID
+	}
+	page := add(userID, "index.html", "site")
+	script := add(userID, "app.js", "site/src")
+	add(userID, "notes.md", "sites")                              // a folder whose name only starts the same
+	add(userID, "top.md", "")                                     // the top level
+	add(other, "theirs.js", "site")                               // someone else's
+	_, err := ds.CreateFileAttachmentReference(ctx, userID, page) // a chat copy of a file in it
+	require.NoError(t, err)
+
+	ids, err := ds.FolderFileIDs(ctx, userID, "site", 10)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []uuid.UUID{page, script}, ids)
+
+	// One more than the limit says there are more.
+	ids, err = ds.FolderFileIDs(ctx, userID, "site", 1)
+	require.NoError(t, err)
+	require.Len(t, ids, 2)
+
+	ids, err = ds.FolderFileIDs(ctx, userID, "", 10)
+	require.NoError(t, err)
+	require.Empty(t, ids, "the top level is no project folder")
+}

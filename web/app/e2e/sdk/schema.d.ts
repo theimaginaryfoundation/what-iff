@@ -16748,6 +16748,8 @@ export interface components {
                 author_name?: string;
                 text?: string;
             }[];
+            /** @description For a thread on an element of a page shown as a site (ADR 0x050 §5), the gallery folder the page is in. The commented file must be in it (400 otherwise). Mentioning the agent then also lets it change every file in the folder and the folders inside it, up to 200 files; a larger folder grants only the commented file. The top level grants nothing more. */
+            project_folder?: string;
         };
         /** @description A document comment a chat message is about (ADR 0x046), shown as a link that opens the file at the thread. */
         CommentRef: {

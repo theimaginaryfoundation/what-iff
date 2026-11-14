@@ -1,5 +1,6 @@
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { CompileError, assetModule, compiledAs, importCandidates, jsxDevRuntime } from './compile';
+import { factoryAt, factoryModule, rewriteFactoryImports } from './factory-sites';
 import { Compiler, compilerFor } from './compiler';
 import { FolderFiles } from './folder-files.service';
 import { packageVersions, rewriteBareImports } from './module-imports';
@@ -99,6 +100,8 @@ export class SiteProject {
 
   private async answer(path: string, destination: string): Promise<SiteAnswer> {
     if (path === JSX_RUNTIME_PATH) return this.jsxRuntime();
+    const factory = factoryAt(path);
+    if (factory) return textAnswer(factoryModule(factory.library, factory.specifier));
     const place = this.place(path);
     if (!place) return { status: 400, message: `${path} is not a path in this project.` };
     const isPage =
@@ -245,9 +248,10 @@ export class SiteProject {
       const out = await this.compiledOnce(path, file, bytes, destination);
       bytes = new TextEncoder().encode(out.text);
       contentType = out.contentType;
-    } else if (MODULE_EXTENSIONS.some(ext => lower.endsWith(ext)) && !this.ownImportMap) {
+    } else if (MODULE_EXTENSIONS.some(ext => lower.endsWith(ext))) {
       const source = new TextDecoder().decode(bytes);
-      bytes = new TextEncoder().encode(await rewriteBareImports(source, await this.packageVersions()));
+      const resolved = this.ownImportMap ? source : await rewriteBareImports(source, await this.packageVersions());
+      bytes = new TextEncoder().encode(await rewriteFactoryImports(resolved, path));
     } else if (HTML_EXTENSIONS.some(ext => lower.endsWith(ext))) {
       // Each element's source range and our bridge script first (ADR 0x050 §5), then the modules.
       const page = withSourcePositions(new TextDecoder().decode(bytes), fileId, PAGE_BRIDGE_SCRIPT);
@@ -316,7 +320,8 @@ export class SiteProject {
           jsxImportSource,
           ...(fileId ? { sourceRanges: { fileId, runtime } } : {}),
         });
-        return { text: this.ownImportMap ? code : await rewriteBareImports(code, versions), contentType: 'text/javascript; charset=utf-8' };
+        const resolved = this.ownImportMap ? code : await rewriteBareImports(code, versions);
+        return { text: await rewriteFactoryImports(resolved, path), contentType: 'text/javascript; charset=utf-8' };
       }
       const css = await this.compiler.style(source, path, how.syntax, async p => {
         const text = await this.rawText(p);
@@ -346,7 +351,7 @@ export class SiteProject {
     const versions = await this.packageVersions();
     const source = jsxDevRuntime(jsxImportSourceOf(versions));
     const text = this.ownImportMap ? source : await rewriteBareImports(source, versions);
-    return { status: 200, contentType: 'text/javascript; charset=utf-8', body: new TextEncoder().encode(text).buffer };
+    return textAnswer(text);
   }
 
   /**
@@ -445,6 +450,11 @@ const ABSENT = '';
 
 /** Where the project's compiled JSX finds its runtime (§5); a path no project file is expected at. */
 const JSX_RUNTIME_PATH = '__whatiff/jsx-dev-runtime.js';
+
+/** A module of ours (not the project's), served as it is. */
+function textAnswer(text: string): SiteAnswer {
+  return { status: 200, contentType: 'text/javascript; charset=utf-8', body: new TextEncoder().encode(text).buffer };
+}
 
 /** The JSX runtime a project's JSX compiles against: Preact's when it depends on Preact and not React. */
 function jsxImportSourceOf(versions: Map<string, string>): string {

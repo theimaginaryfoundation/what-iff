@@ -13008,6 +13008,13 @@ components:
             properties:
               author_name: {type: string}
               text: {type: string}
+        project_folder:
+          type: string
+          description: >-
+            For a thread on an element of a page shown as a site (ADR 0x050 §5), the gallery folder
+            the page is in. The commented file must be in it (400 otherwise). Mentioning the agent
+            then also lets it change every file in the folder and the folders inside it, up to 200
+            files; a larger folder grants only the commented file. The top level grants nothing more.
       required: [file_id, thread_id]
     CommentRef:
       type: object

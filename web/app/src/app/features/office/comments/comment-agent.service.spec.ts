@@ -76,6 +76,21 @@ describe('CommentAgentService', () => {
     ]);
   });
 
+  it('sends a mention on a page’s element with the page’s folder, whose files it grants, and not one on its text', () => {
+    register();
+    const ask = newComment('t1', ME, { text: '@Iris make it blue', mentions: [{ id: IRIS.id, name: 'Iris' }] });
+    const file = { id: 'f-1', name: 'app.js' };
+    const hooks = service.hooks(
+      () => file,
+      () => 'site',
+    );
+    const onElement = { id: 't1', anchor: null, comments: [ask], element: { selector: 'h1', fingerprint: { tag: 'h1' } } };
+    hooks.posted(onElement, 't1', '<h1>');
+    hooks.posted({ id: 't2', anchor: null, comments: [{ ...ask, id: 't2' }] }, 't2', '');
+    hooks.saved(hooks.mark());
+    expect(sent.map(s => s.comment.project_folder)).toEqual(['site', undefined]);
+  });
+
   it('reloads an open file the agent commented on, once per reply', () => {
     const reload = vi.fn();
     const file = signal<{ id: string } | null>({ id: 'f-1' });

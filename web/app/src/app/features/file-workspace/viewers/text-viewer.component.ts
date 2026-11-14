@@ -112,7 +112,10 @@ export class TextViewerComponent {
     this.me,
     () => this.comments.autosave(),
     () => this.saver?.showCurrentContent(),
-    this.commentAgent.hooks(() => this.file()),
+    this.commentAgent.hooks(
+      () => this.file(),
+      () => this.pageFolder(),
+    ),
   );
   private readonly panel = inject(CommentsPanelState);
   /** Text, Markdown and HTML carry comments; a file shown only in part (over 1 MB) does not. */
@@ -155,11 +158,18 @@ export class TextViewerComponent {
         () => state.autosave(),
         // A save that finds the script changed since its comments were read reads it again.
         () => void this.pageComments.reload(file.id),
-        this.commentAgent.hooks(() => file),
+        this.commentAgent.hooks(
+          () => file,
+          () => this.pageFolder(),
+        ),
       );
       return state;
     },
   );
+  /** The folder of the page shown, whose files a mention on one of its elements grants the agent. */
+  private pageFolder(): string | null {
+    return this.preview()?.pageProject()?.folder ?? null;
+  }
   private map: CommentTextMap | null = null;
   /** A thread chosen while the text was shown formatted, to show once the raw text is. */
   private revealAfterRender: string | null = null;

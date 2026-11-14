@@ -6,7 +6,7 @@ import { fakeTextComments } from '../file-workspace/text-comments/fake-text-comm
 import { TextCommentSurface, TextCommentsState } from '../file-workspace/text-comments/text-comments-state';
 import { TextCommentThread, TextCommentsService } from '../file-workspace/text-comments/text-comments.service';
 import { PageBridgeAction, PageProject } from './page-bridge';
-import { PageComments, lineRange } from './page-comments';
+import { PageComments, callRange, lineRange } from './page-comments';
 
 const HTML = '<main><h1 id="title">Hello</h1><ul id="data"></ul></main>';
 const TAG = { start: 6, end: 21 }; // <h1 id="title">
@@ -164,6 +164,7 @@ describe('PageComments', () => {
     let release: () => void = () => undefined;
     const slow = new Promise<FileAttachment | null>(resolve => (release = () => resolve(null)));
     const project: PageProject = {
+      folder: 'site',
       servedFiles: () => new Map(),
       fileAt: () => slow,
       text: async () => '',
@@ -201,6 +202,7 @@ describe('PageComments', () => {
     const scriptApi = fakeTextComments({ contentVersion: 1, revision: 0, threads: [] });
     let scriptState: TextCommentsState | null = null;
     const project: PageProject = {
+      folder: 'site',
       servedFiles: () => new Map([['js/app.js', script]]),
       fileAt: async path => (path === 'js/app.js' ? script : null),
       text: async () => SCRIPT,
@@ -263,6 +265,7 @@ describe('PageComments', () => {
     const apis = new Map<string, ReturnType<typeof fakeTextComments>>();
     const states = new Map<string, TextCommentsState>();
     const project: PageProject = {
+      folder: 'site',
       servedFiles: () =>
         new Map([
           ['App.tsx', tsx],
@@ -340,6 +343,21 @@ describe('PageComments', () => {
     expect(comments.draftQuote()).toBe('<h1 id="title">');
     comments.create({ text: 'From the source', mentions: [] });
     expect(state.threads()[0]).toMatchObject({ anchor: TAG });
+  });
+});
+
+describe('callRange', () => {
+  it('is the head of the call at a line and column: the function and a string first argument', () => {
+    const text = `const a = 1;\nrender(h('main', null, h('h1', { id: 't' }, 'Hi')), root);\nReact.createElement(Tag, null);`;
+    expect(callRange(text, 2, 8)).toEqual({ start: 20, end: 28 });
+    expect(text.slice(20, 28)).toBe(`h('main'`);
+    const h1 = callRange(text, 2, 24)!;
+    expect(text.slice(h1.start, h1.end)).toBe(`h('h1'`);
+    const create = callRange(text, 3, 7)!;
+    expect(text.slice(create.start, create.end)).toBe('createElement(');
+    expect(callRange(text, 1, 7)).toBeNull(); // `= 1;` is no call
+    expect(callRange(text, 4, 1)).toBeNull();
+    expect(callRange(text, 1, 99)).toBeNull();
   });
 });
 

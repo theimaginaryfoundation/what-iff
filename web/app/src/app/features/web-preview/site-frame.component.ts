@@ -225,6 +225,7 @@ export class SiteFrameComponent {
     const project = this.project;
     if (!project) return null;
     return {
+      folder: project.root,
       servedFiles: () => project.servedFiles(),
       fileAt: path => project.fileAt(path),
       text: async file => (await this.folders.download(file)).text(),

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { FolderFiles } from './folder-files.service';
+import { factoryPath } from './factory-sites';
 import { MAX_SERVED_BYTES, SiteProject } from './site-project';
 
 type Tree = Record<string, Record<string, { text: string; version?: number; type?: string; size?: number }>>;
@@ -56,14 +57,20 @@ describe('SiteProject', () => {
     const tree: Tree = {
       site: {
         'package.json': { text: JSON.stringify({ dependencies: { preact: '10.19.0' } }) },
-        'main.js': { text: `import { h } from 'preact'; import './util.js';` },
+        'main.js': { text: `import { h } from 'preact'; import { useState } from 'preact/hooks'; import './util.js';` },
       },
     };
     const unsaved = new Map([
       ['index.html', { text: `<script type="module">import { marked } from 'marked';</script><p>draft</p>`, file: 'page-id' }],
     ]);
     const project = new SiteProject(folders(tree), 'site', unsaved, parse);
-    expect(text((await project.get('main.js')).body)).toBe(`import { h } from 'https://esm.sh/preact@10.19.0'; import './util.js';`);
+    // The library's main entry is the wrapper that keeps where its factory was called (§5).
+    const wrapper = factoryPath('preact', 'https://esm.sh/preact@10.19.0');
+    expect(text((await project.get('main.js')).body)).toBe(
+      `import { h } from './${wrapper}'; import { useState } from 'https://esm.sh/preact@10.19.0/hooks'; import './util.js';`,
+    );
+    const served = text((await project.get(wrapper, 'script')).body);
+    expect(served).toContain(`export * from "https://esm.sh/preact@10.19.0";`);
     const page = text((await project.get('index.html')).body);
     expect(page).toContain(`import { marked } from 'https://esm.sh/marked';`);
     // Its elements carry their source ranges in the unsaved text, and our bridge comes first.
@@ -82,7 +89,10 @@ describe('SiteProject', () => {
     };
     const project = new SiteProject(folders(tree), 'site', new Map(), parse);
     await project.get('index.html', 'iframe');
-    expect(text((await project.get('main.js')).body)).toBe(`import { h } from 'preact';`);
+    // Still through the wrapper, which imports `preact` as the page's map says.
+    const wrapper = factoryPath('preact', 'preact');
+    expect(text((await project.get('main.js')).body)).toBe(`import { h } from './${wrapper}';`);
+    expect(text((await project.get(wrapper, 'script')).body)).toContain(`export * from "preact";`);
   });
 
   it('says it changed when a served file has a new version, or a missing one appears', async () => {

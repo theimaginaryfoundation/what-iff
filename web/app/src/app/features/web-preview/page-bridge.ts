@@ -33,6 +33,28 @@ export const PAGE_BRIDGE_SCRIPT = String.raw`(function () {
   // Each element a call made keeps the Error of that call; its stack is only read (formatted) when
   // the element is picked, as formatting a stack for every element a page makes would be slow.
   var made = new WeakMap();
+  // A library that builds the DOM (Preact, React) calls the DOM deep in its own code: the frames
+  // that say which project file asked are far down the stack, past the 10 a browser keeps by default.
+  try { if (!(Error.stackTraceLimit >= 100)) Error.stackTraceLimit = 100; } catch (e) {}
+  // Where a library's element factory was called (factory-sites.ts): by the element's props object,
+  // and the elements made from them (Preact says which; React keeps them on the element).
+  var factoryCalls = new WeakMap();
+  var factoryMade = new WeakMap();
+  window.__whatiffSite = {
+    props: function (props, error) { if (props && typeof props === 'object') factoryCalls.set(props, error); },
+    element: function (el, props) {
+      var error = props && factoryCalls.get(props);
+      if (error && el && el.nodeType === 1) factoryMade.set(el, error);
+    }
+  };
+  function factoryError(el) {
+    var error = factoryMade.get(el);
+    if (error) return error;
+    for (var key in el) {
+      if (key.indexOf('__reactProps$') === 0) return el[key] && typeof el[key] === 'object' ? factoryCalls.get(el[key]) : undefined;
+    }
+    return undefined;
+  }
   var base = location.pathname.replace(/[^/]*$/, '');
   var served = location.pathname.match(/^(.*?\/p\/[^/]+\/)/);
   var tokenRoot = (served || [])[1] || base;
@@ -50,7 +72,25 @@ export const PAGE_BRIDGE_SCRIPT = String.raw`(function () {
       // inline scripts, whose code has no place a thread can be kept on: the first project file
       // after them is where the element was made.
       if (url.pathname === location.pathname) continue;
-      return { path: decodeURIComponent(url.pathname.slice(tokenRoot.length)), line: +m[2], column: +m[3] };
+      var path = decodeURIComponent(url.pathname.slice(tokenRoot.length));
+      // Modules of ours (the JSX runtime, the factory wrappers) are not the project's.
+      if (path.indexOf('__whatiff/') === 0) continue;
+      return { path: path, line: +m[2], column: +m[3] };
+    }
+    return null;
+  }
+  /**
+   * Where the element was made: where a library's factory was called for it, else the first project
+   * file in the stack of the call that made it; else, as an element a library added later (with
+   * no project file in the stack), where its nearest ancestor was made.
+   */
+  function createdAt(el) {
+    for (var node = el; node && node.nodeType === 1; node = node.parentElement) {
+      if (node.hasAttribute(SRC)) return null;
+      var error = factoryError(node);
+      var site = error ? siteOf(error) : null;
+      if (!site && made.has(node)) site = siteOf(made.get(node));
+      if (site) return site;
     }
     return null;
   }
@@ -299,13 +339,12 @@ export const PAGE_BRIDGE_SCRIPT = String.raw`(function () {
     stopPicking();
     if (!el || isOurs(el)) { post({ type: 'pick-cancelled' }); return; }
     var d = describe(el);
-    var error = made.get(el);
     post({
       type: 'picked',
       selector: d.selector,
       fingerprint: fingerprint(el, d.used),
       src: el.getAttribute(SRC),
-      created: error ? siteOf(error) : null,
+      created: el.hasAttribute(SRC) ? null : createdAt(el),
       label: pickLabel(el)
     });
   }
@@ -611,6 +650,8 @@ export function readBridgeEvent(data: unknown): PageBridgeEvent | null {
  * loaded, a project path's file, and a file's text. A page on its own has none.
  */
 export interface PageProject {
+  /** The gallery folder the page is in, its project's root ("" for the top level). */
+  readonly folder: string;
   servedFiles(): ReadonlyMap<string, import('../../core/models/file-attachment.model').FileAttachment>;
   fileAt(path: string): Promise<import('../../core/models/file-attachment.model').FileAttachment | null>;
   text(file: import('../../core/models/file-attachment.model').FileAttachment): Promise<string>;

@@ -6,6 +6,7 @@ import { EditEvent, ReplyEvent } from '../office/comments/comments-panel.compone
 import { TextCommentsState } from '../file-workspace/text-comments/text-comments-state';
 import { PageElement, TextCommentThread } from '../file-workspace/text-comments/text-comments.service';
 import { ViewerCommentSurface } from '../file-workspace/text-comments/viewer-comment-surface';
+import { compiledAs } from './compile';
 import { PageBridgeAction, PageBridgeEvent, PageMark, PageProject } from './page-bridge';
 import { anchorText, formatSourceRange, parseSourceRange } from './source-positions';
 
@@ -280,7 +281,9 @@ export class PageComments {
       const { path, line, column } = event.created;
       const script = await this.scriptAt(path);
       const at = script ? await this.project()!.sourceLine(path, line, column) : null;
-      const lines = script && at ? lineRange(script.text, at) : null;
+      // A plain script is served as written, so the column is the call's own: the thread is on the
+      // call that made the element (`h('li'`); a compiled one's is on the line its map names.
+      const lines = script && at ? (!compiledAs(path) && callRange(script.text, at, column)) || lineRange(script.text, at) : null;
       if (script && lines) {
         state = script.state;
         range = lines;
@@ -399,6 +402,26 @@ function isTagOf(text: string | null, tag: string): boolean {
   if (!text || !tag) return false;
   const m = /^<([A-Za-z][\w:.-]*)/.exec(text);
   return !!m && m[1].toLowerCase() === tag.toLowerCase() && text.endsWith('>');
+}
+
+/**
+ * The head of the call at a line and column (1-based) of text: the function called and its first
+ * argument when that is a string (`h('li'`, `React.createElement("li"`), or only the function's
+ * name; null when no call starts there.
+ */
+export function callRange(text: string, line: number, column: number): { start: number; end: number } | null {
+  if (line < 1 || column < 1) return null;
+  let start = 0;
+  for (let n = 1; n < line; n++) {
+    const next = text.indexOf('\n', start);
+    if (next < 0) return null;
+    start = next + 1;
+  }
+  const lineEnd = text.indexOf('\n', start);
+  const at = start + column - 1;
+  if (at >= (lineEnd < 0 ? text.length : lineEnd)) return null;
+  const m = /^[A-Za-z_$][\w$]*\s*\(\s*(?:(['"`])(?:\\.|(?!\1)[^\\\n])*\1)?/.exec(text.slice(at, lineEnd < 0 ? undefined : lineEnd));
+  return m ? { start: at, end: at + m[0].length } : null;
 }
 
 /** A line of text as a range, without its indentation (1-based); null for a blank or missing line. */

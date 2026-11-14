@@ -45,6 +45,9 @@ type commentMessageRequest struct {
 	CommentID string                        `json:"comment_id"`
 	Quote     string                        `json:"quote"`
 	Earlier   []filecomments.MentionComment `json:"earlier"`
+	// ProjectFolder is the gallery folder of the page a comment on a page's element is about (ADR
+	// 0x050 §5): the page is made of the files in it, so mentioning the agent lets it change them all.
+	ProjectFolder string `json:"project_folder,omitempty"`
 }
 
 // CreateChatMessage creates a new chat message from the user and initiates the agent processing

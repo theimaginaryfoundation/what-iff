@@ -183,6 +183,11 @@ export interface CommentMessage {
   comment_id: string;
   quote: string;
   earlier: { author_name: string; text: string }[];
+  /**
+   * The gallery folder of the page a thread on a page's element is on (ADR 0x050 §5): the page is
+   * made of its files, so the agent mentioned may change any of them.
+   */
+  project_folder?: string;
 }
 
 export interface CreateChatMessageRequest {

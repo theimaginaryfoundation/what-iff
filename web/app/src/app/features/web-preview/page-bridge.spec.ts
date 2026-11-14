@@ -100,4 +100,50 @@ describe('the page bridge script', () => {
     // A page on its own has no project scripts to name: no call site, but the element is picked.
     expect(posted[0]).toMatchObject({ type: 'picked', selector: '#added', created: null });
   });
+
+  describe('where a library’s factory was called (factory-sites.ts)', () => {
+    const site = () =>
+      (window as unknown as { __whatiffSite: { props(p: object, e: unknown): void; element(el: Element, p: object): void } }).__whatiffSite;
+    /** An error whose stack is a call from our wrapper, made at `file`:line:column. */
+    const callFrom = (file: string, line: number, column: number) => ({
+      stack: `Error\n    at h (${location.origin}/__whatiff/factory/preact/x.js:3:9)\n    at App (${location.origin}/${file}:${line}:${column})`,
+    });
+    const pickOn = async (el: Element) => {
+      app({ type: 'pick' });
+      posted.length = 0;
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await frame();
+      return posted[0] as Extract<PageBridgeEvent, { type: 'picked' }>;
+    };
+    const mount = (html: string) => {
+      const host = document.createElement('section');
+      host.innerHTML = html;
+      document.body.append(host);
+      return host;
+    };
+
+    it('gives an element Preact made the place of the h() call it was made from, past our wrapper', async () => {
+      const host = mount('<article><p>Body</p></article>');
+      const props = {};
+      site().props(props, callFrom('app.js', 12, 113));
+      site().element(host.querySelector('article')!, props);
+      expect((await pickOn(host.querySelector('article')!)).created).toEqual({ path: 'app.js', line: 12, column: 113 });
+      // One the library added inside it, of which nothing is known, is where its parent was made.
+      expect((await pickOn(host.querySelector('p')!)).created).toEqual({ path: 'app.js', line: 12, column: 113 });
+      host.remove();
+    });
+
+    it('finds the createElement() call of an element React made through the props React keeps on it', async () => {
+      const host = mount('<h1>React</h1>');
+      const props = { id: 'r' };
+      site().props(props, callFrom('react.js', 3, 37));
+      Object.assign(host.querySelector('h1')!, { __reactProps$abc: props });
+      expect((await pickOn(host.querySelector('h1')!)).created).toEqual({ path: 'react.js', line: 3, column: 37 });
+      host.remove();
+    });
+
+    it('keeps more stack frames than a browser’s default, so the project’s call is not cut off', () => {
+      expect((Error as { stackTraceLimit?: number }).stackTraceLimit).toBeGreaterThanOrEqual(100);
+    });
+  });
 });
