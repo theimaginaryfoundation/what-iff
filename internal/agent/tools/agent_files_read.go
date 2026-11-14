@@ -3,12 +3,16 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
 )
 
@@ -28,7 +32,7 @@ action:
 - "read": the file's text from start_line (default 1), up to %d lines or about %d characters. When there is more, the result gives next_start_line; call again with it to continue.
 - "search": the section under the Markdown heading that best matches heading (exact title first, then close matches), down to the next heading of the same or higher level, with its line numbers. Leave heading empty to get the file's outline.
 
-file is a file id, or a path such as "notes/journal.md". Find files with list (kind="files"); origin="agent" lists files agents made. The result says whether you can change the file (editable). Reading a web page (.html) also shows you a picture of it as the user's browser last drew it, when there is one of its current version.`, agentFileReadMaxLines, agentFileReadMaxChars)
+file is a file id, or a path such as "notes/journal.md". Find files with list (kind="files"); origin="agent" lists files agents made. The result says whether you can change the file (editable). Reading a web page (.html) also shows you a picture of it as the user's browser last drew it; preview says whether that picture is current, out of date (a file the page loads changed since) or missing. Pictures are only drawn when the user opens the page.`, agentFileReadMaxLines, agentFileReadMaxChars)
 
 // AgentFileReadToolSpec is the shared function-tool shape for agent_file_read.
 var AgentFileReadToolSpec = FunctionToolSpec{
@@ -80,7 +84,7 @@ type agentFileReadResult struct {
 	OtherMatches  []agentFileHeading `json:"other_matches,omitempty"`
 	Outline       []agentFileHeading `json:"outline,omitempty"`
 	Note          string             `json:"note,omitempty"`
-	// Preview says whether a picture of a web page follows the result (ADR 0x050).
+	// Preview says whether a picture of a web page follows the result, and whether it is current (ADR 0x050 §8).
 	Preview string `json:"preview,omitempty"`
 	Error   string `json:"error,omitempty"`
 }
@@ -126,7 +130,7 @@ func (t *AgentFileTool) read(ctx context.Context, chat *models.Chat, a agentFile
 	// A web page's picture, once per read of it (its first stretch or its outline), as the user's
 	// browser last drew this version.
 	if models.IsHTMLFile(att.Name, att.FileType) && (a.Action != "read" || a.StartLine <= 1) {
-		res.Preview = t.pagePreview(ctx, att)
+		res.Preview = t.pagePreview(ctx, chat.UserID, att)
 	}
 	if len(lines) == 0 {
 		res.Note = "The file is empty."
@@ -305,14 +309,43 @@ func wordOverlap(a, b []string) float64 {
 	return float64(both) / float64(len(set))
 }
 
-// pagePreview shows the model a picture of a web page with the result and says so, or says there is
-// none of this version yet.
-func (t *AgentFileTool) pagePreview(ctx context.Context, att *models.FileAttachment) string {
+// pagePreview shows the model a picture of a web page with the result and says what it is: the
+// page as the user's browser drew this version, one drawn before a file the page loads changed, or
+// none yet (ADR 0x050 §8). Only a browser draws it, when the user opens the page, so the model is
+// told plainly when what it sees is not the page as it is now.
+func (t *AgentFileTool) pagePreview(ctx context.Context, userID uuid.UUID, att *models.FileAttachment) string {
 	if t.files == nil {
 		return ""
 	}
+	const redraw = "Pictures are drawn in the user's browser when they open the page; there is no way to draw one without them, so if you need to see the page as it is now, ask the user to open it, then read it again."
 	if !showStoredPreview(ctx, t.files, att) {
-		return "No picture of this version yet: one is drawn when the user next views the page."
+		return "No picture of this version of the page yet. " + redraw
 	}
-	return "A picture of the page, as the user's browser drew this version, follows this result (if you can see images)."
+	sources, err := storage.PreviewSources(ctx, t.files, att.S3Key)
+	if err != nil || len(sources) == 0 {
+		return "A picture of the page, as the user's browser drew this version, follows this result (if you can see images)."
+	}
+	changes := storage.ComparePreviewSources(ctx, sources, func(ctx context.Context, id uuid.UUID) (*models.FileAttachment, error) {
+		f, err := t.store.GetFileAttachment(ctx, userID, id)
+		if errors.Is(err, datastore.ErrFileAttachmentNotFound) {
+			return nil, nil
+		}
+		return f, err
+	})
+	if !changes.Stale() {
+		return "A picture of the page, as the user's browser drew it with the current version of every file it loads, follows this result (if you can see images)."
+	}
+	var what []string
+	if n := len(changes.Changed); n > 0 {
+		shown := changes.Changed
+		if n > 5 {
+			shown = append(shown[:5:5], fmt.Sprintf("%d more", n-5))
+		}
+		what = append(what, strings.Join(shown, ", ")+" changed")
+	}
+	if changes.Gone > 0 {
+		what = append(what, fmt.Sprintf("%d file(s) it loaded were deleted", changes.Gone))
+	}
+	return "A picture of the page follows this result (if you can see images), but it is OUT OF DATE: it was drawn before " +
+		strings.Join(what, " and ") + ", so it shows the page as it was then, not as it is now. " + redraw
 }

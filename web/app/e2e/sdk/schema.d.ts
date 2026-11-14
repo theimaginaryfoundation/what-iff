@@ -13999,6 +13999,8 @@ export interface paths {
                 query?: {
                     /** @description `full` (the default, PNG) or `thumbnail` (JPEG). */
                     size?: "full" | "thumbnail";
+                    /** @description `1`: answer 404 also when a file a web page's picture was drawn from (its `sources`) has changed or been deleted since, so the caller draws a new one (ADR 0x050 §8). */
+                    current?: "1";
                 };
                 header?: never;
                 path: {
@@ -14054,6 +14056,8 @@ export interface paths {
                 query: {
                     /** @description The content_version the picture shows. */
                     version: number;
+                    /** @description For a web page: the other files the picture shows (its stylesheets, scripts, images), as `id:content_version` pairs separated by commas, at most 100 kept. A later read with `current=1` says there is no current picture once one of them changed. */
+                    sources?: string;
                 };
                 header?: never;
                 path: {

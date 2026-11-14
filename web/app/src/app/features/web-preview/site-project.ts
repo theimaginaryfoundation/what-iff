@@ -1,10 +1,11 @@
 import { FileAttachment } from '../../core/models/file-attachment.model';
-import { CompileError, assetModule, compileScript, compileStyle, compiledAs, moduleCandidates } from './compile';
+import { CompileError, assetModule, compileScript, compileStyle, compiledAs, jsxDevRuntime, moduleCandidates } from './compile';
 import { FolderFiles } from './folder-files.service';
 import { packageVersions, rewriteBareImports } from './module-imports';
 import { servedType } from './page-assets';
 import { PAGE_BRIDGE_SCRIPT } from './page-bridge';
 import { withSourcePositions } from './source-positions';
+import { inlineSourceMap, originalLine } from './source-map';
 
 /** An answer to the preview site's worker: a file, or why there is none. */
 export interface SiteAnswer {
@@ -46,7 +47,7 @@ export class SiteProject {
   /** A page of the project brought its own import map: bare imports are then the page's to resolve. */
   private ownImportMap = false;
   /** Compiled files by file version and how they were asked for, least recently used first. */
-  private readonly compiled = new Map<string, Promise<{ text: string; contentType: string }>>();
+  private readonly compiled = new Map<string, Promise<Compiled>>();
 
   constructor(
     private readonly folders: FolderFiles,
@@ -67,6 +68,7 @@ export class SiteProject {
    * as (`script` for a module import, `style`, `document`, ...), from the request.
    */
   async get(path: string, destination = ''): Promise<SiteAnswer> {
+    if (path === JSX_RUNTIME_PATH) return this.jsxRuntime();
     const place = this.place(path);
     if (!place) return { status: 400, message: `${path} is not a path in this project.` };
     const unsaved = this.unsaved.get(path);
@@ -174,18 +176,14 @@ export class SiteProject {
    * A TypeScript, JSX or SCSS file compiled (§4), once per version. A compile error is served so it
    * shows: a script that throws it, a stylesheet that puts it at the top of the page.
    */
-  private compiledOnce(
-    path: string,
-    file: FileAttachment | null,
-    bytes: Uint8Array,
-    destination: string,
-  ): Promise<{ text: string; contentType: string }> {
+  private async compiledOnce(path: string, file: FileAttachment | null, bytes: Uint8Array, destination: string): Promise<Compiled> {
     const key = `${file ? versionOf(file) : path}:${destination === 'script' ? 'module' : 'file'}`;
     let out = this.compiled.get(key);
-    if (out) {
-      this.compiled.delete(key);
-    } else {
-      out = this.compile(path, new TextDecoder().decode(bytes));
+    this.compiled.delete(key);
+    // A stylesheet whose imports changed is compiled again, though its own file did not.
+    if (out && (await this.importsChanged(await out.catch(() => null)))) out = undefined;
+    if (!out) {
+      out = this.compile(path, new TextDecoder().decode(bytes), file?.id ?? null);
       out.catch(() => this.compiled.get(key) === out && this.compiled.delete(key));
     }
     this.compiled.set(key, out);
@@ -196,17 +194,41 @@ export class SiteProject {
     return out;
   }
 
-  private async compile(path: string, source: string): Promise<{ text: string; contentType: string }> {
+  /** Whether a file a compiled stylesheet imported has another version now, or is gone. */
+  private async importsChanged(compiled: Compiled | null): Promise<boolean> {
+    for (const [path, version] of compiled?.imports ?? []) {
+      const place = this.place(path);
+      const now = place ? await this.find(place, this.lookups(false)) : undefined;
+      if (!now || versionOf(now) !== version) return true;
+    }
+    return false;
+  }
+
+  private async compile(path: string, source: string, fileId: string | null): Promise<Compiled> {
     const how = compiledAs(path)!;
+    // The project files a stylesheet imported, at the versions read.
+    const imports = new Map<string, string>();
     try {
       if (how.kind === 'script') {
         const versions = await this.packageVersions();
-        const jsxImportSource = versions.has('preact') && !versions.has('react') ? 'preact' : 'react';
-        const code = await compileScript(source, path, how.loader, { wasmUrl: this.wasmUrl, jsxImportSource });
+        const jsxImportSource = jsxImportSourceOf(versions);
+        // JSX elements carry their source range (§5), through a runtime the project serves itself,
+        // found from where this module is.
+        const runtime = ('../'.repeat(path.split('/').length - 1) || './') + JSX_RUNTIME_PATH;
+        const code = await compileScript(source, path, how.loader, {
+          wasmUrl: this.wasmUrl,
+          jsxImportSource,
+          ...(fileId ? { sourceRanges: { fileId, runtime } } : {}),
+        });
         return { text: this.ownImportMap ? code : await rewriteBareImports(code, versions), contentType: 'text/javascript; charset=utf-8' };
       }
-      const css = await compileStyle(source, path, how.syntax, p => this.rawText(p));
-      return { text: css, contentType: 'text/css; charset=utf-8' };
+      const css = await compileStyle(source, path, how.syntax, async p => {
+        const text = await this.rawText(p);
+        const read = this.served.get(p);
+        if (text !== null && read) imports.set(p, read.version);
+        return text;
+      });
+      return { text: css, contentType: 'text/css; charset=utf-8', imports };
     } catch (error) {
       const message = error instanceof CompileError ? error.message : `${path}: ${String(error)}`;
       if (how.kind === 'script') {
@@ -219,15 +241,48 @@ export class SiteProject {
       return {
         text: `body::before { content: "${shown}"; display: block; white-space: pre-wrap; font: 12px/1.4 monospace; color: #b00020; background: #fff0f0; padding: 8px; border-bottom: 1px solid #b00020; }\n`,
         contentType: 'text/css; charset=utf-8',
+        // Fixing the partial the error is in compiles it again.
+        imports,
       };
     }
   }
 
-  /** A project file's text as it is stored, for a stylesheet's imports; null when there is none. */
+  /** The JSX dev runtime the project's compiled JSX imports (§5): the library's runtime, giving elements their source range. */
+  private async jsxRuntime(): Promise<SiteAnswer> {
+    const versions = await this.packageVersions();
+    const source = jsxDevRuntime(jsxImportSourceOf(versions));
+    const text = this.ownImportMap ? source : await rewriteBareImports(source, versions);
+    return { status: 200, contentType: 'text/javascript; charset=utf-8', body: new TextEncoder().encode(text).buffer };
+  }
+
+  /**
+   * The line of the file the user wrote that a place in a served module is (1-based): through the
+   * compiled module's source map for TypeScript and JSX (§4), as it is for anything else; null for a
+   * compiled module whose map does not say.
+   */
+  async sourceLine(path: string, line: number, column: number): Promise<number | null> {
+    if (compiledAs(path)?.kind !== 'script') return line;
+    const file = this.served.get(path)?.file;
+    const out = file ? this.compiled.get(`${versionOf(file)}:module`) : undefined;
+    if (!out) return null;
+    try {
+      const map = inlineSourceMap((await out).text);
+      return map ? originalLine(map.mappings, line, column) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * A project file's text as it is stored, for a stylesheet's imports; null when there is none. It
+   * counts as served, so a change to it reloads the page and dates its picture (§6, §8).
+   */
   private async rawText(path: string): Promise<string | null> {
     const place = this.place(path);
     const file = place ? await this.find(place, this.lookups(false)) : undefined;
-    return file ? (await this.folders.download(file)).text() : null;
+    if (!place || !file) return null;
+    this.served.set(path, { ...place, version: versionOf(file), file });
+    return (await this.folders.download(file)).text();
   }
 
   /** The page with its inline module scripts' bare imports rewritten, unless it brings its own import map. */
@@ -261,6 +316,21 @@ export class SiteProject {
     })().catch(() => new Map<string, string>());
     return this.versions;
   }
+}
+
+/** A compiled file, and for a stylesheet the project files it imported, by path, at the versions read. */
+interface Compiled {
+  text: string;
+  contentType: string;
+  imports?: ReadonlyMap<string, string>;
+}
+
+/** Where the project's compiled JSX finds its runtime (§5); a path no project file is expected at. */
+const JSX_RUNTIME_PATH = '__whatiff/jsx-dev-runtime.js';
+
+/** The JSX runtime a project's JSX compiles against: Preact's when it depends on Preact and not React. */
+function jsxImportSourceOf(versions: Map<string, string>): string {
+  return versions.has('preact') && !versions.has('react') ? 'preact' : 'react';
 }
 
 function versionOf(file: FileAttachment): string {

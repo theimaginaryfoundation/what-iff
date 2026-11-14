@@ -11,8 +11,8 @@ import { anchorText, formatSourceRange, parseSourceRange } from './source-positi
 
 /** The mark id of the thread being started. */
 const DRAFT = 'draft';
-/** The project's scripts whose threads can be on the page's elements. */
-const SCRIPT = /\.m?js$/i;
+/** The project's scripts whose threads can be on the page's elements: JavaScript, and what is compiled to it (§4). */
+const SCRIPT = /\.(m?js|jsx|tsx?|mts)$/i;
 
 /** Another file of the project whose threads may be on the page's elements: a script. */
 interface ScriptComments {
@@ -79,13 +79,14 @@ export class PageComments {
       state: PageMark['state'],
       at: { start: number; end: number } | null | undefined,
       element: PageElement | undefined,
+      file = page,
     ) => {
       const onPage = element && element.page === page ? element : undefined;
       if (!at && !onPage) return;
       marks.push({
         id,
         state,
-        ...(at ? { src: formatSourceRange({ file: page, ...at }) } : {}),
+        ...(at ? { src: formatSourceRange({ file, ...at }) } : {}),
         ...(onPage ? { selector: onPage.selector, ...(onPage.fingerprint ? { fingerprint: onPage.fingerprint } : {}) } : {}),
       });
     };
@@ -94,16 +95,21 @@ export class PageComments {
       if (t.resolved && t.id !== activeId) continue;
       mark(t.id, t.id === activeId ? 'active' : 'open', positions.get(t.id), t.element);
     }
-    // A script's thread is found on the page by its element: its code is in the script.
-    for (const { threads } of this.scriptThreads()) {
+    // A script's thread is found on the page by its code where the element carries it (JSX's, §4),
+    // else by its element.
+    for (const { script, threads } of this.scriptThreads()) {
+      const at = script.state.positions();
       for (const t of threads) {
         if (t.resolved && t.id !== activeId) continue;
-        mark(t.id, t.id === activeId ? 'active' : 'open', null, t.element);
+        mark(t.id, t.id === activeId ? 'active' : 'open', at.get(t.id), t.element, script.file.id);
       }
     }
     const drafting = this.drafting();
     const draft = drafting?.draft();
-    if (drafting && draft) mark(DRAFT, 'active', drafting === this.state ? draft.range : null, draft.element);
+    if (drafting && draft) {
+      const script = [...this.scripts().values()].find(s => s.state === drafting);
+      mark(DRAFT, 'active', draft.range, draft.element, script ? script.file.id : page);
+    }
     return marks;
   });
 
@@ -230,7 +236,9 @@ export class PageComments {
 
   /**
    * Starts a thread on a picked element, in the file its code is in: the page's, on the tag it
-   * declares; a script's, on the line that made it; else the page's, on the element alone.
+   * declares; a script's, on the JSX tag that made it (its source range, §4) or the line that
+   * called the DOM (through the source map, for a compiled script); else the page's, on the
+   * element alone.
    */
   private async startOnPick(event: Extract<PageBridgeEvent, { type: 'picked' }>): Promise<void> {
     const page = this.page().id;
@@ -238,12 +246,21 @@ export class PageComments {
     const src = parseSourceRange(event.src);
     let state = this.state;
     let range: { start: number; end: number } | null = src && src.file === page ? { start: src.start, end: src.end } : null;
-    if (!range && event.created) {
-      const script = await this.scriptAt(event.created.path);
-      const line = script ? lineRange(script.text, event.created.line) : null;
-      if (script && line) {
+    if (!range && src) {
+      const script = await this.scriptWithId(src.file);
+      if (script && src.end <= script.text.length) {
         state = script.state;
-        range = line;
+        range = { start: src.start, end: src.end };
+      }
+    }
+    if (!range && event.created) {
+      const { path, line, column } = event.created;
+      const script = await this.scriptAt(path);
+      const at = script ? await this.project()!.sourceLine(path, line, column) : null;
+      const lines = script && at ? lineRange(script.text, at) : null;
+      if (script && lines) {
+        state = script.state;
+        range = lines;
       }
     }
     for (const s of this.states()) {
@@ -270,6 +287,14 @@ export class PageComments {
     const file = await project.fileAt(path);
     if (!file || file.id === this.page().id) return null;
     return this.scripts().get(file.id) ?? this.load(project, path, file);
+  }
+
+  /** The project script with this file id the page loaded, its comments loaded. */
+  private async scriptWithId(id: string): Promise<ScriptComments | null> {
+    const loaded = this.scripts().get(id);
+    if (loaded) return loaded;
+    for (const [path, file] of this.project()?.servedFiles() ?? []) if (file.id === id) return this.scriptAt(path);
+    return null;
   }
 
   private async load(project: PageProject, path: string, file: FileAttachment): Promise<ScriptComments | null> {

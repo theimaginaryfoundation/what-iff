@@ -245,15 +245,32 @@ func TestAgentFileRead_ShowsAWebPagesPicture(t *testing.T) {
 	}
 
 	res, images := read(`{"action":"read","file":"site/index.html"}`)
-	require.Contains(t, res["preview"], "No picture of this version yet")
+	require.Contains(t, res["preview"], "No picture of this version of the page yet")
+	require.Contains(t, res["preview"], "ask the user to open it")
 	require.Empty(t, images)
 
 	var pic bytes.Buffer
 	require.NoError(t, png.Encode(&pic, image.NewRGBA(image.Rect(0, 0, 8, 6))))
 	fx.objects.objs[storage.FileKeyForPreview(page.S3Key)] = pic.Bytes()
 	res, images = read(`{"action":"read","file":"site/index.html"}`)
-	require.Contains(t, res["preview"], "A picture of the page")
+	require.Contains(t, res["preview"], "as the user's browser drew this version")
 	require.Equal(t, []ResultImage{{Data: pic.Bytes(), MediaType: "image/png"}}, images)
+
+	// Drawn with the files the page loads (ADR 0x050 §8): current while they are, then out of date,
+	// naming what changed, once one has a new version or is gone.
+	css := fx.userUpload("site/css", "app.css", "h1{}")
+	js := fx.userUpload("site", "app.js", "")
+	fx.store.rows[css.ID].ContentVersion, fx.store.rows[js.ID].ContentVersion = 2, 1
+	require.NoError(t, storage.PutPreviewSources(context.Background(), fx.objects, page.S3Key, []storage.PreviewSource{{ID: css.ID, ContentVersion: 2}, {ID: js.ID, ContentVersion: 1}}))
+	res, _ = read(`{"action":"read","file":"site/index.html"}`)
+	require.Contains(t, res["preview"], "with the current version of every file it loads")
+	fx.store.rows[css.ID].ContentVersion = 3
+	delete(fx.store.rows, js.ID)
+	res, images = read(`{"action":"read","file":"site/index.html"}`)
+	require.Contains(t, res["preview"], "OUT OF DATE")
+	require.Contains(t, res["preview"], "site/css/app.css changed and 1 file(s) it loaded were deleted")
+	require.Contains(t, res["preview"], "ask the user to open it")
+	require.Len(t, images, 1, "the old picture is still shown, marked as such")
 
 	// Once per read: not with a later stretch of the file, and never for other files.
 	res, images = read(`{"action":"read","file":"site/index.html","start_line":2}`)

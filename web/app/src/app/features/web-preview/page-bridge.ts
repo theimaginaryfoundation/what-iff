@@ -445,4 +445,6 @@ export interface PageProject {
   servedFiles(): ReadonlyMap<string, import('../../core/models/file-attachment.model').FileAttachment>;
   fileAt(path: string): Promise<import('../../core/models/file-attachment.model').FileAttachment | null>;
   text(file: import('../../core/models/file-attachment.model').FileAttachment): Promise<string>;
+  /** The line of the file the user wrote that a place in a served module is: through its source map when it was compiled (§4); null when unknown. */
+  sourceLine(path: string, line: number, column: number): Promise<number | null>;
 }

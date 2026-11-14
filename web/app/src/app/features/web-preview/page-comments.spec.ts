@@ -149,6 +149,7 @@ describe('PageComments', () => {
       servedFiles: () => new Map([['js/app.js', script]]),
       fileAt: async path => (path === 'js/app.js' ? script : null),
       text: async () => SCRIPT,
+      sourceLine: async (_path, line) => line,
     };
     const sent: PageBridgeAction[] = [];
     const comments = new PageComments(
@@ -179,9 +180,9 @@ describe('PageComments', () => {
     });
     expect(comments.draftQuote()).toBe('ul.innerHTML = items.map(li).join("");');
     expect(state.draft()).toBeNull();
-    // The draft is marked on the page by its element: its code is in the script.
+    // The draft is marked on the page by its code in the script (which no element carries here) and its element.
     expect(comments.marks()).toEqual([
-      { id: 'draft', state: 'active', selector: '#data > li:nth-of-type(2)', fingerprint: { tag: 'li', text: 'Two' } },
+      { id: 'draft', state: 'active', src: 'js-1:46-84', selector: '#data > li:nth-of-type(2)', fingerprint: { tag: 'li', text: 'Two' } },
     ]);
 
     comments.create({ text: 'Typo?', mentions: [] });
@@ -194,8 +195,88 @@ describe('PageComments', () => {
     await vi.waitFor(() => expect(scriptApi.state.puts.at(-1)?.threads[0].comments).toHaveLength(2));
     expect(comments.activeId()).toBe(thread.id);
     expect(comments.marks()).toEqual([
-      { id: thread.id, state: 'active', selector: '#data > li:nth-of-type(2)', fingerprint: { tag: 'li', text: 'Two' } },
+      { id: thread.id, state: 'active', src: 'js-1:46-84', selector: '#data > li:nth-of-type(2)', fingerprint: { tag: 'li', text: 'Two' } },
     ]);
+  });
+
+  it('keeps a thread on an element JSX made with the component, on its tag, and maps a compiled script’s call site', async () => {
+    const { state } = await setup();
+    const tsx = { id: 'tsx-1', name: 'App.tsx', folder: 'site' } as FileAttachment;
+    const ts = { id: 'ts-1', name: 'list.ts', folder: 'site' } as FileAttachment;
+    const TSX = 'export const App = () => (\n  <h1 className="t">Hi</h1>\n);\n';
+    const TS = 'const a: number = 1;\nconst li = document.createElement("li");\n';
+    const apis = new Map<string, ReturnType<typeof fakeTextComments>>();
+    const states = new Map<string, TextCommentsState>();
+    const project: PageProject = {
+      servedFiles: () =>
+        new Map([
+          ['App.tsx', tsx],
+          ['list.ts', ts],
+        ]),
+      fileAt: async path => (path === 'App.tsx' ? tsx : path === 'list.ts' ? ts : null),
+      text: async file => (file.id === 'tsx-1' ? TSX : TS),
+      // The compiled list.ts has the call on its line 5.
+      sourceLine: async (path, line) => (path === 'list.ts' && line === 5 ? 2 : null),
+    };
+    const comments = new PageComments(
+      state,
+      () => undefined,
+      () => undefined,
+      () => true,
+      () => page,
+      () => project,
+      file => {
+        const api = fakeTextComments({ contentVersion: 1, revision: 0, threads: [] });
+        apis.set(file.id, api);
+        const s: TextCommentsState = new TextCommentsState(
+          api as unknown as TextCommentsService,
+          signal({ id: 'user:u-1', name: 'Pat Lee' }),
+          () => s.autosave(),
+        );
+        states.set(file.id, s);
+        return s;
+      },
+    );
+    // The h1's data-wi-src is its JSX tag in App.tsx.
+    comments.handle({
+      type: 'picked',
+      selector: 'h1.t',
+      fingerprint: { tag: 'h1', text: 'Hi' },
+      src: 'tsx-1:29-47',
+      created: null,
+      label: 'h1 “Hi”',
+    });
+    await vi.waitFor(() => expect(states.get('tsx-1')?.draft()).toBeTruthy());
+    expect(comments.draftQuote()).toBe('<h1 className="t">');
+    expect(comments.marks()).toEqual([
+      { id: 'draft', state: 'active', src: 'tsx-1:29-47', selector: 'h1.t', fingerprint: { tag: 'h1', text: 'Hi' } },
+    ]);
+    comments.cancelDraft();
+
+    // A li list.ts made, called from line 5 of its compiled module: line 2 of list.ts.
+    comments.handle({
+      type: 'picked',
+      selector: 'li',
+      fingerprint: { tag: 'li' },
+      src: null,
+      created: { path: 'list.ts', line: 5, column: 12 },
+      label: 'li',
+    });
+    await vi.waitFor(() => expect(states.get('ts-1')?.draft()).toBeTruthy());
+    expect(comments.draftQuote()).toBe('const li = document.createElement("li");');
+    comments.cancelDraft();
+
+    // A call site the map does not place: the thread is on the element alone, in the page's file.
+    comments.handle({
+      type: 'picked',
+      selector: 'li',
+      fingerprint: { tag: 'li' },
+      src: null,
+      created: { path: 'list.ts', line: 9, column: 1 },
+      label: 'li',
+    });
+    await vi.waitFor(() => expect(state.draft()).toBeTruthy());
+    expect(state.draft()).toMatchObject({ element: { page: 'page-1', selector: 'li' } });
   });
 
   it('adopts a draft started on the page’s own text', async () => {

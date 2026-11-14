@@ -55,25 +55,97 @@ export async function compileScript(
   source: string,
   path: string,
   loader: 'ts' | 'tsx' | 'jsx',
-  options: { wasmUrl: string; jsxImportSource: string },
+  options: {
+    wasmUrl: string;
+    jsxImportSource: string;
+    /**
+     * For JSX: the file's id and where the page finds the dev runtime shim (JSX_DEV_RUNTIME), so each
+     * element the file's JSX makes carries its source range (ADR 0x050 §5). Without it, the plain runtime.
+     */
+    sourceRanges?: { fileId: string; runtime: string };
+  },
 ): Promise<string> {
   const mod = await loadEsbuild(options.wasmUrl);
+  const ranges = loader !== 'ts' ? options.sourceRanges : undefined;
   try {
     const result = await mod.transform(source, {
       loader,
       format: 'esm',
       target: 'es2022',
       jsx: 'automatic',
+      jsxDev: !!ranges,
       jsxImportSource: options.jsxImportSource,
       sourcemap: 'inline',
       sourcefile: path,
     });
-    return result.code;
+    return ranges
+      ? withSourceRanges(result.code, source, ranges.fileId, `${options.jsxImportSource}/jsx-dev-runtime`, ranges.runtime)
+      : result.code;
   } catch (error) {
     const first = (error as { errors?: { text: string; location?: { line: number; column: number } }[] }).errors?.[0];
     const at = first?.location ? `${path}:${first.location.line}:${first.location.column + 1}` : path;
     throw new CompileError(`${at}: ${first?.text ?? String(error)}`);
   }
+}
+
+/**
+ * The module the compiled JSX of a project imports in place of `<jsxImportSource>/jsx-dev-runtime`:
+ * the library's own runtime, with each intrinsic element (a `div`, not a component) given the source
+ * range its JSX had as `data-wi-src`, as the page's HTML elements are (ADR 0x050 §5). React and
+ * Preact keep `data-*` props as attributes, so the bridge finds the element's code as for HTML.
+ */
+export function jsxDevRuntime(jsxImportSource: string): string {
+  return `import { jsx, jsxs, Fragment } from ${JSON.stringify(`${jsxImportSource}/jsx-runtime`)};
+export { jsx, jsxs, Fragment };
+export function jsxDEV(type, props, key, isStaticChildren, source) {
+  if (typeof type === 'string' && typeof source === 'string') props = Object.assign({}, props, { 'data-wi-src': source });
+  return (isStaticChildren ? jsxs : jsx)(type, props, key);
+}
+`;
+}
+
+/** esbuild's JSX dev source argument: the file, and the 1-based line and UTF-16 column of the `<`. */
+const JSX_SOURCE = /\{\s*fileName:\s*(?:"(?:[^"\\\n]|\\.)*"|[\w$]+),\s*lineNumber:\s*(\d+),\s*columnNumber:\s*(\d+)\s*\}/g;
+
+/**
+ * Compiled JSX in dev mode, its source arguments turned into the source range of each element's
+ * opening tag (`<fileId>:<start>-<end>`, as data-wi-src), and its dev runtime import pointed at the
+ * shim. Lines are kept, so the inline source map still holds for them.
+ */
+export function withSourceRanges(code: string, source: string, fileId: string, devRuntime: string, shim: string): string {
+  const lineStarts = [0];
+  for (let i = source.indexOf('\n'); i >= 0; i = source.indexOf('\n', i + 1)) lineStarts.push(i + 1);
+  const out = code.replace(JSX_SOURCE, (match, line: string, column: string) => {
+    const lineStart = lineStarts[+line - 1];
+    const newlines = '\n'.repeat(match.split('\n').length - 1);
+    if (lineStart === undefined) return 'void 0' + newlines;
+    const start = lineStart + +column - 1;
+    return JSON.stringify(`${fileId}:${start}-${openingTagEnd(source, start)}`) + newlines;
+  });
+  return out.split(JSON.stringify(devRuntime)).join(JSON.stringify(shim));
+}
+
+/**
+ * Where the JSX opening tag at `start` (its `<`) ends, after its `>`: attributes' strings and
+ * braces are skipped, so a `>` inside them does not end it. Best effort: the end of the text if
+ * none is found.
+ */
+export function openingTagEnd(source: string, start: number): number {
+  let depth = 0;
+  let quote = '';
+  for (let i = start + 1; i < source.length; i++) {
+    const c = source[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '"' || c === "'" || (c === '`' && depth > 0)) quote = c;
+    else if (c === '{') depth++;
+    else if (c === '}') depth = Math.max(0, depth - 1);
+    else if (c === '>' && depth === 0) return i + 1;
+  }
+  return source.length;
 }
 
 type Sass = typeof import('sass');

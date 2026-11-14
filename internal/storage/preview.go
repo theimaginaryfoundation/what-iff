@@ -44,6 +44,10 @@ func PutPreview(ctx context.Context, logger *zap.Logger, store FileStore, object
 	if err := store.DeleteFile(ctx, tagKey); err != nil {
 		return err
 	}
+	// The sources of the picture it replaces (ADR 0x050 §8) are not this one's.
+	if err := store.DeleteFile(ctx, fileKeyForPreviewSources(objectKey)); err != nil {
+		return err
+	}
 	if err := store.UploadFile(ctx, FileKeyForPreview(objectKey), png, "image/png"); err != nil {
 		return err
 	}
@@ -84,14 +88,14 @@ func previewBase(objectKey string) string {
 	return path.Join("previews", name)
 }
 
-// DeletePreviews removes the preview, its thumbnail and its tag of the object at objectKey, after the object
+// DeletePreviews removes the preview, its thumbnail, its tag and its sources of the object at objectKey, after the object
 // itself was deleted. Best effort: a failure is logged and leaves an orphan, never an error.
 // Callers releasing objects of any kind ask mayHavePreview first.
 func DeletePreviews(ctx context.Context, logger *zap.Logger, store FileStore, objectKey string) {
 	if store == nil {
 		return
 	}
-	for _, key := range []string{fileKeyForPreviewTag(objectKey), FileKeyForPreview(objectKey), FileKeyForPreviewThumbnail(objectKey)} {
+	for _, key := range []string{fileKeyForPreviewTag(objectKey), fileKeyForPreviewSources(objectKey), FileKeyForPreview(objectKey), FileKeyForPreviewThumbnail(objectKey)} {
 		if err := store.DeleteFile(ctx, key); err != nil && logger != nil {
 			logger.Warn("preview cleanup: delete failed", zap.String("key", key), zap.Error(err))
 		}

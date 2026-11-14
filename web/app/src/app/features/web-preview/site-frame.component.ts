@@ -216,6 +216,7 @@ export class SiteFrameComponent {
       servedFiles: () => project.servedFiles(),
       fileAt: path => project.fileAt(path),
       text: async file => (await this.folders.download(file)).text(),
+      sourceLine: (path, line, column) => project.sourceLine(path, line, column),
     };
   }
 

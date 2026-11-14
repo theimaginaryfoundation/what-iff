@@ -16,6 +16,8 @@
 - **Previews** (`preview.go`, ADR 0x049 §8, ADR 0x050 §8): a picture of a diagram or an HTML page the browser drew, keyed by the stored object it shows (`FileKeyForPreview`, `FileKeyForPreviewThumbnail`: `users/{id}/previews/{hash of the object key}.png` and `.thumb.jpg`).
   Keying by object means a preview matches the content it was drawn from, rows sharing the object share it, and a save (always a new object) leaves the file with none until it is drawn again.
   `PutPreview` stores the picture, its thumbnail and its tag (a hash of the picture, `.tag`); `PreviewTag` reads the tag, so a reader can tell whether a cached copy is current without downloading the picture.
+  A web page's picture also keeps its sources (`preview_sources.go`, ADR 0x050 §8): the other files it was drawn from at their versions (`PreviewSource`, at most `MaxPreviewSources`), as `.sources.json` beside it.
+  `PutPreview` removes the old sources, `PutPreviewSources` writes the new, `ParsePreviewSources` reads the endpoint's `id:version,…` form, and `ComparePreviewSources` says which changed or are gone, given a lookup, so the handler and the agent tools judge staleness one way.
   The tag is removed before the picture is replaced and written after, so it never names an older picture.
     It first confirms the rows are actually gone (`ExistingFileAttachmentIDs`), so a cascade that did not fire never strips a surviving row.
     Best effort: failures are logged and counted, never returned.

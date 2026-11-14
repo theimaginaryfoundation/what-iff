@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { CompileError, assetModule, compileStyle, compiledAs, moduleCandidates } from './compile';
+import {
+  CompileError,
+  assetModule,
+  compileStyle,
+  compiledAs,
+  jsxDevRuntime,
+  moduleCandidates,
+  openingTagEnd,
+  withSourceRanges,
+} from './compile';
 
 describe('compiledAs', () => {
   it('compiles TypeScript, JSX and SCSS, and serves everything else as it is', () => {
@@ -49,5 +58,45 @@ describe('compileStyle', () => {
   it('says where a stylesheet is wrong', async () => {
     await expect(compileStyle('h1 { color: $missing; }', 'css/app.scss', 'scss', async () => null)).rejects.toBeInstanceOf(CompileError);
     await expect(compileStyle('h1 { color: $missing; }', 'css/app.scss', 'scss', async () => null)).rejects.toThrow(/Undefined variable/);
+  });
+});
+
+describe('JSX source ranges (§5)', () => {
+  // esbuild's dev-mode output for the two elements of this source.
+  const SOURCE = 'export const App = () => (\n  <main title={"a>b"}>\n    /*é😀*/ <h1 id="t">Hi</h1>\n  </main>\n);\n';
+  const COMPILED = [
+    'import { jsxDEV } from "react/jsx-dev-runtime";',
+    'export const App = () => /* @__PURE__ */ jsxDEV("main", { title: "a>b", children: /* @__PURE__ */ jsxDEV("h1", { id: "t", children: "Hi" }, void 0, false, {',
+    '  fileName: "App.tsx",',
+    '  lineNumber: 3,',
+    '  columnNumber: 13',
+    '}, this) }, void 0, false, {',
+    '  fileName: _jsxFileName,',
+    '  lineNumber: 2,',
+    '  columnNumber: 3',
+    '}, this);',
+  ].join('\n');
+
+  it('gives each element the range of its opening tag, keeping the lines, and imports the shim', () => {
+    const out = withSourceRanges(COMPILED, SOURCE, 'f-1', 'react/jsx-dev-runtime', '../__whatiff/jsx-dev-runtime.js');
+    expect(out.split('\n')).toHaveLength(COMPILED.split('\n').length);
+    expect(out).toContain('import { jsxDEV } from "../__whatiff/jsx-dev-runtime.js";');
+    const h1 = SOURCE.indexOf('<h1');
+    const main = SOURCE.indexOf('<main');
+    expect(out).toContain(`"f-1:${h1}-${h1 + '<h1 id="t">'.length}"`);
+    expect(out).toContain(`"f-1:${main}-${main + '<main title={"a>b"}>'.length}"`);
+  });
+
+  it('ends an opening tag at its own >, not one in an attribute', () => {
+    const text = '<a b={x > 1 ? "}" : `>`} c="d>e">';
+    expect(openingTagEnd(text, 0)).toBe(text.length);
+    expect(openingTagEnd('<br/>rest', 0)).toBe(5);
+    expect(openingTagEnd('<unclosed', 0)).toBe(9);
+  });
+
+  it('runs the library’s runtime, giving elements their range', () => {
+    const shim = jsxDevRuntime('preact');
+    expect(shim).toContain('from "preact/jsx-runtime"');
+    expect(shim).toContain("typeof type === 'string'");
   });
 });

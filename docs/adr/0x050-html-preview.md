@@ -89,16 +89,19 @@ An element thread has up to two anchors, each best effort, and falls to the whol
 - **The code anchor is a range of the source, as every text thread has.** For an element written in the HTML, it is its opening tag.
   The served page carries, on every element the HTML parser read, the tag's offsets in its file (`data-wi-src="<file>:<start>-<end>"`, in the units comment anchors use), added by the app as the file is sent from a location-aware parse (parse5) and inserted into the text as it is; a pick on the page reads them back, and the thread is made as a text thread on that tag, with the tag as its quote.
   So it shows in the code editor at the tag, the server carries it across edits made anywhere, and `file_comments` reads and writes it with nothing new.
+- **JSX elements carry their code too.** A `.tsx` or `.jsx` file is compiled (§4) in JSX's development mode, which gives each element its file, line and column; the app turns that into the range of the element's opening tag in its file, and the project serves a small runtime of its own in place of the library's development one, which hands each intrinsic element (a `div`, not a component) that range as `data-wi-src` and otherwise calls the library's runtime.
+  React and Preact keep `data-*` props as attributes, so a JSX element is picked, marked and found as an HTML one is, with its thread in the component's file, on its tag.
   A thread made on a stretch of the source marks the element whose tag holds its start, or the first tag inside it.
 - **The element anchor is a selector for the element on the page** (`element: { page, selector, fingerprint }`, `page` the HTML file's id, beside `anchor` as `cell` is for diagrams), so a thread stays on the element when the code around it is reshaped, and so an element the page made with scripts, which has no tag in the HTML, can carry a thread at all.
   The selector is chosen from the most stable thing the element has, in this order: an `id` that does not look generated; `data-testid`, `data-test`, `data-cy`, `data-id`, `name` or `aria-label`; one or two classes, unique on the page, that are neither utility classes nor hashed; last, a path of positions from the nearest ancestor with a stable id.
   The fingerprint (tag, the start of its text, the attributes the selector used) travels with it: the page shows a thread on the element its selector finds when its tag and text still match, else on the element of that tag whose text is the fingerprint's.
   The server only bounds the anchor; it does not depend on the text, so it is kept as it is across edits.
 - **The code behind a scripted element** is recorded, best effort, as the page runs: the bridge script wraps `createElement`, `innerHTML`, `outerHTML` and `insertAdjacentHTML` and keeps the first project file on the stack for each element made.
-  That finds hand-written DOM code and template libraries; it does not find the component behind a framework's own DOM building, and a prebuilt bundle gives nothing better than its own call site.
+  That finds hand-written DOM code and template libraries; it does not find the component behind a framework's own DOM building (JSX carries its own, above), and a prebuilt bundle gives nothing better than its own call site.
+  A call site in a compiled module (TypeScript, §4) is mapped to the line of the file the user wrote through the module's inline source map; one the map does not place leaves the thread on the element alone.
   Frames in the page itself (the bridge, and the page's inline scripts) are skipped, so the first project script on the stack is where the element was made.
 - **Picking and marking.** Comment, on the rendered page, enters a picker: the element under the pointer is outlined with its tag and size, as a browser's element picker does, a click picks it, Esc leaves.
-  A thread lives with the file its code anchor is in: a pick on an element the page's own file declares starts a thread there, on its tag and on the element; one on an element a project script made starts it in that script, on the line that made it (without its indentation) and on the element; any other pick starts one in the page's file on the element alone, labelled with its tag and the start of its text.
+  A thread lives with the file its code anchor is in: a pick on an element the page's own file declares starts a thread there, on its tag and on the element; one on an element a project script made starts it in that script, on the JSX tag that made it or the line that called the DOM (without its indentation), and on the element; any other pick starts one in the page's file on the element alone, labelled with its tag and the start of its text.
   So the page shows its own file's threads and those of the project's scripts that name it, loaded as it loads them, and the panel shows them together, a script's named after it (`js/main.js · …`); each thread's reply, edit, resolve and delete goes to the file it lives in, and a script's are written at once, as a viewer writes them.
   The bridge script (`page-bridge.ts`, first in every served page's head, in a layer of its own out of the page's styles) draws the marks of open threads on their elements, the active one more strongly, keeps them in place through scrolling, resizing and the page's own changes, and reports picks and clicks on marks to the app; the host page relays both ways.
   A click on a mark chooses its thread, and choosing one in the panel scrolls the page to it; right-clicking a marked element (or its mark) offers Reply and Delete, as every other format has.
@@ -110,6 +113,7 @@ An element thread has up to two anchors, each best effort, and falls to the whol
 
 - New text in the editor (once typing pauses) is served in place of the stored page, which reloads.
 - While a preview is shown, the app lists the folders it served from every few seconds and reloads the page when a file it used has a new `content_version`, or a missing one appears, so an agent's edit shows without a click (§3).
+  A file it used includes a partial a stylesheet imported (§4), and a compiled stylesheet is compiled again when one of its partials changed.
   Gallery lists carry each file's content version for this, as diagram tiles need it for their preview (ADR 0x049 §8).
   A change event from the server replaces the polling when there is one.
 
@@ -128,9 +132,14 @@ A page has a picture, as a diagram has (ADR 0x049 §8), so an agent can see what
 
 - The page draws it: when a page is shown and has settled, the app asks the bridge script (§5) for a picture, and the bridge draws its document with `modern-screenshot` (MIT, loaded from jsDelivr when first asked) at the frame's width and up to 3000 pixels of its height.
   Nothing outside the page sees into it, which keeps the preview site's origin of its own (§3) intact.
-- The app stores it as the file's preview, as for a diagram, when the page's file has a new version; a page that does not answer in 20 seconds, or cannot draw itself, has none.
-- `agent_file_read` shows an HTML file's picture with its text, from the stored preview; the gallery's tile shows it too.
-- It is the page as the user's browser drew it, last time someone looked: an agent that changed a page sees the new picture only once the page is shown again.
+- The app stores it as the file's preview, as for a diagram, with the files the page loaded besides its own (its stylesheets, scripts, a stylesheet's partials, images) at the versions it loaded: the picture's sources, at most 100, kept beside it.
+  A picture is current while the page's file and every source are at those versions; asked for a current one (`current=1`), the server says there is none once a source has another version or is gone.
+  The app draws one when it shows a page that has no current picture, including when the page reloads because a file it loads changed (§6); a page that does not answer in 20 seconds, or cannot draw itself, has none.
+- `agent_file_read` shows an HTML file's picture with its text, from the stored preview, and says which it is: current; out of date, naming the files that changed since it was drawn, still shown since the layout is often still useful; or none of this version yet.
+  The gallery's tile shows the picture it has.
+- Only a browser draws it, and only one showing the page: there is no browser beside the server, and the conversation's container has neither one nor the network to load a page's packages.
+  So a change an agent makes leaves the picture behind until someone opens the page, and the agent is told so in plain words, with the advice to ask the user to open the page, rather than shown an old picture as if it were current.
+  A page shown on its own (§1, where there is no preview site) records no sources, and its picture is dated by its own file alone.
 
 ## Alternatives considered
 
@@ -160,6 +169,5 @@ A page has a picture, as a diagram has (ADR 0x049 §8), so an agent can see what
 
 - **Builds in the container**: a project with a `vite.config.*` or a build script built where agents run commands, and its output folder served as the site.
   The container has no network and no Node today, so this waits on both; nothing of Node runs in the browser either way.
-- **Comments on elements a compiled script made** (§5): such a thread keeps its element anchor but not a code anchor, as the call site the bridge records is in the compiled module; mapping it through the module's source map would place it on the `.tsx` line.
-- **A picture drawn without a viewer**, so an agent sees a page it changed before anyone opens it.
+- **A picture drawn without a viewer** (§8), so an agent sees a page it changed before anyone opens it: a browser beside the server, or in the container once it has one and the network a page needs.
 - **Hosting**: the deployed site's bucket, distribution, response headers and the deploy workflow's build.

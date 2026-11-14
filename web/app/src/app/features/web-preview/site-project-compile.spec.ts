@@ -10,9 +10,9 @@ vi.mock('esbuild-wasm', () => esbuild);
 
 type Tree = Record<string, Record<string, string>>;
 
-function folders(tree: Tree) {
+function folders(tree: Tree, versions: Record<string, number> = {}) {
   const file = (folder: string, name: string) =>
-    ({ id: `${folder}/${name}`, name, folder, file_type: '', content_version: 1 }) as FileAttachment;
+    ({ id: `${folder}/${name}`, name, folder, file_type: '', content_version: versions[`${folder}/${name}`] ?? 1 }) as FileAttachment;
   const fake = {
     list: vi.fn(async (folder: string) => new Map(Object.keys(tree[folder] ?? {}).map(name => [name, file(folder, name)]))),
     download: vi.fn(async (f: FileAttachment) => new Blob([tree[f.folder ?? '']![f.name]!])),
@@ -61,6 +61,19 @@ describe('SiteProject compiling (§4)', () => {
     expect(text(mod.body)).toContain('document.head.appendChild(style)');
   });
 
+  it('compiles a stylesheet again when a partial it uses changed, and counts the partial as served', async () => {
+    const tree: Tree = { site: { 'app.scss': "@use 'vars';\nh1 { color: vars.$c; }", '_vars.scss': '$c: red;' } };
+    const versions: Record<string, number> = {};
+    const project = new SiteProject(folders(tree, versions), 'site', new Map(), parse);
+    expect(text((await project.get('app.scss', 'style')).body)).toContain('color: red');
+    expect([...project.servedFiles().keys()]).toContain('_vars.scss');
+    expect(await project.changed()).toBe(false);
+    tree['site']!['_vars.scss'] = '$c: blue;';
+    versions['site/_vars.scss'] = 2;
+    expect(await project.changed()).toBe(true);
+    expect(text((await project.get('app.scss', 'style')).body)).toContain('color: blue');
+  });
+
   it('shows a stylesheet’s compile error at the top of the page', async () => {
     const project = new SiteProject(folders({ site: { 'app.scss': 'h1 { color: $nope; }' } }), 'site', new Map(), parse);
     expect(text((await project.get('app.scss', 'style')).body)).toMatch(/^body::before \{ content: ".*Undefined variable/);
@@ -78,4 +91,38 @@ describe('SiteProject compiling (§4)', () => {
     expect(text((await project.get('logo.svg', 'script')).body)).toContain('import.meta.url');
     expect(text((await project.get('logo.svg', 'image')).body)).toBe('<svg/>');
   });
+
+  it('serves the JSX runtime that gives elements their source range, and compiles JSX against it', async () => {
+    esbuild.transform.mockReset().mockResolvedValue({
+      code: 'import { jsxDEV } from "react/jsx-dev-runtime";\nexport default () => jsxDEV("b", {}, void 0, false, {\n  fileName: "c/B.tsx",\n  lineNumber: 1,\n  columnNumber: 22\n}, this);\n',
+    });
+    const tree: Tree = {
+      site: { 'package.json': '{"dependencies": {"react": "18.3.1"}}' },
+      'site/c': { 'B.tsx': 'export default () => <b>x</b>;' },
+    };
+    const project = new SiteProject(folders(tree), 'site', new Map(), parse);
+    const out = text((await project.get('c/B.tsx', 'script')).body);
+    expect(esbuild.transform).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ jsxDev: true }));
+    expect(out).toContain('from "../__whatiff/jsx-dev-runtime.js"');
+    expect(out).toContain('"site/c/B.tsx:21-24"');
+    // From the root, relative too: a bare name would be taken for a package.
+    tree['site']!['A.tsx'] = 'export default () => <b>x</b>;';
+    expect(text((await project.get('A.tsx', 'script')).body)).toContain('from "./__whatiff/jsx-dev-runtime.js"');
+    const runtime = text((await project.get('__whatiff/jsx-dev-runtime.js', 'script')).body);
+    expect(runtime).toContain('https://esm.sh/react@18.3.1/jsx-runtime');
+    expect(runtime).toContain("'data-wi-src'");
+  });
+
+  it('maps a call site in a compiled module to the line the user wrote', async () => {
+    esbuild.transform.mockReset().mockResolvedValue({ code: COMPILED_LIST });
+    const project = new SiteProject(folders({ site: { 'list.ts': 'unused' } }), 'site', new Map(), parse);
+    expect(await project.sourceLine('list.ts', 2, 14)).toBeNull(); // not served yet
+    await project.get('list.ts', 'script');
+    expect(await project.sourceLine('list.ts', 2, 14)).toBe(4);
+    expect(await project.sourceLine('app.js', 7, 1)).toBe(7);
+  });
 });
+
+// esbuild's output for a list.ts whose createElement call is on its line 4 (line 2 compiled).
+const COMPILED_LIST =
+  'function add(list, item) {\n  const li = document.createElement("li");\n  li.textContent = item.name;\n  list.append(li);\n}\nexport {\n  add\n};\n//# sourceMappingURL=data:application/json;base64,ewogICJ2ZXJzaW9uIjogMywKICAic291cmNlcyI6IFsibGlzdC50cyJdLAogICJzb3VyY2VzQ29udGVudCI6IFsidHlwZSBJdGVtID0geyBuYW1lOiBzdHJpbmcgfTtcblxuZXhwb3J0IGZ1bmN0aW9uIGFkZChsaXN0OiBIVE1MRWxlbWVudCwgaXRlbTogSXRlbSk6IHZvaWQge1xuICBjb25zdCBsaTogSFRNTExJRWxlbWVudCA9IGRvY3VtZW50LmNyZWF0ZUVsZW1lbnQoJ2xpJyk7XG4gIGxpLnRleHRDb250ZW50ID0gaXRlbS5uYW1lO1xuICBsaXN0LmFwcGVuZChsaSk7XG59XG4iXSwKICAibWFwcGluZ3MiOiAiQUFFTyxTQUFTLElBQUksTUFBbUIsTUFBa0I7QUFDdkQsUUFBTSxLQUFvQixTQUFTLGNBQWMsSUFBSTtBQUNyRCxLQUFHLGNBQWMsS0FBSztBQUN0QixPQUFLLE9BQU8sRUFBRTtBQUNoQjsiLAogICJuYW1lcyI6IFtdCn0K\n';

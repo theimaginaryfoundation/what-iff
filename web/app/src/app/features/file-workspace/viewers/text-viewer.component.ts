@@ -349,14 +349,27 @@ export class TextViewerComponent {
 
   /** Pictures of the rendered page, stored as its preview for agents and the gallery (ADR 0x050 §8). */
   private readonly pageSnapshot = new PageSnapshot(action => this.preview()?.sendToPage(action));
-  private readonly pagePreview = new FilePreview(inject(FileAttachmentService), () => this.pageSnapshot.draw());
+  private readonly pagePreview = new FilePreview(
+    inject(FileAttachmentService),
+    () => this.pageSnapshot.draw(),
+    // The files the page loaded besides itself, so a picture they left behind is known as such.
+    () => {
+      const page = this.file().id;
+      const served = this.preview()?.pageProject()?.servedFiles() ?? new Map();
+      return [...served.values()]
+        .filter(f => f.id !== page && !!f.content_version)
+        .map(f => ({ id: f.id, content_version: f.content_version! }))
+        .slice(0, 100); // as many as the server keeps (storage.MaxPreviewSources)
+    },
+  );
 
   /** What the rendered page reports: its comments' events, a picture of it, and a mark's right-click menu. */
   onPageMessage(event: PageBridgeEvent): void {
     this.pageComments.handle(event);
     this.pageSnapshot.handle(event);
-    // The stored page is shown: draw its preview if this version has none, once its scripts had a
-    // moment to draw.
+    // The stored page is shown: draw its preview if it has none of this version and of the files
+    // it loaded, once its scripts had a moment to draw. A page that reloads because a file it
+    // loads changed (an agent's edit) is drawn again the same way.
     if (event.type === 'ready' && this.pageMode()) {
       const file = this.file();
       setTimeout(() => {
