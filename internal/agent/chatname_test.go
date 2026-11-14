@@ -81,7 +81,7 @@ func TestGenerateChatName_SuccessReturnsOutputText(t *testing.T) {
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	got, err := a.generateChatName(context.Background(), "hi")
+	got, err := a.generateChatName(withTestUtilityModels(context.Background()), "hi")
 	require.NoError(t, err)
 	require.Equal(t, "My New Chat", got)
 }

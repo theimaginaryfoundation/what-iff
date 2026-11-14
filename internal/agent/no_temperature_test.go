@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
-	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
 
@@ -48,7 +47,7 @@ func requireNoTemperature(t *testing.T, reqs []map[string]any) {
 	t.Helper()
 	require.NotEmpty(t, reqs, "expected at least one Responses API call")
 	for _, req := range reqs {
-		require.Equal(t, models.UtilityModelName, req["model"])
+		require.Equal(t, testUtilityModel, req["model"])
 		require.NotContains(t, req, "temperature")
 		require.NotContains(t, req, "top_p")
 	}
@@ -71,7 +70,7 @@ func TestPickGenerationExpression_StandaloneOmitsTemperature(t *testing.T) {
 
 	srv, reqs := capturingResponsesServer(t, responseTextJSONBody("resp_1", `{\"expression_key\":\"happy\",\"reasoning\":\"Warm tone.\"}`))
 	a := &Agent{logger: zap.NewNop(), ds: ds, OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	id, _, err := a.PickGenerationExpression(context.Background(), uuid.New(), uuid.New(), nil, "hi", "hello there")
+	id, _, err := a.PickGenerationExpression(withTestUtilityModels(context.Background()), uuid.New(), uuid.New(), nil, "hi", "hello there")
 	require.NoError(t, err)
 	require.NotNil(t, id, "the call must succeed, not be dropped as a 400")
 	requireNoTemperature(t, reqs())
@@ -86,7 +85,7 @@ func TestPickGenerationExpression_ForkedContextOmitsTemperature(t *testing.T) {
 
 	srv, reqs := capturingResponsesServer(t, responseTextJSONBody("resp_1", `{\"expression_key\":\"happy\",\"reasoning\":\"Warm tone.\"}`))
 	a := &Agent{logger: zap.NewNop(), ds: ds, OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	id, _, err := a.PickGenerationExpression(context.Background(), uuid.New(), uuid.New(), &provider.ModelContext{}, "hi", "hello there")
+	id, _, err := a.PickGenerationExpression(withTestUtilityModels(context.Background()), uuid.New(), uuid.New(), &provider.ModelContext{}, "hi", "hello there")
 	require.NoError(t, err)
 	require.NotNil(t, id)
 	reqs0 := reqs()
@@ -99,7 +98,7 @@ func TestInferExpressionGridLikeness_OmitsTemperature(t *testing.T) {
 	t.Parallel()
 	srv, reqs := capturingResponsesServer(t, responseTextJSONBody("resp_1", "A tall figure with silver hair."))
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	out, err := a.inferExpressionGridLikeness(context.Background(), "You are Aster.", nil, "")
+	out, err := a.inferExpressionGridLikeness(withTestUtilityModels(context.Background()), "You are Aster.", nil, "")
 	require.NoError(t, err)
 	require.Equal(t, "A tall figure with silver hair.", out)
 	requireNoTemperature(t, reqs())
@@ -109,7 +108,7 @@ func TestGenerateChatName_OmitsTemperature(t *testing.T) {
 	t.Parallel()
 	srv, reqs := capturingResponsesServer(t, responseTextJSONBody("resp_1", "Trip planning"))
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	got, err := a.generateChatName(context.Background(), "help me plan a trip")
+	got, err := a.generateChatName(withTestUtilityModels(context.Background()), "help me plan a trip")
 	require.NoError(t, err)
 	require.Equal(t, "Trip planning", got)
 	requireNoTemperature(t, reqs())

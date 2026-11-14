@@ -82,6 +82,12 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     `GetDisabledConnectionModel` and `ModelRowExists` let a chat or job tell a model turned off, or gone with its connection, from a retired catalog model.
     An account's default model (`user_preferences.default_model`) is optional: a new account gets the catalog's default (`resolveDefaultModelTx`: the admin-marked one, then `DEFAULT_MODEL_NAME`, then any catalog model, never a connection's), and none on an install without a catalog, until it enables a model.
     `CreateChat` without a model and with no default stores none; the chat's turns use the account's default once it has one.
+    Utility model settings (`utilitymodels.go`, ADR 0x027 section 6) choose the model for a utility role at a scope, or switch it off (no `model_id`): the deployment's (no `user_id`) or an account's.
+    `ListUtilityModelSettings` returns the deployment's with the account's, `SetUtilityModel` replaces a role's choice (a nil model switches it off) and `ClearUtilityModel` removes it, leaving the role to the next scope or not set; no route clears an account's.
+    An account may choose only a model it can use (`assertUserCanUseModelTx`), and the deployment, whose choice applies to every account, only a catalog model; deleting the model or the account deletes the setting.
+    A choice of a model may carry a reasoning effort and a service tier; Off carries neither, which a second CHECK constraint holds in the database too.
+    A setting that can't exist (an unknown role, scope, effort or tier, a scope with the wrong owner, or Off with an effort or tier) is refused with `ErrInvalidUtilitySetting` before anything is written or cleared.
+    The table's CHECK constraint holds the scope-owner rule in the database too.
     `assertUserCanUseModelTx` treats a connection's model as nonexistent to anyone but the connection's owner, so it can't be set on another account's chat, job or preference.
   - Safety violations: `safety_violation_event.go`.
   - Tool call persistence: `toolcall.go`.
@@ -276,6 +282,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 ## Testing
 
 - `chat_checkpoint_test.go`, `chatmessage_test.go`, `chatmessage_mark_read_test.go` — message and checkpoint behavior.
+- `utilitymodels_test.go` — the deployment's and an account's settings side by side (never another account's), replacing and clearing a choice, Off replacing a model and a model replacing Off, an effort and tier kept and refused when unknown or on Off, what each scope may choose, and the cascades from a deleted model or account.
 - `model_connection_test.go` — the catalog excludes connection models, a user sees only their own, and the usage check refuses another account's.
 - `turnsettings_test.go` — threads store only explicit values, `InheritedTurnSettings` reads the personality and account default, explicit-only chat writes, and preference update semantics for the turn settings.
 - `memory_test.go`, `memory2_test.go`, `filechunk_test.go` — retrieval (including **`ListMemories`** excluding Summary unless `level=summary`), ZIP export/import helpers, full import count/persist coverage, and chunks.

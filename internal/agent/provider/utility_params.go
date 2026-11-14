@@ -149,37 +149,69 @@ func UtilityClaudeParams(model string, req UtilityRequest) anthropic.MessageNewP
 }
 
 // UtilityChatCompletionParams renders a utility call for an OpenAI-compatible
-// Chat Completions API. Instructions and developer turns are system messages.
+// Chat Completions API. Some of those APIs accept a system message only first,
+// so the instructions, the developer turns and a conversation's own system
+// messages form one leading system message, and the conversation's other
+// messages follow it in order. A utility call never sends tools or sampling
+// settings; anything that needs them belongs on the chat adapters, not here.
+//
+// For example, instructions "Summarize.", a developer turn "Be brief." and a
+// conversation [system "You are a helpful assistant.", user "hi", assistant
+// "hello", system "<scratchpad>"] send:
+//
+//	system:    "Summarize.\n\nBe brief.\n\nYou are a helpful assistant.\n\n<scratchpad>"
+//	user:      "hi"
+//	assistant: "hello"
 func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCompletionNewParams {
 	params := openai.ChatCompletionNewParams{
 		Model: shared.ChatModel(model),
 	}
+	var system []string
 	if req.Instructions != "" {
-		params.Messages = append(params.Messages, openai.SystemMessage(req.Instructions))
+		system = append(system, req.Instructions)
 	}
+	turns := utilityTurns(req)
+	for _, m := range turns {
+		if m.Role == RoleDeveloper {
+			system = append(system, m.Text)
+		}
+	}
+	var conversation []openai.ChatCompletionMessageParamUnion
 	if req.Context != nil {
-		params.Messages = append(params.Messages, req.Context.BuildOpenAIChatCompletionParams(model).Messages...)
+		// The conversation renders its system prompt, scratchpad and summary as system
+		// messages, some after its turns; they join the leading one instead.
+		for _, m := range req.Context.BuildOpenAIChatCompletionParams(model).Messages {
+			if m.OfSystem != nil {
+				if text := chatSystemText(m.OfSystem); text != "" {
+					system = append(system, text)
+				}
+				continue
+			}
+			conversation = append(conversation, m)
+		}
 	}
+	if len(system) > 0 {
+		params.Messages = append(params.Messages, openai.SystemMessage(strings.Join(system, "\n\n")))
+	}
+	params.Messages = append(params.Messages, conversation...)
 	// Like the Responses API, and unlike Messages, which requires one, the cap is sent only
 	// when the call sets it.
 	if req.MaxOutputTokens > 0 {
 		params.MaxCompletionTokens = openai.Int(req.MaxOutputTokens)
 	}
-	for _, m := range utilityTurns(req) {
-		if m.Role == RoleDeveloper {
-			params.Messages = append(params.Messages, openai.SystemMessage(m.Text))
-			continue
-		}
-		if m.ImageDataURL == "" {
+	for _, m := range turns {
+		switch {
+		case m.Role == RoleDeveloper:
+		case m.ImageDataURL == "":
 			params.Messages = append(params.Messages, openai.UserMessage(m.Text))
-			continue
+		default:
+			var parts []openai.ChatCompletionContentPartUnionParam
+			if m.Text != "" {
+				parts = append(parts, openai.TextContentPart(m.Text))
+			}
+			parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: m.ImageDataURL}))
+			params.Messages = append(params.Messages, openai.UserMessage(parts))
 		}
-		var parts []openai.ChatCompletionContentPartUnionParam
-		if m.Text != "" {
-			parts = append(parts, openai.TextContentPart(m.Text))
-		}
-		parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: m.ImageDataURL}))
-		params.Messages = append(params.Messages, openai.UserMessage(parts))
 	}
 	if req.Schema != nil {
 		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
@@ -194,6 +226,20 @@ func UtilityChatCompletionParams(model string, req UtilityRequest) openai.ChatCo
 		}
 	}
 	return params
+}
+
+// chatSystemText is a system message's text, whichever form its content takes. A system
+// message's parts are text by type (ChatCompletionContentPartTextParam), so nothing else can be
+// dropped here.
+func chatSystemText(m *openai.ChatCompletionSystemMessageParam) string {
+	if m.Content.OfString.Valid() {
+		return m.Content.OfString.Value
+	}
+	parts := make([]string, 0, len(m.Content.OfArrayOfContentParts))
+	for _, p := range m.Content.OfArrayOfContentParts {
+		parts = append(parts, p.Text)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // utilityTurn is one turn a request adds after its conversation.

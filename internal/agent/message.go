@@ -3129,7 +3129,19 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	// run their scratchpad, memory and summary steps on the memory role's model.
 	// A connection model rebuilds from the DB too: no connection returns an
 	// OpenAI response id to chain off.
-	if checkpointRebuildsFromDB(chatCtx) {
+	//
+	// The memory model is resolved once and pinned for the whole checkpoint. Its steps would
+	// otherwise each resolve it again, and a choice saved mid-checkpoint, or a settings read
+	// that failed only the first time, would send a step that continues the stored response
+	// to a model that can't.
+	memory, err := a.utilityTargetFor(checkpointCtx, provider.UtilityRoleMemory)
+	if err != nil {
+		// Every step runs on the memory role's model: with none to use, none runs.
+		a.logCheckpointSkipped(chatMessage.ChatID, err)
+		return
+	}
+	checkpointCtx = withUtilityTarget(checkpointCtx, provider.UtilityRoleMemory, memory)
+	if !checkpointChainsResponses(chatCtx, memory) {
 		a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
 	} else {
 		a.runCheckpointOpenAI(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
@@ -3139,6 +3151,17 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 			zap.String("chat_id", chatMessage.ChatID.String()),
 			zap.Duration("budget", checkpointTimeout))
 	}
+}
+
+// logCheckpointSkipped logs a checkpoint that can't run because its memory model can't be
+// resolved: quietly when the role is switched off, which the account chose.
+func (a *Agent) logCheckpointSkipped(chatID uuid.UUID, err error) {
+	if errors.Is(err, ErrUtilityRoleOff) {
+		a.logger.Debug("checkpoint skipped: the memory role is switched off", zap.String("chat_id", chatID.String()))
+		return
+	}
+	a.logger.Warn("checkpoint skipped: no memory model to run it on",
+		zap.String("chat_id", chatID.String()), zap.Error(err))
 }
 
 // checkpointRebuildsFromDB reports whether a chat's checkpoint rebuilds its

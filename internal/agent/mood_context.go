@@ -13,8 +13,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const moodAutoSelectModel = models.UtilityModelName
-
 type moodAutoSelectResult struct {
 	MoodID string `json:"mood_id"`
 }
@@ -139,11 +137,9 @@ func isFirstUserMessageResult(results []any, currentMessageID uuid.UUID) bool {
 	return userCount <= 1
 }
 
-// autoSelectMood asks GPT-4.1-mini to pick the best mood from the provided list for the user message.
+// autoSelectMood asks the simple role's model to pick the best mood from the provided list for
+// the user message.
 func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMessage string) *models.Mood {
-	if a.OpenAIProvider == nil {
-		return nil
-	}
 	// Mock/local mode: mood selection is a provider call — deliberately keep
 	// the current mood instead of hitting the deny transport every auto-mood turn.
 	if a.nonVendorLLM() {
@@ -186,12 +182,10 @@ func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMe
 	// We rely on OpenAI structured output enforcement here; parser intentionally
 	// expects JSON-only text (no prose wrappers or concatenated objects).
 	a.logger.Debug("mood auto-select: raw structured output",
-		zap.String("model", moodAutoSelectModel),
 		zap.String("raw", raw))
 	selectedID, err := parseMoodAutoSelectResult(raw)
 	if err != nil {
 		a.logger.Warn("mood auto-select: failed to parse structured response",
-			zap.String("model", moodAutoSelectModel),
 			zap.String("raw", raw),
 			zap.Error(err))
 		return nil

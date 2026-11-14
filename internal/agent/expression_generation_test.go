@@ -127,7 +127,7 @@ func TestPickGenerationExpression_StandaloneSuccessMatchesKey(t *testing.T) {
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), ds: ds, OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	id, reasoning, err := a.PickGenerationExpression(context.Background(), uuid.New(), uuid.New(), nil, "hi", "hello there")
+	id, reasoning, err := a.PickGenerationExpression(withTestUtilityModels(context.Background()), uuid.New(), uuid.New(), nil, "hi", "hello there")
 	require.NoError(t, err)
 	require.NotNil(t, id)
 	require.Equal(t, "Warm tone.", reasoning)

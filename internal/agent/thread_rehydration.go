@@ -460,7 +460,7 @@ func chunkMessagesByChars(msgs []models.ChatMessage, maxChars int) [][]models.Ch
 // every failure is logged and never fails the rehydration job. Per product design, this seeds the
 // user's memory store so an import leaves them with ~10-20 memories per rehydrated thread.
 func (a *Agent) extractAndStoreImportedMemories(ctx context.Context, userID, chatID uuid.UUID, msgs []models.ChatMessage) {
-	if a.OpenAIProvider == nil || a.memoryTool == nil {
+	if a.memoryTool == nil {
 		return
 	}
 	// Mock/local mode: memory mining is inference + embeddings — deliberately skipped.

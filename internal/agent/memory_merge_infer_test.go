@@ -393,16 +393,18 @@ func TestFallbackExactMergeGroups_GroupsExactDuplicates(t *testing.T) {
 	}
 }
 
-// --- inferMemoryMergeGroupsOpenAI ---
+// --- inferMemoryMergeGroupsOnModel ---
 
-func TestInferMemoryMergeGroupsOpenAI_NilProviderReturnsError(t *testing.T) {
+// Merging runs on its role's model, whichever provider that is: without one chosen, the call
+// fails as not set rather than for want of an OpenAI client.
+func TestInferMemoryMergeGroupsOnModel_NotSetReturnsError(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
-	_, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "", nil)
-	require.ErrorContains(t, err, "OpenAIProvider is nil")
+	_, err := a.inferMemoryMergeGroupsOnModel(context.Background(), uuid.New(), "", []memoryMergeCandidate{{Content: "a"}, {Content: "b"}})
+	require.ErrorIs(t, err, ErrUtilityRoleNotSet)
 }
 
-func TestInferMemoryMergeGroupsOpenAI_ProviderErrorIsReturned(t *testing.T) {
+func TestInferMemoryMergeGroupsOnModel_ProviderErrorIsReturned(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -411,11 +413,11 @@ func TestInferMemoryMergeGroupsOpenAI_ProviderErrorIsReturned(t *testing.T) {
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 	candidates := []memoryMergeCandidate{{Content: "Likes tea", Scope: "User"}}
-	_, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "persona", candidates)
+	_, err := a.inferMemoryMergeGroupsOnModel(context.Background(), uuid.New(), "persona", candidates)
 	require.Error(t, err)
 }
 
-func TestInferMemoryMergeGroupsOpenAI_TruncatedJSONIsSalvaged(t *testing.T) {
+func TestInferMemoryMergeGroupsOnModel_TruncatedJSONIsSalvaged(t *testing.T) {
 	t.Parallel()
 	raw := `{\"groups\":[{\"member_indices\":[0],\"relation\":\"merge\",\"canonical_content\":\"\",\"scope\":\"User\",\"confidence\":\"medium\"},{\"member_indices\":[1],\"relation\":\"merge\",\"canonical_content\":\"never fini`
 	srv := jsonResponsesServer(t, responseTextJSONBody("resp_1", raw))
@@ -426,23 +428,23 @@ func TestInferMemoryMergeGroupsOpenAI_TruncatedJSONIsSalvaged(t *testing.T) {
 		{Content: "Likes tea", Scope: "User"},
 		{Content: "Likes coffee", Scope: "User"},
 	}
-	groups, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "", candidates)
+	groups, err := a.inferMemoryMergeGroupsOnModel(withTestUtilityModels(context.Background()), uuid.New(), "", candidates)
 	require.NoError(t, err)
 	require.Len(t, groups, 1, "only the complete group survives salvage")
 }
 
-func TestInferMemoryMergeGroupsOpenAI_UnparsableNonJSONReturnsError(t *testing.T) {
+func TestInferMemoryMergeGroupsOnModel_UnparsableNonJSONReturnsError(t *testing.T) {
 	t.Parallel()
 	srv := jsonResponsesServer(t, responseTextJSONBody("resp_1", "not valid json at all"))
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 	candidates := []memoryMergeCandidate{{Content: "Likes tea", Scope: "User"}, {Content: "Enjoys tea", Scope: "User"}}
-	_, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "persona", candidates)
+	_, err := a.inferMemoryMergeGroupsOnModel(withTestUtilityModels(context.Background()), uuid.New(), "persona", candidates)
 	require.ErrorContains(t, err, "parse memory merge grouping")
 }
 
-func TestInferMemoryMergeGroupsOpenAI_SuccessParsesGroups(t *testing.T) {
+func TestInferMemoryMergeGroupsOnModel_SuccessParsesGroups(t *testing.T) {
 	t.Parallel()
 	raw := `{\"groups\":[{\"member_indices\":[0,1],\"relation\":\"merge\",\"canonical_content\":\"Likes tea\",\"scope\":\"User\",\"confidence\":\"medium\"}]}`
 	srv := jsonResponsesServer(t, responseTextJSONBody("resp_1", raw))
@@ -453,7 +455,7 @@ func TestInferMemoryMergeGroupsOpenAI_SuccessParsesGroups(t *testing.T) {
 		{Content: "Likes tea", Scope: "User"},
 		{Content: "Likes tea a lot", Scope: "User"},
 	}
-	groups, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "", candidates)
+	groups, err := a.inferMemoryMergeGroupsOnModel(withTestUtilityModels(context.Background()), uuid.New(), "", candidates)
 	require.NoError(t, err)
 	require.Len(t, groups, 1)
 	require.Equal(t, []int{0, 1}, groups[0].MemberIndices)
