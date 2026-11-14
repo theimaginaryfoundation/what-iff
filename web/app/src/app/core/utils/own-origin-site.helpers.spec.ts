@@ -22,10 +22,10 @@ describe('usableOtherSite', () => {
 
   it('refuses a host under the app’s domain, whose pages could read the app’s cookies there', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(usableOtherSite('https://preview.whatiff.chat/index.html', 'https://app.whatiff.chat', 'The preview site')).toBeNull();
+    expect(usableOtherSite('https://preview.example.com/index.html', 'https://app.example.com', 'The preview site')).toBeNull();
     expect(error).toHaveBeenCalledWith(expect.stringContaining('domain of its own'));
-    expect(usableOtherSite('https://preview.whatiffusercontent.com/index.html', 'https://app.whatiff.chat', 'p')).toBe(
-      'https://preview.whatiffusercontent.com/index.html',
+    expect(usableOtherSite('https://preview.example-usercontent.com/index.html', 'https://app.example.com', 'p')).toBe(
+      'https://preview.example-usercontent.com/index.html',
     );
     // Local development: localhost and 127.0.0.1 are different sites.
     expect(usableOtherSite('http://127.0.0.1:4200/preview/index.html', 'http://localhost:4200', 'p')).toBe(
