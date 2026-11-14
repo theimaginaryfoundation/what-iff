@@ -1,6 +1,6 @@
 # ADR 0x050: HTML files and web projects, rendered
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-14
 - **Deciders:** What Iff maintainers
 - **Issue:** none (raised in conversation)
