@@ -419,6 +419,7 @@ func (s *Server) setupRoutes() {
 	shareLinkHandler := sharelink.NewHandler(dataStore, agent.FileStore, s.logger, sharelink.Config{
 		Secret:         os.Getenv("JWT_SECRET"),
 		ClientIPHeader: s.config.ClientIPHeader,
+		ProxySecret:    s.config.ClientIPProxySecret,
 	})
 	shareLinkHandler.RegisterPublicRoutes(apiRouter)
 

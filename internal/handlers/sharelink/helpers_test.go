@@ -49,22 +49,31 @@ func TestVisitorAddress(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
 	req.RemoteAddr = "198.51.100.9:5000"
 	req.Header.Set("CloudFront-Viewer-Address", "203.0.113.7:443")
-	got, ok := visitorAddress(req, "")
+	got, ok := visitorAddress(req, "", "")
 	require.True(t, ok)
 	require.Equal(t, netip.MustParsePrefix("198.51.100.9/32"), got, "a header is not trusted unless the deployment names it")
-	got, _ = visitorAddress(req, "CloudFront-Viewer-Address")
+	got, _ = visitorAddress(req, "CloudFront-Viewer-Address", "")
 	require.Equal(t, netip.MustParsePrefix("203.0.113.7/32"), got)
 
 	// IPv6 counts as its /64, in CloudFront's unbracketed form and the connection's bracketed one.
 	req.Header.Set("CloudFront-Viewer-Address", "2001:db8:1:2:aaaa:bbbb:cccc:dddd:46532")
-	got, _ = visitorAddress(req, "CloudFront-Viewer-Address")
+	got, _ = visitorAddress(req, "CloudFront-Viewer-Address", "")
 	require.Equal(t, netip.MustParsePrefix("2001:db8:1:2::/64"), got)
 	req.Header.Del("CloudFront-Viewer-Address")
 	req.RemoteAddr = "[2001:db8:1:2::99]:443"
-	got, _ = visitorAddress(req, "CloudFront-Viewer-Address")
+	got, _ = visitorAddress(req, "CloudFront-Viewer-Address", "")
 	require.Equal(t, netip.MustParsePrefix("2001:db8:1:2::/64"), got, "a missing header falls back to the connection")
 
 	require.NotEqual(t, addressKey([]byte("a"), got), addressKey([]byte("b"), got), "addresses are stored as keyed hashes")
+
+	// With a proxy secret, the header is trusted only on a request that carries it.
+	req.RemoteAddr = "10.0.0.5:443"
+	req.Header.Set("CloudFront-Viewer-Address", "203.0.113.7:443")
+	got, _ = visitorAddress(req, "CloudFront-Viewer-Address", "s3cret")
+	require.Equal(t, netip.MustParsePrefix("10.0.0.5/32"), got, "a visitor who reached the API directly cannot choose their address")
+	req.Header.Set(ProxySecretHeader, "s3cret")
+	got, _ = visitorAddress(req, "CloudFront-Viewer-Address", "s3cret")
+	require.Equal(t, netip.MustParsePrefix("203.0.113.7/32"), got)
 }
 
 func TestSession(t *testing.T) {

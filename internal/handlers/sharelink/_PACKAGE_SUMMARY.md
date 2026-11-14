@@ -27,6 +27,7 @@ HTTP API for **share links** (ADR 0x051): the owner's routes to share a file and
 - **Content cannot run on the share site.**
   Bytes are served with `Content-Disposition: attachment`, `nosniff` and `Content-Security-Policy: sandbox; default-src 'none'`; every public answer is `private, no-store` and `Cross-Origin-Resource-Policy: same-origin`, so a shared web app on the web apps site (the same site) cannot include another share the visitor unlocked as a script or image.
 - **The visitor's address** is the connection's unless `Config.ClientIPHeader` (`CLIENT_IP_HEADER`) names a header the deployment's proxy sets and a visitor cannot (CloudFront-Viewer-Address, `ip:port`, IPv6 unbracketed); a header named but missing falls back to the connection's.
+  With `Config.ProxySecret` (`CLIENT_IP_PROXY_SECRET`) the header is trusted only on a request carrying that secret in `X-Client-IP-Proxy-Secret`, so a request that went around the proxy cannot choose its address.
 - **Keys are derived, not reused**: the cookie key and the address-hash key are HMACs of `JWT_SECRET` with their own labels.
 - **A web app follows its page**: the project root is the page's folder at each request, so moving the folder moves the share and moving the page to the top level makes it a single file.
 

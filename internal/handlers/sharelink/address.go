@@ -3,6 +3,7 @@ package sharelink
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"net"
 	"net/http"
@@ -10,12 +11,17 @@ import (
 	"strings"
 )
 
+// ProxySecretHeader is the header a deployment's proxy sends its secret in, which proves a request
+// came through it, so the address header it set can be trusted (Config.ProxySecret).
+const ProxySecretHeader = "X-Client-IP-Proxy-Secret"
+
 // visitorAddress is the address a request comes from (ADR 0x051 §4): the value of header, when
-// the deployment names one its proxy sets and a visitor cannot (CloudFront-Viewer-Address), else
-// the connection's. An IPv6 address counts as its /64, as one machine holds a whole /64. ok is
-// false when there is none to be read.
-func visitorAddress(r *http.Request, header string) (netip.Prefix, bool) {
-	if header != "" {
+// the deployment names one its proxy sets and a visitor cannot (CloudFront-Viewer-Address) and the
+// request proves it came through that proxy (secret, when set), else the connection's. An IPv6
+// address counts as its /64, as one machine holds a whole /64. ok is false when there is none.
+func visitorAddress(r *http.Request, header, secret string) (netip.Prefix, bool) {
+	viaProxy := secret == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get(ProxySecretHeader)), []byte(secret)) == 1
+	if header != "" && viaProxy {
 		if addr, ok := parseAddress(r.Header.Get(header)); ok {
 			return prefixOf(addr), true
 		}

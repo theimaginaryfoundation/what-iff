@@ -37,6 +37,11 @@ type Config struct {
 	// ClientIPHeader names a header the deployment's proxy sets to the visitor's address and a
 	// visitor cannot set (CloudFront-Viewer-Address); empty to use the connection's (ADR 0x051 §4).
 	ClientIPHeader string
+	// ProxySecret, when set, is what the proxy sends in ProxySecretHeader: ClientIPHeader is trusted
+	// only on a request that carries it, as a visitor who reaches the API another way could set the
+	// address header to anything. A deployment whose API is reachable other than through the proxy
+	// sets it (CLIENT_IP_PROXY_SECRET).
+	ProxySecret string
 }
 
 // Handler serves share links.
@@ -47,6 +52,7 @@ type Handler struct {
 	sessionKey     []byte
 	addressSecret  []byte
 	clientIPHeader string
+	proxySecret    string
 	now            func() time.Time
 }
 
@@ -59,6 +65,7 @@ func NewHandler(ds Store, files func() storage.FileStore, logger *zap.Logger, cf
 		sessionKey:     derive(cfg.Secret, "what-iff share session v1"),
 		addressSecret:  derive(cfg.Secret, "what-iff share address v1"),
 		clientIPHeader: cfg.ClientIPHeader,
+		proxySecret:    cfg.ProxySecret,
 		now:            time.Now,
 	}
 }

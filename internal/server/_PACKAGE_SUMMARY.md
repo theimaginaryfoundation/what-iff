@@ -15,7 +15,7 @@ HTTP **API server**: Gorilla mux router, OpenTelemetry/metrics middleware, CORS 
   The ingester depends on small interfaces (`attachmentDatastore`, `attachmentProvider`), wired from the agent by `newAgentAttachmentIngester`.
   The attachment it returns goes on the plugin turn's message.
   Sub-routers use `/api` prefix; some routes use `/api/v1/...` (see `server.go` comments).
-- **`Config` (`config.go`):** Env-driven environment name (`ENV`, then `ENVIRONMENT`), host/port, CORS, OpenAI/Anthropic keys, S3, Stripe keys, **agent job scheduler** flags (in-process vs distributed lock), free-tier message limit, token encryption secret, `ClientIPHeader` (`CLIENT_IP_HEADER`, the proxy-set header share-link unlock limits read the visitor's address from, ADR 0x051 §4), and a `RequireBilling` feature flag — consumed by a private billing implementation when one is linked; a no-op otherwise.
+- **`Config` (`config.go`):** Env-driven environment name (`ENV`, then `ENVIRONMENT`), host/port, CORS, OpenAI/Anthropic keys, S3, Stripe keys, **agent job scheduler** flags (in-process vs distributed lock), free-tier message limit, token encryption secret, `ClientIPHeader` (`CLIENT_IP_HEADER`, the proxy-set header share-link unlock limits read the visitor's address from, ADR 0x051 §4) and `ClientIPProxySecret` (`CLIENT_IP_PROXY_SECRET`, which a request must carry for that header to count), and a `RequireBilling` feature flag — consumed by a private billing implementation when one is linked; a no-op otherwise.
 
 ## Key types and entry points
 

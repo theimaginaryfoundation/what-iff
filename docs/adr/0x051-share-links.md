@@ -58,6 +58,7 @@ And a passcode can be guessed, so guessing has to be slow and costly.
 - Attempts and bans are kept in the database, not in a server's memory, so every server of a deployment enforces the same ones and a restart does not forgive.
   Addresses are stored as keyed hashes, not as they are, and old attempts are deleted as they age out.
 - **The visitor's address is the connection's**, unless the deployment names a header its proxy sets and a visitor cannot (`CLIENT_IP_HEADER`, such as CloudFront's `CloudFront-Viewer-Address`); a header anyone can send (`X-Forwarded-For` as a client wrote it) is never trusted.
+  Where the API can also be reached without that proxy, the proxy sends a secret (`X-Client-IP-Proxy-Secret`, `CLIENT_IP_PROXY_SECRET`) and the header is trusted only on a request that carries it; a request without it counts as the connection's address, so going around the proxy gains nothing.
 - 71 bits cannot be guessed at 5 tries an hour per address; the limits are there so that guessing is pointless, not merely slow.
 
 ### 5. The share site

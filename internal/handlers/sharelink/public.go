@@ -81,7 +81,7 @@ func (h *Handler) Unlock(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	ctx := r.Context()
 	now := h.now()
-	prefix, ok := visitorAddress(r, h.clientIPHeader)
+	prefix, ok := visitorAddress(r, h.clientIPHeader, h.proxySecret)
 	if !ok {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Could not tell where the request came from", nil)
 		return

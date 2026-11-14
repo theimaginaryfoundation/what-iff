@@ -96,6 +96,10 @@ type Config struct {
 	// visitor cannot set (CLIENT_IP_HEADER, e.g. CloudFront-Viewer-Address); share-link unlock
 	// limits use it (ADR 0x051 §4). Empty uses the connection's address.
 	ClientIPHeader string
+	// ClientIPProxySecret (CLIENT_IP_PROXY_SECRET), when set, must arrive in the
+	// X-Client-IP-Proxy-Secret header for ClientIPHeader to be trusted: set it where the API can be
+	// reached other than through the proxy that sets the address header.
+	ClientIPProxySecret string
 	// EnableAgentJobsScheduler starts the in-process AgentJob scheduler (single-server MVP).
 	EnableAgentJobsScheduler bool
 	// AgentJobsSchedulerDistributed enables Postgres-backed leader election so only one
@@ -403,6 +407,7 @@ func NewConfig() *Config {
 		AllowedEmails:                       allowedEmails,
 		RequireBilling:                      requireBilling,
 		ClientIPHeader:                      strings.TrimSpace(os.Getenv("CLIENT_IP_HEADER")),
+		ClientIPProxySecret:                 os.Getenv("CLIENT_IP_PROXY_SECRET"),
 		EnableAgentJobsScheduler:            enableAgentJobsScheduler,
 		AgentJobsSchedulerDistributed:       agentJobsSchedulerDistributed,
 		AgentJobsSchedulerLockKey:           agentJobsSchedulerLockKey,
