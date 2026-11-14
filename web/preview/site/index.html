@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Preview</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        background: #fff;
+        display: flex;
+        flex-direction: column;
+      }
+      #page {
+        border: 0;
+        flex: 1;
+        width: 100%;
+      }
+      #status {
+        color: #555;
+        font: 14px system-ui, sans-serif;
+        padding: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="status" role="status">Starting the preview…</p>
+    <!--
+      The user's page, served by the site's service worker. Same origin as this page, as a worker
+      controls only same-origin documents; this origin holds nothing of the app's (ADR 0x050 §3).
+    -->
+    <iframe
+      id="page"
+      title="Page"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads"
+    ></iframe>
+    <script src="config.js"></script>
+    <script src="host.js"></script>
+  </body>
+</html>

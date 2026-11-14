@@ -15,5 +15,7 @@ export const environment = {
   docsUrl: '__DOCS_URL__',
   // The JupyterLite site that runs notebooks, on an origin of its own; empty leaves Run off.
   diagramsUrl: '__DIAGRAMS_URL__',
+  // The preview site that serves web projects (ADR 0x050 §3); empty leaves a lone .html file only.
+  previewUrl: '__PREVIEW_URL__',
   jupyterliteUrl: '__JUPYTERLITE_URL__',
 };

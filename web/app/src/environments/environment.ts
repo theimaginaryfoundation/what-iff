@@ -15,6 +15,9 @@ export const environment = {
   // The draw.io editor for .drawio files, on an origin of its own (ADR 0x049): `make diagrams-site`, then
   // ng serve serves it at /diagrams/; 127.0.0.1 is another origin than localhost. Open the app on localhost.
   diagramsUrl: 'http://127.0.0.1:4200/diagrams/index.html',
+  // The preview site that serves web projects, on an origin of its own (ADR 0x050 §3): ng serve
+  // serves web/preview/site at /preview/; 127.0.0.1 is another origin than localhost.
+  previewUrl: 'http://127.0.0.1:4200/preview/index.html',
   // The JupyterLite site that runs notebooks, on an origin of its own: make jupyterlite-serve.
   jupyterliteUrl: 'http://localhost:4203/lab/index.html',
 };

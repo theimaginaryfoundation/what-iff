@@ -8,6 +8,8 @@ import { ConfirmationService } from '../../../core/services/confirmation.service
 import { GalleryViewService } from '../../../core/services/gallery-view.service';
 import { GALLERY_LAYOUT_KEY } from '../helpers/gallery-list.helpers';
 import { ImageGalleryService } from '../../../core/services/image-gallery.service';
+import { Router } from '@angular/router';
+import { PREVIEW_URL } from '../../web-preview/preview-site.config';
 import { GalleryFolderToolsComponent } from './gallery-folder-tools.component';
 
 function image(id: string): FileAttachment {
@@ -55,6 +57,7 @@ describe('GalleryFolderToolsComponent', () => {
         provideZonelessChangeDetection(),
         { provide: ImageGalleryService, useValue: api },
         { provide: ConfirmationService, useValue: confirmation },
+        { provide: PREVIEW_URL, useValue: 'https://preview.example.test/index.html' },
       ],
     }).compileComponents();
     view = TestBed.inject(GalleryViewService);
@@ -505,6 +508,26 @@ describe('GalleryFolderToolsComponent', () => {
 
       expect(confirmation.confirm).toHaveBeenCalled();
       expect(api.deleteFiles).toHaveBeenCalledWith(['a', 'b']);
+    });
+  });
+
+  describe('Open as site', () => {
+    it('opens the folder’s index.html, where the folder has one', async () => {
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      expect(buttons()).not.toContain('Open as site');
+      const page = { ...image('page'), name: 'index.html', file_type: 'text/html', folder: 'charts' };
+      api.listImages.mockReturnValue(of({ results: [page, { ...image('c'), folder: 'charts' }], total_count: 2, page: 1 }));
+      view.openFolder('charts');
+      await flush(fixture);
+      button('Open as site').click();
+      expect(navigate).toHaveBeenCalledWith([], { queryParams: { file: 'page' }, queryParamsHandling: 'merge' });
+    });
+
+    it('is not offered at the top level or in a folder without one', async () => {
+      api.listImages.mockReturnValue(of({ results: [{ ...image('c'), folder: 'charts' }], total_count: 1, page: 1 }));
+      view.openFolder('charts');
+      await flush(fixture);
+      expect(buttons()).not.toContain('Open as site');
     });
   });
 });

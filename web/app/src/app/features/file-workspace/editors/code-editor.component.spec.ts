@@ -9,6 +9,7 @@ import { stubCommentHighlights } from '../../office/comments/comment-highlights.
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { latexMathExtension } from '../../../core/utils/latex-math.helpers';
 import { PageFiles } from '../../web-preview/page-files.service';
+import { PREVIEW_URL } from '../../web-preview/preview-site.config';
 import { CodeEditorComponent } from './code-editor.component';
 import { fakeMonaco, selectInFake } from './fake-monaco.spec-helper';
 import { MONACO_LOADER } from './monaco/monaco-loader';
@@ -34,6 +35,8 @@ describe('CodeEditorComponent', () => {
         { provide: MONACO_LOADER, useValue: () => Promise.resolve(fake.monaco) },
         { provide: CommentPeopleService, useValue: { me: signal({ id: 'user:u-1', name: 'Pat Lee' }) } },
         { provide: TextCommentsService, useValue: textComments },
+        // No preview site: an .html file renders on its own (ADR 0x050 §1).
+        { provide: PREVIEW_URL, useValue: null },
         {
           provide: PageFiles,
           useValue: {

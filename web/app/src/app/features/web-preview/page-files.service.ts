@@ -1,23 +1,14 @@
 import { DOCUMENT } from '@angular/common';
 import { Injectable, inject } from '@angular/core';
-import { firstValueFrom } from 'rxjs';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
-import { FileAttachmentService } from '../../core/services/file-attachment.service';
 import { bytesToBase64 } from '../../core/utils/base64';
-import { ImageGalleryService } from '../../core/services/image-gallery.service';
+import { FolderFiles } from './folder-files.service';
 import { cssReferences, isStylesheet, pageReferences, rewriteCss, rewritePage, serializePage, servedType } from './page-assets';
 
-/** How many of the folder's files are listed to find the page's (pages of LIST_PAGE). */
-const LIST_PAGE = 200;
-const MAX_LIST_PAGES = 5;
 /** What a lone page may pull from its folder: beyond this the rest stay unresolved. */
 export const MAX_PAGE_FILES = 200;
 export const MAX_PAGE_BYTES = 30 * 1024 * 1024;
-/** How long a folder's listing is reused: a page rebuilt while typing lists its folder once. */
-const LISTING_TTL_MS = 5_000;
-/** How many downloaded files are kept for rebuilds, by file version. */
-const MAX_CACHED_FILES = 400;
 
 /** A page ready for its frame. */
 export interface BuiltPage {
@@ -38,14 +29,7 @@ export interface BuiltPage {
 @Injectable({ providedIn: 'root' })
 export class PageFiles {
   private readonly document = inject(DOCUMENT);
-  private readonly files = inject(FileAttachmentService);
-  private readonly gallery = inject(ImageGalleryService);
-  /** Recent folder listings, by folder. */
-  private readonly listings = new Map<string, { at: number; files: Promise<Map<string, FileAttachment>> }>();
-  /** Downloaded files by id and content version, least recently used first. */
-  private readonly downloads = new Map<string, Promise<Blob>>();
-  /** The clock, replaced in tests. */
-  now = () => Date.now();
+  private readonly folders = inject(FolderFiles);
 
   async build(page: FileAttachment, html: string): Promise<BuiltPage> {
     const view = this.document.defaultView;
@@ -53,7 +37,7 @@ export class PageFiles {
     const wanted = [...pageReferences(doc)];
     if (!wanted.length) return { html, missing: [], skipped: [] };
 
-    const folder = await this.folderFiles(page);
+    const folder = await this.folders.list(page.folder ?? '');
     const fetched = new Map<string, { file: FileAttachment; blob: Blob; css?: string }>();
     const missing = new Set<string>();
     const skipped: string[] = [];
@@ -72,7 +56,7 @@ export class PageFiles {
         skipped.push(name);
         continue;
       }
-      const blob = await this.download(file);
+      const blob = await this.folders.download(file);
       bytes += blob.size;
       const entry: { file: FileAttachment; blob: Blob; css?: string } = { file, blob };
       if (isStylesheet(name)) {
@@ -98,50 +82,6 @@ export class PageFiles {
     }
     rewritePage(doc, urls);
     return { html: serializePage(doc), missing: [...missing], skipped };
-  }
-
-  /** A file's bytes, fetched once per version while it stays among the recent ones. */
-  private download(file: FileAttachment): Promise<Blob> {
-    const key = `${file.id}@${file.content_version ?? '?'}`;
-    let blob = this.downloads.get(key);
-    if (blob) {
-      this.downloads.delete(key);
-    } else {
-      blob = firstValueFrom(this.files.downloadFileAttachment(file.id));
-      // A failed download is not kept, so the next build tries again.
-      blob.catch(() => this.downloads.get(key) === blob && this.downloads.delete(key));
-    }
-    this.downloads.set(key, blob);
-    for (const oldest of this.downloads.keys()) {
-      if (this.downloads.size <= MAX_CACHED_FILES) break;
-      this.downloads.delete(oldest);
-    }
-    return blob;
-  }
-
-  /** The page's folder's files, listed at most once every few seconds. */
-  private folderFiles(page: FileAttachment): Promise<Map<string, FileAttachment>> {
-    const folder = page.folder ?? '';
-    const kept = this.listings.get(folder);
-    if (kept && this.now() - kept.at < LISTING_TTL_MS) return kept.files;
-    const files = this.listFolder(folder);
-    files.catch(() => this.listings.get(folder)?.files === files && this.listings.delete(folder));
-    this.listings.set(folder, { at: this.now(), files });
-    return files;
-  }
-
-  /** The files in a folder, by name: the newest of a name wins. */
-  private async listFolder(folder: string): Promise<Map<string, FileAttachment>> {
-    const byName = new Map<string, FileAttachment>();
-    for (let n = 1; n <= MAX_LIST_PAGES; n++) {
-      const list = await firstValueFrom(this.gallery.listImages(n, LIST_PAGE, { folder, kind: 'all' }));
-      for (const file of list.results) {
-        const kept = byName.get(file.name);
-        if (!kept || (file.created_at ?? '') > (kept.created_at ?? '')) byName.set(file.name, file);
-      }
-      if (n * LIST_PAGE >= list.total_count || !list.results.length) break;
-    }
-    return byName;
   }
 }
 
