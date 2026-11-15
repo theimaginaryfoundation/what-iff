@@ -9654,17 +9654,30 @@ paths:
           type: string
           format: uuid
     get:
-      summary: A file's share link
+      summary: A file's share link, and what sharing it shares
+      description: >-
+        The scope is worked out from the file's original, so a chat's copy of a page in a folder says
+        it shares the folder (ADR 0x051 §1); link is null when the file is not shared.
       tags: [Share Links]
       responses:
         '200':
-          description: The link
+          description: The scope and the link
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ShareLink'
+                type: object
+                required: [scope, link]
+                properties:
+                  scope:
+                    $ref: '#/components/schemas/ShareScope'
+                  link:
+                    nullable: true
+                    allOf:
+                      - $ref: '#/components/schemas/ShareLink'
+        '400':
+          description: A skill's file, which cannot be shared
         '404':
-          description: Not the user's file, or not shared
+          description: Not the user's file
     put:
       summary: Share a file
       description: >-
@@ -9702,7 +9715,7 @@ paths:
         '404':
           description: Not the user's file
         '409':
-          description: The server cannot keep passcodes
+          description: The server has no token key to keep passcodes with (it does not start without one)
     patch:
       summary: Change a share link's passcode
       description: >-
@@ -9727,17 +9740,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ShareLink'
+        '400':
+          description: An invalid body, or a skill's file
         '404':
           description: Not the user's file, or not shared
         '409':
-          description: The server cannot keep passcodes
+          description: The server has no token key to keep passcodes with (it does not start without one)
     delete:
       summary: Stop sharing a file
       description: The link stops working; sharing again makes a new one.
       tags: [Share Links]
       responses:
         '204':
-          description: Not shared
+          description: The file is not shared (now, or already)
+        '400':
+          description: A skill's file
         '404':
           description: Not the user's file
   /shared/{key}:
@@ -9779,7 +9796,9 @@ paths:
         The right passcode is answered with the share's cookie (HttpOnly, Secure, SameSite=Strict,
         scoped to /api/shared/{key}, 12 hours). Tries are limited per address (an IPv4 address or an
         IPv6 /64) across all links: 10 a minute, and 5 wrong within 15 minutes ban the address for an
-        hour (a day for the next ban within a day), right passcode or not (ADR 0x051 §4).
+        hour (a day for the next ban within a day), right passcode or not (ADR 0x051 §4). Only the share
+        site's own requests count: the body must be JSON, and a Sec-Fetch-Site other than same-origin
+        is refused (403) before the try is counted.
       tags: [Share Links]
       security: []
       requestBody:
@@ -9795,6 +9814,10 @@ paths:
       responses:
         '204':
           description: Unlocked (or the link needs no passcode)
+        '400':
+          description: An invalid body, or the visitor's address could not be read
+        '403':
+          description: Not the share site's own request (not JSON, or from another origin)
         '401':
           description: A wrong passcode
           content:
@@ -13286,6 +13309,9 @@ components:
         passcode:
           type: string
           description: The 12-character passcode, when the link needs one
+        passcode_unreadable:
+          type: boolean
+          description: The stored passcode could not be decrypted (the token key changed); make a new one
         created_at:
           type: string
           format: date-time
@@ -13293,6 +13319,19 @@ components:
           type: string
           format: date-time
       required: [key, file_id, file_name, file_type, web_app, passcode_required, created_at, updated_at]
+    ShareScope:
+      type: object
+      description: What sharing a file shares, from its original (ADR 0x051 §1).
+      properties:
+        file_name:
+          type: string
+        web_app:
+          type: boolean
+          description: The file is shared with its folder
+        folder:
+          type: string
+          description: That folder, for a web app
+      required: [file_name, web_app]
     SharedView:
       type: object
       description: What a share link opens, as a visitor sees it.

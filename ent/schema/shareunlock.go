@@ -11,7 +11,7 @@ import (
 
 // ShareUnlockAttempt is one try at a share link's passcode (ADR 0x051 §4), by address: what the
 // rate limit and the bans count. The address is a keyed hash, never the address itself. Attempts
-// older than a day are deleted.
+// older than a day are deleted, as are bans that ended more than a day ago.
 type ShareUnlockAttempt struct {
 	ent.Schema
 }
@@ -25,8 +25,10 @@ func (ShareUnlockAttempt) Fields() []ent.Field {
 		field.String("address_key").
 			NotEmpty().
 			Immutable(),
+		// A try is recorded as failed until its passcode is known to be right, so tries that arrive
+		// together count each other (ADR 0x051 §4).
 		field.Bool("failed").
-			Immutable(),
+			Default(true),
 		field.Time("at").
 			Default(time.Now).
 			Immutable(),

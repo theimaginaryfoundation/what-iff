@@ -18,11 +18,23 @@ type ShareLink struct {
 	FileType string `json:"file_type"`
 	// WebApp is true when the link shares the page's folder as a web app (an HTML file in a
 	// folder); Folder is then the project's root.
-	WebApp           bool      `json:"web_app"`
-	PasscodeRequired bool      `json:"passcode_required"`
-	Passcode         string    `json:"passcode,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	WebApp           bool   `json:"web_app"`
+	PasscodeRequired bool   `json:"passcode_required"`
+	Passcode         string `json:"passcode,omitempty"`
+	// PasscodeUnreadable is true when the stored passcode could not be decrypted (the token key
+	// changed): the link still works for nobody, and the owner makes a new passcode or stops it.
+	PasscodeUnreadable bool      `json:"passcode_unreadable,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// ShareScope is what sharing a file shares, worked out from the file's original (a chat copy has no
+// folder of its own), so the owner is told before sharing (ADR 0x051 §1).
+type ShareScope struct {
+	FileName string `json:"file_name"`
+	// WebApp is true when the file is shared with its folder; Folder is that folder.
+	WebApp bool   `json:"web_app"`
+	Folder string `json:"folder,omitempty"`
 }
 
 // SharedItem is what a share link opens, found by its key (ADR 0x051 §5): never shown as it is to

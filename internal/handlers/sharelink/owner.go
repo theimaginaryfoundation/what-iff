@@ -28,14 +28,24 @@ func (h *Handler) ListShareLinks(w http.ResponseWriter, r *http.Request) {
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, map[string]any{"links": links})
 }
 
-// GetShareLink handles GET /share-links/files/{fileId}: the file's link, 404 when it has none.
+// GetShareLink handles GET /share-links/files/{fileId}: what sharing the file shares (its scope,
+// from its original: a chat copy has no folder of its own) and its link, null when it has none.
 func (h *Handler) GetShareLink(w http.ResponseWriter, r *http.Request) {
 	userID, fileID, ok := h.ownerRequest(w, r)
 	if !ok {
 		return
 	}
+	scope, err := h.ds.ShareScope(r.Context(), userID, fileID)
+	if err != nil {
+		h.respondLink(w, nil, 0, err)
+		return
+	}
 	link, err := h.ds.ShareLinkForFile(r.Context(), userID, fileID)
-	h.respondLink(w, link, http.StatusOK, err)
+	if err != nil && !errors.Is(err, models.ErrShareLinkNotFound) {
+		h.respondLink(w, nil, 0, err)
+		return
+	}
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, map[string]any{"scope": scope, "link": link})
 }
 
 // PutShareLink handles PUT /share-links/files/{fileId}: shares the file (with a passcode unless

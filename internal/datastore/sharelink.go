@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"math/big"
 	"time"
 
@@ -17,6 +16,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/shareunlockattempt"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"go.uber.org/zap"
 )
 
 // Share links (ADR 0x051): a public link to one of the user's files, on the file's original row,
@@ -216,11 +216,29 @@ func (d *Datastore) shareLinkModel(row *ent.ShareLink, file *ent.FileAttachment)
 	if link.PasscodeRequired {
 		passcode, err := d.decryptTokenForRead(row.PasscodeCiphertext)
 		if err != nil {
-			return nil, fmt.Errorf("read share passcode: %w", err)
+			// One unreadable passcode must not keep the owner from their other links, or from
+			// making a new passcode for this one.
+			d.logger.Warn("share link passcode could not be decrypted", zap.Error(err))
+			link.PasscodeUnreadable = true
+			return link, nil
 		}
 		link.Passcode = passcode
 	}
 	return link, nil
+}
+
+// ShareScope is what sharing the user's file (any row of it) shares: the file, or its folder as a
+// web app.
+func (d *Datastore) ShareScope(ctx context.Context, userID, fileID uuid.UUID) (models.ShareScope, error) {
+	file, err := d.shareableFile(ctx, userID, fileID)
+	if err != nil {
+		return models.ShareScope{}, err
+	}
+	scope := models.ShareScope{FileName: file.Name}
+	if models.SharesAsWebApp(&models.FileAttachment{Name: file.Name, FileType: file.FileType, Folder: file.Folder}) {
+		scope.WebApp, scope.Folder = true, file.Folder
+	}
+	return scope, nil
 }
 
 func (d *Datastore) newPasscodeCiphertext() (string, error) {
@@ -242,7 +260,9 @@ func (d *Datastore) SharedItemByKey(ctx context.Context, key string) (*models.Sh
 	}
 	row, err := d.dbClient.ShareLink.Query().
 		Where(sharelink.Key(key)).
-		WithFileAttachment(func(q *ent.FileAttachmentQuery) { q.WithOwner() }).
+		WithFileAttachment(func(q *ent.FileAttachmentQuery) {
+			q.Select(sharedFileFields...).WithOwner(func(u *ent.UserQuery) { u.Select(user.FieldID) })
+		}).
 		Only(ctx)
 	if ent.IsNotFound(err) {
 		return nil, models.ErrShareLinkNotFound
@@ -268,6 +288,20 @@ func (d *Datastore) SharePasscode(item *models.SharedItem) (string, error) {
 	return d.decryptTokenForRead(item.PasscodeCiphertext)
 }
 
+// sharedFileFields are the columns a visitor's reads need: never a file's extracted text
+// (file_content), which the public routes would otherwise load for every file they list.
+var sharedFileFields = []string{
+	entfileattachment.FieldID,
+	entfileattachment.FieldName,
+	entfileattachment.FieldFileType,
+	entfileattachment.FieldFolder,
+	entfileattachment.FieldS3Key,
+	entfileattachment.FieldSizeBytes,
+	entfileattachment.FieldContentVersion,
+	entfileattachment.FieldCreatedAt,
+	entfileattachment.FieldOrigin,
+}
+
 // MaxSharedProjectFiles bounds how many files a shared web app lists.
 const MaxSharedProjectFiles = 2000
 
@@ -286,6 +320,7 @@ func (d *Datastore) SharedProjectFiles(ctx context.Context, ownerID uuid.UUID, r
 		)).
 		Order(ent.Asc(entfileattachment.FieldFolder), ent.Asc(entfileattachment.FieldName), ent.Desc(entfileattachment.FieldCreatedAt)).
 		Limit(MaxSharedProjectFiles).
+		Select(sharedFileFields...).
 		All(ctx)
 	if err != nil {
 		return nil, err
@@ -308,6 +343,7 @@ func (d *Datastore) SharedProjectFile(ctx context.Context, ownerID uuid.UUID, ro
 		Where(galleryMutableFiles(ownerID, models.GalleryKindAll)...).
 		Where(entfileattachment.FolderEQ(folder), entfileattachment.Name(name)).
 		Order(ent.Desc(entfileattachment.FieldCreatedAt)).
+		Select(sharedFileFields...).
 		First(ctx)
 	if ent.IsNotFound(err) {
 		return nil, ErrFileAttachmentNotFound
@@ -320,24 +356,49 @@ func (d *Datastore) SharedProjectFile(ctx context.Context, ownerID uuid.UUID, ro
 
 // --- Unlock attempts and bans (ADR 0x051 §4) ------------------------------------------------
 
-// RecordShareUnlockAttempt records a try at a passcode by an address (a keyed hash), and deletes
-// attempts older than keep.
-func (d *Datastore) RecordShareUnlockAttempt(ctx context.Context, addressKey string, failed bool, at time.Time, keep time.Duration) error {
-	if err := d.dbClient.ShareUnlockAttempt.Create().SetAddressKey(addressKey).SetFailed(failed).SetAt(at).Exec(ctx); err != nil {
-		return err
+// RecordShareUnlockAttempt records a try at a passcode by an address (a keyed hash), as a failure
+// until ClearShareUnlockFailure says otherwise, and deletes attempts, and bans that ended, older
+// than keep: the tables hold at most a day of tries and bans.
+func (d *Datastore) RecordShareUnlockAttempt(ctx context.Context, addressKey string, at time.Time, keep time.Duration) (uuid.UUID, error) {
+	row, err := d.dbClient.ShareUnlockAttempt.Create().SetAddressKey(addressKey).SetFailed(true).SetAt(at).Save(ctx)
+	if err != nil {
+		return uuid.Nil, err
 	}
-	_, err := d.dbClient.ShareUnlockAttempt.Delete().Where(shareunlockattempt.AtLT(at.Add(-keep))).Exec(ctx)
-	return err
+	if _, err := d.dbClient.ShareUnlockAttempt.Delete().Where(shareunlockattempt.AtLT(at.Add(-keep))).Exec(ctx); err != nil {
+		return row.ID, err
+	}
+	_, err = d.dbClient.ShareBan.Delete().Where(shareban.UntilLT(at.Add(-keep))).Exec(ctx)
+	return row.ID, err
 }
 
-// CountShareUnlockAttempts counts an address's tries since a time: every try, or only the failed ones.
-func (d *Datastore) CountShareUnlockAttempts(ctx context.Context, addressKey string, since time.Time, failedOnly bool) (int, error) {
+// ClearShareUnlockFailure records that a try was no wrong guess (the passcode was right, or it
+// was refused unchecked).
+func (d *Datastore) ClearShareUnlockFailure(ctx context.Context, id uuid.UUID) error {
+	return d.dbClient.ShareUnlockAttempt.UpdateOneID(id).SetFailed(false).Exec(ctx)
+}
+
+// DiscardShareUnlockAttempt deletes a try that was refused unchecked (over the rate limit).
+func (d *Datastore) DiscardShareUnlockAttempt(ctx context.Context, id uuid.UUID) error {
+	return d.dbClient.ShareUnlockAttempt.DeleteOneID(id).Exec(ctx)
+}
+
+// ShareUnlockAttempts counts an address's tries since a time (every try, or only the failed ones)
+// and says when the oldest of them was.
+func (d *Datastore) ShareUnlockAttempts(ctx context.Context, addressKey string, since time.Time, failedOnly bool) (int, time.Time, error) {
 	q := d.dbClient.ShareUnlockAttempt.Query().
 		Where(shareunlockattempt.AddressKey(addressKey), shareunlockattempt.AtGTE(since))
 	if failedOnly {
 		q = q.Where(shareunlockattempt.Failed(true))
 	}
-	return q.Count(ctx)
+	n, err := q.Clone().Count(ctx)
+	if err != nil || n == 0 {
+		return n, time.Time{}, err
+	}
+	oldest, err := q.Order(ent.Asc(shareunlockattempt.FieldAt)).First(ctx)
+	if err != nil {
+		return n, time.Time{}, err
+	}
+	return n, oldest.At, nil
 }
 
 // ShareBan is an address's ban: until when, and how many bans in a row it has had; zero values

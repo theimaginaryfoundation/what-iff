@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
@@ -56,6 +57,9 @@ func (f *fakeStore) SharedProjectFile(_ context.Context, owner uuid.UUID, root, 
 		}
 	}
 	return nil, datastore.ErrFileAttachmentNotFound
+}
+func (f *fakeStore) ShareScope(context.Context, uuid.UUID, uuid.UUID) (models.ShareScope, error) {
+	return models.ShareScope{FileName: "index.html", WebApp: true, Folder: "site"}, nil
 }
 func (f *fakeStore) ShareLinkForFile(context.Context, uuid.UUID, uuid.UUID) (*models.ShareLink, error) {
 	return nil, models.ErrShareLinkNotFound
@@ -111,6 +115,9 @@ func setup(t *testing.T) (*fakeStore, http.Handler) {
 func call(h http.Handler, method, path, body string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	req.RemoteAddr = "203.0.113.7:1234"
+	if method == http.MethodPost {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	for _, c := range cookies {
 		req.AddCookie(c)
 	}
@@ -160,6 +167,11 @@ func TestSharedWebApp_LockedUntilUnlocked_AndConfinedToItsFolder(t *testing.T) {
 	require.Equal(t, "private, no-store", rec.Header().Get("Cache-Control"))
 	require.Equal(t, "same-origin", rec.Header().Get("Cross-Origin-Resource-Policy"), "no other origin may load it")
 
+	// The router cleans `..` away before the handler; these reach the handler and are refused there.
+	for _, p := range []string{"css/%5C..%5C..%5Cother%5Csecret.txt", "css/%00/secret.txt"} {
+		rec = call(h, "GET", base+"/files/"+p, "", cookie)
+		require.Equal(t, http.StatusBadRequest, rec.Code, p)
+	}
 	for _, p := range []string{"../other/secret.txt", "css/../../other/secret.txt", "%2e%2e/other/secret.txt", "..%2fother%2fsecret.txt"} {
 		rec = call(h, "GET", base+"/files/"+p, "", cookie)
 		require.NotEqual(t, http.StatusOK, rec.Code, p)
@@ -195,11 +207,47 @@ func TestUnlock_BansAnAddressAfterFiveWrongPasscodes(t *testing.T) {
 	require.Empty(t, rec.Result().Cookies())
 
 	// A new passcode signs out whoever unlocked before.
-	s.bans = nil
-	s.attempts = nil
+	s.memGate = memGate{}
 	rec = call(h, "POST", base+"/unlock", `{"passcode":"Abc123Def456"}`)
 	cookie := rec.Result().Cookies()[0]
 	require.Equal(t, http.StatusOK, call(h, "GET", base, "", cookie).Code)
 	s.gen++
 	require.Equal(t, http.StatusUnauthorized, call(h, "GET", base, "", cookie).Code)
+}
+
+func TestUnlock_TakesOnlyTheShareSitesOwnRequests(t *testing.T) {
+	s, h := setup(t)
+	unlock := func(contentType, site string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/shared/"+testKey+"/unlock", bytes.NewBufferString(`{"passcode":"nope"}`))
+		req.RemoteAddr = "203.0.113.7:1234"
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		if site != "" {
+			req.Header.Set("Sec-Fetch-Site", site)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	// What a page of another site can send without a preflight is refused before it counts.
+	require.Equal(t, http.StatusForbidden, unlock("text/plain", ""))
+	require.Equal(t, http.StatusForbidden, unlock("", ""))
+	require.Equal(t, http.StatusForbidden, unlock("application/json", "cross-site"))
+	require.Equal(t, http.StatusForbidden, unlock("application/json", "same-site"))
+	require.Empty(t, s.attempts, "none of them was a try")
+	require.Equal(t, http.StatusUnauthorized, unlock("application/json; charset=utf-8", "same-origin"))
+}
+
+func TestGetShareLink_SaysWhatSharingShares_BeforeTheFileIsShared(t *testing.T) {
+	s, _ := setup(t)
+	h := NewHandler(s, func() storage.FileStore { return memFiles{} }, zap.NewNop(), Config{Secret: "x"})
+	r := mux.NewRouter()
+	h.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/share-links/files/"+uuid.NewString(), nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, s.owner))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"scope":{"file_name":"index.html","web_app":true,"folder":"site"},"link":null}`, rec.Body.String())
 }

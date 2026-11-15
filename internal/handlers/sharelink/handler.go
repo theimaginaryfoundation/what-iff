@@ -19,6 +19,7 @@ import (
 type Store interface {
 	gateStore
 	ShareLinkForFile(ctx context.Context, userID, fileID uuid.UUID) (*models.ShareLink, error)
+	ShareScope(ctx context.Context, userID, fileID uuid.UUID) (models.ShareScope, error)
 	CreateShareLink(ctx context.Context, userID, fileID uuid.UUID, withPasscode bool) (*models.ShareLink, bool, error)
 	UpdateShareLink(ctx context.Context, userID, fileID uuid.UUID, requirePasscode *bool, regenerate bool) (*models.ShareLink, error)
 	DeleteShareLink(ctx context.Context, userID, fileID uuid.UUID) error

@@ -51,7 +51,8 @@ func parseAddress(raw string) (netip.Addr, bool) {
 	// as an address that ends in a port-sized group parses as an address too.
 	if i := strings.LastIndexByte(raw, ':'); i > 0 && strings.Count(raw, ":") > 1 {
 		if a, err := netip.ParseAddr(raw[:i]); err == nil && a.Is6() {
-			return a, true
+			// An IPv4 address in IPv6 form (::ffff:a.b.c.d) is that IPv4 address, not one /64 of all of them.
+			return a.Unmap(), true
 		}
 	}
 	if a, err := netip.ParseAddr(raw); err == nil {

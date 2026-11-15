@@ -14328,7 +14328,10 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** A file's share link */
+        /**
+         * A file's share link, and what sharing it shares
+         * @description The scope is worked out from the file's original, so a chat's copy of a page in a folder says it shares the folder (ADR 0x051 §1); link is null when the file is not shared.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -14341,16 +14344,26 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description The link */
+                /** @description The scope and the link */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ShareLink"];
+                        "application/json": {
+                            scope: components["schemas"]["ShareScope"];
+                            link: components["schemas"]["ShareLink"] | null;
+                        };
                     };
                 };
-                /** @description Not the user's file, or not shared */
+                /** @description A skill's file, which cannot be shared */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not the user's file */
                 404: {
                     headers: {
                         [name: string]: unknown;
@@ -14414,7 +14427,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description The server cannot keep passcodes */
+                /** @description The server has no token key to keep passcodes with (it does not start without one) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -14440,8 +14453,15 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Not shared */
+                /** @description The file is not shared (now, or already) */
                 204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A skill's file */
+                400: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -14490,6 +14510,13 @@ export interface paths {
                         "application/json": components["schemas"]["ShareLink"];
                     };
                 };
+                /** @description An invalid body, or a skill's file */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
                 /** @description Not the user's file, or not shared */
                 404: {
                     headers: {
@@ -14497,7 +14524,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description The server cannot keep passcodes */
+                /** @description The server has no token key to keep passcodes with (it does not start without one) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -14585,7 +14612,7 @@ export interface paths {
         put?: never;
         /**
          * Unlock a shared item with its passcode (public)
-         * @description The right passcode is answered with the share's cookie (HttpOnly, Secure, SameSite=Strict, scoped to /api/shared/{key}, 12 hours). Tries are limited per address (an IPv4 address or an IPv6 /64) across all links: 10 a minute, and 5 wrong within 15 minutes ban the address for an hour (a day for the next ban within a day), right passcode or not (ADR 0x051 §4).
+         * @description The right passcode is answered with the share's cookie (HttpOnly, Secure, SameSite=Strict, scoped to /api/shared/{key}, 12 hours). Tries are limited per address (an IPv4 address or an IPv6 /64) across all links: 10 a minute, and 5 wrong within 15 minutes ban the address for an hour (a day for the next ban within a day), right passcode or not (ADR 0x051 §4). Only the share site's own requests count: the body must be JSON, and a Sec-Fetch-Site other than same-origin is refused (403) before the try is counted.
          */
         post: {
             parameters: {
@@ -14612,6 +14639,13 @@ export interface paths {
                     };
                     content?: never;
                 };
+                /** @description An invalid body, or the visitor's address could not be read */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
                 /** @description A wrong passcode */
                 401: {
                     headers: {
@@ -14623,6 +14657,13 @@ export interface paths {
                             attempts_left?: number;
                         };
                     };
+                };
+                /** @description Not the share site's own request (not JSON, or from another origin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
                 /** @description No such link */
                 404: {
@@ -17320,10 +17361,20 @@ export interface components {
             passcode_required: boolean;
             /** @description The 12-character passcode, when the link needs one */
             passcode?: string;
+            /** @description The stored passcode could not be decrypted (the token key changed); make a new one */
+            passcode_unreadable?: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description What sharing a file shares, from its original (ADR 0x051 §1). */
+        ShareScope: {
+            file_name: string;
+            /** @description The file is shared with its folder */
+            web_app: boolean;
+            /** @description That folder, for a web app */
+            folder?: string;
         };
         /** @description What a share link opens, as a visitor sees it. */
         SharedView: {

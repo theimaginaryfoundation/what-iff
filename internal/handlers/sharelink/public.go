@@ -76,24 +76,20 @@ func (h *Handler) GetShared(w http.ResponseWriter, r *http.Request) {
 }
 
 // Unlock handles POST /shared/{key}/unlock: a passcode, limited and banned by address (ADR 0x051
-// §4). The right one is answered with the share's cookie.
+// §4). The right one is answered with the share's cookie. Only the share site's own requests are
+// taken (a JSON body, and same-origin where the browser says), so another site cannot spend a
+// visitor's tries and get their address banned.
 func (h *Handler) Unlock(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
+	if !sameOriginJSON(r) {
+		handlerutils.RespondWithError(w, h.logger, http.StatusForbidden, handlerutils.CodeNotSet, "Unlock from the share site", nil)
+		return
+	}
 	ctx := r.Context()
 	now := h.now()
 	prefix, ok := visitorAddress(r, h.clientIPHeader, h.proxySecret)
 	if !ok {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Could not tell where the request came from", nil)
-		return
-	}
-	addr := addressKey(h.addressSecret, prefix)
-	wait, err := waitBeforeUnlock(ctx, h.ds, addr, now)
-	if err != nil {
-		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to check the passcode", err)
-		return
-	}
-	if wait > 0 {
-		h.tooMany(w, wait)
 		return
 	}
 	var body struct {
@@ -103,17 +99,27 @@ func (h *Handler) Unlock(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid request body", nil)
 		return
 	}
+	addr := addressKey(h.addressSecret, prefix)
+	id, wait, err := admit(ctx, h.ds, addr, now)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to check the passcode", err)
+		return
+	}
+	if wait > 0 {
+		h.tooMany(w, wait)
+		return
+	}
 	item, err := h.ds.SharedItemByKey(ctx, mux.Vars(r)["key"])
 	if err != nil && !errors.Is(err, models.ErrShareLinkNotFound) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to check the passcode", err)
 		return
 	}
-	if item != nil && item.PasscodeCiphertext == "" {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
 	right := false
-	if item != nil {
+	switch {
+	case item != nil && item.PasscodeCiphertext == "":
+		// Nothing to unlock: no guess was made.
+		right = true
+	case item != nil:
 		passcode, err := h.ds.SharePasscode(item)
 		if err != nil {
 			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to check the passcode", err)
@@ -122,12 +128,14 @@ func (h *Handler) Unlock(w http.ResponseWriter, r *http.Request) {
 		right = passcode != "" && subtle.ConstantTimeCompare([]byte(body.Passcode), []byte(passcode)) == 1
 	}
 	// A key that names no share is a wrong guess too, so keys cannot be probed for free.
-	ban, left, err := recordUnlock(ctx, h.ds, addr, !right, now)
+	ban, left, err := conclude(ctx, h.ds, addr, id, right, now)
 	if err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to check the passcode", err)
 		return
 	}
 	switch {
+	case right && item.PasscodeCiphertext == "":
+		w.WriteHeader(http.StatusNoContent)
 	case right:
 		setSession(w, h.sessionKey, item.Key, item.PasscodeGeneration, now)
 		w.WriteHeader(http.StatusNoContent)
@@ -138,6 +146,19 @@ func (h *Handler) Unlock(w http.ResponseWriter, r *http.Request) {
 	default:
 		handlerutils.RespondWithJSON(w, h.logger, http.StatusUnauthorized, map[string]any{"error": "That passcode is not right.", "attempts_left": left})
 	}
+}
+
+// sameOriginJSON reports whether a request can be the share site's own: a JSON body (which a page
+// of another origin cannot send without a preflight the API refuses) and, where the browser says
+// where it came from, the same origin. A request without Sec-Fetch-Site (an older browser, a
+// script) is judged by its body alone.
+func sameOriginJSON(r *http.Request) bool {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
+	if mediaType != "application/json" {
+		return false
+	}
+	site := r.Header.Get("Sec-Fetch-Site")
+	return site == "" || site == "same-origin"
 }
 
 func (h *Handler) tooMany(w http.ResponseWriter, wait time.Duration) {
