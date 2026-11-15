@@ -32,6 +32,8 @@ const HTML_EXTENSIONS = ['.html', '.htm'];
  * at once.
  */
 export const MAX_SERVED_BYTES = 50 * 1024 * 1024;
+/** The largest package.json read for versions (ADR 0x050 §4). */
+const MAX_PACKAGE_JSON_BYTES = 1024 * 1024;
 const MAX_COMPILED = 300;
 const MAX_MISSING = 500;
 const MAX_FOLDERS = 200;
@@ -127,6 +129,8 @@ export class SiteProject {
       this.served.delete(path);
       return { status: 404, message: this.notHere(path, place) };
     }
+    // Refused before it is downloaded, by the size the gallery records; the check after the download
+    // covers a file stored without one.
     if ((file.size_bytes ?? 0) > MAX_SERVED_BYTES) {
       return { status: 413, message: `${path} is larger than ${MAX_SERVED_BYTES >> 20} MB, more than the preview serves.` };
     }
@@ -174,10 +178,11 @@ export class SiteProject {
     return { folder, name };
   }
 
-  /** A page was loaded: what it loads, and its import map, are its own. */
+  /** A page was loaded: what it loads, its import map and its budget of folders are its own. */
   private startPage(): void {
     this.served.clear();
     this.missing.clear();
+    this.folderNames.clear();
     this.versions = null;
     this.ownImportMap = false;
   }
@@ -432,6 +437,8 @@ export class SiteProject {
         return packageVersions(null);
       }
       this.served.set('package.json', { ...place, version: versionOf(file), file });
+      // A package.json is a few KB; one the size of a project's limit is not one to read.
+      if ((file.size_bytes ?? 0) > MAX_PACKAGE_JSON_BYTES) return packageVersions(null);
       return packageVersions(await (await this.folders.download(file)).text());
     })().catch(() => new Map<string, string>());
     return this.versions;
