@@ -92,7 +92,7 @@ func (d *Datastore) ShareLinkForFile(ctx context.Context, userID, fileID uuid.UU
 	if err != nil {
 		return nil, err
 	}
-	return d.shareLinkModel(link, file)
+	return d.shareLinkModel(link, file), nil
 }
 
 // CreateShareLink shares the user's file (any row of it), with a new passcode when withPasscode;
@@ -103,8 +103,7 @@ func (d *Datastore) CreateShareLink(ctx context.Context, userID, fileID uuid.UUI
 		return nil, false, err
 	}
 	if existing, err := d.dbClient.ShareLink.Query().Where(sharelink.FileAttachmentID(file.ID)).Only(ctx); err == nil {
-		link, err := d.shareLinkModel(existing, file)
-		return link, false, err
+		return d.shareLinkModel(existing, file), false, nil
 	} else if !ent.IsNotFound(err) {
 		return nil, false, err
 	}
@@ -131,8 +130,7 @@ func (d *Datastore) CreateShareLink(ctx context.Context, userID, fileID uuid.UUI
 	if err != nil {
 		return nil, false, err
 	}
-	link, err = d.shareLinkModel(row, file)
-	return link, true, err
+	return d.shareLinkModel(row, file), true, nil
 }
 
 // UpdateShareLink changes the share link of the user's file: requirePasscode (when not nil) turns
@@ -166,13 +164,13 @@ func (d *Datastore) UpdateShareLink(ctx context.Context, userID, fileID uuid.UUI
 	case !want && has:
 		update.SetPasscodeCiphertext("")
 	default:
-		return d.shareLinkModel(row, file)
+		return d.shareLinkModel(row, file), nil
 	}
 	row, err = update.Save(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return d.shareLinkModel(row, file)
+	return d.shareLinkModel(row, file), nil
 }
 
 // DeleteShareLink stops sharing the user's file (any row of it). Deleting one that is not there
@@ -198,16 +196,14 @@ func (d *Datastore) ListShareLinks(ctx context.Context, userID uuid.UUID) ([]mod
 	}
 	out := make([]models.ShareLink, 0, len(rows))
 	for _, r := range rows {
-		link, err := d.shareLinkModel(r, r.Edges.FileAttachment)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *link)
+		out = append(out, *d.shareLinkModel(r, r.Edges.FileAttachment))
 	}
 	return out, nil
 }
 
-func (d *Datastore) shareLinkModel(row *ent.ShareLink, file *ent.FileAttachment) (*models.ShareLink, error) {
+// shareLinkModel is a link as its owner sees it. It cannot fail: a passcode that cannot be
+// decrypted is flagged on the link (PasscodeUnreadable), so one bad row never hides the others.
+func (d *Datastore) shareLinkModel(row *ent.ShareLink, file *ent.FileAttachment) *models.ShareLink {
 	link := &models.ShareLink{Key: row.Key, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, PasscodeRequired: row.PasscodeCiphertext != ""}
 	if file != nil {
 		link.FileID, link.FileName, link.Folder, link.FileType = file.ID, file.Name, file.Folder, file.FileType
@@ -220,11 +216,11 @@ func (d *Datastore) shareLinkModel(row *ent.ShareLink, file *ent.FileAttachment)
 			// making a new passcode for this one.
 			d.logger.Warn("share link passcode could not be decrypted", zap.Error(err))
 			link.PasscodeUnreadable = true
-			return link, nil
+			return link
 		}
 		link.Passcode = passcode
 	}
-	return link, nil
+	return link
 }
 
 // ShareScope is what sharing the user's file (any row of it) shares: the file, or its folder as a

@@ -9863,7 +9863,7 @@ paths:
         '401':
           description: Locked
         '404':
-          description: No such link
+          description: No such link, or the file's stored bytes are gone
   /shared/{key}/files:
     parameters:
       - $ref: '#/components/parameters/ShareKey'
@@ -9919,7 +9919,7 @@ paths:
         '401':
           description: Locked
         '404':
-          description: Not in the project
+          description: Not in the project, or the file's stored bytes are gone
   /image-gallery:
     get:
       summary: List gallery files

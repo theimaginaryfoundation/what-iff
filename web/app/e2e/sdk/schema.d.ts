@@ -14734,7 +14734,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description No such link */
+                /** @description No such link, or the file's stored bytes are gone */
                 404: {
                     headers: {
                         [name: string]: unknown;
@@ -14865,7 +14865,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Not in the project */
+                /** @description Not in the project, or the file's stored bytes are gone */
                 404: {
                     headers: {
                         [name: string]: unknown;

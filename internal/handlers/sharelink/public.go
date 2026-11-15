@@ -261,6 +261,11 @@ func (h *Handler) writeFile(w http.ResponseWriter, r *http.Request, item *models
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the file", err)
 		return
 	}
+	// A file whose stored bytes are gone (ReadAttachment finds no object) is no longer there to see.
+	if len(data) == 0 && f.SizeBytes != nil && *f.SizeBytes > 0 {
+		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "This file is no longer available", nil)
+		return
+	}
 	contentType := strings.TrimSpace(f.FileType)
 	if contentType == "" {
 		contentType = "application/octet-stream"

@@ -127,7 +127,7 @@ func call(h http.Handler, method, path, body string, cookies ...*http.Cookie) *h
 }
 
 func TestSharedWebApp_LockedUntilUnlocked_AndConfinedToItsFolder(t *testing.T) {
-	_, h := setup(t)
+	s, h := setup(t)
 	base := "/api/shared/" + testKey
 
 	// Locked: nothing about the share.
@@ -178,6 +178,13 @@ func TestSharedWebApp_LockedUntilUnlocked_AndConfinedToItsFolder(t *testing.T) {
 		require.NotContains(t, rec.Body.String(), "secret", p)
 	}
 	require.Equal(t, http.StatusNotFound, call(h, "GET", base+"/files/secret.txt", "", cookie).Code)
+
+	// A file whose stored bytes are gone is no longer available, not an empty file.
+	size := int64(10)
+	s.files[1].SizeBytes = &size
+	s.files[1].S3Key = "gone"
+	rec = call(h, "GET", base+"/files/css/app.css", "", cookie)
+	require.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestSharedFile_SingleFileShareHasNoProject(t *testing.T) {

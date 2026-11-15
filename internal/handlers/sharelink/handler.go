@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -57,8 +58,16 @@ type Handler struct {
 	now            func() time.Time
 }
 
+// forgeableHeaders are address headers a visitor can set themselves: trusted without a proxy secret,
+// they let a visitor choose their address on every unlock.
+var forgeableHeaders = map[string]bool{"x-forwarded-for": true, "x-real-ip": true, "forwarded": true, "true-client-ip": true, "x-client-ip": true}
+
 // NewHandler makes the share link handler; files gives the store a file's bytes are read from.
 func NewHandler(ds Store, files func() storage.FileStore, logger *zap.Logger, cfg Config) *Handler {
+	if cfg.ClientIPHeader != "" && cfg.ProxySecret == "" && forgeableHeaders[strings.ToLower(cfg.ClientIPHeader)] {
+		logger.Warn("CLIENT_IP_HEADER names a header visitors can set themselves, and CLIENT_IP_PROXY_SECRET is not set: share-link unlock limits can be dodged by setting it",
+			zap.String("client_ip_header", cfg.ClientIPHeader))
+	}
 	return &Handler{
 		ds:             ds,
 		files:          files,

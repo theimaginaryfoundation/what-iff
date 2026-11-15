@@ -15,7 +15,7 @@ export class ShareLinkService {
   private readonly apiUrl = environment.apiUrl;
 
   /** The share site, without a trailing slash; empty when the build has none. */
-  readonly siteUrl = shareSiteUrl((environment as { shareUrl?: string }).shareUrl);
+  readonly siteUrl = shareSiteUrl(environment.shareUrl);
 
   /** Whether sharing is offered in this build. */
   get enabled(): boolean {
