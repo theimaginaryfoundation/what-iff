@@ -95,6 +95,24 @@ describe('SiteProject', () => {
     expect(text((await project.get(wrapper, 'script')).body)).toContain(`export * from "preact";`);
   });
 
+  it('gives each page its own budget of folders, and does not read an oversized package.json', async () => {
+    const tree: Tree = { site: { 'index.html': { text: '<p>x</p>' }, 'package.json': { text: '{}', size: 5 * 1024 * 1024 } } };
+    for (let i = 0; i < 205; i++) tree[`site/f${i}`] = { 'a.txt': { text: 'a' } };
+    const files = folders(tree);
+    const project = new SiteProject(files, 'site', new Map(), parse);
+    await project.get('index.html', 'document');
+    let found = 0;
+    for (let i = 0; i < 205; i++) if ((await project.get(`f${i}/a.txt`)).status === 200) found++;
+    expect(found).toBeLessThan(205); // the budget holds within a page
+    await project.get('index.html', 'document');
+    expect((await project.get('f204/a.txt')).status).toBe(200); // a new page starts a new one
+    // Bare imports still resolve (to the latest), without downloading a 5 MB package.json.
+    tree['site']['main.js'] = { text: `import { h } from 'preact/hooks';` };
+    const main = new TextDecoder().decode((await project.get('main.js')).body as ArrayBuffer);
+    expect(main).toContain('https://esm.sh/preact/hooks');
+    expect(files.download).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'package.json' }));
+  });
+
   it('says it changed when a served file has a new version, or a missing one appears', async () => {
     const tree: Tree = { site: { 'index.html': { text: 'a' } } };
     const files = folders(tree);

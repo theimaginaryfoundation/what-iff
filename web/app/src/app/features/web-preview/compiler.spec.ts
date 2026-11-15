@@ -79,7 +79,8 @@ describe('WorkerCompiler', () => {
 
 describe('the esbuild WebAssembly asset', () => {
   it('is served from the folder of the installed version, which esbuild asks for', () => {
-    const app = resolve(__dirname, '../../../..');
+    // The test runner runs in web/app; __dirname is wherever it bundled the spec.
+    const app = process.cwd();
     const version = JSON.parse(readFileSync(resolve(app, 'node_modules/esbuild-wasm/package.json'), 'utf8')).version as string;
     const outputs = [...readFileSync(resolve(app, 'angular.json'), 'utf8').matchAll(/"output": "assets\/esbuild\/([^"]*)"/g)].map(
       m => m[1],
