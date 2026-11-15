@@ -7,6 +7,8 @@ import { provideMarkdown } from 'ngx-markdown';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TextViewerComponent } from '../app/features/file-workspace/viewers/text-viewer.component';
+import { FileAttachmentService } from '../app/core/services/file-attachment.service';
+import { CommentAgentService } from '../app/features/office/comments/comment-agent.service';
 
 import { buildTree, foldersOf, treeRows } from './file-tree';
 import { ShareApiService, SharedFile, sharedFileUrl } from './share-api.service';
@@ -130,6 +132,32 @@ describe('ShareApiService', () => {
     expect(await banned).toEqual({ state: 'banned', retryAfterSeconds: 3600 });
   });
 
+  it('reads a share’s files, and says when an unlock finds no share or fails', async () => {
+    const content = api.content(key);
+    http.expectOne(`/api/shared/${key}/content`).flush(new Blob(['a']));
+    expect(await content).toBeInstanceOf(Blob);
+
+    const files = api.files(key);
+    http.expectOne(`/api/shared/${key}/files`).flush({ files: [{ path: 'a.txt', file_type: 'text/plain', content_version: 1 }] });
+    expect((await files).map(f => f.path)).toEqual(['a.txt']);
+
+    const file = api.file(key, 'css/a.css');
+    http.expectOne(`/api/shared/${key}/files/css/a.css`).flush(new Blob(['b']));
+    expect(await file).toBeInstanceOf(Blob);
+
+    const missing = api.unlock(key, 'x');
+    http.expectOne(`/api/shared/${key}/unlock`).flush({}, { status: 404, statusText: 'Not Found' });
+    expect(await missing).toEqual({ state: 'missing' });
+
+    const failed = api.unlock(key, 'x');
+    http.expectOne(`/api/shared/${key}/unlock`).flush({}, { status: 500, statusText: 'Server Error' });
+    expect(await failed).toEqual({ state: 'error' });
+
+    const unlocked = api.unlock(key, 'x');
+    http.expectOne(`/api/shared/${key}/unlock`).flush(null, { status: 204, statusText: 'No Content' });
+    expect(await unlocked).toEqual({ state: 'unlocked' });
+  });
+
   it('encodes each segment of a file’s path', () => {
     expect(sharedFileUrl(key, 'css/a b#c.css')).toBe(`/api/shared/${key}/files/css/a%20b%23c.css`);
   });
@@ -160,5 +188,25 @@ describe('the share site’s stand-ins', () => {
     fixture.detectChanges();
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('Hello');
     http.verify();
+  });
+
+  it('stand in for the agent: no agent to mention, and nothing posted reaches anyone', async () => {
+    TestBed.configureTestingModule({
+      providers: [provideZonelessChangeDetection(), provideHttpClient(), provideRouter([]), ...readOnlyViewerProviders()],
+    });
+    const agent = TestBed.inject(CommentAgentService);
+    expect(agent.agent()).toBeNull();
+    const people = [{ id: 'user:a', name: 'A' }];
+    expect(agent.withAgent(people)).toBe(people);
+    const hooks = agent.hooks(() => ({ id: 'f', name: 'f' }));
+    expect(hooks.people(people)).toBe(people);
+    expect(hooks.mark()).toBe(0);
+    expect(() => {
+      hooks.posted({ id: 't', anchor: null, comments: [] }, 'c', '');
+      hooks.saved(0);
+      hooks.discard();
+    }).not.toThrow();
+    expect(await agent.posted({ id: 'f', name: 'f' }, { id: 't', anchor: null, comments: [] }, 'c', '')).toBe(false);
+    expect(TestBed.inject(FileAttachmentService).hasPreview('f', false)).toBeTruthy();
   });
 });

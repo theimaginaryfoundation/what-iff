@@ -87,4 +87,21 @@ describe('SharedPageComponent', () => {
     const missing = await setup({ open: vi.fn().mockResolvedValue({ state: 'missing' }) });
     expect(missing.el.textContent).toContain('This link does not work');
   });
+
+  it('offers to try again when the share cannot be opened, and says when the browser kept the share closed', async () => {
+    const open = vi.fn().mockResolvedValueOnce({ state: 'error' }).mockResolvedValue({ state: 'locked' });
+    const { el, settle } = await setup({ open, unlock: vi.fn().mockResolvedValue({ state: 'unlocked' }) });
+    expect(el.textContent).toContain('Something went wrong');
+    ([...el.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Try again') as HTMLButtonElement).click();
+    await settle();
+    const input = el.querySelector('#share-passcode') as HTMLInputElement;
+    input.value = 'Abc123Def456';
+    input.dispatchEvent(new Event('input'));
+    await settle();
+    el.querySelector('form')!.dispatchEvent(new Event('submit'));
+    await settle();
+    // Unlocked, yet still locked: the cookie did not stick.
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('Allow cookies for this site');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+  });
 });
