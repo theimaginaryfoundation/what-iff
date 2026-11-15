@@ -12,6 +12,9 @@ export const SHARE_ROOT = 'shared';
 /** How long a web app's listing is reused: a preview checks for changes every few seconds. */
 const LISTING_TTL_MS = 30_000;
 
+/** How many downloaded files are kept, by path and version (the server sends them no-store). */
+const MAX_CACHED_FILES = 200;
+
 /** A shared file as the app's viewers take it, with an id that is its path, never the owner's. */
 export function sharedAttachment(file: SharedFile): FileAttachment {
   const slash = file.path.lastIndexOf('/');
@@ -42,6 +45,8 @@ export class ShareFolderFiles {
   private key = '';
   private single: FileAttachment | null = null;
   private listing: { at: number; files: Promise<SharedFile[]> } | null = null;
+  /** Downloaded files by path and version, least recently used first. */
+  private readonly downloads = new Map<string, Promise<Blob>>();
   /** The clock, replaced in tests. */
   now = () => Date.now();
 
@@ -50,6 +55,7 @@ export class ShareFolderFiles {
     this.key = key;
     this.single = single ? sharedAttachment(single) : null;
     this.listing = null;
+    this.downloads.clear();
   }
 
   /** The share's files, by path in its project. */
@@ -82,8 +88,29 @@ export class ShareFolderFiles {
     return new Map();
   }
 
-  /** A file's bytes. */
+  /**
+   * A file's bytes, once per version: a preview reloads its page whenever a file changes, and the
+   * page and the Code view ask for the same files.
+   */
   download(file: FileAttachment): Promise<Blob> {
+    const key = `${file.id}@${file.content_version ?? '?'}`;
+    let blob = this.downloads.get(key);
+    if (blob) {
+      this.downloads.delete(key);
+    } else {
+      blob = this.fetch(file);
+      // A failed download is not kept, so the next request tries again.
+      blob.catch(() => this.downloads.get(key) === blob && this.downloads.delete(key));
+    }
+    this.downloads.set(key, blob);
+    for (const oldest of this.downloads.keys()) {
+      if (this.downloads.size <= MAX_CACHED_FILES) break;
+      this.downloads.delete(oldest);
+    }
+    return blob;
+  }
+
+  private fetch(file: FileAttachment): Promise<Blob> {
     if (this.single && file.id === this.single.id) return this.api.content(this.key);
     const path = sharedPath(file);
     if (!path) return Promise.reject(new Error('Not a file of this share'));

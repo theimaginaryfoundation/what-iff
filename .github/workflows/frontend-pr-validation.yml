@@ -151,3 +151,9 @@ jobs:
           echo "Verifying production build..."
           npm run build:prod
           echo "✅ Production build successful"
+
+      # The share site (ADR 0x051 §5) is a second application of this workspace: only its own build
+      # catches a break in its angular.json project, tsconfig or the viewers it loads.
+      - name: Verify share site build
+        working-directory: web/app
+        run: npm run build:share:docker

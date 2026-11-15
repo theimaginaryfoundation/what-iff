@@ -400,6 +400,8 @@ export class CodeEditorComponent implements FileEditor {
     this.previewText.set(text);
     this.state.set('ready');
     this.attachComments(monaco);
+    // Code only (a share) has no comments to show.
+    if (this.codeOnly()) return;
     try {
       await this.comments.load(file.id);
       this.hadComments = this.comments.threads().length > 0;

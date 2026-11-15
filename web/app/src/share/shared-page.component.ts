@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, signal, untracked } from '@angular/core';
 
 import { ButtonComponent } from '../app/shared/ui';
 import { ShareApiService, SharedView } from './share-api.service';
@@ -62,11 +62,13 @@ type PageState =
               spellcheck="false"
               maxlength="64"
               [value]="passcode()"
+              [attr.aria-invalid]="wrong() ? 'true' : null"
+              [attr.aria-describedby]="wrong() ? 'share-passcode-error' : null"
               (input)="passcode.set($any($event.target).value)"
               autofocus
             />
             @if (wrong()) {
-              <p class="share-message__error" role="alert">{{ wrong() }}</p>
+              <p id="share-passcode-error" class="share-message__error" role="alert">{{ wrong() }}</p>
             }
             <ui-button variant="primary" type="submit" [disabled]="!passcode().trim() || busy()" [loading]="busy()">Open</ui-button>
           </form>
@@ -108,7 +110,11 @@ export class SharedPageComponent {
 
   constructor() {
     inject(DestroyRef).onDestroy(() => (this.alive = false));
-    queueMicrotask(() => this.load());
+    // Another key (the router can reuse this page for another share) is another share.
+    effect(() => {
+      this.key();
+      untracked(() => void this.load());
+    });
   }
 
   async load(): Promise<void> {
@@ -131,6 +137,10 @@ export class SharedPageComponent {
       case 'unlocked':
         this.passcode.set('');
         await this.load();
+        // Unlocked, yet still locked: the browser kept the share's cookie out.
+        if (this.alive && this.page().state === 'locked') {
+          this.wrong.set('The passcode is right, but this browser did not keep the share open. Allow cookies for this site and try again.');
+        }
         return;
       case 'wrong':
         this.wrong.set(

@@ -34,17 +34,18 @@ And a passcode can be guessed, so guessing has to be slow and costly.
 
 ### 2. The owner's side
 
-- **Share**, in the file workspace's header, opens a dialog: share the file (with a passcode, the default), then copy the link and the passcode, require a passcode or not, make a new passcode, or stop sharing.
+- **Share**, in the file workspace's header, opens a dialog that says first what sharing shares, as the server works it out from the file's original (a chat's copy of a page in a folder shares the folder too): share the file (with a passcode, the default), then copy the link and the passcode, require a passcode or not, make a new passcode, or stop sharing.
   A web app's dialog names the folder it shares and says that files added to it later are shared too.
 - **Shared links**, in Config, lists every share of the user's, with the item, its folder, whether it needs a passcode and when it was made, to copy a link or stop sharing.
-- The API (signed in): `GET`/`PUT`/`PATCH`/`DELETE /share-links/files/{fileId}` reads, makes (idempotently), changes and deletes a file's share; `GET /share-links` lists them.
+- The API (signed in): `GET /share-links/files/{fileId}` is what sharing the file shares (its scope) and its link (null when it has none); `PUT`/`PATCH`/`DELETE` make it (idempotently), change it and delete it; `GET /share-links` lists them.
   The app's `shareUrl` (a build setting, as `previewUrl` is) is the share site's address; without it, Share is not offered.
 
 ### 3. Passcodes, and what a visitor holds
 
 - **A passcode is 12 characters of `A-Z`, `a-z` and `0-9`, case-sensitive, made by the server** from a cryptographic source without bias (71 bits).
   Users choose whether a share needs one and can have a new one made; they cannot set one themselves, so every passcode is as strong as the next.
-- It is stored encrypted, with the key the server keeps tokens with (`TOKEN_ENCRYPTION_SECRET`), so the owner can see and copy it at any time; a server without that key makes only shares without passcodes, and says so.
+- It is stored encrypted, with the key the server keeps tokens with (`TOKEN_ENCRYPTION_SECRET`), so the owner can see and copy it at any time (the server does not start without that key).
+  A passcode that cannot be decrypted (the key was replaced) does not keep the owner from their links: the link says so, and the owner makes a new passcode or stops sharing.
 - **Unlocking** (`POST /shared/{key}/unlock`) compares in constant time and answers with a cookie: HttpOnly, `Secure`, `SameSite=Strict`, scoped to that share's API path, and good for 12 hours.
   It is an HMAC, under a key derived from the server's signing secret, of the share's key, its passcode generation and the expiry; making a new passcode, or turning the passcode on, starts a new generation, so everyone who unlocked before is out.
   Nothing a visitor holds can be read by a script, so a page that runs code (a web app's, §6) cannot take another share's access.
@@ -56,7 +57,9 @@ And a passcode can be guessed, so guessing has to be slow and costly.
 - **Failures ban the address**: 5 wrong passcodes within 15 minutes, on any shares, ban it for an hour; another 5 within a day of that ban, for a day.
   A banned address is answered `429` with `Retry-After` for every unlock, right passcode or not, so a ban cannot be probed.
 - Attempts and bans are kept in the database, not in a server's memory, so every server of a deployment enforces the same ones and a restart does not forgive.
-  Addresses are stored as keyed hashes, not as they are, and old attempts are deleted as they age out.
+  A try is recorded, as a failure, before its passcode is checked, and the limits count every try recorded before it: tries that arrive together cannot all pass the check before any is counted; a try refused over the limit is deleted, as it guessed nothing.
+  Addresses are stored as keyed hashes, not as they are, and attempts, and bans that ended, are deleted after a day.
+- **Only the share site's own requests are tries**: an unlock must send JSON (which a page of another origin cannot without a preflight the API refuses) and, where the browser says where it came from (`Sec-Fetch-Site`), come from the same origin; anything else is 403 before it counts, so no other site, and no shared web app on the web apps site, can spend a visitor's tries and get their address banned.
 - **The visitor's address is the connection's**, unless the deployment names a header its proxy sets and a visitor cannot (`CLIENT_IP_HEADER`, such as CloudFront's `CloudFront-Viewer-Address`); a header anyone can send (`X-Forwarded-For` as a client wrote it) is never trusted.
   Where the API can also be reached without that proxy, the proxy sends a secret (`X-Client-IP-Proxy-Secret`, `CLIENT_IP_PROXY_SECRET`) and the header is trusted only on a request that carries it; a request without it counts as the connection's address, so going around the proxy gains nothing.
 - 71 bits cannot be guessed at 5 tries an hour per address; the limits are there so that guessing is pointless, not merely slow.
@@ -80,9 +83,10 @@ And a passcode can be guessed, so guessing has to be slow and costly.
 ### 6. Viewers, read-only
 
 - The share site shows an item with the app's viewer for its kind, read-only: no editing, no comments, no agent, no markup.
-  The viewers reach for the signed-in user's services; on the share site those are stand-ins that read and send nothing (no comments, no page pictures), and the share's files stand in for the gallery's.
-  An HTML file shared on its own (§1) shows rendered, with its code a click away, as in the app; a notebook shows its cells and their saved outputs, without running them; office files show in the office viewers, read-only; an image and a PDF show as they do in the app.
-  A download button gives the file as it is.
+  The viewers reach for the signed-in user's services; on the share site those are stand-ins that read and send nothing (no comments, no page pictures, no agent), and the share's files stand in for the gallery's.
+  The share site builds the app's code with settings of its own in place of the app's (no API address, no sign-in, no other site), so nothing it carries points at the app.
+  An HTML file shared on its own (§1) shows rendered, with its code a click away, as in the app; a notebook shows its cells and their saved outputs, without running them, and a script-driven output says it cannot be shown (the share site's policy would block its scripts); office files show in the office viewers, read-only; an image and a PDF show as they do in the app.
+  Download is a link to the file, which the browser streams; a file with no viewer is not read until it is downloaded.
 
 ### 7. A shared web app
 
@@ -91,7 +95,9 @@ And a passcode can be guessed, so guessing has to be slow and costly.
   A skill's files and chats' copies are never in it; the listing is the same set, so nothing a visitor sees or asks for comes from outside the folder.
   The share site's own paths are as the server answers them; it cannot widen what the server will serve.
 - **Preview and Code**: the share opens on Preview, the page running as it does in the app, on the web apps site (ADR 0x050 §3), whose host page now also accepts the share site as its parent; the share site answers its worker's requests from the share's files, so the page's own requests are confined to the project the same way.
-  Code shows a file tree of the project (folders to open and close) and the chosen file: text and code in the code editor, read-only and alone (no preview beside it, no comments), an image or a document in its viewer; choosing an HTML file there and switching to Preview shows that page.
+  Code shows a file tree of the project (folders to open and close) and the chosen file: text and code in the code editor, read-only and alone (no preview beside it, no comments), a diagram as its XML, an image or a document in its viewer; choosing an HTML file there and switching to Preview shows that page.
+  A project with no page opens on Code; a file that cannot be read says so in its own pane.
+  Each version of a file is downloaded once, however often the preview reloads.
   The listing is read once and reused for 30 seconds, so a preview checking for changes does not ask for it every few seconds.
 - TypeScript, JSX and SCSS compile in the visitor's browser (ADR 0x050 §4), with the compiler served by the share site.
 

@@ -2,11 +2,10 @@ import { NgComponentOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, DestroyRef, Type, computed, effect, inject, input, signal, untracked } from '@angular/core';
 
 import { FileAttachment } from '../app/core/models/file-attachment.model';
-import { saveBlobAsFile } from '../app/core/utils/download.helpers';
 import { previewKindFor } from '../app/features/gallery/helpers/file-preview.helpers';
 import { loadViewer } from '../app/features/file-workspace/viewers/registry';
-import { ButtonComponent, DownloadIconComponent } from '../app/shared/ui';
-import { ShareApiService, SharedView } from './share-api.service';
+import { DownloadIconComponent } from '../app/shared/ui';
+import { SharedView, sharedContentUrl } from './share-api.service';
 import { ShareFolderFiles, sharedAttachment } from './share-folder-files';
 
 /** A file shared on its own (ADR 0x051 §6): its viewer, read-only, and a download. */
@@ -14,34 +13,33 @@ import { ShareFolderFiles, sharedAttachment } from './share-folder-files';
   selector: 'share-file-view',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgComponentOutlet, ButtonComponent, DownloadIconComponent],
+  imports: [NgComponentOutlet, DownloadIconComponent],
   styleUrl: './shared-view.scss',
   template: `
-    <div class="shared-view">
+    <main class="shared-view">
       <header class="shared-view__bar">
         <h1 class="shared-view__name">{{ view().name }}</h1>
         <span class="shared-view__by">Shared with What Iff</span>
-        <ui-button size="sm" [disabled]="!blob()" (click)="download()">
+        <a class="shared-view__download" [href]="downloadUrl()" download>
           <ui-download-icon [size]="14" />
           Download
-        </ui-button>
+        </a>
       </header>
       <section class="shared-view__body">
-        @if (failed()) {
-          <p class="shared-view__note">The file could not be loaded. Reload to try again.</p>
+        @if (noPreview()) {
+          <p class="shared-view__note">This kind of file has no preview. Download it to open it.</p>
+        } @else if (failed()) {
+          <p class="shared-view__note" role="alert">The file could not be loaded. Reload to try again.</p>
         } @else if (!blob()) {
-          <p class="shared-view__note">Loading…</p>
+          <p class="shared-view__note" role="status">Loading…</p>
         } @else if (viewer(); as viewer) {
           <ng-container *ngComponentOutlet="viewer; inputs: { file: file(), blob: blob()! }" />
-        } @else if (noPreview()) {
-          <p class="shared-view__note">This kind of file has no preview. Download it to open it.</p>
         }
       </section>
-    </div>
+    </main>
   `,
 })
 export class SharedFileViewComponent {
-  private readonly api = inject(ShareApiService);
   private readonly files = inject(ShareFolderFiles);
 
   readonly shareKey = input.required<string>();
@@ -51,6 +49,7 @@ export class SharedFileViewComponent {
     const v = this.view();
     return sharedAttachment({ path: v.name, file_type: v.file_type, size_bytes: v.size_bytes, content_version: v.content_version });
   });
+  readonly downloadUrl = computed(() => sharedContentUrl(this.shareKey()));
   readonly blob = signal<Blob | null>(null);
   readonly viewer = signal<Type<unknown> | null>(null);
   readonly failed = signal(false);
@@ -68,20 +67,21 @@ export class SharedFileViewComponent {
 
   private async open(key: string, v: SharedView): Promise<void> {
     this.files.use(key, { path: v.name, file_type: v.file_type, size_bytes: v.size_bytes, content_version: v.content_version });
-    const load = loadViewer(previewKindFor(this.file()));
-    if (!load) this.noPreview.set(true);
+    // A kind with no viewer (or a diagram, which has none here) is only downloaded, by the link:
+    // the browser streams it, and nothing is read before the visitor asks for it.
+    const kind = previewKindFor(this.file());
+    const load = kind === 'diagram' ? null : loadViewer(kind);
+    if (!load) {
+      this.noPreview.set(true);
+      return;
+    }
     try {
-      const [blob, viewer] = await Promise.all([this.api.content(key), load ?? Promise.resolve(null)]);
+      const [blob, viewer] = await Promise.all([this.files.download(this.file()), load]);
       if (!this.alive) return;
       this.blob.set(blob);
       this.viewer.set(viewer);
     } catch {
       if (this.alive) this.failed.set(true);
     }
-  }
-
-  download(): void {
-    const blob = this.blob();
-    if (blob) saveBlobAsFile(blob, this.view().name);
   }
 }

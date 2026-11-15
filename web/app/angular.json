@@ -327,7 +327,13 @@
               ".ttf": "file"
             },
             "index": "src/share/index.html",
-            "outputPath": "dist/share"
+            "outputPath": "dist/share",
+            "fileReplacements": [
+              {
+                "replace": "src/environments/environment.ts",
+                "with": "src/share/app-environment.ts"
+              }
+            ]
           },
           "configurations": {
             "production": {
@@ -347,32 +353,41 @@
               "sourceMap": {
                 "scripts": true,
                 "hidden": true
+              },
+              "optimization": {
+                "scripts": true,
+                "styles": {
+                  "minify": true,
+                  "inlineCritical": false
+                },
+                "fonts": true
               }
             },
             "docker": {
               "outputHashing": "all",
               "fileReplacements": [
                 {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/share/app-environment.ts"
+                },
+                {
                   "replace": "src/share/share-environment.ts",
                   "with": "src/share/share-environment.docker.ts"
                 }
-              ]
+              ],
+              "optimization": {
+                "scripts": true,
+                "styles": {
+                  "minify": true,
+                  "inlineCritical": false
+                },
+                "fonts": true
+              }
             },
             "development": {
               "optimization": false,
               "extractLicenses": false,
-              "sourceMap": true,
-              "assets": [
-                {
-                  "glob": "favicon.ico",
-                  "input": "public"
-                },
-                {
-                  "glob": "esbuild.wasm",
-                  "input": "node_modules/esbuild-wasm",
-                  "output": "assets/esbuild/0.28.2"
-                }
-              ]
+              "sourceMap": true
             }
           },
           "defaultConfiguration": "production"
