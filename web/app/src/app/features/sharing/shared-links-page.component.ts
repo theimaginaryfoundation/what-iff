@@ -29,11 +29,16 @@ import { folderLabel } from '../gallery/helpers/gallery-folder.helpers';
         <ui-empty-state heading="Sharing is not set up" body="This server has no share site, so files cannot be shared with a link." />
       } @else if (loading()) {
         <ui-spinner />
-      } @else if (error()) {
-        <p class="shared-links__error" role="alert">{{ error() }}</p>
+      } @else if (loadError()) {
+        <p class="shared-links__error" role="alert">{{ loadError() }}</p>
+        <ui-button (click)="load()">Try again</ui-button>
       } @else if (links().length === 0) {
         <ui-empty-state heading="Nothing shared yet" body="Open a file and choose Share to make a link to it." />
       } @else {
+        @if (actionError()) {
+          <p class="shared-links__error" role="alert">{{ actionError() }}</p>
+        }
+        <span class="shared-links__live" aria-live="polite">{{ copied() ? 'Link copied' : '' }}</span>
         <ul class="shared-links__list">
           @for (link of links(); track link.key) {
             <li class="shared-links__row">
@@ -45,12 +50,25 @@ import { folderLabel } from '../gallery/helpers/gallery-folder.helpers';
                   }
                   <span>{{ folderName(link) }}</span>
                   <span>{{ link.passcode_required ? 'Passcode' : 'Anyone with the link' }}</span>
+                  @if (link.passcode_unreadable) {
+                    <ui-badge intent="warning">Passcode unreadable: open the file to make a new one</ui-badge>
+                  }
                   <span>Shared {{ link.created_at | date: 'medium' }}</span>
                 </span>
               </div>
               <div class="shared-links__actions">
-                <ui-button size="sm" (click)="copy(link)">{{ copied() === link.key ? 'Copied' : 'Copy link' }}</ui-button>
-                <ui-button size="sm" variant="danger" [disabled]="stopping() === link.key" (click)="stop(link)">Stop sharing</ui-button>
+                <ui-button size="sm" [ariaLabel]="'Copy the link to ' + link.file_name" (click)="copy(link)">
+                  {{ copied() === link.key ? 'Copied' : 'Copy link' }}
+                </ui-button>
+                <ui-button
+                  size="sm"
+                  variant="danger"
+                  [ariaLabel]="'Stop sharing ' + link.file_name"
+                  [disabled]="stopping().has(link.key)"
+                  (click)="stop(link)"
+                >
+                  Stop sharing
+                </ui-button>
               </div>
             </li>
           }
@@ -66,9 +84,12 @@ export class SharedLinksPageComponent {
   readonly enabled = this.service.enabled;
   readonly links = signal<ShareLink[]>([]);
   readonly loading = signal(true);
-  readonly error = signal<string | null>(null);
+  /** The list could not be read: it takes the list's place. */
+  readonly loadError = signal<string | null>(null);
+  /** A copy or a stop that failed: shown above the list, cleared by the next action. */
+  readonly actionError = signal<string | null>(null);
   readonly copied = signal<string | null>(null);
-  readonly stopping = signal<string | null>(null);
+  readonly stopping = signal<ReadonlySet<string>>(new Set());
   private alive = true;
 
   constructor() {
@@ -77,9 +98,15 @@ export class SharedLinksPageComponent {
       this.loading.set(false);
       return;
     }
+    this.load();
+  }
+
+  load(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
     this.service.list().subscribe({
       next: links => this.alive && (this.links.set(links), this.loading.set(false)),
-      error: () => this.alive && (this.error.set('Could not load your shared links.'), this.loading.set(false)),
+      error: () => this.alive && (this.loadError.set('Could not load your shared links.'), this.loading.set(false)),
     });
   }
 
@@ -88,31 +115,44 @@ export class SharedLinksPageComponent {
   }
 
   async copy(link: ShareLink): Promise<void> {
+    this.actionError.set(null);
     try {
       await navigator.clipboard.writeText(this.service.urlOf(link));
       this.copied.set(link.key);
       setTimeout(() => this.alive && this.copied() === link.key && this.copied.set(null), 2000);
     } catch {
-      this.error.set('Could not copy the link.');
+      this.actionError.set('Could not copy the link. Open the file and select it there.');
     }
   }
 
   async stop(link: ShareLink): Promise<void> {
+    this.actionError.set(null);
     const ok = await this.confirmation.confirm({
       title: 'Stop sharing?',
-      message: `The link to ${link.file_name} stops working. Sharing it again makes a new link.`,
+      message: `The link to ${link.file_name} stops working for everyone who has it. Sharing it again makes a new link.`,
       confirmText: 'Stop sharing',
       type: 'danger',
     });
     if (!ok) return;
-    this.stopping.set(link.key);
+    const busy = (on: boolean) =>
+      this.stopping.update(keys => {
+        const next = new Set(keys);
+        if (on) next.add(link.key);
+        else next.delete(link.key);
+        return next;
+      });
+    busy(true);
     this.service.stop(link.file_id).subscribe({
       next: () => {
         if (!this.alive) return;
-        this.stopping.set(null);
+        busy(false);
         this.links.update(links => links.filter(l => l.key !== link.key));
       },
-      error: () => this.alive && (this.stopping.set(null), this.error.set(`Could not stop sharing ${link.file_name}.`)),
+      error: () => {
+        if (!this.alive) return;
+        busy(false);
+        this.actionError.set(`Could not stop sharing ${link.file_name}. Try again.`);
+      },
     });
   }
 }

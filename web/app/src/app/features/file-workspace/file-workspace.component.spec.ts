@@ -9,6 +9,7 @@ import { CommentAutosave } from '../office/comments/comment-autosave';
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
+import { ShareLinkService } from '../../core/services/share-link.service';
 import { FolderFiles } from '../web-preview/folder-files.service';
 import { FileWorkspaceComponent } from './file-workspace.component';
 import { FileWorkspaceService } from './file-workspace.service';
@@ -244,6 +245,17 @@ describe('FileWorkspaceComponent', () => {
     fixture.componentRef.setInput('personalityName', 'Aster');
     const el = await show(file({ personality_id: 'p-1', source: 'imported' }));
     expect(el.querySelector('.file-workspace__meta')?.textContent).toContain('Document of Aster');
+  });
+
+  it('offers Share for what the share site shows, and only where there is a share site', async () => {
+    const links = TestBed.inject(ShareLinkService) as { siteUrl: string };
+    (links as { siteUrl: string }).siteUrl = 'https://share.test';
+    expect(button(await show(file({ name: 'notes.md', file_type: 'text/markdown' })), 'Share')).toBeDefined();
+    expect(
+      button(await show(file({ id: 'd-1', name: 'flow.drawio', file_type: 'application/vnd.jgraph.mxfile' })), 'Share'),
+    ).toBeUndefined();
+    (links as { siteUrl: string }).siteUrl = '';
+    expect(button(await show(file({ id: 'n-2', name: 'other.md', file_type: 'text/markdown' })), 'Share')).toBeUndefined();
   });
 
   it('opens the page of the project a script is part of, from its folder or the nearest one above', async () => {

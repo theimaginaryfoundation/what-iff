@@ -1,4 +1,11 @@
-<button [attr.type]="type()" [disabled]="isDisabled()" [class]="buttonClass()" (click)="onClick($event)" (keydown)="onKeydown($event)">
+<button
+  [attr.type]="type()"
+  [attr.aria-label]="ariaLabel()"
+  [disabled]="isDisabled()"
+  [class]="buttonClass()"
+  (click)="onClick($event)"
+  (keydown)="onKeydown($event)"
+>
   @if (loading()) {
     <ui-spinner [size]="16" ariaLabel="Loading" />
   }

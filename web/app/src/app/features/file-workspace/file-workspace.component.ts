@@ -161,8 +161,12 @@ export class FileWorkspaceComponent implements CommentSaver, WorkspaceContext {
    */
   readonly projectPage = signal<FileAttachment | null>(null);
   private readonly shareLinks = inject(ShareLinkService);
-  /** Whether the user can share this file (ADR 0x051): a build with a share site, their own file, a kind it shows. */
-  readonly canShare = computed(() => this.shareLinks.enabled && this.canEdit() && isShareable(this.file()));
+  /**
+   * Whether the file can be shared (ADR 0x051): a build with a share site, and a kind the share
+   * site shows. Every file the workspace opens is the user's (the server checks again); a phone
+   * can share too, as sharing changes nothing in the file.
+   */
+  readonly canShare = computed(() => this.shareLinks.enabled && isShareable(this.file()));
   readonly shareOpen = signal(false);
   private readonly folders = inject(FolderFiles);
 

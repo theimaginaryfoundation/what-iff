@@ -1,9 +1,9 @@
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, catchError, map, of, throwError } from 'rxjs';
+import { Observable, map } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
-import { ShareLink } from '../models/share-link.model';
+import { ShareLink, ShareState } from '../models/share-link.model';
 
 /**
  * Share links (ADR 0x051): share a file, read and change its link, stop sharing it, and list every
@@ -27,11 +27,9 @@ export class ShareLinkService {
     return `${this.siteUrl}/s/${link.key}`;
   }
 
-  /** The file's link, or null when it is not shared. */
-  get(fileId: string): Observable<ShareLink | null> {
-    return this.http
-      .get<ShareLink>(this.fileUrl(fileId))
-      .pipe(catchError((error: HttpErrorResponse) => (error.status === 404 ? of(null) : throwError(() => error))));
+  /** What sharing the file shares, and its link (null when it is not shared). */
+  get(fileId: string): Observable<ShareState> {
+    return this.http.get<ShareState>(this.fileUrl(fileId));
   }
 
   /** Shares the file (with a passcode unless told otherwise); a shared file keeps its link. */

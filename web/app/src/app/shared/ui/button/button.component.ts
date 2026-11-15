@@ -8,7 +8,8 @@ export type ButtonType = 'button' | 'submit' | 'reset';
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary: 'border-transparent bg-[var(--cta)] text-[var(--cta-text)] hover:brightness-95',
-  secondary: 'border-[var(--btn-secondary-border)] bg-[var(--btn-secondary)] text-[var(--btn-secondary-text)] hover:border-[var(--border-hover)]',
+  secondary:
+    'border-[var(--btn-secondary-border)] bg-[var(--btn-secondary)] text-[var(--btn-secondary-text)] hover:border-[var(--border-hover)]',
   ghost: 'border-transparent bg-transparent text-[var(--text-secondary)] hover:bg-[var(--accent-bg)] hover:text-[var(--text-primary)]',
   danger: 'border-transparent bg-[var(--danger)] text-white hover:brightness-95',
 };
@@ -34,13 +35,17 @@ export class ButtonComponent {
   readonly type = input<ButtonType>('button');
   readonly disabled = input(false);
   readonly loading = input(false);
+  /** The button's accessible name, when its text alone does not say what it acts on ("Copy" beside a link). */
+  readonly ariaLabel = input<string | null>(null);
   readonly activate = output<Event>();
 
-  readonly buttonClass = computed(() => [
-    'inline-flex items-center justify-center gap-2 rounded-lg border font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-base)] disabled:cursor-not-allowed disabled:opacity-50',
-    VARIANT_CLASSES[this.variant()],
-    SIZE_CLASSES[this.size()],
-  ].join(' '));
+  readonly buttonClass = computed(() =>
+    [
+      'inline-flex items-center justify-center gap-2 rounded-lg border font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-base)] disabled:cursor-not-allowed disabled:opacity-50',
+      VARIANT_CLASSES[this.variant()],
+      SIZE_CLASSES[this.size()],
+    ].join(' '),
+  );
 
   onClick(event: MouseEvent): void {
     if (this.isDisabled()) {
