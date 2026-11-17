@@ -120,13 +120,14 @@ describe('BackgroundModelsStepComponent', () => {
 });
 
 describe('BackgroundModelsStepComponent with no models loaded', () => {
-  it("says the models couldn't be loaded, and leaves Off as the only choice", async () => {
+  it("says the models couldn't be loaded, leaves Off as the only choice, and saves nothing", async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const service = { choose: vi.fn(), switchOff: vi.fn() };
     await TestBed.configureTestingModule({
       imports: [HostComponent],
       providers: [
         provideZonelessChangeDetection(),
-        { provide: UtilityModelsService, useValue: { choose: vi.fn(), switchOff: vi.fn() } },
+        { provide: UtilityModelsService, useValue: service },
         { provide: ModelService, useValue: { models$: new BehaviorSubject<Model[]>([]), getModels: vi.fn(() => throwError(() => new Error('offline'))) } },
       ],
     }).compileComponents();
@@ -138,6 +139,12 @@ describe('BackgroundModelsStepComponent with no models loaded', () => {
     expect(el.querySelector('[data-testid="background-models-step-error"]')?.textContent).toContain("Your models couldn't be loaded.");
     const memory = el.querySelector('[data-testid="onboarding-background-model-memory"]') as HTMLSelectElement;
     expect(Array.from(memory.options).map(o => o.value)).toEqual(['off']);
+    // Saving now would switch every role off; it waits for a reload instead.
+    const step = fixture.debugElement.children[0].componentInstance as BackgroundModelsStepComponent;
+    expect(step.loadFailed()).toBe(true);
+    await step.save();
+    expect(service.switchOff).not.toHaveBeenCalled();
+    expect(service.choose).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });

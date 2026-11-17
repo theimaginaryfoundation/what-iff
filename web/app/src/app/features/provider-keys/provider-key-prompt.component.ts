@@ -45,8 +45,11 @@ export class ProviderKeyPromptComponent {
   /** Whether the account is past onboarding: it has a personality. */
   readonly pastOnboarding = signal(false);
   private readonly backgroundStep = viewChild(BackgroundModelsStepComponent);
-  /** Whether the background step is saving, so its button waits. */
-  readonly backgroundSaving = computed(() => this.backgroundStep()?.saving() ?? true);
+  /** Whether the background step can't save yet (saving, or its models failed to load), so its button waits. */
+  readonly backgroundSaving = computed(() => {
+    const step = this.backgroundStep();
+    return !step || step.saving() || step.loadFailed();
+  });
 
   /** A key, but no model: the account brings its own keys, has one, and has no default model yet. */
   readonly needsFirstModel = computed(() => {

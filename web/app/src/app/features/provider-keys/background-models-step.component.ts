@@ -40,6 +40,8 @@ export class BackgroundModelsStepComponent implements OnInit {
   /** What each row is set to, where the person changed it: a model's id or OFF_VALUE. */
   private readonly picked = signal<Partial<Record<UtilityRole, string>>>({});
   readonly saving = signal(false);
+  /** The account's models couldn't be loaded, so every row would save as Off; saving waits for a reload. */
+  readonly loadFailed = signal(false);
   readonly error = signal('');
 
   readonly rows = computed(() => {
@@ -63,7 +65,8 @@ export class BackgroundModelsStepComponent implements OnInit {
         await firstValueFrom(this.modelService.getModels());
       } catch (err) {
         console.warn('Failed to load models for the background models step:', err);
-        this.error.set("Your models couldn't be loaded. Close this and try again in a moment.");
+        this.loadFailed.set(true);
+        this.error.set("Your models couldn't be loaded. Reload the page to try again.");
       }
     }
   }
@@ -77,7 +80,7 @@ export class BackgroundModelsStepComponent implements OnInit {
    * handed back too, so the host shows only the roles still to choose.
    */
   async save(): Promise<void> {
-    if (this.saving()) return;
+    if (this.saving() || this.loadFailed()) return;
     this.saving.set(true);
     this.error.set('');
     let after: UtilityModels | null = null;
