@@ -148,4 +148,26 @@ describe('BackgroundModelsStepComponent with no models loaded', () => {
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
+
+  it('saves again once the models arrive from elsewhere', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const models$ = new BehaviorSubject<Model[]>([]);
+    await TestBed.configureTestingModule({
+      imports: [HostComponent],
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: UtilityModelsService, useValue: { choose: vi.fn(), switchOff: vi.fn() } },
+        { provide: ModelService, useValue: { models$, getModels: vi.fn(() => throwError(() => new Error('offline'))) } },
+      ],
+    }).compileComponents();
+    const fixture = TestBed.createComponent(HostComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const step = fixture.debugElement.children[0].componentInstance as BackgroundModelsStepComponent;
+    expect(step.loadFailed()).toBe(true);
+    models$.next(MODELS);
+    expect(step.loadFailed()).toBe(false);
+    expect(step.error()).toBe('');
+    warn.mockRestore();
+  });
 });

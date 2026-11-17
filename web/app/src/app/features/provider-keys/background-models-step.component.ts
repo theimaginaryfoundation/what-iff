@@ -40,7 +40,7 @@ export class BackgroundModelsStepComponent implements OnInit {
   /** What each row is set to, where the person changed it: a model's id or OFF_VALUE. */
   private readonly picked = signal<Partial<Record<UtilityRole, string>>>({});
   readonly saving = signal(false);
-  /** The account's models couldn't be loaded, so every row would save as Off; saving waits for a reload. */
+  /** The account's models couldn't be loaded, so every row would save as Off; saving waits until they arrive. */
   readonly loadFailed = signal(false);
   readonly error = signal('');
 
@@ -57,7 +57,15 @@ export class BackgroundModelsStepComponent implements OnInit {
   });
 
   constructor() {
-    this.modelService.models$.pipe(takeUntilDestroyed()).subscribe(models => this.models.set(models));
+    this.modelService.models$.pipe(takeUntilDestroyed()).subscribe(models => {
+      this.models.set(models);
+      // Models loaded elsewhere after this step's own load failed: the rows have real models
+      // to start on again, so saving is safe.
+      if (models.length > 0 && this.loadFailed()) {
+        this.loadFailed.set(false);
+        this.error.set('');
+      }
+    });
   }
 
   async ngOnInit(): Promise<void> {
