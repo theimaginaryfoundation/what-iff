@@ -252,22 +252,24 @@ func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.U
 		// as a failed memory load.
 		return memories, liveMemories, userNameLine, nil
 	}
+	// From here on a failure costs the turn its memories, not its own lines: they go back with
+	// the error, and the best-effort caller keeps them.
 	if err != nil {
 		a.logger.Error("failed to get memory query", zap.Error(err))
-		return nil, nil, "", err
+		return memories, nil, userNameLine, err
 	}
 
 	if memoryQuery.ShouldEnrich {
 		memoryQueryEmbedding, err := a.memoryTool.CreateEmbedding(ctx, memoryQuery.Query)
 		if err != nil {
 			a.logger.Error("failed to create memory query embedding", zap.Error(err))
-			return nil, nil, "", err
+			return memories, nil, userNameLine, err
 		}
 
 		dbMemories, err := a.ds.GetRelatedMemories(ctx, userID, chatID, memoryQueryEmbedding, personalityID, sandboxed)
 		if err != nil {
 			a.logger.Error("failed to get related memories", zap.Error(err))
-			return nil, nil, "", err
+			return memories, nil, userNameLine, err
 		}
 
 		liveMemories = dbMemories
