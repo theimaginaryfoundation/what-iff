@@ -225,7 +225,9 @@ func initialTurnContextLines(username string, hasUserMessages bool, sandboxed bo
 }
 
 // getMemories prefetches the memories relevant to userMessage for one turn. A sandboxed chat gets
-// only the memories created in it (scoped in the retrieval SQL) and no user-name line.
+// only the memories created in it (scoped in the retrieval SQL) and no user-name line. Once the
+// turn's own lines are built, a failed search returns them with the error, so a best-effort caller
+// can keep them.
 func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, error) {
 	chatUser, err := a.ds.GetUserByID(ctx, userID)
 	if err != nil {
