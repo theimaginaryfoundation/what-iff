@@ -10,7 +10,10 @@ export function backgroundModelLabel(model: Model): string {
   return isConnectionGroup(model) && model.connection_name ? `${model.display_name} · ${model.connection_name}` : model.display_name;
 }
 
-/** Whether a role has nothing chosen at any scope, so its work doesn't run. */
+/**
+ * Whether a role has nothing chosen at any scope, so its work doesn't run. A role switched off has
+ * a choice (Off), so it isn't "not set".
+ */
 export function roleNotSet(role: UtilityRoleModel): boolean {
   return !role.account && !role.deployment;
 }
