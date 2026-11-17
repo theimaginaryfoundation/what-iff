@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -222,6 +223,30 @@ func TestGetMemories_NoQueryModelKeepsTheTurnsOwnLines(t *testing.T) {
 	a := newTestAgent(ds)
 	memories, live, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", false)
 	require.NoError(t, err, "not set is not a failed memory load")
+	require.Empty(t, live)
+	require.Equal(t, initialTurnContextLines("sam", false, false), memories)
+}
+
+// A memory query that fails is a failed memory load, but the turn's own lines go back with the
+// error, so the user's name on a first message survives it.
+func TestGetMemories_FailedQueryKeepsTheTurnsOwnLines(t *testing.T) {
+	t.Parallel()
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	mock.ExpectQuery("FROM `users`").WillReturnRows(sqlmock.NewRows([]string{"id", "username"}).AddRow(uuid.New().String(), "sam"))
+	mock.ExpectQuery("FROM `roles`").WillReturnRows(sqlmock.NewRows([]string{"user_id", "id"}))
+	mock.ExpectQuery("FROM `user_preferences`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectBegin()
+	mock.ExpectQuery("FROM `chats`").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New().String()))
+	mock.ExpectQuery("FROM `chat_messages`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectCommit()
+	// The memory query's model can't be read.
+	mock.ExpectQuery("FROM `utility_model_settings`").WillReturnError(errors.New("connection reset"))
+
+	a := newTestAgent(ds)
+	memories, live, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", false)
+	require.Error(t, err)
 	require.Empty(t, live)
 	require.Equal(t, initialTurnContextLines("sam", false, false), memories)
 }
