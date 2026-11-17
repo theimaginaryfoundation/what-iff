@@ -40,6 +40,7 @@
 - Keep handlers thin; business logic in services/datastore. Avoid editing files under `ent/` manually.
 - API changes must update `openapi.yaml` and related docs.
 - Frontend UI: read [`web/app/docs/ui-style-standards.md`](web/app/docs/ui-style-standards.md) before adding or changing screens in `web/app`. Use the `shared/ui` primitives and theme tokens, not browser defaults or one-off Tailwind: `ui-checkbox` for every checkbox (never a bare `<input type="checkbox">`), and `ui-data-table` + `ui-bulk-action-bar` for tables with selection.
+- Frontend UX direction: for new screens and meaningful UI updates, also follow [`docs/design-guide.md`](docs/design-guide.md) (the MVP design guide: user job first, full state paths, accessibility, responsive checks). Apply it to the area you are changing; it is not a reason to retrofit working UI or a blanket requirement for unrelated PRs.
 
 ### Structure & reuse
 Large files and near-duplicate code are a recurring review finding here. They build up one reasonable-looking addition at a time. Check for them as part of the change, not afterwards:

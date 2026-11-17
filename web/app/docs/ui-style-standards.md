@@ -4,6 +4,10 @@ New screens keep falling back to browser defaults or one-off Tailwind styling.
 These are the house rules for the Angular app in `web/app`, so a new screen looks like the rest of the app in light and dark mode without anyone restyling it later.
 Every primitive below lives in `src/app/shared/ui/` and is exported from `shared/ui/index.ts`.
 
+This document is the implementation reference for primitives and tokens.
+For product-level UX direction on new screens and meaningful updates (user job, state paths, accessibility, responsive checks), see the [MVP design guide](../../../docs/design-guide.md).
+If the two disagree, check the code, then update whichever document is wrong instead of adding a third pattern.
+
 ## 1. Checkboxes: always `ui-checkbox`
 
 Use `<ui-checkbox>` (`shared/ui/checkbox`) for every checkbox.

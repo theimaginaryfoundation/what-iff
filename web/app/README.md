@@ -71,6 +71,7 @@ this is exactly the gap that originally broke CI).
 ## Notes for Contributors
 
 - UI work follows [`docs/ui-style-standards.md`](docs/ui-style-standards.md): shared `ui-*` primitives (`ui-checkbox`, `ui-data-table`, …) and theme tokens before custom styling.
+- For new screens and meaningful UI updates, also follow the [MVP design guide](../../docs/design-guide.md) (user job first, full state paths, accessibility, responsive checks), applied to the area being changed.
 - Keep API contract updates aligned with backend `openapi.yaml`.
 - For Integrations feature work, update:
   - `src/app/features/integrations/`
