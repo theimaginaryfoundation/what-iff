@@ -230,7 +230,9 @@ func firstUserNameLine(lines []string) string {
 }
 
 // getMemories prefetches the memories relevant to userMessage for one turn. A sandboxed chat gets
-// only the memories created in it (scoped in the retrieval SQL) and no user-name line.
+// only the memories created in it (scoped in the retrieval SQL) and no user-name line. Once the
+// turn's own lines are built, a failed search returns them, and userNameLine, with the error, so a
+// best-effort caller can keep them.
 //
 // userNameLine is the user-name line it put first in memories ("" when it added none). The caller
 // records exactly this line as chatContext.userNameLine instead of rebuilding it from the profile,
