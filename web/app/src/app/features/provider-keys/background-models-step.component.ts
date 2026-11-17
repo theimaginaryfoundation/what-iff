@@ -47,7 +47,8 @@ export class BackgroundModelsStepComponent implements OnInit {
   readonly rows = computed(() => {
     const models = this.models();
     const defaultId = this.defaultModelId();
-    // The default model, or the first of the account's if the default isn't among them.
+    // The default model, or the first of the account's if the default isn't among them. With no
+    // models every row starts on Off, which is why save() refuses after a failed load.
     const start = models.some(m => m.id === defaultId) ? defaultId : (models[0]?.id ?? OFF_VALUE);
     const picked = this.picked();
     return this.utility()
