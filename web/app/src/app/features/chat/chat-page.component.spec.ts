@@ -24,6 +24,7 @@ import { RightPanelService } from '../../core/services/right-panel.service';
 import { FileWorkspaceService } from '../file-workspace/file-workspace.service';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { ContextPanelService, DESKTOP_OPEN_STORAGE_KEY } from './services/context-panel.service';
+import { ThreadSandboxService } from './services/thread-sandbox.service';
 import { ChatSendGate, NoopChatSendGate } from './services/chat-send-gate';
 
 describe('ChatPageComponent', () => {
@@ -280,27 +281,26 @@ describe('ChatPageComponent', () => {
             expect(fixture.nativeElement.querySelector('app-thread-sandboxed-chip button')).toBeNull();
         });
 
-        it('shows a Sandboxed chip when the thread is sandboxed', async () => {
+        it('shows a shield-only button when the thread is sandboxed', async () => {
             chatService.getChat.mockReturnValue(of({ ...chat, context_scope: 'sandbox' }));
             fixture.detectChanges();
             await fixture.whenStable();
             fixture.detectChanges();
 
             const chip = fixture.nativeElement.querySelector('app-thread-sandboxed-chip button') as HTMLButtonElement;
-            expect(chip?.textContent).toContain('Sandboxed');
+            expect(chip?.getAttribute('aria-label')).toContain('Sandboxed thread');
         });
 
-        it('opens the Memories tab when the chip is clicked', async () => {
+        it('asks for confirmation to remove the thread from the sandbox when the chip is clicked', async () => {
             chatService.getChat.mockReturnValue(of({ ...chat, context_scope: 'sandbox' }));
-            const context = TestBed.inject(ContextPanelService);
+            const leave = vi.spyOn(TestBed.inject(ThreadSandboxService), 'leave').mockResolvedValue({ status: 'cancelled' });
             fixture.detectChanges();
             await fixture.whenStable();
             fixture.detectChanges();
 
             (fixture.nativeElement.querySelector('app-thread-sandboxed-chip button') as HTMLButtonElement).click();
 
-            expect(context.activeTab()).toBe('memories');
-            expect(TestBed.inject(RightPanelService).visible()).toBe(true);
+            expect(leave).toHaveBeenCalledTimes(1);
         });
 
         it('closes the context panel when a file opens, and lets the rail bring it back over the file', async () => {

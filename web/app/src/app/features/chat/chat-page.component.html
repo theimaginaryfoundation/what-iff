@@ -89,7 +89,7 @@
           </div>
         </div>
         <div class="chat-page__title-actions">
-          <app-thread-sandboxed-chip [sandboxed]="isSandboxed(session.thread())" (openSettings)="openSandboxSettings()" />
+          <app-thread-sandboxed-chip [sandboxed]="isSandboxed(session.thread())" (remove)="removeFromSandbox()" />
           <app-thread-bookmarks [bookmarks]="bookmarks()" (jump)="jumpToBookmark($event)" (commitRemovals)="commitBookmarkRemovals($event)" />
           <button type="button" class="chat-page__export" (click)="exportActiveChat()" aria-label="Export thread" uiTooltip="Download this thread as a ZIP" placement="bottom">
             <ui-file-icon [size]="12" />
@@ -143,12 +143,22 @@
               type="button"
               uiTooltip="Memories: what the personality remembers here and globally"
               placement="right"
-              aria-label="Open memories"
+              [attr.aria-label]="isSandboxed(session.thread()) ? 'Open memories (sandboxed thread)' : 'Open memories'"
               [class.chat-page__context-rail-button--active]="contextPanel.visible() && contextPanel.activeTab() === 'memories'"
               [attr.aria-current]="(contextPanel.visible() && contextPanel.activeTab() === 'memories') ? 'true' : null"
               (click)="openContextPanel('memories')"
             >
-              <ui-brain-icon [size]="14" />
+              <span style="position: relative; display: inline-flex;">
+                <ui-brain-icon [size]="14" />
+                @if (isSandboxed(session.thread())) {
+                  <ui-shield-icon
+                class="sandbox-badge"
+                [size]="10"
+                style="position: absolute; top: -4px; right: -6px; color: var(--color-warning);"
+                aria-hidden="true"
+              />
+                }
+              </span>
             </button>
             <button
               type="button"

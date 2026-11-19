@@ -802,3 +802,19 @@ export class EyeIconComponent {
 export class EyeOffIconComponent {
   readonly size = input(16);
 }
+
+@Component({
+  selector: 'ui-more-vertical-icon',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
+  template: `
+    <svg [attr.width]="size()" [attr.height]="size()" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="5" r="2" />
+      <circle cx="12" cy="12" r="2" />
+      <circle cx="12" cy="19" r="2" />
+    </svg>
+  `,
+})
+export class MoreVerticalIconComponent {
+  readonly size = input(16);
+}

@@ -23,8 +23,11 @@ export function createFocusTrap(
   const restoreTo = opts.restoreTo ?? (host.ownerDocument.activeElement as HTMLElement | null);
 
   const focusFirst = (): void => {
-    const first = getFocusableElements(host)[0] ?? host;
-    first.focus();
+    // `data-autofocus` marks the safest control (e.g. Cancel in a destructive confirmation).
+    const marked = host.querySelector<HTMLElement>('[data-autofocus]');
+    // The marker may sit on a wrapper (a label around a checkbox): focus the control inside it.
+    const preferred = marked ? (marked.matches(FOCUSABLE_SELECTOR) ? marked : marked.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)) : null;
+    (preferred ?? getFocusableElements(host)[0] ?? host).focus();
   };
 
   const onKeydown = (event: KeyboardEvent): void => {
