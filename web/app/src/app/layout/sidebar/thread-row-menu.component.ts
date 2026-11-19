@@ -157,7 +157,7 @@ export class ThreadRowMenuComponent {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
   /** Where the open panel should land in viewport pixels; `settle()` corrects the drawn position to it. */
-  private target = { top: 0, right: 0 };
+  private target = { top: 0, right: 0, anchorBottom: null as number | null };
 
   constructor() {
     listenForOutsideClick(() => this.close());
@@ -273,14 +273,14 @@ export class ThreadRowMenuComponent {
     const rect = trigger.getBoundingClientRect();
     const gap = 4;
     const margin = 8;
-    const wanted = 260; // about the height of the six items and the divider
+    const wanted = 210; // about the height of the six items and the divider
     const below = win.innerHeight - rect.bottom - gap - margin;
     const above = rect.top - gap - margin;
     const openUp = below < wanted && above > below;
     const maxHeight = Math.max(120, openUp ? above : below);
     const top = openUp ? Math.max(margin, rect.top - gap - Math.min(wanted, maxHeight)) : rect.bottom + gap;
     const right = Math.max(margin, win.innerWidth - rect.right);
-    this.target = { top, right: win.innerWidth - right };
+    this.target = { top, right: win.innerWidth - right, anchorBottom: openUp ? rect.top - gap : null };
     this.pos.set({ top, right, maxHeight });
   }
 
@@ -293,7 +293,8 @@ export class ThreadRowMenuComponent {
     const panel = this.host.nativeElement.querySelector<HTMLElement>('.menu__panel');
     if (!panel) return;
     const box = panel.getBoundingClientRect();
-    const dTop = this.target.top - box.top;
+    // Opening upward: sit the real bottom edge on the button, whatever the measured height turns out to be.
+    const dTop = this.target.anchorBottom === null ? this.target.top - box.top : this.target.anchorBottom - box.bottom;
     const dRight = box.right - this.target.right;
     if (Math.abs(dTop) < 0.5 && Math.abs(dRight) < 0.5) return;
     this.pos.update(p => ({ ...p, top: p.top + dTop, right: p.right + dRight }));
