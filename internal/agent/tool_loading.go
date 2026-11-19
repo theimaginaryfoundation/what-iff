@@ -25,9 +25,10 @@ import (
 func (a *Agent) turnFunctionToolSpecs(ctx context.Context, chatCtx *chatContext, userID, chatID uuid.UUID, policy turnToolPolicy) []agenttools.FunctionToolSpec {
 	specs := agenttools.AgentFunctionToolSpecs(policy.showMoodTools)
 	specs = append(specs, turnOnlyToolSpecs(chatCtx)...)
-	if policy.toolsEnabled {
+	if policy.offersMCP() {
 		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatID, policy.ritualIDs)...)
 	}
+	specs = policy.restrictToAllowlist(specs)
 	offered := offeredToolNames(specs, policy.disabledTools)
 	chatCtx.setOfferedTools(offered)
 	a.prepareTurnLoadableTools(ctx, chatCtx, offered)

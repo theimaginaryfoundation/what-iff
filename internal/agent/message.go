@@ -651,10 +651,19 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 	}
 	// Attachment labels are only injected when tools are enabled, matching the
 	// previous behavior for OpenAI chat turns.
-	additionalDevContext := mcpLifecycleDeveloperContext()
-	if policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage); policy.toolsEnabled {
+	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
+	additionalDevContext := ""
+	// The lifecycle note tells the model to load tools; a build's allowlist without load_tools
+	// leaves nothing to load.
+	if policy.toolAllowed(tools.LoadToolsToolSpec.Name) {
+		additionalDevContext = mcpLifecycleDeveloperContext()
+	}
+	if policy.toolsEnabled {
 		if loadable := loadableToolsDeveloperContext(policy.offeredAgentToolNames(), a.loadedBuiltinToolSet(ctx, userID, chatCtx)); loadable != "" {
-			additionalDevContext += "\n\n" + loadable
+			if additionalDevContext != "" {
+				additionalDevContext += "\n\n"
+			}
+			additionalDevContext += loadable
 		}
 	}
 	if additionalDeveloperContextForChat != nil {
@@ -1402,11 +1411,11 @@ func (a *Agent) generateAssistantForMessageMock(ctx context.Context, userID uuid
 	offered := policy.offeredAgentToolNames()
 	// Turn-only tools (update_plan, ask_user) and MCP tools are offered too, so the mock's echo
 	// directives can drive them locally (provider/mock_directives.go).
-	for _, spec := range turnOnlyToolSpecs(chatCtx) {
+	for _, spec := range policy.restrictToAllowlist(turnOnlyToolSpecs(chatCtx)) {
 		offered[spec.Name] = struct{}{}
 	}
-	if policy.toolsEnabled {
-		for _, spec := range a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs) {
+	if policy.offersMCP() {
+		for _, spec := range policy.restrictToAllowlist(a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)) {
 			offered[spec.Name] = struct{}{}
 		}
 	}
@@ -1475,9 +1484,12 @@ func (a *Agent) openAIResponseParamsForChat(ctx context.Context, chatCtx *chatCo
 			NativeWebSearch: policy.nativeWebSearch,
 		})
 		agentTools := getAgentToolsList(policy.disabledTools, policy.showMoodTools)
-		turnSpecs := turnOnlyToolSpecs(chatCtx)
+		turnSpecs := policy.restrictToAllowlist(turnOnlyToolSpecs(chatCtx))
 		agentTools = append(agentTools, tools.OpenAIFunctionTools(turnSpecs)...)
-		mcpSpecs := a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)
+		var mcpSpecs []tools.FunctionToolSpec
+		if policy.offersMCP() {
+			mcpSpecs = policy.restrictToAllowlist(a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs))
+		}
 		mcpTools := tools.OpenAIFunctionTools(mcpSpecs)
 		toolParams = provider.BuildOpenAITools(chatCtx.model, chatTools, agentTools, mcpTools)
 		offered := offeredToolNames(append(append(tools.AgentFunctionToolSpecs(policy.showMoodTools), turnSpecs...), mcpSpecs...), policy.disabledTools)

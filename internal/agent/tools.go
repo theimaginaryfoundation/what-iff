@@ -97,6 +97,9 @@ type turnToolPolicy struct {
 	// native tool where the provider has one.
 	firstPartyWebSearch bool
 	nativeWebSearch     bool
+	// allowedTools, when non-nil, is the only set of function tools the turn may offer (see
+	// toolAllowlistForChat). Every tool it leaves out is also in disabledTools.
+	allowedTools map[string]bool
 }
 
 // ToolMeta describes an available agent tool for use in the tools API.
@@ -186,6 +189,9 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 		showMoodTools: a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
 		ritualIDs:     ritualIDs,
 	}
+	// A build's allowlist is applied before the tools-enabled early return and before the web
+	// search decision, so neither path can offer a tool it leaves out.
+	applyToolAllowlist(ctx, a, chatCtx.chat, &policy)
 	if !policy.toolsEnabled {
 		return policy
 	}

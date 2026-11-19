@@ -298,6 +298,11 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   A job id as its `filter` reads that one job in full (whole prompt, model, skills, parameters and values, any status), which is how the model sees a prompt before rewriting it.
   Auto mood selection does not run in a sandboxed chat (`autoMoodSelectionSkipped`); its `change_mood` picks only its own personality's modes, refuses `model_override`, and mood rituals are not loaded.
   In every chat, dispatch refuses a tool the model was not offered that turn (`setOfferedTools`, recorded on every generation path including the sub-agent loops).
+- **Tool allowlist seam (`tool_allowlist_seam.go`):** `toolAllowlistForChat`, unset here, lets another build give a chat turn a fixed set of tools by name; nil means no restriction.
+  `buildTurnToolPolicy` applies it after every other rule and before the tools-enabled early return, disabling each catalog and turn-only tool it leaves out (`ask_user` and `update_plan` included), so vendor-native web search follows `web_search`.
+  MCP tools are admitted only by full name: `restrictToAllowlist` filters them (and the turn-only specs on the Responses path) where the specs are assembled, and with no MCP name listed the turn does not contact connectors at all (`offersMCP`).
+  Without `load_tools` in the list, the developer context drops the tool-lifecycle note.
+  It only narrows: the chat's own `disabled_tools` and the sandbox rules still apply on top.
 - **Memory provenance (relay threads, Discord, Buzz or Slack):** `memory_provenance.go`.
   `prepareChatContext` records `chatContext.memoryProvenance` (`memoryProvenanceForChat`: external for any chat bound to a Discord channel, sandboxed or not, `datastore.IsExternalRelayChat`; a failed lookup in a sandboxed chat reads as external) and the trigger message id.
   `create_memory` writes with `createMemoryOrigin` (the Discord author of the message being answered, read when the tool runs; the tool's `speaker` argument overrides it).
