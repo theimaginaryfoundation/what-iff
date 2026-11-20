@@ -126,6 +126,9 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   `chat_messages`, `chats` and `memories` therefore also carry a single-column index on their parent FK (`index.Edges(...)` alone); add one wherever queries filter by an edge without its leading field.
 - **Context X-ray column:** `chat_message.context_breakdown` is a typed **`jsonb`** column (`field.JSON` over `*models.ContextBreakdown`); ent handles (un)marshalling, so `toChatMessageModel` just surfaces it (guarding empty snapshots) and `SetChatMessageContextBreakdown` sets the pointer (assistant rows only; best-effort).
   It is a scalar column rather than a `ChatMessageContextItem` row on purpose — context items are re-fed into the model context, and this snapshot must not be.
+- **Memory-save flag:** `chat_message.exclude_from_memory` (nullable bool) marks the messages of a turn sent with memory saving off (`models.TurnOptions.MemorySave`).
+  `CreateChatMessage` writes it only when true, so every ordinary message keeps NULL, and `toChatMessageModel` reads NULL as false.
+  The hand-written SQLite test schemas list it, or get it from `ensureChatMessageBookmarkedTestColumn`.
   It's a value object (write-once, read-with-parent, never queried by field), so no child table; `jsonb` (not text) keeps DB-side JSON queries open and the embedded `version` guards shape evolution.
 - **DB metric semantics:** one sample per logical ent call as the caller sees it (scanning included).
   Eager-loaded edges are folded into their parent query, and a `CreateBulk` is one `create` sample: ent re-enters every builder's hooks with the caller's own context, so nested creates on the same context are skipped (two concurrent creates sharing one context can fold into one sample, a deliberate undercount).

@@ -85,6 +85,10 @@ func (ChatMessage) Fields() []ent.Field {
 		field.Bool("bookmarked").
 			Default(false).
 			Comment("User-flagged bookmark for navigating long threads; either origin can be bookmarked."),
+		field.Bool("exclude_from_memory").
+			Optional().
+			Nillable().
+			Comment("Set to true on both messages of a turn sent with memory saving off (models.TurnOptions.MemorySave): a checkpoint whose conversation includes a flagged message extracts no memories from it. NULL on every ordinary message. A column, not turn state in memory, because extraction runs at a later checkpoint, possibly in another process."),
 	}
 }
 

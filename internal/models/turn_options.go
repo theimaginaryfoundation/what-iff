@@ -24,6 +24,16 @@ type TurnOptions struct {
 	// MaxOutputTokens replaces the output cap the turn's provider requests would otherwise carry,
 	// as-is, in the same request field. Zero keeps the usual cap.
 	MaxOutputTokens int
+	// MemoryRecall false turns memory recall off for this turn: no memories are retrieved for it
+	// (and the memory-query model call is skipped), and memories earlier turns recalled are not
+	// replayed into its context. The first message's user-name line stays: it is identity, not
+	// memory. Nil (or true) recalls as usual.
+	MemoryRecall *bool
+	// MemorySave false keeps this turn out of long-term memory: its messages are flagged
+	// (ChatMessage.ExcludeFromMemory), no checkpoint extracts memories from a conversation that
+	// includes them, and the create_memory tool is not offered on the turn. The scratchpad and the
+	// checkpoint summary are unaffected. Nil (or true) saves as usual.
+	MemorySave *bool
 }
 
 // TurnPreContext returns o.PreContext, or "" for nil options.
@@ -56,4 +66,14 @@ func (o *TurnOptions) TurnMaxOutputTokens() int {
 		return 0
 	}
 	return o.MaxOutputTokens
+}
+
+// RecallsMemory reports whether the turn recalls memories: true unless MemoryRecall is set to false.
+func (o *TurnOptions) RecallsMemory() bool {
+	return o == nil || o.MemoryRecall == nil || *o.MemoryRecall
+}
+
+// SavesMemory reports whether the turn may become memories: true unless MemorySave is set to false.
+func (o *TurnOptions) SavesMemory() bool {
+	return o == nil || o.MemorySave == nil || *o.MemorySave
 }

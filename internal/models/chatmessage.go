@@ -65,7 +65,12 @@ type ChatMessage struct {
 	Steer bool `json:"-"`
 	// TurnOptions is request-only too, and never stored: per-turn settings for the turn this
 	// message starts (see TurnOptions). Nil on every ordinary message.
-	TurnOptions           *TurnOptions      `json:"-"`
+	TurnOptions *TurnOptions `json:"-"`
+	// ExcludeFromMemory is set (stored, never in the API) on both messages of a turn sent with
+	// memory saving off (TurnOptions.MemorySave false): a checkpoint whose conversation includes a
+	// flagged message extracts no memories. A partial reply saved when such a turn is stopped or
+	// fails is not flagged; its user message is. False on every ordinary message.
+	ExcludeFromMemory     bool              `json:"-"`
 	ID                    uuid.UUID         `json:"id"`
 	ChatID                uuid.UUID         `json:"chat_id"`
 	Message               string            `json:"message"`

@@ -236,20 +236,29 @@ func initialTurnContextLines(username string, hasUserMessages bool, sandboxed bo
 	return []string{}
 }
 
-// getMemories prefetches the memories relevant to userMessage for one turn. A sandboxed chat gets
-// only the memories created in it (scoped in the retrieval SQL) and no user-name line.
-func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, error) {
+// turnUserNameLines are the lines a turn's memory context starts with (initialTurnContextLines):
+// the user-name line on a chat's first message, else none.
+func (a *Agent) turnUserNameLines(ctx context.Context, userID, chatID uuid.UUID, sandboxed bool) ([]string, error) {
 	chatUser, err := a.ds.GetUserByID(ctx, userID)
 	if err != nil {
 		a.logger.Error("failed to get chat user", zap.Error(err))
-		return nil, nil, err
+		return nil, err
 	}
 	hasUserMessages, err := a.ds.ChatHasMessages(ctx, userID, chatID, models.MessageOriginFilterUser)
 	if err != nil {
 		a.logger.Error("failed to check for user messages", zap.Error(err))
+		return nil, err
+	}
+	return initialTurnContextLines(chatUser.Username, hasUserMessages, sandboxed), nil
+}
+
+// getMemories prefetches the memories relevant to userMessage for one turn. A sandboxed chat gets
+// only the memories created in it (scoped in the retrieval SQL) and no user-name line.
+func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, error) {
+	memories, err := a.turnUserNameLines(ctx, userID, chatID, sandboxed)
+	if err != nil {
 		return nil, nil, err
 	}
-	memories := initialTurnContextLines(chatUser.Username, hasUserMessages, sandboxed)
 	liveMemories := []*models.Memory{}
 	prompt := MemoryQueryPrompt
 	memoryQuery, err := a.getMemoryQuery(ctx, userID, prompt, userMessage)

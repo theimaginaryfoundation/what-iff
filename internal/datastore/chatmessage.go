@@ -64,6 +64,7 @@ func toChatMessageModel(e *ent.ChatMessage) *models.ChatMessage {
 		SentAt:                e.SentAt,
 		Tokens:                e.Tokens,
 		Bookmarked:            e.Bookmarked,
+		ExcludeFromMemory:     e.ExcludeFromMemory != nil && *e.ExcludeFromMemory,
 	}
 
 	if e.Edges.GenerationMood != nil {
@@ -339,6 +340,10 @@ func (d *Datastore) CreateChatMessage(ctx context.Context, userID uuid.UUID, cha
 	}
 	if chatMessage.JobRun != nil {
 		create.SetJobRun(chatMessage.JobRun)
+	}
+	if chatMessage.ExcludeFromMemory {
+		// Only ever set, never stored false: NULL is every ordinary message.
+		create.SetExcludeFromMemory(true)
 	}
 	if len(chatMessage.CommentRefs) > 0 {
 		create.SetCommentRefs(chatMessage.CommentRefs)

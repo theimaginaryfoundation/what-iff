@@ -28,20 +28,26 @@ func ensureChatMessageBookmarkedTestColumn(t *testing.T, db *sql.DB) {
 	require.NoError(t, err)
 	defer rows.Close()
 
+	// Columns added after the hand-written test schemas were, and the DDL that adds each.
+	missing := map[string]string{
+		"bookmarked":          `ALTER TABLE chat_messages ADD COLUMN bookmarked bool NOT NULL DEFAULT false`,
+		"exclude_from_memory": `ALTER TABLE chat_messages ADD COLUMN exclude_from_memory bool`,
+	}
 	for rows.Next() {
 		var cid int
 		var name, columnType string
 		var notNull, pk int
 		var defaultValue any
 		require.NoError(t, rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk))
-		if name == "bookmarked" {
-			return
-		}
+		delete(missing, name)
 	}
 	require.NoError(t, rows.Err())
+	require.NoError(t, rows.Close())
 
-	_, err = db.Exec(`ALTER TABLE chat_messages ADD COLUMN bookmarked bool NOT NULL DEFAULT false`)
-	require.NoError(t, err)
+	for _, ddl := range missing {
+		_, err = db.Exec(ddl)
+		require.NoError(t, err)
+	}
 }
 
 // newTestDatastore opens an in-memory sqlite DB, applies the given schema-creation funcs in

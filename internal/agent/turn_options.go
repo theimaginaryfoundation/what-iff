@@ -36,6 +36,8 @@ func (a *Agent) prepareUserTurnContext(ctx context.Context, userID uuid.UUID, ch
 		runChatOnModel(chatCtx.chat, model)
 	}
 	chatCtx.turnOptions = opts
+	// A retry runs without the options, but its message's flag still keeps it out of memory.
+	chatCtx.memorySaveOff = !opts.SavesMemory() || chatMessage.ExcludeFromMemory
 	return chatCtx, nil
 }
 

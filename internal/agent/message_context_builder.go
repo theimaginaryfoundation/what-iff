@@ -91,18 +91,39 @@ type messageContextBuildRequest struct {
 	// (every ordinary turn) adds nothing.
 	PreContext  string
 	PostContext string
+	// WithoutMemoryRecall leaves out the memories earlier turns recalled and stored on their
+	// messages (models.TurnOptions.MemoryRecall false); the caller passes none of its own. False
+	// (every ordinary turn) replays them as usual.
+	WithoutMemoryRecall bool
+}
+
+// builtTurn is what building a turn's context found out besides the context itself.
+type builtTurn struct {
+	// replaysExcludedTurn: the replayed conversation (carry-over and history) includes a message
+	// flagged ExcludeFromMemory (turn_memory.go).
+	replaysExcludedTurn bool
 }
 
 func (b *messageContextBuilder) build(ctx context.Context, req messageContextBuildRequest) (*provider.ModelContext, error) {
+	modelCtx, _, err := b.buildTurn(ctx, req)
+	return modelCtx, err
+}
+
+// buildTurn is build, also reporting what it found out about the replayed conversation.
+func (b *messageContextBuilder) buildTurn(ctx context.Context, req messageContextBuildRequest) (*provider.ModelContext, builtTurn, error) {
 	var excludeID *uuid.UUID
 	if req.CurrentMessage != nil {
 		excludeID = &req.CurrentMessage.ID
 	}
 	modelCtx, carryOver, history, err := b.buildHistoryContext(ctx, req.UserID, req.Chat, excludeID, req.LoadHistoryImageBytes, req.PreContext)
 	if err != nil {
-		return nil, err
+		return nil, builtTurn{}, err
 	}
+	built := builtTurn{replaysExcludedTurn: replaysExcludedTurn(carryOver, history)}
 	keepPersisted := b.persistedMemoryFilter(ctx, req.UserID, req.Chat, persistedAdditionalContext(carryOver, history, req.CurrentMessage)...)
+	if req.WithoutMemoryRecall {
+		keepPersisted = withoutRecalledMemories(keepPersisted)
+	}
 	appendMergedAdditionalContext(modelCtx, mergeAdditionalContextItems(carryOver, history, req.CurrentMessage, req.Memories, req.UserNameLine, req.LiveMemories, keepPersisted))
 	if req.IncludeAttachmentContext && len(req.Attachments) > 0 {
 		if hint := b.buildFullAttachmentContext(ctx, req.UserID, req.Chat.ID, req.Attachments); hint != "" {
@@ -125,7 +146,7 @@ func (b *messageContextBuilder) build(ctx context.Context, req messageContextBui
 		modelCtx.Append(provider.SegmentKindPostContext, provider.RoleDeveloper, req.PostContext, false)
 	}
 	modelCtx.AppendUserMessage(provider.RoleUser, req.UserPrompt, userMessageImagesFromAttachments(req.Attachments, req.ImageBytes), false)
-	return modelCtx, nil
+	return modelCtx, built, nil
 }
 
 // userMessageImagesFromAttachments collects the image payloads for vision-capable providers:

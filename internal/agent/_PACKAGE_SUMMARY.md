@@ -200,6 +200,13 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   The `applyTurnOutputCap*` helpers put the cap, as-is, in each request's cap field after any reasoning effort raised it, on every request the turn builds (Advanced rebuilds too).
   `runUserChatPostInferencePhases` hands the expression pick and the checkpoint `ModelContext.WithoutTurnContext()`, so the caller's context never reaches a stored scratchpad, memory or summary.
   Nil options (every ordinary turn) change nothing; `turn_options_test.go` pins that.
+- **Per-turn memory switches** (`turn_memory.go`, `TurnOptions.MemoryRecall` / `MemorySave`; nil or true is the usual behaviour).
+  Recall off: `loadTurnMemoriesFor` skips retrieval (no memory-query model call, no embedding, no lookup, no "Load Memory" row) and keeps only the first message's user-name line, which is identity, not memory.
+  The build request's `WithoutMemoryRecall` also drops the memories earlier turns stored on their messages (`withoutRecalledMemories`); the user-name line and other replayed context stay.
+  Save off: `HandleUserMessage` stores `ChatMessage.ExcludeFromMemory` on the user message and `saveAgentResponse` on the reply (a retry, which runs without options, still honours the stored flag), and `buildTurnToolPolicy` drops `create_memory`.
+  Memory extraction runs at a checkpoint over the conversation since the last one (plus carry-over), so it cannot leave one turn out: `buildTurn` reports a flagged message in the replayed conversation, and a checkpoint whose turn is flagged or replayed one skips extraction (`checkpointMayExtractMemories`).
+  The scratchpad, the checkpoint summary and `find_context` are unaffected; the summary can still retell a save-off turn, which is the design's choice (they are load-bearing for long chats).
+  `turn_memory_test.go` pins defaults, recall off, save off and the checkpoint.
 - **`HandleAgentJobPrompt`** (`agentjob_run.go`) applies model/personality overrides only in-memory on `chatContext`; `UpdateChat` receives a copy with the **persisted** chat `ModelID` / `PersonalityID` so scheduled-job overrides never overwrite the chat row.
   `handleEphemeralPrompt` runs on the context its caller passes: the async `agent_job_run` worker passes its cancellable run context, so cancelling that job stops the turn, while the sync entry points (`HandleAgentJobPrompt`, `HandleEphemeralPromptSync`) detach first (`detachedUserContext`) and run to completion.
 - **Reply hooks** (`reply_hook.go`): once a reply is saved and its job is `complete`, `runUserChatPostInferencePhases` and `handleEphemeralPrompt` call `fireReplyHook`, which hands pointers to any hooks registered in `internal/replyhook`.

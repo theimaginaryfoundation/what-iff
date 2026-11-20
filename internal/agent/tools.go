@@ -180,6 +180,8 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 	if !chatCtx.skillUnloadOffered() {
 		disabledTools[agenttools.UnloadSkillToolSpec.Name] = true
 	}
+	// A turn kept out of memory is not offered create_memory either (models.TurnOptions.MemorySave).
+	disableMemoryWriteTools(chatCtx, disabledTools)
 	policy := turnToolPolicy{
 		toolsEnabled:  chatCtx.chat.ToolsEnabled,
 		disabledTools: disabledTools,
