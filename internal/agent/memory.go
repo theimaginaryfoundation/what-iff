@@ -220,7 +220,7 @@ func (a *Agent) recognizeUserNameLine(ctx context.Context, userID uuid.UUID, mem
 	if err != nil || user == nil {
 		return ""
 	}
-	if line := userNameContextLine(user.Username); memories[0] == line {
+	if line := userNameContextLine(a.contextUserName(ctx, user)); memories[0] == line {
 		return line
 	}
 	return ""
@@ -249,7 +249,7 @@ func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.U
 		a.logger.Error("failed to check for user messages", zap.Error(err))
 		return nil, nil, err
 	}
-	memories := initialTurnContextLines(chatUser.Username, hasUserMessages, sandboxed)
+	memories := initialTurnContextLines(a.contextUserName(ctx, chatUser), hasUserMessages, sandboxed)
 	liveMemories := []*models.Memory{}
 	prompt := MemoryQueryPrompt
 	memoryQuery, err := a.getMemoryQuery(ctx, userID, prompt, userMessage)
