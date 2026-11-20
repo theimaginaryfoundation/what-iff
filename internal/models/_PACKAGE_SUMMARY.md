@@ -33,6 +33,8 @@
   Nil on every ordinary message; the nil-safe accessors (`TurnPreContext` and the rest) let callers read it without a check.
   `MemoryRecall` / `MemorySave` (`*bool`, nil = usual) switch memory recall and saving off for one turn; `RecallsMemory` / `SavesMemory` read them.
   `ChatMessage.ExcludeFromMemory` is the one stored trace of a turn: set on both messages of a save-off turn (`chat_message.exclude_from_memory`, nullable), never in the API (`json:"-"`).
+- **Superseded messages:** `ChatMessage.SupersededAt` / `SupersededBy` (`json:"-"`) mark a message taken back and the reply that replaced it (agent `SupersedeTurn` / `RegenerateTurn`).
+  `ChatMessageFilters.IncludeSuperseded` (`json:"-"`) lists them too; off by default, so they are hidden wherever messages are listed.
 - **Error envelope (`error.go`):** `ErrorResponse` plus the error-code registry — `ErrCode*` constants and `GenericErrorCode(status)`.
   This is the single source of truth for the taxonomy; the `ErrorCode` enum in `openapi.yaml` mirrors it and must be updated alongside.
   Adding a provider connection that fails answers with `provider_unreachable`, `provider_key_rejected`, `provider_incompatible` or `provider_unavailable`, `custom_address_not_allowed` when the deployment does not let accounts choose an address, `provider_connection_exists` for a second connection to a built-in provider, and `default_model_in_use` when a change would take away the account's default model (ADR 0x027).

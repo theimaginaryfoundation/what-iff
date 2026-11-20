@@ -32,6 +32,8 @@ func ensureChatMessageBookmarkedTestColumn(t *testing.T, db *sql.DB) {
 	missing := map[string]string{
 		"bookmarked":          `ALTER TABLE chat_messages ADD COLUMN bookmarked bool NOT NULL DEFAULT false`,
 		"exclude_from_memory": `ALTER TABLE chat_messages ADD COLUMN exclude_from_memory bool`,
+		"superseded_at":       `ALTER TABLE chat_messages ADD COLUMN superseded_at datetime`,
+		"superseded_by":       `ALTER TABLE chat_messages ADD COLUMN superseded_by uuid`,
 	}
 	for rows.Next() {
 		var cid int

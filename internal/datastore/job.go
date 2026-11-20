@@ -657,6 +657,9 @@ func (d *Datastore) finalizeChatJobWithPartial(
 	// partial here.
 	if entJob.Status == terminalStatus {
 		resultID, iErr := d.finalizeTerminalPartialIdempotentTx(ctx, tx, entJob, chatID, generationModel, generationPersonality, generationMoodID)
+		if iErr == nil {
+			iErr = settlePartialReplyTx(ctx, tx, userID, chatID, entJob, resultID)
+		}
 		if iErr != nil {
 			d.rollbackTx(tx)
 			return nil, nil, iErr
@@ -686,6 +689,9 @@ func (d *Datastore) finalizeChatJobWithPartial(
 			ctx, tx, chatID, partialText, partialReasoning, generationModel, generationPersonality, generationMoodID,
 		)
 	}
+	if err == nil {
+		err = settlePartialReplyTx(ctx, tx, userID, chatID, entJob, resultID)
+	}
 	if err != nil {
 		d.rollbackTx(tx)
 		return nil, nil, err
@@ -710,6 +716,20 @@ func (d *Datastore) finalizeChatJobWithPartial(
 
 	d.recordJobStatusChange(ctx, entJob.JobType, entJob.CreatedAt, entJob.Status, terminalStatus)
 	return toJobModel(updatedJob), resultID, nil
+}
+
+// settlePartialReplyTx is SettleTurnReply for the partial reply a stopped or failed chat_message
+// job saved: a turn taken back while it ran (agent.SupersedeTurn stops it first) leaves no live
+// partial behind. Other jobs, and a job that saved nothing, are left alone.
+func settlePartialReplyTx(ctx context.Context, tx *ent.Tx, userID, chatID uuid.UUID, entJob *ent.Job, resultID *uuid.UUID) error {
+	if resultID == nil || entJob.JobType != "chat_message" {
+		return nil
+	}
+	userMessageID, err := uuid.Parse(entJob.Reference)
+	if err != nil {
+		return nil
+	}
+	return settleTurnReply(ctx, tx.ChatMessage, userID, chatID, userMessageID, *resultID, time.Now())
 }
 
 func (d *Datastore) ensureOwnedChatExistsTx(ctx context.Context, tx *ent.Tx, userID, chatID uuid.UUID) error {

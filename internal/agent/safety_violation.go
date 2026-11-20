@@ -55,6 +55,7 @@ func (a *Agent) handleSafetyViolation(ctx context.Context, userID uuid.UUID, cha
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to save safety violation assistant response: %w", err)
 	}
+	a.settleTurnReply(ctx, userID, chatMessage, agentMessage.ID)
 
 	return agentMessage, result, nil
 }

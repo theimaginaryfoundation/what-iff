@@ -1193,6 +1193,8 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 			comment_refs json,
 			bookmarked boolean NOT NULL DEFAULT false,
 			exclude_from_memory boolean,
+			superseded_at datetime,
+			superseded_by uuid,
 			chat_messages uuid NOT NULL,
 			chat_message_generation_mood uuid,
 			chat_message_generation_expression uuid

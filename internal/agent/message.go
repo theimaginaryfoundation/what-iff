@@ -819,16 +819,10 @@ func (a *Agent) recoverAsyncMessageJob(runCtx context.Context, userID, jobID, ch
 // RetryUserChatMessage enqueues another chat_message job for an existing user turn.
 // When a non-terminal job already exists for that message, returns its job id without creating a duplicate.
 func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid.UUID) (*models.ChatMessageResponse, error) {
-	// Detach from request cancellation before enqueue + background execution. User id and timezone
-	// are copied into a fresh Background context (see middleware.CopyUserToIDContext), and so is
-	// the turn source, as in HandleUserMessage.
-	turnSource := metering.TurnSourceFromContext(ctx)
-	detachedCtx, ok := middleware.CopyUserToIDContext(ctx, context.Background())
-	if !ok {
-		return nil, errors.New("user ID not found in context")
+	detachedCtx, userID, err := detachTurnContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-	detachedCtx = metering.WithTurnSource(detachedCtx, turnSource)
-	userID, _ := middleware.GetUserIDFromContext(detachedCtx)
 
 	msg, err := a.ds.GetChatMessage(detachedCtx, userID, messageID)
 	if err != nil {
@@ -839,6 +833,11 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 	}
 	if msg.Origin != models.MessageOriginUser {
 		return nil, ErrRetryNotUserOrigin
+	}
+	if msg.SupersededAt != nil {
+		// Taken back (SupersedeTurn): hidden like a message that is not there, and its reply
+		// would be superseded as it was saved.
+		return nil, datastore.ErrChatMessageNotFound
 	}
 
 	active, err := a.ds.FindLatestActiveChatMessageJob(detachedCtx, userID, messageID)
@@ -853,13 +852,34 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 		}, nil
 	}
 
-	if err := a.ds.SetChatMessageLastError(detachedCtx, userID, messageID, nil, ""); err != nil {
-		a.logger.Warn("failed to clear last_error_message before retry", zap.Error(err))
+	return a.rerunUserMessage(detachedCtx, userID, msg, "retry")
+}
+
+// detachTurnContext detaches a turn started from a request from the request's cancellation: the
+// user id and timezone are copied into a fresh Background context (see
+// middleware.CopyUserToIDContext), and so is the turn source, as in HandleUserMessage.
+func detachTurnContext(ctx context.Context) (context.Context, uuid.UUID, error) {
+	turnSource := metering.TurnSourceFromContext(ctx)
+	detachedCtx, ok := middleware.CopyUserToIDContext(ctx, context.Background())
+	if !ok {
+		return nil, uuid.Nil, errors.New("user ID not found in context")
+	}
+	detachedCtx = metering.WithTurnSource(detachedCtx, turnSource)
+	userID, _ := middleware.GetUserIDFromContext(detachedCtx)
+	return detachedCtx, userID, nil
+}
+
+// rerunUserMessage starts another chat_message job answering the saved user message msg (a retry,
+// or a regenerate with msg.TurnOptions set), on detachedCtx (detachTurnContext). action names the
+// path in the job's logs.
+func (a *Agent) rerunUserMessage(detachedCtx context.Context, userID uuid.UUID, msg *models.ChatMessage, action string) (*models.ChatMessageResponse, error) {
+	if err := a.ds.SetChatMessageLastError(detachedCtx, userID, msg.ID, nil, ""); err != nil {
+		a.logger.Warn("failed to clear last_error_message before "+action, zap.Error(err))
 	}
 
 	newJob, err := a.ds.CreateJob(detachedCtx, userID, models.Job{
 		JobType:     JobTypeChatMessage,
-		Reference:   messageID.String(),
+		Reference:   msg.ID.String(),
 		Status:      models.JobStatusPending,
 		DraftDeltas: []string{},
 	})
@@ -869,13 +889,16 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 
 	runCtx, cancel := context.WithCancel(detachedCtx)
 	a.registerRunningJobCancel(newJob.ID, userID, cancel)
-	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, msg.ID, "retry", func() error {
+	// Like a new send, the run stops when it is cancelled from another API instance (a Stop, or
+	// the turn taken back there: SupersedeTurn).
+	go a.watchChatJobCancel(runCtx, userID, newJob.ID, cancel)
+	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, msg.ID, action, func() error {
 		_, err := a.handleUserMessage(runCtx, newJob, msg)
 		return err
 	})
 
 	return &models.ChatMessageResponse{
-		ID:    messageID,
+		ID:    msg.ID,
 		JobID: newJob.ID.String(),
 		Type:  JobTypeChatMessage,
 	}, nil
@@ -1409,6 +1432,7 @@ func (a *Agent) finishGeneration(ctx context.Context, userID uuid.UUID, chatMess
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to save %s agent response: %w", opts.provider, err)
 	}
+	a.settleTurnReply(ctx, userID, chatMessage, agentMessage.ID)
 
 	if opts.afterSave != nil {
 		opts.afterSave(ctx, agentMessage)
@@ -1759,6 +1783,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to save local model agent response: %w", err)
 	}
+	a.settleTurnReply(ctx, userID, chatMessage, agentMessage.ID)
 
 	return agentMessage, result, nil
 }

@@ -129,6 +129,12 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Memory-save flag:** `chat_message.exclude_from_memory` (nullable bool) marks the messages of a turn sent with memory saving off (`models.TurnOptions.MemorySave`).
   `CreateChatMessage` writes it only when true, so every ordinary message keeps NULL, and `toChatMessageModel` reads NULL as false.
   The hand-written SQLite test schemas list it, or get it from `ensureChatMessageBookmarkedTestColumn`.
+- **Superseded messages** (`chatmessage_supersede.go`): `chat_message.superseded_at` (nullable time) marks a message taken back, `superseded_by` (nullable uuid) the reply that replaced it on a regenerate.
+  Every chat-message read filters `superseded_at IS NULL`: `listChatMessages` (unless `ChatMessageFilters.IncludeSuperseded`, which nothing sets yet), the counts behind `ChatHasMessages` / `GetChatMessageCount`, `FirstChatMessageSentAtSince`, the unread counts, `GetLatestMessagesForChats`, the rehydration transcript, the chat/account/SFT exports and the checkpoint's tool-call reads.
+  `GetChatMessage` by id still returns a superseded message.
+  `SupersedeTurn` acts on the latest turn only (`ErrTurnNotLatest`); a turn's replies are the assistant messages after its user message, except a scheduled run's (`job_run` set).
+  It also clears `chat.response_id`, and sweeps once more after commit for a reply saved concurrently; `SettleTurnReply` (and `finalizeChatJobWithPartial`) supersede a reply saved after its turn was taken back, and link `superseded_by` from the replies a regenerate replaced, found through the turn's earlier jobs' `result_id`.
+  The hand-written SQLite test schemas get both columns from `ensureChatMessageBookmarkedTestColumn` or list them.
   It's a value object (write-once, read-with-parent, never queried by field), so no child table; `jsonb` (not text) keeps DB-side JSON queries open and the embedded `version` guards shape evolution.
 - **DB metric semantics:** one sample per logical ent call as the caller sees it (scanning included).
   Eager-loaded edges are folded into their parent query, and a `CreateBulk` is one `create` sample: ent re-enters every builder's hooks with the caller's own context, so nested creates on the same context are skipped (two concurrent creates sharing one context can fold into one sample, a deliberate undercount).

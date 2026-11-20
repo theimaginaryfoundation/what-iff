@@ -38,6 +38,8 @@ func newAccountExportTestDatastore(t *testing.T) *Datastore {
 			read_status text NOT NULL,
 			bookmarked boolean NOT NULL DEFAULT 0,
 			exclude_from_memory boolean,
+			superseded_at datetime,
+			superseded_by uuid,
 			response_id text,
 			sent_at datetime NOT NULL,
 			tokens integer,
