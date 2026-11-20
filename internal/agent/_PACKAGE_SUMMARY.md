@@ -197,6 +197,13 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   Read back by the frontend "Context" panel tab.
   Estimates are cl100k text-token estimates, exclude image-token usage, and are not billed usage.
   It is deliberately **not** stored as a `ChatMessageContextItem` — `appendMergedAdditionalContext` re-injects every non-MEMORY item type back into the model context, which would feed the breakdown JSON back to the model; a dedicated `chat_message.context_breakdown` column avoids that.
+- **Per-turn options** (`turn_options.go`, `models.TurnOptions`): an extension that starts a user turn with `ChatMessage.TurnOptions` set gets pre/post context, a one-turn model and an output cap for that turn only.
+  `HandleUserMessage` carries the options to the job's goroutine in memory; nothing stores them (not the message, chat or job), and a retry of the message runs without them.
+  `prepareUserTurnContext` runs the turn on the named model the way an agent job's model override does (`runChatOnModel`: the run's copy of the chat only).
+  `messageContextBuilder.build` puts `pre_context` at the end of the system material (after the summary and scratchpad, cacheable) and `post_context` after the per-turn tail, immediately before the user message.
+  The `applyTurnOutputCap*` helpers put the cap, as-is, in each request's cap field after any reasoning effort raised it, on every request the turn builds (Advanced rebuilds too).
+  `runUserChatPostInferencePhases` hands the expression pick and the checkpoint `ModelContext.WithoutTurnContext()`, so the caller's context never reaches a stored scratchpad, memory or summary.
+  Nil options (every ordinary turn) change nothing; `turn_options_test.go` pins that.
 - **`HandleAgentJobPrompt`** (`agentjob_run.go`) applies model/personality overrides only in-memory on `chatContext`; `UpdateChat` receives a copy with the **persisted** chat `ModelID` / `PersonalityID` so scheduled-job overrides never overwrite the chat row.
   `handleEphemeralPrompt` runs on the context its caller passes: the async `agent_job_run` worker passes its cancellable run context, so cancelling that job stops the turn, while the sync entry points (`HandleAgentJobPrompt`, `HandleEphemeralPromptSync`) detach first (`detachedUserContext`) and run to completion.
 - **Reply hooks** (`reply_hook.go`): once a reply is saved and its job is `complete`, `runUserChatPostInferencePhases` and `handleEphemeralPrompt` call `fireReplyHook`, which hands pointers to any hooks registered in `internal/replyhook`.

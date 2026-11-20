@@ -86,6 +86,11 @@ type messageContextBuildRequest struct {
 	// vision (set for every vision-capable model): the thumbnails of the most recent
 	// maxHistoryImages of them.
 	LoadHistoryImageBytes bool
+	// PreContext and PostContext are this turn's caller-supplied context (models.TurnOptions):
+	// pre at the end of the system material, post immediately before the user message. Empty
+	// (every ordinary turn) adds nothing.
+	PreContext  string
+	PostContext string
 }
 
 func (b *messageContextBuilder) build(ctx context.Context, req messageContextBuildRequest) (*provider.ModelContext, error) {
@@ -93,7 +98,7 @@ func (b *messageContextBuilder) build(ctx context.Context, req messageContextBui
 	if req.CurrentMessage != nil {
 		excludeID = &req.CurrentMessage.ID
 	}
-	modelCtx, carryOver, history, err := b.buildHistoryContext(ctx, req.UserID, req.Chat, excludeID, req.LoadHistoryImageBytes)
+	modelCtx, carryOver, history, err := b.buildHistoryContext(ctx, req.UserID, req.Chat, excludeID, req.LoadHistoryImageBytes, req.PreContext)
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +119,10 @@ func (b *messageContextBuilder) build(ctx context.Context, req messageContextBui
 	}
 	if extra := strings.TrimSpace(req.AdditionalDeveloperContext); extra != "" {
 		modelCtx.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, extra, false)
+	}
+	if strings.TrimSpace(req.PostContext) != "" {
+		// Last before the user message; InsertBeforeLastUserMessage keeps it there.
+		modelCtx.Append(provider.SegmentKindPostContext, provider.RoleDeveloper, req.PostContext, false)
 	}
 	modelCtx.AppendUserMessage(provider.RoleUser, req.UserPrompt, userMessageImagesFromAttachments(req.Attachments, req.ImageBytes), false)
 	return modelCtx, nil
@@ -266,7 +275,10 @@ func (b *messageContextBuilder) selectCarryOverTurns(
 	return b.tokenCounter.SelectCarryOverTurns(recent, maxTurns, maxTokens), nil
 }
 
-func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID uuid.UUID, chat *models.Chat, excludeMessageID *uuid.UUID, loadHistoryImageBytes bool) (
+// buildHistoryContext starts the turn's context: the system material (base and personality
+// prompt, checkpoint summary, scratchpad, then the turn's preContext, all cacheable) and the
+// history after it. preContext is "" on every ordinary turn.
+func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID uuid.UUID, chat *models.Chat, excludeMessageID *uuid.UUID, loadHistoryImageBytes bool, preContext string) (
 	modelCtx *provider.ModelContext,
 	carryOver [][2]*models.ChatMessage,
 	history []*models.ChatMessage,
@@ -281,6 +293,9 @@ func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID 
 	}
 	if chat.Scratchpad != "" && !chat.IsSandboxed() {
 		modelCtx.Append(provider.SegmentKindScratchpad, provider.RoleDeveloper, chat.Scratchpad, true)
+	}
+	if strings.TrimSpace(preContext) != "" {
+		modelCtx.Append(provider.SegmentKindPreContext, provider.RoleDeveloper, preContext, true)
 	}
 
 	budget := resolveContextBudget(chat)

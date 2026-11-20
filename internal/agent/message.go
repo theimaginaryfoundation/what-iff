@@ -701,6 +701,8 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		IncludeAttachmentContext:   chatCtx.chat.ToolsEnabled,
 		AdditionalDeveloperContext: additionalDevContext,
 		LoadHistoryImageBytes:      chatCtx.modelVisionSupport,
+		PreContext:                 chatCtx.turnOptions.TurnPreContext(),
+		PostContext:                chatCtx.turnOptions.TurnPostContext(),
 	})
 }
 
@@ -736,6 +738,8 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 	if err != nil {
 		return nil, fmt.Errorf("failed to create chat message: %w", err)
 	}
+	// Request-only, never stored: carried to the turn in memory (nil on an ordinary send).
+	chatMessage.TurnOptions = request.TurnOptions
 
 	// Create a job for asynchronous processing
 	newJob, err := a.ds.CreateJob(ctx, userID, models.Job{
@@ -1021,6 +1025,9 @@ type chatContext struct {
 	// so a later call can use them as reference images (ADR 0x047). See rememberTurnImages.
 	turnImagesMu sync.Mutex
 	turnImages   []*models.FileAttachment
+	// turnOptions are the caller's per-turn settings (pre/post context, output cap; see
+	// models.TurnOptions and turn_options.go). Nil on every ordinary turn.
+	turnOptions *models.TurnOptions
 }
 
 func (c *chatContext) setMCPServerCache(servers []*models.MCPServer, loadedByServer map[uuid.UUID][]string) {
@@ -1083,8 +1090,8 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	// window rather than the full (possibly huge) history. No-op for native/ready threads.
 	a.WaitForThreadRehydration(ctx, chatJob.UserID, chatMessage.ChatID)
 
-	// Prepare chat context (chat, memories, model)
-	chatCtx, err := a.prepareChatContext(ctx, chatJob.UserID, chatMessage, a.newMemoryLoadProgress(chatJob))
+	// Prepare chat context (chat, memories, model). A turn whose options name a model runs on it.
+	chatCtx, err := a.prepareUserTurnContext(ctx, chatJob.UserID, chatMessage, a.newMemoryLoadProgress(chatJob))
 	if err != nil {
 		a.logger.Error("failed to prepare chat context", zap.Error(err))
 		a.setJobStatusFailed(ctx, chatJob, err)
@@ -1210,6 +1217,10 @@ func (a *Agent) runUserChatPostInferencePhases(
 		)
 		return
 	}
+
+	// The caller's per-turn context applied to this turn's reply only: the expression pick and
+	// the checkpoint (scratchpad, memories, summary) never see it, so none of it gets stored.
+	modelContext = modelContext.WithoutTurnContext()
 
 	if err := a.applyExpressionPhase(ctx, chatJob.UserID, chatJob, chatCtx, modelContext, chatMessage.Message, agentMessage); err != nil {
 		a.logger.Error("expression phase failed", zap.Error(err))
@@ -1545,6 +1556,7 @@ func (a *Agent) generateAssistantForMessageOpenAI(ctx context.Context, userID uu
 		params := a.openAIResponseParamsForChat(ctx, chatCtx, userID, chatMessage, mc)
 		// A selected reasoning effort (ADR 0x026); none leaves the request as it was.
 		provider.ApplyOpenAIReasoning(&params, chatCtx.reasoningEffort)
+		applyTurnOutputCapResponses(&params, chatCtx)
 		adapter = provider.NewOpenAIAdapter(a.OpenAIProvider, params)
 		built = append(built, adapter)
 		return adapter, nil
@@ -1627,6 +1639,7 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 			// The turn streams, so high effort can have the larger cap a non-streamed call cannot.
 			provider.RaiseClaudeStreamingOutputCap(&claudeParams, chatCtx.reasoningEffort)
 		}
+		applyTurnOutputCapClaude(&claudeParams, chatCtx)
 
 		policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
 		specs := a.turnFunctionToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy)
@@ -1674,6 +1687,7 @@ func (a *Agent) generateAssistantForMessageGemini(ctx context.Context, userID uu
 	build := func(mc *provider.ModelContext) (provider.AgentAdapter, error) {
 		geminiParams := visionRenderContext(chatCtx, mc).BuildGeminiParams(chatCtx.model)
 		provider.ApplyGeminiReasoning(&geminiParams, chatCtx.reasoningEffort)
+		applyTurnOutputCapChat(&geminiParams, chatCtx)
 
 		policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
 		specs := a.turnFunctionToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy)
@@ -1711,6 +1725,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	renderCtx := modelContext.Clone()
 	renderCtx.PrepareForTextOnly()
 	params := renderCtx.BuildOpenAIChatCompletionParams(a.localLLMModel)
+	applyTurnOutputCapChat(&params, chatCtx)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
 	specs := a.turnFunctionToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy)
@@ -1800,7 +1815,9 @@ func visionRenderContext(chatCtx *chatContext, modelContext *provider.ModelConte
 }
 
 func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai.ChatCompletionNewParams, functionTools []openai.ChatCompletionToolUnionParam, disabledTools map[string]bool) (provider.AgentAdapter, error) {
+	// The turn's output cap goes on last, after any reasoning effort raised the cap.
 	if chatCtx.connection != nil {
+		applyTurnOutputCapChat(&params, chatCtx)
 		return provider.NewConnectionChatAdapter(a.connectionChatProvider(chatCtx.connection), params, functionTools, disabledTools), nil
 	}
 	switch models.ProviderForModel(chatCtx.modelProvider, chatCtx.model) {
@@ -1809,23 +1826,29 @@ func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai
 			return nil, fmt.Errorf("Mistral model %q requested but MISTRAL_API_KEY is not configured", chatCtx.model)
 		}
 		provider.ApplyMistralReasoning(&params, chatCtx.reasoningEffort)
+		applyTurnOutputCapChat(&params, chatCtx)
 		return provider.NewMistralAdapter(a.MistralProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderDeepSeek:
 		if a.DeepSeekProvider == nil {
 			return nil, fmt.Errorf("DeepSeek model %q requested but DEEPSEEK_API_KEY is not configured", chatCtx.model)
 		}
 		provider.ApplyDeepSeekReasoning(&params, chatCtx.reasoningEffort)
+		applyTurnOutputCapChat(&params, chatCtx)
 		return provider.NewDeepSeekAdapter(a.DeepSeekProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderQwen:
 		if a.QwenProvider == nil {
 			return nil, fmt.Errorf("Qwen model %q requested but QWEN_API_KEY is not configured", chatCtx.model)
 		}
 		provider.ApplyQwenReasoning(&params, chatCtx.reasoningEffort)
+		applyTurnOutputCapChat(&params, chatCtx)
 		return provider.NewQwenAdapter(a.QwenProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderXiaomi:
 		if a.XiaomiProvider == nil {
 			return nil, fmt.Errorf("Xiaomi model %q requested but XIAOMI_API_KEY is not configured", chatCtx.model)
 		}
+		// MiMo's adapter raises only the default cap (DefaultMaxContentLength) to its reasoning
+		// cap; any other cap, a turn's included, is kept.
+		applyTurnOutputCapChat(&params, chatCtx)
 		adapter := provider.NewXiaomiAdapter(a.XiaomiProvider, params, functionTools, disabledTools)
 		// MiMo's only reasoning control: an effort of off turns thinking off (ADR 0x026).
 		if chatCtx.reasoningEffort == models.ReasoningEffortOff {
