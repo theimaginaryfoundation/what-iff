@@ -201,8 +201,9 @@ describe('AppSidebarComponent', () => {
         const actions = fixture.nativeElement.querySelector('.app-sidebar-header__actions') as HTMLElement;
         const order = Array.from(actions.children).map(el =>
             el.tagName.toLowerCase() === 'app-nav-actions-outlet' ? 'outlet' : el.className.includes('help') ? 'help'
+                : el.className.includes('constellation-trigger') ? 'constellation'
                 : el.className.includes('collapse-toggle') ? 'collapse' : el.className);
-        expect(order).toEqual(['help', 'outlet', 'collapse']);
+        expect(order).toEqual(['help', 'constellation', 'outlet', 'collapse']);
         const outlet = actions.querySelector('app-nav-actions-outlet') as HTMLElement;
         if (outlet.childElementCount === 0) {
             expect(getComputedStyle(outlet).display).toBe('none');

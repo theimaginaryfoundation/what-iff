@@ -177,3 +177,16 @@ body {
   background: var(--bg-base);
   color: var(--text-primary);
 }
+
+// Skill constellation: intentionally keeps the landing-page night-sky palette in either app theme.
+:root {
+  --constellation-bg: #070b1f;
+  --constellation-mid: #19294f;
+  --constellation-panel: rgba(17, 24, 39, 0.97);
+  --constellation-text: #f9fafb;
+  --constellation-muted: #c0c7d8;
+  --constellation-accent: #a5b4fc;
+  --constellation-brand: #4f46e5;
+  --constellation-border: rgba(140, 135, 255, 0.30);
+  --constellation-glow: rgba(140, 135, 255, 0.14);
+}

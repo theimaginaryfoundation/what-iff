@@ -46,6 +46,8 @@ import { PersonalityGenerateComponent } from '../features/personality/personalit
 import { ProfileSettingsModalHostComponent } from '../features/profile-settings/profile-settings-modal-host.component';
 import { ProviderKeyPromptComponent } from '../features/provider-keys/provider-key-prompt.component';
 import { HelpExtensionOutletComponent } from '../extensions/help-extension-outlet.component';
+import { ConstellationComponent } from '../features/constellation/constellation.component';
+import { ConstellationService } from '../features/constellation/constellation.service';
 import { RightPanelHostComponent } from './right-panel/right-panel-host.component';
 import { AppSidebarComponent } from './sidebar/app-sidebar.component';
 import { ContextPanelComponent } from '../features/chat/components/context-panel/context-panel.component';
@@ -78,6 +80,7 @@ import {
     CommandPaletteComponent,
     ContextPanelComponent,
     HelpExtensionOutletComponent,
+    ConstellationComponent,
     ModalComponent,
     PersonaPickerDialogComponent,
     PersonalityGenerateComponent,
@@ -94,6 +97,7 @@ import {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class AppLayoutComponent implements OnInit, OnDestroy {
+  readonly constellation = inject(ConstellationService);
   readonly nav = inject(NavService);
   private readonly palette = inject(CommandPaletteService);
   private readonly shortcuts = inject(KeyboardShortcutService);

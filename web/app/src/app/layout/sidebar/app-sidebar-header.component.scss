@@ -40,6 +40,10 @@
   order: 3;
 }
 
+.app-sidebar-header--collapsed .app-sidebar-header__constellation-trigger {
+  order: 4;
+}
+
 .app-sidebar-header__brand {
   font-weight: 800;
   letter-spacing: -0.03em;
