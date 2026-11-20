@@ -1,3 +1,4 @@
+import { RestoreThreadService } from '../../restore/restore-thread.service';
 import { Location } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, output, signal } from '@angular/core';
 import { Router } from '@angular/router';
@@ -917,6 +918,7 @@ export class ThreadListPanelComponent implements OnInit {
 
   private readonly location = inject(Location);
   private readonly router = inject(Router);
+  private readonly restore = inject(RestoreThreadService);
   private readonly confirmation = inject(ConfirmationService);
 
   constructor(readonly threads: ThreadListService) {}
@@ -962,8 +964,8 @@ export class ThreadListPanelComponent implements OnInit {
     await this.threads.setThreadArchived(thread, true);
   }
 
-  async restoreThread(thread: Chat): Promise<void> {
-    await this.threads.setThreadArchived(thread, false);
+  restoreThread(thread: Chat): void {
+    this.restore.request([thread]);
   }
 
   /**
@@ -1027,8 +1029,8 @@ export class ThreadListPanelComponent implements OnInit {
     await this.threads.bulkSetArchived([...this.threads.selectedIds()], true);
   }
 
-  async runBulkRestore(): Promise<void> {
-    await this.threads.bulkSetArchived([...this.threads.selectedIds()], false);
+  runBulkRestore(): void {
+    this.restore.request(this.threads.loadedThreads().filter(thread => this.threads.selectedIds().has(thread.id)));
   }
 
   async runBulkDelete(): Promise<void> {

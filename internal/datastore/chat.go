@@ -48,6 +48,7 @@ func toChatModel(e *ent.Chat) *models.Chat {
 		LastMessageTime: e.LastMessageTime,
 		IsAutoMood:      e.IsAutoMood,
 		Archived:        &arch,
+		RestoreGuidance: e.RestoreGuidance,
 		IsFavorite:      &fav,
 		CreatedAt:       e.CreatedAt,
 		UpdatedAt:       e.UpdatedAt,

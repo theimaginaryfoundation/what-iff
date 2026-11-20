@@ -1,3 +1,4 @@
+import { RestoreThreadService } from '../../restore/restore-thread.service';
 import type { MockedObject } from "vitest";
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
@@ -92,6 +93,20 @@ describe('ThreadListPanelComponent', () => {
         navigateSpy = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
         await service.refresh();
         fixture.detectChanges();
+    });
+
+    it('single and bulk restore open confirmation without mutating threads', () => {
+        const restore = TestBed.inject(RestoreThreadService);
+        const target = makeChat({ id: 'archived', archived: true });
+        component.restoreThread(target);
+        expect(restore.targets()).toEqual([target]);
+        expect(chatService.patchChat).not.toHaveBeenCalled();
+        restore.cancel();
+        const request = vi.spyOn(restore, 'request');
+        service.setAllSelected(['phantom'], true);
+        component.runBulkRestore();
+        expect(request).toHaveBeenCalledWith([expect.objectContaining({ id: 'phantom' })]);
+        expect(chatService.patchChat).not.toHaveBeenCalled();
     });
 
     it('renders Concept D manager tabs and table headers', () => {

@@ -298,7 +298,7 @@ export class ThreadListService implements OnDestroy {
   }
 
   /** @returns whether the server accepted the archive change */
-  async setThreadArchived(thread: Chat, archived: boolean): Promise<boolean> {
+  async setThreadArchived(thread: Chat, archived: boolean, restoreGuidance?: string): Promise<boolean> {
     const snapshot = this.allThreads();
     const scope = this.scope();
     // The Jobs tab lists threads in either state, so archiving there only flips the flag.
@@ -314,7 +314,9 @@ export class ThreadListService implements OnDestroy {
       );
     }
     try {
-      const updated = await firstValueFrom(this.chatService.patchChat(thread.id, { archived }));
+      const updated = await firstValueFrom(!archived && restoreGuidance !== undefined
+        ? this.chatService.restoreChat(thread.id, restoreGuidance)
+        : this.chatService.patchChat(thread.id, { archived }));
       if (!removeFromList) {
         this.allThreads.set(this.allThreads().map(item => (item.id === updated.id ? updated : item)));
       }

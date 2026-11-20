@@ -1,0 +1,46 @@
+label {
+  display: block;
+  margin: 16px 0 8px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+label span, p {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+textarea {
+  width: 100%;
+  margin: 12px 0;
+  padding: 12px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+textarea:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.restore__name {
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.restore__scope { font-size: 12px; }
+
+.restore__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  width: 100%;
+}
+
+.restore__error { color: var(--danger); }

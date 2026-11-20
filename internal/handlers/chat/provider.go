@@ -19,6 +19,7 @@ type Store interface {
 	GetChatContext(ctx context.Context, userID, id uuid.UUID) (*models.ChatContext, error)
 	UpdatePersonalityScratchpad(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
 	UpdateChat(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error)
+	RestoreChat(ctx context.Context, userID, chatID uuid.UUID, guidance string) (*models.Chat, error)
 	DeleteChat(ctx context.Context, userID, id uuid.UUID) error
 	// ListChatFileAttachmentObjectRefs and ReferencedFileAttachmentKeys let DeleteChat remove the
 	// stored objects of the attachments its cascade deletes (storage.ReleaseAttachmentObjects).

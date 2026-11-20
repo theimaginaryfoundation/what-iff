@@ -28,6 +28,8 @@ export interface Chat {
   is_favorite?: boolean;
   /** When true, thread is in the archive (hidden from default lists). */
   archived?: boolean;
+  /** Preferences saved on explicit unarchive; guides working context without deleting history. */
+  restore_guidance?: string;
   /** UUID of the effective mood currently used for generation. */
   active_mood_id?: string | null;
   /** True when chat mood policy is Auto; false when manually pinned. */

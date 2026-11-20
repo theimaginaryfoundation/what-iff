@@ -86,6 +86,19 @@ describe('ChatService', () => {
         expect(state).toBe('pending');
     });
 
+    it('posts restore preferences to the dedicated endpoint and updates the active thread', () => {
+        service.createChat({ name: 'Archived' }).subscribe();
+        const thread = { id: 'chat-restore', user_id: 'owner', name: 'Archived', archived: true, created_at: '', updated_at: '' };
+        httpMock.expectOne(`${environment.apiUrl}/chat`).flush(thread);
+        service.restoreChat(thread.id, 'Keep decisions; omit drafts').subscribe();
+        const req = httpMock.expectOne(`${environment.apiUrl}/chat/${thread.id}/restore`);
+        expect(req.request.method).toBe('POST');
+        expect(req.request.body).toEqual({ guidance: 'Keep decisions; omit drafts' });
+        req.flush({ ...thread, archived: false, restore_guidance: req.request.body.guidance, rehydration_state: 'pending' });
+        expect(service.getActiveChat()?.archived).toBe(false);
+        expect(service.getActiveChat()?.restore_guidance).toBe('Keep decisions; omit drafts');
+    });
+
     describe('markAllChatsRead', () => {
         function seedActiveChatWithUnread(): void {
             service.createChat({ name: 'Unread chat' }).subscribe();

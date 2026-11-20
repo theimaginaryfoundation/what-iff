@@ -1,3 +1,5 @@
+import { RestoreThreadService } from '../features/chat/restore/restore-thread.service';
+import { RestoreThreadDialogComponent } from '../features/chat/restore/restore-thread-dialog.component';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -73,6 +75,7 @@ import {
   selector: 'app-layout',
   standalone: true,
   imports: [
+    RestoreThreadDialogComponent,
     FileWorkspacePanelComponent,
     AppSidebarComponent,
     CommandPaletteComponent,
@@ -94,6 +97,7 @@ import {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class AppLayoutComponent implements OnInit, OnDestroy {
+  readonly restoreThreads = inject(RestoreThreadService);
   readonly nav = inject(NavService);
   private readonly palette = inject(CommandPaletteService);
   private readonly shortcuts = inject(KeyboardShortcutService);
@@ -233,6 +237,7 @@ export class AppLayoutComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.restoreThreads.reset();
     this.releaseMobileNavTrap();
     this.subscriptions.unsubscribe();
     this.shortcutHandle?.();

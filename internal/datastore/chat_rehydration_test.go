@@ -22,7 +22,7 @@ func TestClaimChatRehydration_ClaimsOnlyAQualifyingThread(t *testing.T) {
 		".chats.\\..checkpoint_summary. IS NULL OR .chats.\\..checkpoint_summary. = \\?.*"+
 		".chats.\\..rehydration_state. IS NULL OR .chats.\\..rehydration_state. IN \\(\\?, \\?\\).*"+
 		"OR .chats.\\..rehydration_state. = \\?.*NOT .chats.\\..archived.$").
-		WithArgs(sqlmock.AnyArg(), "pending", sqlmock.AnyArg(), sqlmock.AnyArg(), "", "", "", "failed", "stale").
+		WithArgs(sqlmock.AnyArg(), "pending", sqlmock.AnyArg(), sqlmock.AnyArg(), "", "", "", "", "failed", "stale", "", "failed").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	claimed, err := ds.ClaimChatRehydration(context.Background(), uuid.New(), uuid.New(), false)
@@ -60,8 +60,8 @@ func TestClaimChatRehydration_IncludeArchivedDropsTheArchivedCondition(t *testin
 	defer cleanup()
 
 	// Without the archived condition the statement ends at the state check.
-	mock.ExpectExec(`UPDATE .*chats.* WHERE .*IN \(\?, \?\)\)\) OR .chats.\..rehydration_state. = \?\)$`).
-		WithArgs(sqlmock.AnyArg(), "pending", sqlmock.AnyArg(), sqlmock.AnyArg(), "", "", "", "failed", "stale").
+	mock.ExpectExec(`UPDATE .*chats.* WHERE .*restore_guidance.*rehydration_state. = \?\)\)$`).
+		WithArgs(sqlmock.AnyArg(), "pending", sqlmock.AnyArg(), sqlmock.AnyArg(), "", "", "", "", "failed", "stale", "", "failed").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	claimed, err := ds.ClaimChatRehydration(context.Background(), uuid.New(), uuid.New(), true)

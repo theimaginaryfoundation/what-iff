@@ -10341,6 +10341,107 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unarchive a chat with optional context guidance
+         * @description Explicitly confirms unarchiving an owned archived thread. Optional natural-language guidance
+         *     rebuilds its working summary from the transcript, for native and imported chats alike, and
+         *     guides future replies. This preparation may use credits. Old turns are kept in the transcript
+         *     but are replaced by the guided summary in the live context. Existing memories and retrieval
+         *     remain available; these preferences do not delete, hide, or guarantee exclusion of information.
+         *     Guided preparation does not automatically mine new long-term memories from the old transcript.
+         *     Blank guidance retains normal lazy preparation. A guided restore starts preparation immediately;
+         *     until it succeeds, replies cannot fall back to the previous context. Failed preparation can be
+         *     retried through the rehydrate endpoint or by reopening the thread.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description Optional priorities and omissions for the restored working summary. Trimmed before saving. */
+                        guidance?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Thread unarchived; guided preparation started when requested */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Chat"];
+                    };
+                };
+                /** @description Invalid ID, request body, or guidance */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Thread is not archived or preparation is still running */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unable to unarchive thread */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/{id}/rehydrate": {
         parameters: {
             query?: never;
@@ -10351,13 +10452,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Start an imported chat's one-time summary now
+         * Start or retry chat context preparation
          * @description Starts the background summary (and long-term memory seeding) for an imported chat right away, for
          *     callers that already know the user wants it ready, such as the post-import "prepare" picker.
          *     Otherwise it starts when the chat is first opened after being restored from the archive, or when a
          *     message is sent into it.
-         *     It does nothing for a chat that is archived, was not imported, or already has a summary or one in
-         *     progress. Returns the chat, with `rehydration_state` `pending` when this call started the summary.
+         *     Also retries failed guided restores, including native chats. Guided preparation uses the saved
+         *     restore preferences and does not seed new memories. It does nothing for an archived chat, a
+         *     native chat without guidance, or preparation already in progress or ready. Returns the chat,
+         *     with `rehydration_state` `pending` when this call started the summary.
          */
         post: {
             parameters: {
@@ -15902,6 +16005,8 @@ export interface components {
             tts_autoplay_override?: boolean | null;
             /** @description When true, the thread is in the archive and omitted from default list responses */
             archived?: boolean;
+            /** @description Saved optional context preferences. Updated only through the restore endpoint; not a deletion or access restriction. */
+            readonly restore_guidance?: string;
             /**
              * @description How much of the account the thread may read. `account` (the default) reads everything, as any thread. `sandbox` reads nothing outside itself: no memories except those created in the thread, no other conversation, no scratchpad, no account-wide files, jobs, skills or other personalities, and only the files uploaded to the thread. Memories it creates are Chat-scoped and visible only inside the thread. It cannot update the scratchpad, schedule jobs or sort the gallery, and a sub-agent it runs keeps its own personality and no skills. It is created with no MCP connectors and with web search, page fetching, image generation and sub-agents in its `disabled_tools` (the owner can enable any of these afterwards), and it is never given the owner's name or auto-selected moods. Chosen at creation: a thread can leave the sandbox (`account`) but never enter one later.
              * @enum {string}

@@ -193,3 +193,15 @@ Run `make reflow-package-summaries` to fix a file mechanically; CI enforces it w
  - `internal/datastore/`: repository layer abstracting Ent queries with ownership, pagination, filters, and vector search.
  - Entities mirror the schema files and are augmented with provider interfaces for testing.
 - Data access utilities include chat/message/memory/personality/ritual/file attachment helpers. User account portability projects selected user data into an id-stripped archive suitable for additive cross-account import; it intentionally inventories, rather than transfers, file bytes. Admin account backup restore remains a separate clone-oriented path: it imports a versioned ZIP of user-owned chats, personalities, memories, moods, and agent jobs into an existing target user, preserves source UUIDs for idempotency, clears provider response IDs, and rebuilds memory embeddings. Both restore paths are intentionally section-by-section rather than one large transaction, so partial imports can be retried.
+
+## Guided unarchive
+
+The archived-thread and Thread Manager unarchive actions open a shared Unarchive/Cancel dialog with optional natural-language context preferences.
+Cancel performs no write or preparation; bulk confirmation applies the same preferences to each selected thread and retains failures for retry.
+`POST /chat/{id}/restore` saves the preferences and unarchives an owned idle thread atomically; blank input preserves normal lazy preparation.
+Nonempty guidance clears provider continuation and immediately rebuilds the working summary from the transcript, for native and imported chats.
+The summary replaces all old raw turns in the live window, and the preferences remain in ongoing developer context.
+A failed or timed-out guided preparation blocks replies until ready rather than silently using old context; opening or explicitly preparing the thread retries failure.
+Guidance controls model attention, not storage or authorization: the original transcript and existing memories remain available, and omitted material is not guaranteed inaccessible.
+Guided preparation skips automatic new long-term memory mining from the raw old transcript and may consume credits.
+The optional Ent `restore_guidance` field is migrated by the existing schema migration path; the restore endpoint is the only writer.

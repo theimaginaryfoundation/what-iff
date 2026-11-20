@@ -307,6 +307,7 @@ func newMCPLifecycleAgentFixture(t *testing.T, serverURL string) (*Agent, *chatC
 			name text NOT NULL,
 			response_id text,
 			checkpoint_summary text,
+			restore_guidance text,
 			checkpoint_user_message_count integer NOT NULL DEFAULT 0,
 			last_message_time datetime,
 			last_checkpoint_at datetime,

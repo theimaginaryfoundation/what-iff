@@ -58,7 +58,7 @@ const (
 // state (ready/failed), or the timeout/ctx elapses. It is a no-op for threads that are not pending
 // (native threads, already-ready imports). This is the "stall the inference job" gate: it lets a user
 // send a message immediately after restoring a thread while the summary finishes, instead of blocking
-// the UI. On timeout it returns and the caller proceeds with whatever context exists (degraded).
+// the UI. On timeout normal imports degrade; prepareChatContextOn rejects guided restores until ready.
 //
 // It also starts the summary for an imported thread that has none yet, so a turn that arrives without
 // the thread ever being opened (webhook, API, scheduled job, a thread that was unarchived in bulk)
@@ -132,6 +132,8 @@ func isRehydrationInFlight(state string) bool {
 // summary that is not already in flight or done, so repeats are no-ops. includeArchived lets a turn
 // into an archived thread start it; opening one never does. It is safe to call on the request
 // goroutine: it detaches the context so the work outlives the HTTP response.
+// An explicitly guided unarchive is also intent: it starts preparation immediately and may
+// claim a native conversation or a failed guided attempt with an older checkpoint.
 func (a *Agent) EnqueueThreadRehydration(ctx context.Context, userID, chatID uuid.UUID, includeArchived bool) bool {
 	// The caller's user is authoritative: a turn's context may not carry it.
 	detachedCtx, _ := middleware.CopyUserToIDContext(context.WithValue(ctx, middleware.UserIDKey, userID), context.Background())
@@ -213,13 +215,19 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 		return telemetry.JobOutcomeFailed
 	}
 	pending, priorSummary := msgs, ""
-	if prior.Summary != "" && prior.WindowStart != nil {
+	guidance := strings.TrimSpace(prior.RestoreGuidance)
+	if guidance == "" && prior.Summary != "" && prior.WindowStart != nil {
 		// Empty when nothing came after the summary: the split below then finds no turns to
 		// summarize and the thread is simply marked ready again.
 		pending, priorSummary = messagesFrom(msgs, *prior.WindowStart), prior.Summary
 	}
 
 	summarizeMsgs, windowStartIdx, needs := splitForRehydration(pending, rehydrationKeepTurns)
+	if guidance != "" && len(msgs) > 0 {
+		// Explicit restoration preferences rebuild from the full original transcript, not a stale
+		// summary. Old raw turns are not replayed after this guided working summary is prepared.
+		summarizeMsgs, needs = msgs, true
+	}
 	if !needs {
 		// Thread is short enough to load in full; no summary needed. Mark ready without a checkpoint
 		// so the entire (small) history is used as context. (A caught-up thread keeps its summary.)
@@ -230,7 +238,7 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 		// Seed long-term memories from the (short) thread too — even a few turns can carry durable
 		// facts. Runs after the gate is released; best-effort so it never fails the job. A caught-up
 		// thread has nothing new outside the live window, which its own checkpoints will cover.
-		if priorSummary == "" {
+		if priorSummary == "" && guidance == "" {
 			a.extractAndStoreImportedMemories(ctx, userID, chatID, msgs)
 		}
 		if _, err := a.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
@@ -253,14 +261,14 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 		a.logger.Debug("mock/local mode: using deterministic rehydration summary", zap.String("chat_id", chatID.String()))
 	} else {
 		var err error
-		summary, err = a.summarizeImportedThread(ctx, userID, priorSummary, summarizeMsgs)
+		summary, err = a.summarizeImportedThreadWithGuidance(ctx, userID, priorSummary, summarizeMsgs, guidance)
 		if err != nil {
 			a.failRehydration(ctx, userID, chatID, jobID, fmt.Sprintf("summarize: %v", err))
 			return telemetry.JobOutcomeFailed
 		}
 	}
 
-	windowStart := pending[windowStartIdx].SentAt
+	windowStart := restoredWindowStart(pending, windowStartIdx, guidance != "")
 	// The checkpoint cadence counts every reply before the window, summarized now or before.
 	assistantCount := countAssistantMessagesBefore(msgs, windowStart)
 
@@ -286,7 +294,11 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 	if priorSummary != "" {
 		memorySource = summarizeMsgs
 	}
-	a.extractAndStoreImportedMemories(ctx, userID, chatID, memorySource)
+	// Do not mine new long-term memories from omitted raw history during a guided restore.
+	// Existing memories remain stored; the user can explicitly save selected facts later.
+	if guidance == "" {
+		a.extractAndStoreImportedMemories(ctx, userID, chatID, memorySource)
+	}
 
 	if _, err := a.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
 		a.logger.Warn("thread rehydration: failed to complete job", zap.String("job_id", jobID.String()), zap.Error(err))
@@ -382,20 +394,24 @@ func buildTranscript(msgs []models.ChatMessage) string {
 // prior, when set, is the thread's existing summary of everything before msgs: the result covers
 // both (a catch-up after remote sync appended messages past the summary).
 func (a *Agent) summarizeImportedThread(ctx context.Context, userID uuid.UUID, prior string, msgs []models.ChatMessage) (string, error) {
+	return a.summarizeImportedThreadWithGuidance(ctx, userID, prior, msgs, "")
+}
+
+func (a *Agent) summarizeImportedThreadWithGuidance(ctx context.Context, userID uuid.UUID, prior string, msgs []models.ChatMessage, guidance string) (string, error) {
 	transcript := buildTranscript(msgs)
 	if strings.TrimSpace(transcript) == "" {
 		return "", fmt.Errorf("empty transcript")
 	}
 
 	if len(transcript) <= rehydrationSinglePassChars {
-		return a.summarizeText(ctx, userID, checkpointConversationSummaryInstructions, withPriorSummary(prior, transcript), rehydrationSummaryMaxTokens)
+		return a.summarizeText(ctx, userID, summaryInstructionsWithRestoreGuidance(checkpointConversationSummaryInstructions, guidance), withPriorSummary(prior, transcript), rehydrationSummaryMaxTokens)
 	}
 
 	// Map: chunk by message boundaries within a character budget and summarize each chunk.
 	chunks := chunkMessagesByChars(msgs, rehydrationChunkChars)
 	partials := make([]string, 0, len(chunks))
 	for i, chunk := range chunks {
-		part, err := a.summarizeText(ctx, userID, rehydrationChunkInstructions, buildTranscript(chunk), rehydrationChunkMaxTokens)
+		part, err := a.summarizeText(ctx, userID, summaryInstructionsWithRestoreGuidance(rehydrationChunkInstructions, guidance), buildTranscript(chunk), rehydrationChunkMaxTokens)
 		if err != nil {
 			return "", fmt.Errorf("summarizing chunk %d/%d: %w", i+1, len(chunks), err)
 		}
@@ -404,7 +420,16 @@ func (a *Agent) summarizeImportedThread(ctx context.Context, userID uuid.UUID, p
 
 	// Reduce: roll the section summaries up into one cohesive summary.
 	rollupInput := fmt.Sprintf("The following are ordered section summaries of one long conversation. Produce a single cohesive summary as instructed.\n\n%s", strings.Join(partials, "\n\n"))
-	return a.summarizeText(ctx, userID, checkpointConversationSummaryInstructions, withPriorSummary(prior, rollupInput), rehydrationSummaryMaxTokens)
+	return a.summarizeText(ctx, userID, summaryInstructionsWithRestoreGuidance(checkpointConversationSummaryInstructions, guidance), withPriorSummary(prior, rollupInput), rehydrationSummaryMaxTokens)
+}
+
+// restoredWindowStart excludes pre-restore raw turns for guided restores, using the database's
+// microsecond precision. Standard restores retain their existing recent-turn window.
+func restoredWindowStart(msgs []models.ChatMessage, index int, guided bool) time.Time {
+	if guided {
+		return msgs[len(msgs)-1].SentAt.Add(time.Microsecond)
+	}
+	return msgs[index].SentAt
 }
 
 // withPriorSummary puts a thread's existing summary ahead of what continues it, so one summary

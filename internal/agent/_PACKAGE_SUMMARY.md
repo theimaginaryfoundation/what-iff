@@ -6,6 +6,11 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
 
 ## Responsibilities
 
+- Guided restores rebuild the working summary from the full transcript with saved user preferences in every summarization pass and subsequent model context (`restore_guidance.go`).
+  They exclude all old raw turns from the live window, clear provider continuation, and skip new raw-transcript memory mining; existing history and memories remain accessible.
+  `prepareChatContextOn` rejects a guided thread until preparation is ready, preventing failed or timed-out preparation from silently falling back to old context.
+  `restore_guidance_test.go` covers preference framing, readiness, and the guided cutoff.
+
 - **`Agent`** (`NewAgent`): central service constructed with datastore, telemetry, S3 file store and an `AgentConfig`.
   It takes no provider keys: provider clients are built without a credential and `AgentConfig.HTTPClient` supplies one per request, while `AgentConfig.KeyResolver` (`internal/providerkeys`) decides at startup which provider clients are built.
 - **Chat turns:** `HandleUserMessage` and related paths build `provider.ModelContext` via `messageContextBuilder` / `buildModelContextForChatMessage`, attach tools, run the model (`openAIResponseParamsForChat` → `ModelContext.BuildOpenAIResponseParams`), and execute tool rounds (`agentloop`).

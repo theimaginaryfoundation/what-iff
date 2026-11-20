@@ -206,29 +206,39 @@ export class ChatService {
   patchChat(chatId: string, chatData: PatchChatRequest): Observable<Chat> {
     return this.http.patch<Chat>(`${this.apiUrl}/${chatId}`, chatData)
       .pipe(
-        tap(updatedChat => {
-          const currentChats = this.chatsSubject.getValue();
-          let nextChats: Chat[];
-          if (updatedChat.archived === true) {
-            nextChats = currentChats.filter(chat => chat.id !== chatId);
-          } else {
-            const exists = currentChats.some(c => c.id === chatId);
-            if (exists) {
-              nextChats = currentChats.map(chat => (chat.id === chatId ? updatedChat : chat));
-            } else {
-              nextChats = [updatedChat, ...currentChats];
-            }
-          }
-          this.chatsSubject.next(nextChats);
-
-          // Update active chat if it's the current one
-          const activeChat = this.activeChatSubject.getValue();
-          if (activeChat && activeChat.id === chatId) {
-            this.activeChatSubject.next(updatedChat);
-          }
-        }),
+        tap(updatedChat => this.acceptPatchedChat(chatId, updatedChat)),
         catchError(this.handleError)
       );
+  }
+
+  /** Explicit unarchive with optional natural-language context preferences. */
+  restoreChat(chatId: string, guidance: string): Observable<Chat> {
+    return this.http.post<Chat>(`${this.apiUrl}/${chatId}/restore`, { guidance }).pipe(
+      tap(updatedChat => this.acceptPatchedChat(chatId, updatedChat)),
+      catchError(this.handleError),
+    );
+  }
+
+  private acceptPatchedChat(chatId: string, updatedChat: Chat): void {
+    const currentChats = this.chatsSubject.getValue();
+    let nextChats: Chat[];
+    if (updatedChat.archived === true) {
+      nextChats = currentChats.filter(chat => chat.id !== chatId);
+    } else {
+      const exists = currentChats.some(c => c.id === chatId);
+      if (exists) {
+        nextChats = currentChats.map(chat => (chat.id === chatId ? updatedChat : chat));
+      } else {
+        nextChats = [updatedChat, ...currentChats];
+      }
+    }
+    this.chatsSubject.next(nextChats);
+
+    // Update active chat if it's the current one
+    const activeChat = this.activeChatSubject.getValue();
+    if (activeChat && activeChat.id === chatId) {
+      this.activeChatSubject.next(updatedChat);
+    }
   }
 
   updateChat(chatId: string, chatData: UpdateChatRequest): Observable<Chat> {

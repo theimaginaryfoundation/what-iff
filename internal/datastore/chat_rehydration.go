@@ -91,16 +91,21 @@ type ChatRehydrationInfo struct {
 	Imported bool
 	// Summarized is true once the chat has a checkpoint summary.
 	Summarized bool
+	// Guided permits an explicit user-guided restore for native threads too.
+	Guided bool
 }
 
 // NeedsRehydration reports whether the chat is an imported one that still lacks its one-time
 // summary and is not already being summarized or done ("failed" qualifies, so it is retried), or
-// one that remote sync flagged stale (messages arrived past its summary; see settleRemoteSummary).
+// one flagged stale by sync or guided restoration. Guided failures retry even with an old summary.
 func (i ChatRehydrationInfo) NeedsRehydration() bool {
-	if !i.Imported {
+	if !i.Imported && !i.Guided {
 		return false
 	}
 	if i.State == models.RehydrationStateStale {
+		return true
+	}
+	if i.Guided && i.State == models.RehydrationStateFailed {
 		return true
 	}
 	if i.Summarized {
@@ -115,7 +120,7 @@ func (i ChatRehydrationInfo) NeedsRehydration() bool {
 func (d *Datastore) GetChatRehydrationInfo(ctx context.Context, userID, chatID uuid.UUID) (ChatRehydrationInfo, error) {
 	row, err := d.dbClient.Chat.Query().
 		Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))).
-		Select(entchat.FieldRehydrationState, entchat.FieldSource, entchat.FieldCheckpointSummary).
+		Select(entchat.FieldRehydrationState, entchat.FieldSource, entchat.FieldCheckpointSummary, entchat.FieldRestoreGuidance).
 		Only(ctx)
 	if ent.IsNotFound(err) {
 		return ChatRehydrationInfo{}, ErrChatNotFound
@@ -127,6 +132,7 @@ func (d *Datastore) GetChatRehydrationInfo(ctx context.Context, userID, chatID u
 		State:      row.RehydrationState,
 		Imported:   row.Source != "",
 		Summarized: row.CheckpointSummary != "",
+		Guided:     row.RestoreGuidance != "",
 	}, nil
 }
 
@@ -142,8 +148,10 @@ func (d *Datastore) ClaimChatRehydration(ctx context.Context, userID, chatID uui
 		Where(
 			entchat.ID(chatID),
 			entchat.HasOwnerWith(user.ID(userID)),
-			entchat.SourceNotNil(),
-			entchat.SourceNEQ(""),
+			entchat.Or(
+				entchat.And(entchat.SourceNotNil(), entchat.SourceNEQ("")),
+				entchat.And(entchat.RestoreGuidanceNotNil(), entchat.RestoreGuidanceNEQ("")),
+			),
 			entchat.Or(
 				entchat.And(
 					entchat.Or(entchat.CheckpointSummaryIsNil(), entchat.CheckpointSummary("")),
@@ -153,6 +161,7 @@ func (d *Datastore) ClaimChatRehydration(ctx context.Context, userID, chatID uui
 					),
 				),
 				entchat.RehydrationState(models.RehydrationStateStale),
+				entchat.And(entchat.RestoreGuidanceNEQ(""), entchat.RehydrationState(models.RehydrationStateFailed)),
 			),
 		)
 	if !includeArchived {
@@ -178,6 +187,7 @@ func (d *Datastore) SetImportedThreadRehydrated(ctx context.Context, userID, cha
 		SetCheckpointUserMessageCount(checkpointUserMessageCount).
 		SetLastCheckpointAt(windowStart).
 		SetRehydrationState(models.RehydrationStateReady).
+		ClearResponseID().
 		Save(ctx)
 	if err != nil {
 		d.logger.Error("failed to persist imported thread rehydration", zap.String("chat_id", chatID.String()), zap.Error(err))
@@ -194,7 +204,7 @@ func (d *Datastore) SetImportedThreadRehydrated(ctx context.Context, userID, cha
 func (d *Datastore) GetChatSummary(ctx context.Context, userID, chatID uuid.UUID) (*models.ChatSummary, error) {
 	row, err := d.dbClient.Chat.Query().
 		Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))).
-		Select(entchat.FieldCheckpointSummary, entchat.FieldLastCheckpointAt).
+		Select(entchat.FieldCheckpointSummary, entchat.FieldLastCheckpointAt, entchat.FieldRestoreGuidance).
 		Only(ctx)
 	if ent.IsNotFound(err) {
 		return nil, ErrChatNotFound
@@ -202,7 +212,7 @@ func (d *Datastore) GetChatSummary(ctx context.Context, userID, chatID uuid.UUID
 	if err != nil {
 		return nil, err
 	}
-	return &models.ChatSummary{ChatID: chatID, Summary: row.CheckpointSummary, WindowStart: row.LastCheckpointAt}, nil
+	return &models.ChatSummary{ChatID: chatID, Summary: row.CheckpointSummary, WindowStart: row.LastCheckpointAt, RestoreGuidance: row.RestoreGuidance}, nil
 }
 
 // GetChatPersonalityID returns the id of the personality assigned to a chat, or uuid.Nil when none
