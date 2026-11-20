@@ -1,0 +1,112 @@
+<ui-overlay [open]="entry.visible()" variant="inset" labelledBy="constellation-title" (dismiss)="dismiss()">
+  <div class="constellation">
+    <header class="constellation__header">
+      <div class="constellation__brand">WHATIFF <span>THE FOUNDRY</span></div>
+      <div class="constellation__rank">
+        <small>Learning rank</small><strong>{{ learning.rank() }}</strong>
+      </div>
+      <ui-icon-button ariaLabel="Close skill constellation" (activate)="entry.close()"><ui-x-icon [size]="18" /></ui-icon-button>
+      <div class="constellation__title">
+        <h1 id="constellation-title">Skill Constellation</h1>
+        <p>Every possibility begins with a personality.</p>
+      </div>
+      <nav aria-label="Constellation views">
+        <ui-button variant="ghost" size="sm" (activate)="origin()">Origin</ui-button>
+        <ui-button variant="ghost" size="sm" (activate)="map()?.atlas()">Atlas</ui-button>
+        <ui-button variant="ghost" size="sm" (activate)="guideLibraryOpen.set(true)">19 guides</ui-button>
+      </nav>
+    </header>
+    <app-constellation-map [selected]="selectedId() ?? 'S1'" [completed]="learning.completed()" (select)="select($event)" />
+    @if (selected(); as node) {
+      <aside class="objective" aria-labelledby="objective-title">
+        <div class="objective__close">
+          <ui-icon-button ariaLabel="Close objective" size="xs" (activate)="closeObjective()"><ui-x-icon [size]="16" /></ui-icon-button>
+        </div>
+        <p class="objective__kicker">{{ node.branch }} / {{ node.id }}</p>
+        <h2 #objectiveHeading id="objective-title" tabindex="-1">{{ node.title }}</h2>
+        <p class="objective__status">
+          {{ learning.completed().has(node.id) ? "Completed" : selectedReady() ? "Ready to begin" : "Complete prior objectives" }} ·
+          {{ node.xp }} XP
+        </p>
+        <h3>The objective</h3>
+        <p>{{ node.objective }}</p>
+        @if (node.id === "S1") {
+          <a class="objective__start" routerLink="/personality" (click)="entry.close()">Open Personalities →</a>
+        }
+        <h3>Completion criteria</h3>
+        <p>{{ node.acceptance }}</p>
+        <h3>Prerequisites</h3>
+        @for (required of node.requires; track required) {
+          <button type="button" class="objective__requirement" (click)="select(required)">
+            {{ learning.completed().has(required) ? "✓" : "◇" }} {{ titleFor(required) }}
+          </button>
+        } @empty {
+          <p>This is your origin. No prior objective.</p>
+        }
+        @if (node.requiresAnyBranches) {
+          <p>Also complete any {{ node.requiresAnyBranches }} main branches. {{ learning.branches() }} complete.</p>
+        }
+        <h3>Try this</h3>
+        <p class="objective__prompt">“{{ node.prompt }}”</p>
+        <h3>Guides for this objective</h3>
+        <div class="objective__guides">
+          @for (guide of selectedGuides(); track guide.slug) {
+            <a [href]="guideUrl(guide.slug)" target="_blank" rel="noopener noreferrer">{{ guide.title }} ↗</a>
+          }
+        </div>
+        <ui-button variant="ghost" size="sm" (activate)="guideLibraryOpen.set(true)">Browse all 19 guides</ui-button>
+        <h3>Record your learning</h3>
+        <label for="constellation-note">What did you make or check? Progress is self-reported.</label>
+        <textarea
+          id="constellation-note"
+          [(ngModel)]="note"
+          maxlength="2000"
+          rows="3"
+          placeholder="Describe the result you checked…"
+        ></textarea>
+        <ui-button variant="primary" [disabled]="!selectedReady() || learning.completed().has(node.id)" (activate)="complete()">
+          {{
+            learning.completed().has(node.id)
+              ? "Objective completed"
+              : selectedReady()
+                ? "Complete learning objective"
+                : "Finish prerequisites first"
+          }}
+        </ui-button>
+        <p class="objective__feedback" role="status">{{ feedback() }}</p>
+        <p class="objective__disclaimer">
+          {{
+            learning.persisted()
+              ? "Saved for this account in this browser. Not synced between devices."
+              : "Browser storage is unavailable. Progress lasts for this session."
+          }}
+          Learning rank never changes feature access.
+        </p>
+      </aside>
+    }
+    <footer class="constellation__footer">
+      <div>
+        <strong>All features are always available.</strong><small>Learning milestones only · self-reported progress</small>
+        <span>{{ learning.xp() }} XP · {{ learning.completed().size }} / {{ nodes.length }} objectives</span>
+      </div>
+      <div class="constellation__controls">
+        <ui-button size="sm" (activate)="nextObjective()">Next objective</ui-button>
+        <ui-icon-button ariaLabel="Zoom out" size="xs" (activate)="map()?.zoomBy(-0.12)">−</ui-icon-button>
+        <output aria-label="Map zoom">{{ zoomPercent() }}%</output>
+        <ui-icon-button ariaLabel="Zoom in" size="xs" (activate)="map()?.zoomBy(0.12)">+</ui-icon-button>
+      </div>
+    </footer>
+  </div>
+</ui-overlay>
+<ui-modal [open]="guideLibraryOpen()" labelledBy="constellation-guides-title" size="lg" (dismiss)="guideLibraryOpen.set(false)">
+  <h2 modal-header id="constellation-guides-title">WhatIff / 19 guides</h2>
+  <p>Guides open in a new tab. Your place in the constellation stays here.</p>
+  <div class="guide-library">
+    @for (guide of guides; track guide.slug) {
+      <a [href]="guideUrl(guide.slug)" target="_blank" rel="noopener noreferrer"
+        ><strong>{{ guide.title }} ↗</strong><span>{{ guide.description }}</span></a
+      >
+    }
+  </div>
+  <div modal-footer><ui-button (activate)="guideLibraryOpen.set(false)">Back to constellation</ui-button></div>
+</ui-modal>

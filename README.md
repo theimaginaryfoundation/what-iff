@@ -47,6 +47,7 @@ Want the story behind it? Read the [Imagination Foundry blog](https://imaginatio
 - Bind a ritual to a personality and auto-enrich messages with its context
 
 ### 🛠️ Tools & agents
+- **[Skill constellation](docs/guides/skill-constellation.md)** — a radial learning overlay beside Help, with guided objectives from Noob to Builder; all product features stay available
 - **File attachments** with 30+ supported types, plus semantic search over uploaded documents
 - **Code interpreter**, **image generation**, and **web search** available to the assistant
 - **Agents** — scheduled and background AI jobs with a distributed-lock-aware scheduler

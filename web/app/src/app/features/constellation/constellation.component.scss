@@ -1,0 +1,279 @@
+.constellation {
+  // Fixed landing-page art direction; scoped tokens leave the underlying app's chosen theme intact.
+  --bg-base: var(--constellation-bg);
+  --bg-card: var(--constellation-panel);
+  --bg-input: var(--constellation-bg);
+  --text-primary: var(--constellation-text);
+  --text-secondary: var(--constellation-muted);
+  --border: var(--constellation-border);
+  --accent-bg: var(--constellation-glow);
+  --cta: var(--constellation-brand);
+  --cta-text: var(--constellation-text);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  padding: 28px 32px 24px;
+  gap: 22px;
+  color: var(--constellation-text);
+  background:
+    radial-gradient(ellipse at 72% 24%, var(--constellation-glow), transparent 50%),
+    linear-gradient(160deg, var(--constellation-bg), var(--constellation-mid));
+}
+.constellation__header {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 14px 22px;
+  align-items: center;
+}
+.constellation__brand {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.25em;
+  color: var(--constellation-accent);
+  span {
+    margin-left: 16px;
+    padding-left: 16px;
+    border-left: 1px solid var(--constellation-border);
+  }
+}
+.constellation__rank {
+  text-align: right;
+  small {
+    display: block;
+    text-transform: uppercase;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--constellation-muted);
+  }
+  strong {
+    font:
+      19px Georgia,
+      serif;
+  }
+}
+.constellation__title {
+  grid-column: 1;
+  h1 {
+    font:
+      28px Georgia,
+      serif;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    margin: 0;
+  }
+  p {
+    margin: 8px 0 0;
+    font-size: 11px;
+    color: var(--constellation-muted);
+  }
+}
+.constellation__header nav {
+  grid-column: 2 / 4;
+  display: flex;
+  gap: 6px;
+  justify-content: end;
+}
+.constellation__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--constellation-accent);
+  strong {
+    font-weight: 400;
+  }
+  small {
+    display: block;
+    color: var(--constellation-muted);
+    font-size: 10px;
+  }
+  span {
+    display: block;
+    margin-top: 8px;
+  }
+}
+.constellation__controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  output {
+    min-width: 38px;
+    text-align: center;
+  }
+}
+.objective {
+  position: absolute;
+  top: 154px;
+  bottom: 120px;
+  right: 48px;
+  width: min(350px, calc(100% - 64px));
+  overflow: auto;
+  padding: 26px;
+  background: var(--constellation-panel);
+  border: 1px solid var(--constellation-border);
+  box-shadow: 0 15px 70px rgb(0 0 0 / 0.5);
+  border-radius: 12px;
+  z-index: 1;
+  h2 {
+    font:
+      26px/1.25 Georgia,
+      serif;
+    color: var(--constellation-text);
+    margin: 14px 16px 10px 0;
+  }
+  h3 {
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    color: var(--constellation-accent);
+    margin: 22px 0 8px;
+  }
+  p {
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--constellation-muted);
+  }
+  label {
+    display: block;
+    font-size: 11px;
+    color: var(--constellation-muted);
+    margin: 10px 0;
+  }
+  textarea {
+    width: 100%;
+    background: var(--constellation-bg);
+    border: 1px solid var(--constellation-border);
+    color: var(--constellation-text);
+    padding: 10px;
+    border-radius: 8px;
+    resize: vertical;
+    font: inherit;
+    font-size: 12px;
+    margin-bottom: 12px;
+  }
+  textarea:focus-visible {
+    outline: 2px solid var(--focus-ring);
+  }
+}
+.objective__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+.objective__start {
+  display: inline-block;
+  color: var(--constellation-accent);
+  margin: 8px 0;
+}
+.objective .objective__kicker,
+.objective .objective__status {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--constellation-accent);
+  letter-spacing: 0.1em;
+}
+.objective__status {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--constellation-border);
+}
+.objective__requirement {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 8px 0;
+  font-size: 12px;
+  color: var(--constellation-accent);
+  cursor: pointer;
+}
+.objective__prompt {
+  border-left: 1px solid var(--constellation-accent);
+  padding: 8px 12px;
+  background: var(--constellation-glow);
+}
+.objective__guides {
+  display: grid;
+  gap: 8px;
+  a {
+    padding: 10px;
+    border: 1px solid var(--constellation-border);
+    border-radius: 8px;
+    color: var(--constellation-accent);
+    font-size: 12px;
+    text-decoration: none;
+  }
+}
+.objective .objective__disclaimer,
+.objective .objective__feedback {
+  font-size: 10px;
+}
+.guide-library {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  a {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    color: var(--text-primary);
+    text-decoration: none;
+  }
+  span {
+    display: block;
+    margin-top: 7px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+}
+@media (max-width: 760px) {
+  .constellation {
+    padding: 18px 14px;
+    gap: 16px;
+  }
+  .constellation__header {
+    gap: 12px 6px;
+  }
+  .constellation__brand {
+    font-size: 9px;
+    span {
+      display: none;
+    }
+  }
+  .constellation__rank strong {
+    font-size: 15px;
+  }
+  .constellation__title {
+    h1 {
+      font-size: 18px;
+      letter-spacing: 0.05em;
+    }
+    p {
+      font-size: 9px;
+      max-width: 155px;
+    }
+  }
+  .constellation__header nav {
+    gap: 0;
+  }
+  .constellation__footer {
+    font-size: 10px;
+  }
+  .objective {
+    top: auto;
+    left: 20px;
+    right: 20px;
+    bottom: 20px;
+    width: auto;
+    max-height: 62dvh;
+    padding: 22px;
+  }
+  .guide-library {
+    grid-template-columns: 1fr;
+  }
+}

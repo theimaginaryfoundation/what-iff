@@ -18,6 +18,11 @@
     >
       <ui-circle-help-icon [size]="15" />
     </button>
+    <ui-icon-button class="app-sidebar-header__constellation-trigger" size="xs"
+      ariaLabel="Open skill constellation" uiTooltip="Skill constellation" placement="right"
+      (activate)="constellation.open()">
+      <ui-constellation-icon [size]="17" />
+    </ui-icon-button>
     <app-nav-actions-outlet [collapsed]="collapsed()" />
     <button
       type="button"

@@ -50,6 +50,11 @@
 <app-profile-settings-modal-host />
 <app-provider-key-prompt />
 <app-help-extension-outlet />
+@if (constellation.visible()) {
+  @defer (on immediate) {
+    <app-constellation />
+  }
+}
 
 @if (showMobileSheet()) {
   <ui-sheet
