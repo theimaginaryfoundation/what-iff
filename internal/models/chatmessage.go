@@ -62,7 +62,10 @@ type AdditionalContextItem struct {
 type ChatMessage struct {
 	// Steer is request-only (not stored on the message): the message was sent while an earlier turn
 	// in the chat was still running, for that turn to take in (ADR 0x042). See Job.Steer.
-	Steer                 bool              `json:"-"`
+	Steer bool `json:"-"`
+	// TurnOptions is request-only too, and never stored: per-turn settings for the turn this
+	// message starts (see TurnOptions). Nil on every ordinary message.
+	TurnOptions           *TurnOptions      `json:"-"`
 	ID                    uuid.UUID         `json:"id"`
 	ChatID                uuid.UUID         `json:"chat_id"`
 	Message               string            `json:"message"`

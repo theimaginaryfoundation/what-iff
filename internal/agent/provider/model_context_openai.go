@@ -193,6 +193,10 @@ func RenderOpenAIInputItems(ctx *ModelContext) []responses.ResponseInputItemUnio
 				fmt.Sprintf("Conversation checkpoint summary:\n%s", seg.Content),
 				RoleDeveloper,
 			))
+		case SegmentKindPreContext, SegmentKindPostContext:
+			// Developer messages, where the builder put them: pre after the scratchpad and
+			// summary (the cached prefix), post just before the new turn.
+			out = append(out, responses.ResponseInputItemParamOfMessage(seg.Content, RoleDeveloper))
 		case SegmentKindHistoryTurn:
 			appendOpenAIHistoryTurn(&out, seg)
 		case SegmentKindExpressionPortrait:

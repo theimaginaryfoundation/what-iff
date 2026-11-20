@@ -41,6 +41,11 @@ const (
 	SegmentKindDeveloperContext   ModelContextSegmentKind = "developer_context"
 	SegmentKindExpressionPortrait ModelContextSegmentKind = "expression_portrait"
 	SegmentKindUserMessage        ModelContextSegmentKind = "user_message"
+	// SegmentKindPreContext and SegmentKindPostContext carry caller-supplied text for one turn
+	// (models.TurnOptions): pre at the end of the system material, so it shares the cached
+	// prefix; post immediately before the new user message. Neither is ever stored.
+	SegmentKindPreContext  ModelContextSegmentKind = "pre_context"
+	SegmentKindPostContext ModelContextSegmentKind = "post_context"
 	// SegmentKindToolDefinitions represents request tool schemas. They are sent outside
 	// the conversational message list, so their token estimate is recorded separately.
 	SegmentKindToolDefinitions ModelContextSegmentKind = "tool_definitions"
@@ -176,11 +181,34 @@ func (m *ModelContext) InsertBeforeLastUserMessage(kind ModelContextSegmentKind,
 	}
 	for i := len(m.Segments) - 1; i >= 0; i-- {
 		if m.Segments[i].Kind == SegmentKindUserMessage {
+			// A turn's post context stays directly above its user message, whatever is inserted
+			// after it was placed (Advanced instructions, a run's work log).
+			for i > 0 && m.Segments[i-1].Kind == SegmentKindPostContext && kind != SegmentKindPostContext {
+				i--
+			}
 			m.Segments = slices.Insert(m.Segments, i, seg)
 			return
 		}
 	}
 	m.Segments = append(m.Segments, seg)
+}
+
+// isTurnContextSegment reports whether s is caller-supplied context for one turn.
+func isTurnContextSegment(s ModelContextSegment) bool {
+	return s.Kind == SegmentKindPreContext || s.Kind == SegmentKindPostContext
+}
+
+// WithoutTurnContext returns the context without its per-turn pre/post context segments
+// (SegmentKindPreContext, SegmentKindPostContext): m itself when it has none, else a clone. Work
+// that outlives the turn (a checkpoint's scratchpad, memories and summary, the expression pick)
+// reads this, so caller-supplied turn context never ends up in what that work stores.
+func (m *ModelContext) WithoutTurnContext() *ModelContext {
+	if m == nil || !slices.ContainsFunc(m.Segments, isTurnContextSegment) {
+		return m
+	}
+	out := m.Clone()
+	out.Segments = slices.DeleteFunc(out.Segments, isTurnContextSegment)
+	return out
 }
 
 // SetAdditionalTokenEstimate records a token estimate for request material that is
