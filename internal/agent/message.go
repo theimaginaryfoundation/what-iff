@@ -703,6 +703,7 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		LoadHistoryImageBytes:      chatCtx.modelVisionSupport,
 		PreContext:                 chatCtx.turnOptions.TurnPreContext(),
 		PostContext:                chatCtx.turnOptions.TurnPostContext(),
+		BaseSystemPrompt:           a.baseSystemPromptForChat(ctx, chatCtx.chat),
 	})
 }
 
@@ -2709,7 +2710,7 @@ var tzLocationCache sync.Map // map[string]*time.Location
 // offset so agents can reason about day-of-week without parsing ISO-8601.
 // Example: "Sun 2026-09-13 08:46:51 -04:00". This is intentionally not
 // RFC3339; treat layout changes as a prompt/protocol change (update
-// baseSystemPrompt + docs together).
+// baseSystemPromptMechanics + docs together).
 const agentMessageTimestampLayout = "Mon 2006-01-02 15:04:05 -07:00"
 
 // formatUserMessageWithTime prefixes body with a [sys:…] timestamp tag using

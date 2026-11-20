@@ -163,7 +163,7 @@ func TestCallSubagent_ConnectionModelUsesItsConnection(t *testing.T) {
 
 	caps, err := f.a.subagentCapabilitiesFor(ctx, f.alice, f.aliceModel.ID, f.aliceModel.Name)
 	require.NoError(t, err)
-	out, err := f.a.callSubagentModelWithCaps(ctx, f.alice, caps, f.aliceModel.Name, buildSubagentModelContext("", "", "hi"), nil, false)
+	out, err := f.a.callSubagentModelWithCaps(ctx, f.alice, caps, f.aliceModel.Name, buildSubagentModelContext("", "", "", "hi"), nil, false)
 
 	require.NoError(t, err)
 	require.Equal(t, "hello from ollama", out.Output)
@@ -181,7 +181,7 @@ func TestCallSubagent_ConnectionWithoutKeySendsNone(t *testing.T) {
 
 	caps, err := f.a.subagentCapabilitiesFor(ctx, f.alice, f.aliceModel.ID, f.aliceModel.Name)
 	require.NoError(t, err)
-	_, err = f.a.callSubagentModelWithCaps(ctx, f.alice, caps, f.aliceModel.Name, buildSubagentModelContext("", "", "hi"), nil, false)
+	_, err = f.a.callSubagentModelWithCaps(ctx, f.alice, caps, f.aliceModel.Name, buildSubagentModelContext("", "", "", "hi"), nil, false)
 
 	require.NoError(t, err)
 	require.Equal(t, "", rec.authHdrs[0])
@@ -208,7 +208,7 @@ func TestCallSubagent_AnthropicConnectionUsesMessages(t *testing.T) {
 
 	caps, err := f.a.subagentCapabilitiesFor(ctx, f.alice, f.aliceModel.ID, f.aliceModel.Name)
 	require.NoError(t, err)
-	out, err := f.a.callSubagentModelWithCaps(ctx, f.alice, caps, f.aliceModel.Name, buildSubagentModelContext("", "", "hi"), nil, false)
+	out, err := f.a.callSubagentModelWithCaps(ctx, f.alice, caps, f.aliceModel.Name, buildSubagentModelContext("", "", "", "hi"), nil, false)
 
 	require.NoError(t, err)
 	require.Equal(t, "hello from custom", out.Output)

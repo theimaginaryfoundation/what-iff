@@ -88,5 +88,5 @@ func TestSummarizeScratchpadClaude_ProviderErrorIsWrapped(t *testing.T) {
 
 func TestScratchpadPromptOrDefault_NilPersonalityReturnsDefault(t *testing.T) {
 	t.Parallel()
-	require.Equal(t, scratchpadUpdatePrompt, scratchpadPromptOrDefault(nil))
+	require.Equal(t, scratchpadUpdatePrompt, scratchpadPromptOrDefault(nil, ""))
 }

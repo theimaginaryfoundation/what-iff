@@ -201,7 +201,7 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 		})
 	}
 
-	modelContext := buildSubagentModelContext(systemPrompt, scratchpad, message)
+	modelContext := buildSubagentModelContext(a.baseSystemPromptForChat(ctx, chatCtx.chat), systemPrompt, scratchpad, message)
 	subagentCtx := telemetry.WithCallPath(ctx, telemetry.CallPathSubagent)
 	// The sub-agent inherits the turn's selected reasoning effort (ADR 0x026), only when the turn's
 	// own model runs with one: a selection the parent model ignores does not start reasoning (and
@@ -276,9 +276,14 @@ func subagentScratchpad(chat *models.Chat, scratchpad string) string {
 	return scratchpad
 }
 
-func buildSubagentModelContext(systemPrompt, scratchpad, message string) *provider.ModelContext {
+// buildSubagentModelContext is a sub-agent's context: the base prompt ("" is What Iff's own,
+// baseSystemPrompt) merged with the personality prompt, the scratchpad, then the task.
+func buildSubagentModelContext(basePrompt, systemPrompt, scratchpad, message string) *provider.ModelContext {
+	if basePrompt == "" {
+		basePrompt = baseSystemPrompt
+	}
 	modelContext := &provider.ModelContext{}
-	modelContext.Append(provider.SegmentKindSystemPrompt, provider.RoleDeveloper, mergePrompts(baseSystemPrompt, systemPrompt), true)
+	modelContext.Append(provider.SegmentKindSystemPrompt, provider.RoleDeveloper, mergePrompts(basePrompt, systemPrompt), true)
 	if strings.TrimSpace(scratchpad) != "" {
 		modelContext.Append(provider.SegmentKindScratchpad, provider.RoleDeveloper, scratchpad, true)
 	}

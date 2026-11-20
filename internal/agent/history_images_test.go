@@ -180,7 +180,7 @@ func TestBuildHistoryContext_CapsHistoryImages(t *testing.T) {
 		return turnsWithImages
 	}
 
-	modelCtx, _, _, err := b.buildHistoryContext(t.Context(), userID, chat, nil, true, "")
+	modelCtx, _, _, err := b.buildHistoryContext(t.Context(), userID, chat, nil, true, "", "")
 	require.NoError(t, err)
 	withImages := countImages(modelCtx)
 	require.Len(t, withImages, maxHistoryImages)
@@ -192,7 +192,7 @@ func TestBuildHistoryContext_CapsHistoryImages(t *testing.T) {
 	}
 	require.Equal(t, last, withImages[len(withImages)-1], "the newest turns keep their images")
 
-	modelCtx, _, _, err = b.buildHistoryContext(t.Context(), userID, chat, nil, false, "")
+	modelCtx, _, _, err = b.buildHistoryContext(t.Context(), userID, chat, nil, false, "", "")
 	require.NoError(t, err)
 	require.Empty(t, countImages(modelCtx))
 }
