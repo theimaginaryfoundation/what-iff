@@ -222,6 +222,7 @@
           <app-buzz-composer-toggle />
           <app-slack-composer-toggle />
           <app-chat-composer
+            (unarchiveRequested)="requestUnarchive()"
             [draft]="session.draft()"
             [attachments]="pendingAttachments()"
             [chatId]="session.thread()?.id ?? null"

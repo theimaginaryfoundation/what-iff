@@ -48,6 +48,9 @@ type Chat struct {
 	// Archived reflects stored archive state when loaded from the DB (non-nil).
 	// Nil means "omit on UpdateChat" so PATCH callers that do not send archived preserve the row.
 	Archived *bool `json:"archived,omitempty"`
+	// RestoreGuidance is written only by the explicit restore operation, not stale turn saves.
+	// It steers restoration and future context use; it never deletes or hides stored history.
+	RestoreGuidance string `json:"restore_guidance,omitempty"`
 	// Source is the origin of an imported chat (e.g. "openai", "anthropic"). Internal-only; not exposed in JSON.
 	Source *string `json:"-"`
 	// ImportHash is the per-conversation dedup key used by the import pipeline. Internal-only; not exposed in JSON.

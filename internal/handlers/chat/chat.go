@@ -780,21 +780,19 @@ func (h *Handler) RehydrateChat(w http.ResponseWriter, r *http.Request) {
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, chat)
 }
 
-// needsRehydration reports whether an imported thread still needs its one-time lazy summary: it is
-// unarchived, was imported, has no checkpoint yet and is not already being summarized or done.
+// needsRehydration reports whether an unarchived import or guided restore needs preparation.
+// Guided failures remain retryable even when an older checkpoint exists.
 // The atomic claim in the datastore is authoritative; this just spares plain threads the write.
 func needsRehydration(chat *models.Chat) bool {
-	if chat.Source == nil || *chat.Source == "" {
-		return false
-	}
 	if chat.Archived != nil && *chat.Archived {
 		return false
 	}
-	switch chat.RehydrationState {
-	case models.RehydrationStatePending, models.RehydrationStateProcessing, models.RehydrationStateReady:
-		return false
-	}
-	return chat.CheckpointSummary == ""
+	return (datastore.ChatRehydrationInfo{
+		State:      chat.RehydrationState,
+		Imported:   chat.Source != nil && *chat.Source != "",
+		Summarized: chat.CheckpointSummary != "",
+		Guided:     chat.RestoreGuidance != "",
+	}).NeedsRehydration()
 }
 
 // MarkChatRead marks all unread assistant messages in a chat as read.

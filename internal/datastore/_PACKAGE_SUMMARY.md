@@ -6,6 +6,10 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 
 ## Responsibilities
 
+- Guided unarchive: `chat_restore.go:RestoreChat` atomically unarchives an owned idle thread and saves optional `restore_guidance`; nonempty guidance marks context stale and clears the provider response chain.
+  `chat_rehydration.go` also claims native guided threads and retries failed guided preparation even when an older summary exists.
+  `chat_restore_test.go` covers ownership, concurrent preparation, blank restores, and single-worker claims.
+
 - **`Datastore`** (`datastore.go`): holds `*ent.Client`, `*sql.DB` for raw queries, logger, optional **`telemetry.Metrics`** (for datastore counters such as context-item persist failures), and **`tokenCrypto`** for encrypting OAuth/API tokens at rest (`token_crypto.go`).
 - **Per-domain files** (each adds methods on `Datastore`):
   - `agent_prompt.go` (ADR 0x042): agent prompts a running turn waits on; `AnswerAgentPrompt` and `CloseAgentPrompt` are conditional on the prompt still pending, so two answers (or an answer and the expiry) cannot both land.

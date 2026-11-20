@@ -1,0 +1,17 @@
+<ui-modal [open]="restore.targets().length > 0" labelledBy="unarchive-title" size="md"
+  [dismissible]="!restore.busy()" (dismiss)="restore.cancel()">
+  <h2 modal-header id="unarchive-title">Unarchive {{ restore.targets().length > 1 ? restore.targets().length + ' threads' : 'thread' }}?</h2>
+  @if (restore.targets().length === 1) { <p class="restore__name">{{ restore.targets()[0].name }}</p> }
+  <label for="restore-guidance">What should carry forward? <span>(optional)</span></label>
+  <p id="restore-guidance-help">Tell your personality what's important and what you'd like it to leave out when rebuilding this thread's working summary.</p>
+  <textarea id="restore-guidance" rows="5" maxlength="4000" [disabled]="restore.busy()"
+    [ngModel]="restore.guidance()" (ngModelChange)="restore.guidance.set($event)" aria-describedby="restore-guidance-help restore-guidance-scope"
+    placeholder="Keep the final decisions, budget and next steps. Leave out abandoned plans and small talk."></textarea>
+  @if (restore.targets().length > 1) { <p>The same instructions apply to each selected thread.</p> }
+  <p id="restore-guidance-scope" class="restore__scope">Your instructions guide the working summary and future replies. The full transcript and existing memories remain available; nothing is deleted or hidden. With instructions, a new summary is prepared and may use credits. Leave blank to unarchive normally.</p>
+  @if (restore.error()) { <p class="restore__error" role="alert">{{ restore.error() }}</p> }
+  <div modal-footer class="restore__actions">
+    <ui-button variant="secondary" [disabled]="restore.busy()" (activate)="restore.cancel()">Cancel</ui-button>
+    <ui-button variant="primary" [loading]="restore.busy()" (activate)="restore.confirm()">Unarchive</ui-button>
+  </div>
+</ui-modal>

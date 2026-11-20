@@ -2326,6 +2326,10 @@ func (a *Agent) prepareChatContextOn(ctx context.Context, userID uuid.UUID, chat
 	if err != nil {
 		return nil, fmt.Errorf("failed to get chat: %w", err)
 	}
+	// A guided restore must never silently fall back to the old working context on timeout/failure.
+	if err := requireGuidedRestoreReady(parentChat); err != nil {
+		return nil, err
+	}
 
 	// Get relevant memories.
 	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message, parentChat.IsSandboxed())

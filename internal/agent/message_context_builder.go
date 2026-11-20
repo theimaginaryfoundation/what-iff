@@ -275,6 +275,9 @@ func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID 
 	modelCtx = &provider.ModelContext{}
 	sysText := mergePrompts(baseSystemPrompt, chat.SystemPrompt)
 	modelCtx.Append(provider.SegmentKindSystemPrompt, provider.RoleDeveloper, sysText, true)
+	if guidance := restoreGuidanceContext(chat.RestoreGuidance); guidance != "" {
+		modelCtx.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, guidance, true)
+	}
 
 	if chat.CheckpointSummary != "" {
 		modelCtx.Append(provider.SegmentKindCheckpointSummary, provider.RoleDeveloper, chat.CheckpointSummary, true)

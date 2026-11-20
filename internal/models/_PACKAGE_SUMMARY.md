@@ -6,6 +6,9 @@
 
 ## Responsibilities
 
+- `Chat.RestoreGuidance` exposes optional saved unarchive preferences; ordinary chat updates do not write it.
+  `ChatSummary.RestoreGuidance` is internal-only (`json:"-"`), keeping user preferences out of the webhook summary payload.
+
 - Request/response structs for chats, messages, memories, personalities, rituals, models, jobs, agent jobs (including schedule types), billing-related payloads, file attachments, MCP servers, users, quotas, etc.
 - **Defaults and validation helpers** where present (e.g. `model_defaults.go` for model configuration).
 - **Provider keys** (`provider_key.go`): `ModelProviders` lists every provider, `ModelProvider.Known` checks one, `ModelProvider.DisplayName` names one the way a person would know it, `ProviderKeySummary` describes a stored key without it, and `ProviderAccess` reports where an account's keys come from (`KeysFromDeployment`/`KeysFromAccount`) and which providers it has a key for.

@@ -6,6 +6,9 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 
 ## Responsibilities
 
+- `restore.go:RestoreChat` handles `POST /chat/{id}/restore`: bounded optional natural-language guidance, explicit atomic unarchive, and immediate guided preparation.
+  Blank restores retain lazy import preparation; `restore_test.go` covers validation, ownership/not-found, conflicts, and preparation triggers.
+
 - **Agent prompts** (`prompts.go`, ADR 0x042): `POST /chat/{chatId}/prompts/{promptId}/answer` records the person's answer to a question the running turn asked (ask_user or an MCP elicitation) through `PromptAgent`; 404 for another chat's or account's prompt, 409 when it no longer waits, 400 for an answer that does not fit.
 - **Follow-ups** (ADR 0x042): `CreateChatMessage` takes `steer: true` for a message sent while a turn runs, which that turn takes in at its next step.
 - **Document comments sent to the agent** (ADR 0x046): `CreateChatMessage` takes `comment` for a message that is a comment mentioning the agent (`comment_message.go`).

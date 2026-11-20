@@ -27,6 +27,7 @@ type fakeStore struct {
 	updateScratchpadFn        func(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
 	listChatsFn               func(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.ChatFilters) (*models.PaginatedResponse, error)
 	updateChatFn              func(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error)
+	restoreChatFn             func(ctx context.Context, userID, chatID uuid.UUID, guidance string) (*models.Chat, error)
 	markChatMessagesReadFn    func(ctx context.Context, userID, chatID uuid.UUID) (int, error)
 	markAllChatMessagesReadFn func(ctx context.Context, userID uuid.UUID) (int, error)
 	getModelByNameFn          func(ctx context.Context, name string) (*models.Model, error)
@@ -56,6 +57,12 @@ func (f *fakeStore) GetChat(ctx context.Context, userID, id uuid.UUID) (*models.
 }
 func (f *fakeStore) UpdateChat(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error) {
 	return f.updateChatFn(ctx, userID, chat)
+}
+func (f *fakeStore) RestoreChat(ctx context.Context, userID, chatID uuid.UUID, guidance string) (*models.Chat, error) {
+	if f.restoreChatFn == nil {
+		return nil, errors.New("not implemented")
+	}
+	return f.restoreChatFn(ctx, userID, chatID, guidance)
 }
 func (f *fakeStore) DeleteChat(ctx context.Context, userID, id uuid.UUID) error {
 	if f.deleteChatFn != nil {

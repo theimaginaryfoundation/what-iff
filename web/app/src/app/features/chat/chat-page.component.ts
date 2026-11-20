@@ -1,3 +1,4 @@
+import { RestoreThreadService } from './restore/restore-thread.service';
 import { CommonModule, DOCUMENT } from '@angular/common';
 import {
   ChangeDetectionStrategy,
@@ -138,7 +139,13 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ChatPageComponent implements OnInit, OnDestroy {
+  private readonly restore = inject(RestoreThreadService);
   readonly session = inject(ChatSessionService);
+
+  requestUnarchive(): void {
+    const thread = this.session.thread();
+    if (thread) this.restore.request([thread]);
+  }
   readonly isSandboxed = isSandboxed;
   readonly sendGate = inject(ChatSendGate);
   private readonly chatService = inject(ChatService);

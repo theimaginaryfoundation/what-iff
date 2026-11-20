@@ -63,9 +63,11 @@ type WebhookMessage struct {
 // as they are. An empty Summary means the thread has none yet. The webhook read API serves it, so
 // remote sync can give a copy the summary instead of summarizing the history again.
 type ChatSummary struct {
-	ChatID      uuid.UUID  `json:"chat_id"`
-	Summary     string     `json:"summary"`
-	WindowStart *time.Time `json:"window_start,omitempty"`
+	// RestoreGuidance is internal preparation context, not part of the webhook summary payload.
+	RestoreGuidance string     `json:"-"`
+	ChatID          uuid.UUID  `json:"chat_id"`
+	Summary         string     `json:"summary"`
+	WindowStart     *time.Time `json:"window_start,omitempty"`
 }
 
 // WebhookAttachment is attachment metadata only. File contents are not served on this surface.

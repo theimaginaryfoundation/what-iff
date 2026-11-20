@@ -1,3 +1,4 @@
+import { ButtonComponent } from '../../../../shared/ui/button/button.component';
 import { CommonModule, AsyncPipe } from '@angular/common';
 import {
   ChangeDetectionStrategy,
@@ -95,6 +96,7 @@ let nextPreviewId = 0;
   selector: 'app-chat-composer',
   standalone: true,
   imports: [
+    ButtonComponent,
     CommonModule,
     AsyncPipe,
     AuthImagePipe,
@@ -124,7 +126,8 @@ let nextPreviewId = 0;
 
       @if (threadArchived()) {
         <p class="composer__archived" role="status">
-          This thread is archived. Restore it from Thread Manager to continue the conversation.
+          This thread is archived.
+          <ui-button size="sm" (activate)="unarchiveRequested.emit()">Unarchive</ui-button>
         </p>
       }
 
@@ -1492,6 +1495,7 @@ export class ChatComposerComponent {
   /** What the thread inherits where it sets nothing (personality, account default; none when sandboxed). */
   readonly inheritedTurnSettings = input<InheritedTurnSettings | null>(null);
 
+  readonly unarchiveRequested = output<void>();
   readonly draftChange = output<string>();
   readonly send = output<string>();
   readonly filesSelected = output<File[]>();

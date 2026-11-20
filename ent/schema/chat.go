@@ -63,6 +63,9 @@ func (Chat) Fields() []ent.Field {
 		field.Bool("archived").
 			Default(false).
 			Comment("When true, thread is hidden from default lists; list with archived=true to browse the archive"),
+		field.Text("restore_guidance").
+			Optional().
+			Comment("User-provided preferences for what to emphasize or omit from the restored working summary; not transcript deletion or a retrieval restriction"),
 		field.String("source").
 			Optional().
 			Comment("Origin of chat, e.g. 'openai'/'anthropic' for imported conversation exports"),

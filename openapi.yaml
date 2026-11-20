@@ -6715,16 +6715,89 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /chat/{id}/restore:
+    post:
+      summary: Unarchive a chat with optional context guidance
+      description: |
+        Explicitly confirms unarchiving an owned archived thread. Optional natural-language guidance
+        rebuilds its working summary from the transcript, for native and imported chats alike, and
+        guides future replies. This preparation may use credits. Old turns are kept in the transcript
+        but are replaced by the guided summary in the live context. Existing memories and retrieval
+        remain available; these preferences do not delete, hide, or guarantee exclusion of information.
+        Guided preparation does not automatically mine new long-term memories from the old transcript.
+        Blank guidance retains normal lazy preparation. A guided restore starts preparation immediately;
+        until it succeeds, replies cannot fall back to the previous context. Failed preparation can be
+        retried through the rehydrate endpoint or by reopening the thread.
+      tags: [Chat Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                guidance:
+                  type: string
+                  maxLength: 4000
+                  description: Optional priorities and omissions for the restored working summary. Trimmed before saving.
+      responses:
+        '200':
+          description: Thread unarchived; guided preparation started when requested
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Chat'
+        '400':
+          description: Invalid ID, request body, or guidance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Thread is not archived or preparation is still running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unable to unarchive thread
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /chat/{id}/rehydrate:
     post:
-      summary: Start an imported chat's one-time summary now
+      summary: Start or retry chat context preparation
       description: |
         Starts the background summary (and long-term memory seeding) for an imported chat right away, for
         callers that already know the user wants it ready, such as the post-import "prepare" picker.
         Otherwise it starts when the chat is first opened after being restored from the archive, or when a
         message is sent into it.
-        It does nothing for a chat that is archived, was not imported, or already has a summary or one in
-        progress. Returns the chat, with `rehydration_state` `pending` when this call started the summary.
+        Also retries failed guided restores, including native chats. Guided preparation uses the saved
+        restore preferences and does not seed new memories. It does nothing for an archived chat, a
+        native chat without guidance, or preparation already in progress or ready. Returns the chat,
+        with `rehydration_state` `pending` when this call started the summary.
       tags: [Chat Management]
       parameters:
         - name: id
@@ -11469,6 +11542,11 @@ components:
         archived:
           type: boolean
           description: When true, the thread is in the archive and omitted from default list responses
+        restore_guidance:
+          type: string
+          readOnly: true
+          maxLength: 4000
+          description: Saved optional context preferences. Updated only through the restore endpoint; not a deletion or access restriction.
         context_scope:
           type: string
           enum: [account, sandbox]
