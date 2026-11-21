@@ -54,7 +54,7 @@ func newConnectionFixture(t *testing.T) *connectionFixture {
 	// The migrator writes to the shared table definitions, and these tests run
 	// in parallel: one fixture creates its tables at a time.
 	schemaMu.Lock()
-	err = migrator.Create(ctx, schemaTables(migrate.UsersTable, migrate.ProviderConnectionsTable, migrate.ModelsTable, migrate.UserPreferencesTable)...)
+	err = migrator.Create(ctx, schemaTables(migrate.UsersTable, migrate.ProviderConnectionsTable, migrate.ModelsTable, migrate.UserPreferencesTable, migrate.UtilityModelSettingsTable, migrate.ChatsTable, migrate.BackgroundNoticesTable)...)
 	schemaMu.Unlock()
 	require.NoError(t, err)
 	client := ent.NewClient(ent.Driver(entsql.OpenDB(dialect.SQLite, db)))

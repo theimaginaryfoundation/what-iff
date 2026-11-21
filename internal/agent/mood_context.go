@@ -7,15 +7,11 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
-
-const moodAutoSelectModel = models.UtilityModelName
 
 type moodAutoSelectResult struct {
 	MoodID string `json:"mood_id"`
@@ -100,7 +96,8 @@ func (a *Agent) resolveActiveMood(ctx context.Context, userID uuid.UUID, chatCtx
 		return moods[0]
 	}
 
-	selected := a.autoSelectMood(ctx, moods, userMessage)
+	selected, err := a.autoSelectMood(ctx, moods, userMessage)
+	a.recordTurnUtility(ctx, userID, chat.ID, models.BackgroundStepMoodSelect, err)
 	if selected != nil {
 		a.persistActiveMood(ctx, userID, chat.ID, selected)
 	}
@@ -141,16 +138,14 @@ func isFirstUserMessageResult(results []any, currentMessageID uuid.UUID) bool {
 	return userCount <= 1
 }
 
-// autoSelectMood asks GPT-4.1-mini to pick the best mood from the provided list for the user message.
-func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMessage string) *models.Mood {
-	if a.OpenAIProvider == nil {
-		return nil
-	}
+// autoSelectMood asks the simple role's model to pick the best mood from the provided list for
+// the user message. It returns nil for no pick, and the call's error when the model call failed.
+func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMessage string) (*models.Mood, error) {
 	// Mock/local mode: mood selection is a provider call — deliberately keep
 	// the current mood instead of hitting the deny transport every auto-mood turn.
 	if a.nonVendorLLM() {
 		a.logger.Debug("mock/local mode: skipping auto mood selection")
-		return nil
+		return nil, nil
 	}
 
 	// Build a compact mood summary for the prompt.
@@ -168,53 +163,40 @@ func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMe
 	sysPrompt := "You are a routing assistant. Given a user message and a list of agent moods (moods), return ONLY the JSON object {\"mood_id\": \"<uuid>\"} for the best matching mood. Return exactly one mood. No explanation."
 	userPrompt := fmt.Sprintf("User message:\n%s\n\nAvailable moods:\n%s", userMessage, string(summaryJSON))
 
-	params := responses.ResponseNewParams{
-		Model:        moodAutoSelectModel,
-		Instructions: openai.String(sysPrompt),
-		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: []responses.ResponseInputItemUnionParam{
-				responses.ResponseInputItemParamOfMessage(userPrompt, "user"),
-			},
+	out, err := a.CallUtility(ctx, provider.UtilityRequest{
+		Role:         provider.UtilityRoleSimple,
+		CallPath:     telemetry.CallPathModeSelect,
+		Instructions: sysPrompt,
+		Input:        userPrompt,
+		Schema: &provider.UtilitySchema{
+			Name:        "MoodAutoSelect",
+			Description: "Mood auto-selection JSON",
+			Schema:      moodAutoSelectSchema,
 		},
-		Text: responses.ResponseTextConfigParam{
-			Format: responses.ResponseFormatTextConfigUnionParam{
-				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-					Name:        "MoodAutoSelect",
-					Schema:      moodAutoSelectSchema,
-					Strict:      openai.Bool(true),
-					Description: openai.String("Mood auto-selection JSON"),
-					Type:        "json_schema",
-				},
-			},
-		},
-	}
-
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathModeSelect), params)
+	})
 	if err != nil {
 		a.logger.Warn("mood auto-select: inference failed", zap.Error(err))
-		return nil
+		return nil, err
 	}
 
-	raw := strings.TrimSpace(provider.ProcessResponseOutput(resp))
+	raw := strings.TrimSpace(out)
 	// We rely on OpenAI structured output enforcement here; parser intentionally
 	// expects JSON-only text (no prose wrappers or concatenated objects).
 	a.logger.Debug("mood auto-select: raw structured output",
-		zap.String("model", moodAutoSelectModel),
 		zap.String("raw", raw))
 	selectedID, err := parseMoodAutoSelectResult(raw)
 	if err != nil {
 		a.logger.Warn("mood auto-select: failed to parse structured response",
-			zap.String("model", moodAutoSelectModel),
 			zap.String("raw", raw),
 			zap.Error(err))
-		return nil
+		return nil, nil
 	}
 	for _, k := range moods {
 		if k.ID == selectedID {
-			return k
+			return k, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func parseMoodAutoSelectResult(raw string) (uuid.UUID, error) {

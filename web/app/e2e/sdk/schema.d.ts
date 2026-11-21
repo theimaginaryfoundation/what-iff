@@ -3198,6 +3198,146 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/utility-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The models the account's background work runs on
+         * @description For each utility role (background work that isn't the assistant talking: memory and summaries, memory merging, simple tasks such as chat naming, personality generation), the account's choice and the deployment's: a model, or off. The account's choice wins, then the deployment's. A role neither chose is not set, and its work doesn't run until one is.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Every role, in display order */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UtilityModels"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/utility-models/{role}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role: components["schemas"]["UtilityRole"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Choose the account's model for a utility role, or switch it off
+         * @description Send either a model or `off`. The model must be one the account can use: a catalog model whose provider it holds a key for, or one enabled on its own provider connections. A choice that can't be used later (turned off, its connection gone or unreachable, its provider's key removed, or an experimental model after the account turns experimental models off) is passed over for the deployment's choice, logged and counted; with none, the role's work doesn't run. A role switched off doesn't run either, by the account's choice. A choice can be replaced but not cleared: where accounts choose, nothing stands behind it.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    role: components["schemas"]["UtilityRole"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SetUtilityModelRequest"];
+                };
+            };
+            responses: {
+                /** @description Every role after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UtilityModels"];
+                    };
+                };
+                /** @description Neither a model nor `off`, both, a model the account can't use, an unknown effort or tier, an effort or tier with `off`, or a tier on a model whose API offers none */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The deployment supplies the keys, so it chooses the models; or the model is experimental and the account hasn't turned experimental models on */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not a utility role */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A catalog model whose provider the account holds no key for (`provider_not_configured`, with the provider in `details`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/provider-keys": {
         parameters: {
             query?: never;
@@ -5128,6 +5268,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Schedule parsing needs a model the account can't use: `provider_not_configured` (no key for its provider, named in `details`), or `utility_model_not_set` / `utility_role_off` / `utility_model_unavailable` (the simple role has no model chosen, is switched off, or its chosen model can't be used; `details.role` names it) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -10947,6 +11096,132 @@ export interface paths {
         };
         trace?: never;
     };
+    "/chat/{chatId}/background-notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Background work on a chat that failed or fell back
+         * @description Notices the account hasn't dismissed, newest first: a checkpoint step (scratchpad, memory, summary) that failed at its provider, or a utility role that passed over a chosen model it couldn't use. A notice goes away when the same step succeeds later, so fixing the cause clears it. Each states the step and the cause; what to do about it is the client's.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The chat's notices; empty for another account's chat */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BackgroundNotice"][];
+                    };
+                };
+                /** @description Invalid chat ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{chatId}/background-notices/{noticeId}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss a background notice
+         * @description Hides the notice until its cause changes.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                    noticeId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Dismissed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid chat or notice ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such notice on this account's chat */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/{chatId}/bookmarks": {
         parameters: {
             query?: never;
@@ -16334,6 +16609,82 @@ export interface components {
             /** @description The agent job a scheduled run is for (ADR 0x040). Set by GET /chat/{chatId}/active-job for a scheduled run only: a webhook background run or the onboarding welcome is an agent_job_run with no message_id too, but has none. */
             job_run?: components["schemas"]["JobRun"];
         };
+        BackgroundNotice: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            chat_id: string;
+            /** @description What didn't happen: `scratchpad`, `memory` or `summary` (a checkpoint step); `memory_query`, `chat_name`, `mood_select` or `expression_pick` (a turn's own background calls); or `fallback_<role>` (a utility role passed over the model chosen for it). Each is its own notice, so one succeeding never clears another's. */
+            step: string;
+            /** @description The utility role the step runs on, so a client can show a role's notices together. Missing for a step this server doesn't know. */
+            role?: components["schemas"]["UtilityRole"];
+            /**
+             * @description Why. `provider_not_configured`: the account has no key for `provider` (or the deployment can't reach it at all). `provider_error`: the provider was asked and failed; background work runs again as the chat goes on. `model_unavailable`: the chosen model couldn't be used (turned off, its connection gone or unreachable, its key removed, or experimental after the account opted out); on a `fallback_<role>` step the role ran on its next choice, and on any other step it had none, so the step didn't run. `model_not_set`: no model is chosen for the role, so the step didn't run. A role switched off makes no notice.
+             * @enum {string}
+             */
+            code: "provider_not_configured" | "provider_error" | "model_unavailable" | "model_not_set";
+            /** @description The provider the step went to, when known. */
+            provider?: string;
+            /** @description The model the step ran on, when known. */
+            model?: string;
+            /** @description How many times it has happened since it was last cleared. */
+            count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /**
+         * @description A group of background work that runs on one model. `memory`: memory extraction, the scratchpad, checkpoint summaries, recall and thread rehydration. `memory_merge`: folding duplicate memories together; off, only exact duplicates are folded. `simple`: tasks straightforward enough for any model, such as chat naming, expression and mood selection, schedule parsing and memory queries. `personality`: generating a personality.
+         * @enum {string}
+         */
+        UtilityRole: "memory" | "memory_merge" | "simple" | "personality";
+        /** @description One scope's choice for a role. */
+        UtilityChoice: {
+            /** @description Whether the role is switched off; `model_id` is then null. */
+            off: boolean;
+            /**
+             * Format: uuid
+             * @description The chosen model, or null when the role is off.
+             */
+            model_id: string | null;
+            /** @description The reasoning effort the role's calls ask for (ADR 0x026), limited to what the model supports; null leaves the model's own default. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description The service tier the role's calls ask for; null leaves the API's default. */
+            service_tier?: components["schemas"]["UtilityServiceTier"] | null;
+        };
+        /**
+         * @description How fast, and at what price, a call asks to be processed: `priority` is faster and pricier, `flex` slower and cheaper. Only models on OpenAI's own Responses API offer a tier.
+         * @enum {string}
+         */
+        UtilityServiceTier: "priority" | "flex";
+        /** @description A role's choices. With neither, the role is not set, and its work doesn't run. */
+        UtilityRoleModel: {
+            role: components["schemas"]["UtilityRole"];
+            /** @description The account's choice, or null. */
+            account: components["schemas"]["UtilityChoice"] | null;
+            /** @description The deployment's choice, or null. */
+            deployment: components["schemas"]["UtilityChoice"] | null;
+        };
+        UtilityModels: {
+            /** @description Whether an account may choose its own models: only where accounts bring their own keys, and so pay for their background work. Where the deployment supplies the keys, it chooses; account choices are refused and not reported. */
+            accounts_choose: boolean;
+            roles: components["schemas"]["UtilityRoleModel"][];
+        };
+        /** @description Exactly one of `model_id` and `off`; a reasoning effort and service tier go with a model only. */
+        SetUtilityModelRequest: {
+            /**
+             * Format: uuid
+             * @description The model to choose.
+             */
+            model_id?: string;
+            /** @description True switches the role off. */
+            off?: boolean;
+            /** @description With a model only. Null or missing leaves the model's own default. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description With a model on OpenAI's Responses API only. Null or missing leaves the API's default. */
+            service_tier?: components["schemas"]["UtilityServiceTier"] | null;
+        };
         /**
          * @description A model provider.
          * @enum {string}
@@ -18358,7 +18709,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "connection_name_taken" | "model_name_taken" | "no_model_selected";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "utility_model_not_set" | "utility_role_off" | "utility_model_unavailable" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "connection_name_taken" | "model_name_taken" | "no_model_selected";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**

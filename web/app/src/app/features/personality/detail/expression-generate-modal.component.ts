@@ -37,6 +37,8 @@ import {
   expressionNameFromKey,
   isValidExpressionKey,
 } from '../helpers/expressions.helpers';
+import { ProviderKeysService } from '../../../core/services/provider-keys.service';
+import { utilityRoleUnavailableMessage } from '../../../core/utils/utility-role-copy';
 
 /** One cell of the 3×3 generate grid. */
 export interface GenerateCell {
@@ -333,6 +335,7 @@ export class ExpressionGenerateModalComponent implements OnDestroy {
   readonly busyChange = output<boolean>();
 
   private readonly mediaJobs = inject(PersonalityMediaJobService);
+  private readonly providerKeys = inject(ProviderKeysService);
   private readonly imageGallery = inject(ImageGalleryService);
   private readonly personalityApi = inject(PersonalityService);
   private readonly destroyRef = inject(DestroyRef);
@@ -545,7 +548,10 @@ export class ExpressionGenerateModalComponent implements OnDestroy {
         next: job => {
           if (job.status === 'failed') {
             this.setGenerating(false);
-            this.error.set(job.error || 'Expression generation failed.');
+            this.error.set(
+              utilityRoleUnavailableMessage(job.error_code, 'simple', this.providerKeys.accountsSupplyKeys()) ??
+                (job.error || 'Expression generation failed.'),
+            );
             return;
           }
           if (job.status !== 'complete') return;

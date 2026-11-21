@@ -1,5 +1,5 @@
 import { test, expect, uniqueId } from '../../fixtures';
-import { ProviderKeyPrompt, ProvidersTab } from '../../poms';
+import { BackgroundModelsStep, ProviderKeyPrompt, ProvidersTab } from '../../poms';
 import { AUTH_REDIRECT_TIMEOUT, LLM_REPLY_TIMEOUT } from '../../timeouts';
 
 /** A made-up OpenAI key; the mock backend never sends it anywhere. */
@@ -56,6 +56,15 @@ test(
       await expect(providers.row('openai')).toContainText('••••');
       await providers.nextStepButton.click();
       await expect(prompt.root).toBeHidden();
+    });
+
+    // No model is chosen for background work until the account chooses, so onboarding asks
+    // next, starting each role on the default model.
+    await test.step('keep the suggested background models', async () => {
+      const background = new BackgroundModelsStep(page);
+      await expect(background.root).toBeVisible();
+      await background.saveButton.click();
+      await expect(background.root).toBeHidden();
     });
 
     await test.step('create a personality manually', async () => {

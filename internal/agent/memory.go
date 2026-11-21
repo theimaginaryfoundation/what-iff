@@ -3,11 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/shared/constant"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/memoryutil"
@@ -15,8 +14,6 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
 	"github.com/google/uuid"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"go.uber.org/zap"
 )
 
@@ -67,130 +64,121 @@ Use both, along with the recent conversation, to decide what should be written t
 Prefer information that will remain useful after it falls out of the scratchpad.
 Use the conversation and scratchpad context to decide what to store or how to phrase it. `
 
-func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, responseID *string, inferenceModelContext *provider.ModelContext, chatCtx *chatContext, compactionEventID *uuid.UUID) {
+// memoryDedupNote is the developer note for memory extraction: what to weigh,
+// and the memories already stored, which must not be extracted again.
+// With none stored, the note says only what to weigh.
+func memoryDedupNote(chatCtx *chatContext) string {
+	note := memoryExtractionDeveloperNote(chatCtx)
+	if chatCtx == nil || len(chatCtx.memories) == 0 {
+		return note
+	}
+	return fmt.Sprintf("%s\n\nDO NOT extract memories that would be duplicative of the following memories:\n\n %s",
+		note, strings.Join(chatCtx.memories, "\n\n"))
+}
+
+func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, responseID *string, inferenceModelContext *provider.ModelContext, chatCtx *chatContext, compactionEventID *uuid.UUID) error {
 	if responseID == nil {
 		a.logger.Error("response ID is nil. cannot extract memories from conversation.")
-		return
+		return errors.New("no stored response to extract memories from")
 	}
 	prompt := memoryWritePromptText()
 
-	instructions := chatCtx.chat.SystemPrompt
-	params := responses.ResponseNewParams{
-		Model:              archivalOpenAIModel,
-		SafetyIdentifier:   openai.String(userID.String()),
-		PreviousResponseID: openai.String(*responseID),
-		MaxOutputTokens:    openai.Int(provider.DefaultMaxContentLength),
-		Instructions:       openai.String(instructions),
-		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: []responses.ResponseInputItemUnionParam{
-				responses.ResponseInputItemParamOfMessage(
-					fmt.Sprintf("%s\n\nDO NOT extract memories that would be duplicative of the following memories:\n\n %s", memoryExtractionDeveloperNote(chatCtx), strings.Join(chatCtx.memories, "\n\n")), provider.RoleDeveloper),
-				responses.ResponseInputItemParamOfMessage(prompt, provider.RoleUser),
-			},
+	out, err := a.CallUtility(ctx, provider.UtilityRequest{
+		Role:               provider.UtilityRoleMemory,
+		CallPath:           telemetry.CallPathMemory,
+		Instructions:       chatCtx.chat.SystemPrompt,
+		PreviousResponseID: *responseID,
+		History:            []provider.UtilityMessage{{Role: provider.UtilityMessageDeveloper, Text: memoryDedupNote(chatCtx)}},
+		Input:              prompt,
+		MaxOutputTokens:    provider.DefaultMaxContentLength,
+		SafetyUserID:       userID.String(),
+		Schema: &provider.UtilitySchema{
+			Name:        "MemoryExtraction",
+			Description: "Memory Extraction JSON",
+			Schema:      memoryExtractionSchemaFor(chatCtx),
 		},
-		Text: responses.ResponseTextConfigParam{
-			Format: responses.ResponseFormatTextConfigUnionParam{
-				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-					Name:        "MemoryExtraction",
-					Schema:      memoryExtractionSchemaFor(chatCtx),
-					Strict:      openai.Bool(true),
-					Description: openai.String("Memory Extraction JSON"),
-					Type:        "json_schema",
-				},
-			},
-		},
-	}
-
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathMemory), params)
+	})
 	if err != nil {
 		a.logger.Error("failed to extract memories with scratchpad delta", zap.Error(err))
-		return
+		return err
 	}
 
-	extracted, err := decodeExtractedMemories(chatCtx, []byte(resp.OutputText()))
+	extracted, err := decodeExtractedMemories(chatCtx, []byte(out))
 	if err != nil {
 		a.logger.Error("failed to unmarshal extracted memories", zap.Error(err))
-		return
+		return err
 	}
 
 	a.logger.Info("extracted memories (scratchpad delta)", zap.Any("count", len(extracted)))
 	a.compactMemoriesFromCheckpoint(ctx, userID, chatID, chatCtx.chat.PersonalityID, inferenceModelContext, chatCtx, extracted, compactionEventID)
+	return nil
 }
 
-// extractMemoriesWithScratchpadDeltaClaude extracts long-term memories for Claude-model
-// chats. It builds context from DB history instead of PreviousResponseID chaining, and
-// makes the scratchpad delta (old → new) explicit via context blocks.
+// extractMemoriesWithScratchpadDeltaClaude extracts long-term memories for chats whose
+// checkpoint rebuilds context from the DB (every chat not on OpenAI's own Responses API;
+// "Claude" is historical). It builds context from DB history instead of PreviousResponseID
+// chaining, makes the scratchpad delta (old → new) explicit via context blocks, and runs on
+// the memory role's model, like the chained path.
 func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, userID, chatID uuid.UUID, modelContext *provider.ModelContext, inferenceModelContext *provider.ModelContext, chatCtx *chatContext, compactionEventID *uuid.UUID) error {
-
-	if a.ClaudeProvider == nil {
-		return fmt.Errorf("ClaudeProvider is nil")
-	}
-
 	prompt := memoryWritePromptText()
 
-	dedupNote := fmt.Sprintf("%s\n\nDO NOT extract memories that would be duplicative of the following memories:\n\n %s",
-		memoryExtractionDeveloperNote(chatCtx), strings.Join(chatCtx.memories, "\n\n"))
-
-	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
-	modelContext.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, dedupNote, false)
-	params := modelContext.BuildClaudeParams(archivalClaudeModel)
-	// Mirror the OpenAI path: keep MaxTokens consistent with DefaultMaxContentLength.
-	params.MaxTokens = int64(provider.DefaultMaxContentLength)
-	// Structured JSON output (same schema as OpenAI memory extraction).
-	params.OutputConfig = anthropic.OutputConfigParam{
-		Format: anthropic.JSONOutputFormatParam{
-			Type:   constant.JSONSchema("").Default(),
-			Schema: extractionSchemaCopy(memoryExtractionSchemaFor(chatCtx)),
+	reply, err := a.callUtility(ctx, provider.UtilityRequest{
+		Role:            provider.UtilityRoleMemory,
+		CallPath:        telemetry.CallPathMemory,
+		Context:         modelContext,
+		History:         []provider.UtilityMessage{{Role: provider.UtilityMessageDeveloper, Text: memoryDedupNote(chatCtx)}},
+		Input:           prompt,
+		MaxOutputTokens: provider.DefaultMaxContentLength,
+		SafetyUserID:    userID.String(),
+		Schema: &provider.UtilitySchema{
+			Name:        "MemoryExtraction",
+			Description: "Memory Extraction JSON",
+			Schema:      extractionSchemaCopy(memoryExtractionSchemaFor(chatCtx)),
 		},
-	}
-	msg, err := a.ClaudeProvider.Call(telemetry.WithCallPath(ctx, telemetry.CallPathMemory), params)
+	})
 	if err != nil {
-		a.logger.Error("Claude memory extraction failed", zap.Error(err))
-		return fmt.Errorf("Claude memory extraction failed: %w", err)
+		a.logger.Error("rebuilt-context memory extraction failed", zap.Error(err))
+		return fmt.Errorf("memory extraction failed: %w", err)
 	}
-	extracted, err := decodeExtractedMemories(chatCtx, []byte(provider.ExtractClaudeText(msg)))
+	extracted, err := decodeExtractedMemories(chatCtx, []byte(reply.Text))
 	if err != nil {
-		a.logger.Error("failed to unmarshal Claude memory extraction", zap.Error(err))
-		return fmt.Errorf("failed to unmarshal Claude memory extraction: %w", err)
+		a.logger.Error("failed to unmarshal rebuilt-context memory extraction", zap.Error(err))
+		return fmt.Errorf("failed to unmarshal memory extraction: %w", err)
 	}
 
-	a.logger.Info("extracted memories (Claude scratchpad delta)", zap.Int("count", len(extracted)))
+	a.logger.Info("extracted memories (rebuilt-context scratchpad delta)", zap.Int("count", len(extracted)))
 	a.compactMemoriesFromCheckpoint(ctx, userID, chatID, chatCtx.chat.PersonalityID, inferenceModelContext, chatCtx, extracted, compactionEventID)
 
 	return nil
 }
 
+// getMemoryQuery asks whether the user's message calls for memories, and what to search for.
+// A message with no text, such as an image alone, has nothing to search with, so it doesn't.
 func (a *Agent) getMemoryQuery(ctx context.Context, userID uuid.UUID, prompt string, userMessage string) (models.MemoryQuery, error) {
-
-	params := responses.ResponseNewParams{
-		Model:            models.UtilityModelName,
-		SafetyIdentifier: openai.String(userID.String()),
-		MaxOutputTokens:  openai.Int(provider.DefaultMaxContentLength),
-		Instructions:     openai.String(prompt),
-		Input: responses.ResponseNewParamsInputUnion{
-			OfString: openai.String(userMessage),
-		},
-		Text: responses.ResponseTextConfigParam{
-			Format: responses.ResponseFormatTextConfigUnionParam{
-				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-					Name:        "MemoryQuery",
-					Schema:      memoryQuerySchema,
-					Strict:      openai.Bool(true),
-					Description: openai.String("Memory Query JSON"),
-					Type:        "json_schema",
-				},
-			},
-		},
+	if strings.TrimSpace(userMessage) == "" {
+		return models.MemoryQuery{}, nil
 	}
 
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathMemory), params)
+	out, err := a.CallUtility(ctx, provider.UtilityRequest{
+		Role:            provider.UtilityRoleSimple,
+		CallPath:        telemetry.CallPathMemory,
+		Instructions:    prompt,
+		Input:           userMessage,
+		MaxOutputTokens: provider.DefaultMaxContentLength,
+		SafetyUserID:    userID.String(),
+		Schema: &provider.UtilitySchema{
+			Name:        "MemoryQuery",
+			Description: "Memory Query JSON",
+			Schema:      memoryQuerySchema,
+		},
+	})
 	if err != nil {
 		a.logger.Error("failed to get memory query", zap.Error(err))
 		return models.MemoryQuery{}, err
 	}
 
 	memoryQuery := models.MemoryQuery{}
-	err = json.Unmarshal([]byte(resp.OutputText()), &memoryQuery)
+	err = json.Unmarshal([]byte(out), &memoryQuery)
 	if err != nil {
 		a.logger.Error("failed to unmarshal memory query", zap.Error(err))
 		return models.MemoryQuery{}, err
@@ -242,7 +230,9 @@ func firstUserNameLine(lines []string) string {
 }
 
 // getMemories prefetches the memories relevant to userMessage for one turn. A sandboxed chat gets
-// only the memories created in it (scoped in the retrieval SQL) and no user-name line.
+// only the memories created in it (scoped in the retrieval SQL) and no user-name line. Once the
+// turn's own lines are built, a failed search returns them, and userNameLine, with the error, so a
+// best-effort caller can keep them.
 //
 // userNameLine is the user-name line it put first in memories ("" when it added none). The caller
 // records exactly this line as chatContext.userNameLine instead of rebuilding it from the profile,
@@ -258,22 +248,30 @@ func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.U
 	liveMemories = []*models.Memory{}
 	prompt := MemoryQueryPrompt
 	memoryQuery, err := a.getMemoryQuery(ctx, userID, prompt, userMessage)
+	a.recordTurnUtility(ctx, userID, chatID, models.BackgroundStepMemoryQuery, err)
+	if errors.Is(err, ErrUtilityRoleOff) || errors.Is(err, ErrUtilityRoleNotSet) {
+		// No model to search with, by choice or not yet: the turn goes on with what it has, not
+		// as a failed memory load.
+		return memories, liveMemories, userNameLine, nil
+	}
+	// From here on a failure costs the turn its memories, not its own lines: they go back with
+	// the error, and the best-effort caller keeps them.
 	if err != nil {
 		a.logger.Error("failed to get memory query", zap.Error(err))
-		return nil, nil, "", err
+		return memories, nil, userNameLine, err
 	}
 
 	if memoryQuery.ShouldEnrich {
 		memoryQueryEmbedding, err := a.memoryTool.CreateEmbedding(ctx, memoryQuery.Query)
 		if err != nil {
 			a.logger.Error("failed to create memory query embedding", zap.Error(err))
-			return nil, nil, "", err
+			return memories, nil, userNameLine, err
 		}
 
 		dbMemories, err := a.ds.GetRelatedMemories(ctx, userID, chatID, memoryQueryEmbedding, personalityID, sandboxed)
 		if err != nil {
 			a.logger.Error("failed to get related memories", zap.Error(err))
-			return nil, nil, "", err
+			return memories, nil, userNameLine, err
 		}
 
 		liveMemories = dbMemories

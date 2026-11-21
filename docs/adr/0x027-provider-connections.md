@@ -127,12 +127,13 @@ A role is a row in a list, so new kinds of background work add a role rather tha
 | Role | Covers | Today |
 |---|---|---|
 | Memory and summaries | Memory extraction and merge, the scratchpad, checkpoint summaries, recall, thread rehydration | `gpt-5.6-luna` (memory and scratchpad use `claude-haiku-4-5` in chats with a Claude model) |
-| Quick tasks | Chat naming, expression and mode selection, schedule parsing, memory dedupe | `gpt-5.6-luna` |
+| Simple tasks | Chat naming, expression and mode selection, schedule parsing, memory dedupe | `gpt-5.6-luna` |
 | Personality generation | Generating a personality | `gpt-5.1` |
 | Images | Portraits and expression sets | `gpt-image-2.5-flare` |
 
 Each role has a deployment default, which an account can override with a model from a connection it can use.
 Whether accounts may override is a separate fact, like those in section 2.
+*Amended in step 5:* no model is named in code. A choice is a model or Off, and a role nobody chose is not set: its work doesn't run until one is, and the account is told. Memory merging became a role of its own, so a deployment can run it differently from the rest of memory work.
 Settings are keyed by scope and role, so a scope other than "deployment" or "account" can be added later.
 
 Utility calls go through one provider-agnostic path that routes by the model's connection, the way subagents already route by model.

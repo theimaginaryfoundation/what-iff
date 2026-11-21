@@ -399,6 +399,24 @@ func TestGetMemoriesBestEffort_DegradesOnError(t *testing.T) {
 	assert.Empty(t, userNameLine, "a failed retrieval records no user-name line")
 }
 
+func TestGetMemoriesBestEffort_KeepsTheTurnsOwnLinesOnError(t *testing.T) {
+	t.Parallel()
+
+	a := &Agent{
+		logger: zap.NewNop(),
+		testHooks: agentTestHooks{
+			GetMemoriesOverride: func(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string) ([]string, error) {
+				return []string{"The user's name is sam"}, fmt.Errorf("no key for the memory model")
+			},
+		},
+	}
+
+	memories, liveMemories, _, failed := a.getMemoriesBestEffort(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hi", false)
+	assert.True(t, failed, "the memories still failed to load")
+	assert.Equal(t, []string{"The user's name is sam"}, memories)
+	assert.Nil(t, liveMemories)
+}
+
 func TestGetMemoriesBestEffort_PassesThroughOnSuccess(t *testing.T) {
 	t.Parallel()
 

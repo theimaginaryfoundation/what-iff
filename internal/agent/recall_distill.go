@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 )
@@ -36,25 +34,20 @@ func newRecallDistiller(a *Agent) *recallDistiller {
 }
 
 func (d *recallDistiller) Distill(ctx context.Context, question, material string) (string, error) {
-	if d == nil || d.a == nil || d.a.OpenAIProvider == nil {
-		return "", fmt.Errorf("recall distiller: OpenAIProvider unavailable")
+	if d == nil || d.a == nil {
+		return "", fmt.Errorf("recall distiller: no agent")
 	}
 
 	userContent := fmt.Sprintf("Question:\n%s\n\nMaterial:\n%s", strings.TrimSpace(question), strings.TrimSpace(material))
-	params := responses.ResponseNewParams{
-		Model:           archivalOpenAIModel,
-		MaxOutputTokens: openai.Int(recallDistillMaxOutputTokens),
-		Instructions:    openai.String(recallDistillPrompt),
-		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: []responses.ResponseInputItemUnionParam{
-				responses.ResponseInputItemParamOfMessage(userContent, provider.RoleUser),
-			},
-		},
-	}
-
-	resp, err := d.a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathMemory), params)
+	out, err := d.a.CallUtility(ctx, provider.UtilityRequest{
+		Role:            provider.UtilityRoleMemory,
+		CallPath:        telemetry.CallPathMemory,
+		Instructions:    recallDistillPrompt,
+		Input:           userContent,
+		MaxOutputTokens: recallDistillMaxOutputTokens,
+	})
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(resp.OutputText()), nil
+	return strings.TrimSpace(out), nil
 }

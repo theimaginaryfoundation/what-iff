@@ -449,7 +449,7 @@ func TestCheckpoint_SaveOffSkipsOnlyMemoryExtraction(t *testing.T) {
 	for _, saveOff := range []bool{false, true} {
 		t.Run(map[bool]string{false: "save on", true: "save off"}[saveOff], func(t *testing.T) {
 			a, ds, client, userID, chat := newSkillsAgentFixture(t)
-			ctx := context.Background()
+			ctx := withTestUtilityModels(context.Background())
 			p, err := ds.CreatePersonality(ctx, userID, models.Personality{Name: "Ada", SystemPrompt: "You are Ada."})
 			require.NoError(t, err)
 			require.NoError(t, client.Chat.UpdateOneID(chat.ID).SetPersonalityID(p.ID).Exec(ctx))
@@ -485,13 +485,13 @@ func TestCheckpoint_SaveOffSkipsOnlyMemoryExtraction(t *testing.T) {
 }
 
 // The Claude checkpoint path (Claude, and every provider that takes runCheckpointClaude) has the
-// same gate: the scratchpad (a Claude call) and the summary (an OpenAI call) run either way, and
-// the extraction call (the Claude request with a JSON-schema output) only on a save-on turn.
+// same gate: the scratchpad and the summary run either way, and the extraction call only on a
+// save-on turn.
 func TestCheckpointClaude_SaveOffSkipsOnlyMemoryExtraction(t *testing.T) {
 	for _, saveOff := range []bool{false, true} {
 		t.Run(map[bool]string{false: "save on", true: "save off"}[saveOff], func(t *testing.T) {
 			a, ds, client, userID, chat := newSkillsAgentFixture(t)
-			ctx := context.Background()
+			ctx := withTestUtilityModels(context.Background())
 			p, err := ds.CreatePersonality(ctx, userID, models.Personality{Name: "Ada", SystemPrompt: "You are Ada."})
 			require.NoError(t, err)
 			require.NoError(t, client.Chat.UpdateOneID(chat.ID).SetPersonalityID(p.ID).Exec(ctx))
@@ -513,9 +513,11 @@ func TestCheckpointClaude_SaveOffSkipsOnlyMemoryExtraction(t *testing.T) {
 			if saveOff {
 				wantExtraction = 0
 			}
-			assert.Equal(t, 1+wantExtraction, len(claudeReqs.bodies), "the scratchpad call, plus extraction on a save-on turn")
-			assert.Equal(t, wantExtraction, claudeReqs.count(`"output_config"`), "the extraction call")
+			// Every checkpoint call runs on the memory model (OpenAI here), whatever the chat is on.
+			assert.Empty(t, claudeReqs.bodies)
+			assert.Equal(t, 2+wantExtraction, len(openAIReqs.bodies), "the scratchpad and the summary, plus extraction on a save-on turn")
 			assert.Equal(t, 1, openAIReqs.count(checkpointConversationSummaryInstructions[:40]), "the summary still runs")
+			assert.Equal(t, wantExtraction, openAIReqs.count(`"MemoryExtraction"`), "the extraction call")
 
 			saved, err := ds.GetChat(ctx, userID, chat.ID)
 			require.NoError(t, err)

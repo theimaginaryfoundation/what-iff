@@ -8,14 +8,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
-
-const generatePersonalityModel = "gpt-5.1"
 
 const generatePersonalityPrompt = `You are designing a single, coherent system prompt for a custom AI companion ("personality") for this user.
 
@@ -90,34 +86,24 @@ func (a *Agent) GeneratePersonality(ctx context.Context, answers map[string]stri
 		sb.WriteString(fmt.Sprintf("**%s**: %s\n", key, val))
 	}
 
-	params := responses.ResponseNewParams{
-		Model:           generatePersonalityModel,
-		MaxOutputTokens: openai.Int(provider.DefaultMaxContentLength),
-		Instructions:    openai.String(generatePersonalityPrompt),
-		ServiceTier:     responses.ResponseNewParamsServiceTierPriority, // We use prio here because these are small and part of onboarding, so we want them to be fast.
-		Input: responses.ResponseNewParamsInputUnion{
-			OfString: openai.String(sb.String()),
+	out, err := a.CallUtility(ctx, provider.UtilityRequest{
+		Role:            provider.UtilityRolePersonality,
+		CallPath:        telemetry.CallPathGeneratePersonality,
+		Instructions:    generatePersonalityPrompt,
+		Input:           sb.String(),
+		MaxOutputTokens: provider.DefaultMaxContentLength,
+		Schema: &provider.UtilitySchema{
+			Name:        "GeneratePersonality",
+			Description: "Generate Personality JSON",
+			Schema:      generatePersonalitySchema,
 		},
-		Text: responses.ResponseTextConfigParam{
-			Format: responses.ResponseFormatTextConfigUnionParam{
-				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-					Name:        "GeneratePersonality",
-					Schema:      generatePersonalitySchema,
-					Strict:      openai.Bool(true),
-					Description: openai.String("Generate Personality JSON"),
-					Type:        "json_schema",
-				},
-			},
-		},
-	}
-
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathGeneratePersonality), params)
+	})
 	if err != nil {
 		a.logger.Error("failed to generate personality", zap.Error(err))
-		return nil, fmt.Errorf("OpenAI call failed: %w", err)
+		return nil, fmt.Errorf("personality generation failed: %w", err)
 	}
 
-	raw := strings.TrimSpace(resp.OutputText())
+	raw := strings.TrimSpace(out)
 
 	var result GeneratePersonalityResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {

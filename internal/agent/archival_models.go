@@ -1,9 +1,10 @@
 package agent
 
-// archivalOpenAIModel and archivalClaudeModel are fixed models for background work:
-// scratchpad update, memory extraction, and checkpoint conversation summary.
-// Persona fields archival_model and custom memory/scratchpad prompts are deprecated and ignored.
-const (
-	archivalOpenAIModel = "gpt-5.6-luna"
-	archivalClaudeModel = "claude-haiku-4-5"
-)
+// checkpointChainsResponses reports whether a chat's checkpoint can chain off the stored
+// OpenAI response rather than rebuild its context from the DB: only when the chat is on
+// OpenAI's own Responses API and memory, the checkpoint's model, is too, since a stored
+// conversation can only be continued there. The caller pins memory for the whole checkpoint
+// (withUtilityTarget), so the steps that continue the response run on the model that decided.
+func checkpointChainsResponses(chatCtx *chatContext, memory utilityTarget) bool {
+	return !checkpointRebuildsFromDB(chatCtx) && memory.usesResponsesAPI()
+}

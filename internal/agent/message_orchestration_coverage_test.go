@@ -193,6 +193,25 @@ func TestFinalizeChat_NonDefaultNameSkipsRenameAndChecksMockMode(t *testing.T) {
 	})
 }
 
+// A first message with no text (an image alone) leaves the placeholder name for the next
+// message that has some: naming would have nothing to go on. The agent has no datastore, so
+// reaching the rename would panic.
+func TestFinalizeChat_MessageWithoutTextKeepsPlaceholderName(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop(), mockLLM: true, meter: metering.NoopMeter{Logger: zap.NewNop()}}
+	chatMessage := &models.ChatMessage{ChatID: uuid.New(), Message: "  "}
+	agentMessage := &models.ChatMessage{ID: uuid.New()}
+	chatCtx := &chatContext{
+		chat:  &models.Chat{Name: defaultChatName, ID: uuid.New()},
+		model: "mock-model",
+	}
+
+	require.NotPanics(t, func() {
+		a.finalizeChat(context.Background(), uuid.New(), chatMessage, agentMessage, chatCtx, &provider.ModelContext{}, metering.Decision{Allowed: true})
+	})
+	require.Equal(t, defaultChatName, chatCtx.chat.Name)
+}
+
 // --- runCheckpointOpenAI ---
 
 func TestRunCheckpointOpenAI_NilAgentMessageIsNoOp(t *testing.T) {

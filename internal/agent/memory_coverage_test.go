@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -83,12 +84,20 @@ func claudeMessageTextJSONBody(id, text string) string {
 		`"usage":{"input_tokens":5,"output_tokens":7}}`
 }
 
-func TestExtractMemoriesWithScratchpadDeltaClaude_NilProviderReturnsError(t *testing.T) {
+// claudeChatCtx is a chat on a native Anthropic model, whose rebuilt-context checkpoint
+// calls stay on Claude.
+func claudeChatCtx(memories ...string) *chatContext {
+	return &chatContext{chat: &models.Chat{}, model: "claude-sonnet-4-5", modelProvider: string(models.ModelProviderAnthropic), memories: memories}
+}
+
+// Memory extraction on a rebuilt context needs the memory role's provider, not the chat's: a
+// Claude chat with no OpenAI provider fails for want of OpenAI.
+func TestExtractMemoriesWithScratchpadDeltaClaude_WithoutMemoryRoleProviderReturnsError(t *testing.T) {
 	t.Parallel()
-	a := &Agent{logger: zap.NewNop()}
-	err := a.extractMemoriesWithScratchpadDeltaClaude(context.Background(), uuid.New(), uuid.New(),
-		&provider.ModelContext{}, &provider.ModelContext{}, &chatContext{chat: &models.Chat{}}, nil)
-	require.ErrorContains(t, err, "ClaudeProvider is nil")
+	a := &Agent{logger: zap.NewNop(), ClaudeProvider: newHTTPTestClaudeProvider("http://127.0.0.1:1")}
+	err := a.extractMemoriesWithScratchpadDeltaClaude(withTestUtilityModels(context.Background()), uuid.New(), uuid.New(),
+		&provider.ModelContext{}, &provider.ModelContext{}, claudeChatCtx(), nil)
+	require.ErrorContains(t, err, "no OpenAI provider is configured")
 }
 
 func TestExtractMemoriesWithScratchpadDeltaClaude_ProviderErrorIsWrapped(t *testing.T) {
@@ -98,25 +107,38 @@ func TestExtractMemoriesWithScratchpadDeltaClaude_ProviderErrorIsWrapped(t *test
 	}))
 	defer srv.Close()
 
-	a := &Agent{logger: zap.NewNop(), ClaudeProvider: newHTTPTestClaudeProvider(srv.URL)}
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 	err := a.extractMemoriesWithScratchpadDeltaClaude(context.Background(), uuid.New(), uuid.New(),
-		&provider.ModelContext{}, &provider.ModelContext{}, &chatContext{chat: &models.Chat{}}, nil)
-	require.ErrorContains(t, err, "Claude memory extraction failed")
+		&provider.ModelContext{}, &provider.ModelContext{}, claudeChatCtx(), nil)
+	require.ErrorContains(t, err, "memory extraction failed")
 }
 
-func TestExtractMemoriesWithScratchpadDeltaClaude_SuccessWithNoMemoriesIsNoOpDownstream(t *testing.T) {
+// A rebuilt-context checkpoint extracts memories on the memory role's model whatever the chat
+// is on, Claude included: no chat kind gets a model of its own, and an account without an
+// Anthropic key still gets its memories.
+func TestExtractMemoriesWithScratchpadDeltaClaude_UsesMemoryRoleModelForEveryChat(t *testing.T) {
 	t.Parallel()
-	body := claudeMessageTextJSONBody("msg_1", `{\"memories\":[]}`)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
-	}))
-	defer srv.Close()
+	chats := map[string]*chatContext{
+		"native Anthropic":                claudeChatCtx("m1"),
+		"Gemini":                          {chat: &models.Chat{}, model: "gemini-3.5", modelProvider: string(models.ModelProviderGoogle), memories: []string{"m1"}},
+		"z.ai, Anthropic wire format":     {chat: &models.Chat{}, model: "glm-5", modelProvider: string(models.ModelProviderZAI)},
+		"Anthropic-compatible connection": {chat: &models.Chat{}, model: "claude-sonnet-4-5", modelProvider: "custom", connection: &ConnectionEndpoint{Flavor: ConnectionFlavorAnthropic}},
+	}
+	for name, chatCtx := range chats {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			srv, reqs := capturingResponsesServer(t, responseTextJSONBody("resp_1", `{\"memories\":[]}`))
+			a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 
-	a := &Agent{logger: zap.NewNop(), ClaudeProvider: newHTTPTestClaudeProvider(srv.URL)}
-	err := a.extractMemoriesWithScratchpadDeltaClaude(context.Background(), uuid.New(), uuid.New(),
-		&provider.ModelContext{}, &provider.ModelContext{}, &chatContext{chat: &models.Chat{}, memories: []string{"m1"}}, nil)
-	require.NoError(t, err)
+			err := a.extractMemoriesWithScratchpadDeltaClaude(withTestUtilityModels(context.Background()), uuid.New(), uuid.New(),
+				&provider.ModelContext{}, &provider.ModelContext{}, chatCtx, nil)
+			require.NoError(t, err)
+			got := reqs()
+			require.Len(t, got, 1)
+			require.Equal(t, testUtilityModel, got[0]["model"])
+			require.NotContains(t, got[0], "previous_response_id", "the rebuilt context is sent, not a stored response")
+		})
+	}
 }
 
 // --- getMemoryQuery ---
@@ -131,6 +153,16 @@ func TestGetMemoryQuery_ProviderErrorIsReturned(t *testing.T) {
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 	_, err := a.getMemoryQuery(context.Background(), uuid.New(), "instructions", "user message")
 	require.Error(t, err)
+}
+
+// A message with no text, such as an image alone, has nothing to search memories with, so no
+// call is made (the agent has no provider to make one with).
+func TestGetMemoryQuery_MessageWithoutTextSkipsTheCall(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()}
+	got, err := a.getMemoryQuery(context.Background(), uuid.New(), "instructions", " ")
+	require.NoError(t, err)
+	require.False(t, got.ShouldEnrich)
 }
 
 func TestGetMemoryQuery_UnmarshalErrorIsReturned(t *testing.T) {
@@ -149,7 +181,7 @@ func TestGetMemoryQuery_SuccessParsesQuery(t *testing.T) {
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	got, err := a.getMemoryQuery(context.Background(), uuid.New(), "instructions", "user message")
+	got, err := a.getMemoryQuery(withTestUtilityModels(context.Background()), uuid.New(), "instructions", "user message")
 	require.NoError(t, err)
 	require.True(t, got.ShouldEnrich)
 	require.Equal(t, "likes Go", got.Query)
@@ -168,6 +200,57 @@ func TestGetMemories_GetUserByIDErrorIsReturned(t *testing.T) {
 	_, _, _, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", false)
 	require.Error(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// With no model for the simple role, the memory query can't run: the turn keeps its own context
+// lines (the user's name on a first message) rather than failing the memory load.
+func TestGetMemories_NoQueryModelKeepsTheTurnsOwnLines(t *testing.T) {
+	t.Parallel()
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	// The user, with the edges GetUserByID loads, then whether the chat has user messages.
+	mock.ExpectQuery("FROM `users`").WillReturnRows(sqlmock.NewRows([]string{"id", "username"}).AddRow(uuid.New().String(), "sam"))
+	mock.ExpectQuery("FROM `roles`").WillReturnRows(sqlmock.NewRows([]string{"user_id", "id"}))
+	mock.ExpectQuery("FROM `user_preferences`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectBegin()
+	mock.ExpectQuery("FROM `chats`").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New().String()))
+	mock.ExpectQuery("FROM `chat_messages`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectCommit()
+	// The memory query's role has nothing chosen.
+	mock.ExpectQuery("FROM `utility_model_settings`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	a := newTestAgent(ds)
+	memories, live, userNameLine, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", false)
+	require.NoError(t, err, "not set is not a failed memory load")
+	require.Empty(t, live)
+	require.Equal(t, initialTurnContextLines("sam", false, false), memories)
+	require.Equal(t, memories[0], userNameLine)
+}
+
+// A memory query that fails is a failed memory load, but the turn's own lines go back with the
+// error, so the user's name on a first message survives it.
+func TestGetMemories_FailedQueryKeepsTheTurnsOwnLines(t *testing.T) {
+	t.Parallel()
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	mock.ExpectQuery("FROM `users`").WillReturnRows(sqlmock.NewRows([]string{"id", "username"}).AddRow(uuid.New().String(), "sam"))
+	mock.ExpectQuery("FROM `roles`").WillReturnRows(sqlmock.NewRows([]string{"user_id", "id"}))
+	mock.ExpectQuery("FROM `user_preferences`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectBegin()
+	mock.ExpectQuery("FROM `chats`").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New().String()))
+	mock.ExpectQuery("FROM `chat_messages`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectCommit()
+	// The memory query's model can't be read.
+	mock.ExpectQuery("FROM `utility_model_settings`").WillReturnError(errors.New("connection reset"))
+
+	a := newTestAgent(ds)
+	memories, live, userNameLine, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", false)
+	require.Error(t, err)
+	require.Empty(t, live)
+	require.Equal(t, initialTurnContextLines("sam", false, false), memories)
+	require.Equal(t, memories[0], userNameLine, "the name line goes back with the error too, so it's recorded as the one the model saw")
 }
 
 // --- compactMemoriesFromCheckpoint ---

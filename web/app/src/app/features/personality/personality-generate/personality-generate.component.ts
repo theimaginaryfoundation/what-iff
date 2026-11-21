@@ -25,6 +25,7 @@ import {
   PersonalityGenFlow,
 } from '../../../core/models/personality-gen-flow.model';
 import { AuthImagePipe } from '../../../core/pipes/auth-image.pipe';
+import { utilityRoleUnavailableMessage } from '../../../core/utils/utility-role-copy';
 
 // ─── Question definitions (stub text — replace later) ───────────────────────
 
@@ -109,9 +110,18 @@ export class PersonalityGenerateComponent implements OnInit {
   /** Leaves the wizard (its answers are saved as a draft) for the Providers tab. */
   addProviderKey(): void {
     this.errorNeedsKey.set(false);
+    this.errorNeedsBackgroundModel.set(false);
     this.generateModal.hide();
     this.settings.open('providers');
   }
+
+  chooseBackgroundModel(): void {
+    this.errorNeedsKey.set(false);
+    this.errorNeedsBackgroundModel.set(false);
+    this.generateModal.hide();
+    this.settings.open('profile');
+  }
+
 
   readonly pages = WIZARD_PAGES;
   readonly imageStyles = IMAGE_STYLES;
@@ -124,6 +134,8 @@ export class PersonalityGenerateComponent implements OnInit {
   errorMessage = signal<string | null>(null);
   /** The last failure was a missing provider key the account can add itself. */
   errorNeedsKey = signal(false);
+  /** The failure is a background model the person hasn't chosen, or switched off. */
+  errorNeedsBackgroundModel = signal(false);
 
   // Wizard navigation.
   currentStep = signal(0);
@@ -205,6 +217,7 @@ export class PersonalityGenerateComponent implements OnInit {
     this.isLoading.set(true);
     this.errorMessage.set(null);
     this.errorNeedsKey.set(false);
+    this.errorNeedsBackgroundModel.set(false);
 
     this.genFlowService.getOrCreateFlow().subscribe({
       next: (flow) => {
@@ -337,6 +350,7 @@ export class PersonalityGenerateComponent implements OnInit {
       this.isEditingAnswers.set(false);
       this.errorMessage.set(null);
     this.errorNeedsKey.set(false);
+    this.errorNeedsBackgroundModel.set(false);
       return;
     }
 
@@ -344,6 +358,7 @@ export class PersonalityGenerateComponent implements OnInit {
     this.isGenerating.set(true);
     this.errorMessage.set(null);
     this.errorNeedsKey.set(false);
+    this.errorNeedsBackgroundModel.set(false);
 
     const refIdForGen = this.referenceImageId();
     this.genFlowService.updateFlow(f.id, {
@@ -406,6 +421,7 @@ export class PersonalityGenerateComponent implements OnInit {
     this.isGenerating.set(true);
     this.errorMessage.set(null);
     this.errorNeedsKey.set(false);
+    this.errorNeedsBackgroundModel.set(false);
     this.selectedNameIndex.set(0);
     this.resetPortraitJob();
 
@@ -432,6 +448,7 @@ export class PersonalityGenerateComponent implements OnInit {
     this.isAccepting.set(true);
     this.errorMessage.set(null);
     this.errorNeedsKey.set(false);
+    this.errorNeedsBackgroundModel.set(false);
 
     const acceptReq: { name: string; cover_image_id?: string } = { name: this.selectedName() };
     const coverId = this.coverImageId();
@@ -507,6 +524,7 @@ export class PersonalityGenerateComponent implements OnInit {
     this.isResetting.set(true);
     this.errorMessage.set(null);
     this.errorNeedsKey.set(false);
+    this.errorNeedsBackgroundModel.set(false);
 
     this.genFlowService.resetFlow(f.id).subscribe({
       next: (resetFlow) => {
@@ -553,6 +571,7 @@ export class PersonalityGenerateComponent implements OnInit {
     this.currentStep.set(this.totalSteps - 1);
     this.errorMessage.set(null);
     this.errorNeedsKey.set(false);
+    this.errorNeedsBackgroundModel.set(false);
   }
 
   goBackToList(): void {
@@ -641,8 +660,14 @@ export class PersonalityGenerateComponent implements OnInit {
             this.refreshFlowAfterGeneration(flowId);
           } else if (job.status === 'failed') {
             this.isGenerating.set(false);
-            this.errorMessage.set(job.error || 'AI generation failed. Please try again.');
-            this.errorNeedsKey.set(job.error_code === 'provider_not_configured' && this.providerKeys.accountsSupplyKeys());
+            const accountsChoose = this.providerKeys.accountsSupplyKeys();
+            this.errorMessage.set(
+              utilityRoleUnavailableMessage(job.error_code, 'personality', accountsChoose) ?? (job.error || 'AI generation failed. Please try again.'),
+            );
+            this.errorNeedsKey.set(job.error_code === 'provider_not_configured' && accountsChoose);
+            this.errorNeedsBackgroundModel.set(
+              accountsChoose && utilityRoleUnavailableMessage(job.error_code, 'personality', true) !== null,
+            );
           }
         },
         error: () => {

@@ -8,6 +8,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -47,11 +48,11 @@ func TestParseExpressionPickPayload_invalidJSON(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 
-// --- expressionPickStructuredOutputFormat ---
+// --- expressionPickSchema ---
 
-func TestExpressionPickStructuredOutputFormat(t *testing.T) {
+func TestExpressionPickSchema(t *testing.T) {
 	t.Parallel()
-	out := expressionPickStructuredOutputFormat()
+	out := provider.UtilityResponsesParams("m", provider.UtilityRequest{Schema: expressionPickSchema}).Text
 	require.NotNil(t, out.Format.OfJSONSchema)
 	require.Equal(t, "ExpressionPortraitPick", out.Format.OfJSONSchema.Name)
 }
@@ -126,7 +127,7 @@ func TestPickGenerationExpression_StandaloneSuccessMatchesKey(t *testing.T) {
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), ds: ds, OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	id, reasoning, err := a.PickGenerationExpression(context.Background(), uuid.New(), uuid.New(), nil, "hi", "hello there")
+	id, reasoning, err := a.PickGenerationExpression(withTestUtilityModels(context.Background()), uuid.New(), uuid.New(), nil, "hi", "hello there")
 	require.NoError(t, err)
 	require.NotNil(t, id)
 	require.Equal(t, "Warm tone.", reasoning)
@@ -151,17 +152,16 @@ func TestPickGenerationExpression_UnknownKeyReturnsNil(t *testing.T) {
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), ds: ds, OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	id, reasoning, err := a.PickGenerationExpression(context.Background(), uuid.New(), uuid.New(), nil, "hi", "hello there")
+	id, reasoning, err := a.PickGenerationExpression(withTestUtilityModels(context.Background()), uuid.New(), uuid.New(), nil, "hi", "hello there")
 	require.NoError(t, err)
 	require.Nil(t, id)
 	require.Empty(t, reasoning)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-// TestPickGenerationExpression_ProviderErrorReturnsNilWithoutError documents that a classifier
-// call failure is swallowed (logged) rather than propagated — callers get "no portrait" instead
-// of an error.
-func TestPickGenerationExpression_ProviderErrorReturnsNilWithoutError(t *testing.T) {
+// A failed model call leaves no expression and is returned, so the turn can tell the account
+// when the cause is theirs to fix.
+func TestPickGenerationExpression_ProviderErrorIsReturned(t *testing.T) {
 	t.Parallel()
 	ds, mock, cleanup := newTestDatastore(t)
 	defer cleanup()
@@ -174,8 +174,9 @@ func TestPickGenerationExpression_ProviderErrorReturnsNilWithoutError(t *testing
 	mock.ExpectCommit()
 
 	a := &Agent{logger: zap.NewNop(), ds: ds, OpenAIProvider: newHTTPTestOpenAIProvider("http://127.0.0.1:0")}
-	id, reasoning, err := a.PickGenerationExpression(context.Background(), uuid.New(), uuid.New(), nil, "hi", "hello there")
-	require.NoError(t, err)
+	id, reasoning, err := a.PickGenerationExpression(withTestUtilityModels(context.Background()), uuid.New(), uuid.New(), nil, "hi", "hello there")
+	var call *UtilityCallError
+	require.ErrorAs(t, err, &call)
 	require.Nil(t, id)
 	require.Empty(t, reasoning)
 	require.NoError(t, mock.ExpectationsWereMet())
