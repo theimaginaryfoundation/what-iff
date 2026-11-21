@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -316,24 +317,40 @@ func TestHandleUserMessage_SaveOffIsNeverTakenInAsASteer(t *testing.T) {
 			30*time.Second, 20*time.Millisecond)
 	})
 
-	stored, err := ds.GetChatMessage(ctx, userID, saveOff.ID)
-	require.NoError(t, err)
+	// The queued workers write their jobs meanwhile; on the shared-cache in-memory SQLite a read can
+	// meet one of those writes ("database table is locked"), so each step retries that.
+	stored := retryWhileLocked(t, func() (*models.ChatMessage, error) { return ds.GetChatMessage(ctx, userID, saveOff.ID) })
 	assert.True(t, stored.ExcludeFromMemory, "the save-off message is stored flagged")
-	job, err := ds.GetJob(ctx, userID, saveOffJob)
-	require.NoError(t, err)
+	job := retryWhileLocked(t, func() (*models.Job, error) { return ds.GetJob(ctx, userID, saveOffJob) })
 	assert.False(t, job.Steer, "a message with turn options is never queued as a steer")
-	steerJob, err := ds.GetJob(ctx, userID, ordinaryJob)
-	require.NoError(t, err)
+	steerJob := retryWhileLocked(t, func() (*models.Job, error) { return ds.GetJob(ctx, userID, ordinaryJob) })
 	require.True(t, steerJob.Steer, "an ordinary steer stays a steer")
 
-	claimed, err := ds.ClaimSteerMessages(ctx, userID, chat.ID, running.ID, running.CreatedAt)
-	require.NoError(t, err)
+	claimed := retryWhileLocked(t, func() ([]datastore.SteerMessage, error) {
+		return ds.ClaimSteerMessages(ctx, userID, chat.ID, running.ID, running.CreatedAt)
+	})
 	require.Len(t, claimed, 1, "the running turn takes in the ordinary steer only")
 	assert.Equal(t, ordinary.ID, claimed[0].MessageID)
-	job, err = ds.GetJob(ctx, userID, saveOffJob)
-	require.NoError(t, err)
+	job = retryWhileLocked(t, func() (*models.Job, error) { return ds.GetJob(ctx, userID, saveOffJob) })
 	assert.Contains(t, []models.JobStatus{models.JobStatusPending, models.JobStatusProcessing}, job.Status,
 		"the save-off message is still queued for a turn of its own")
+}
+
+// retryWhileLocked runs fn until it does not fail with SQLite's table lock (the in-memory test
+// database is shared-cache, where a reader and a writer on two connections lock each other out
+// instead of waiting), for up to 5 seconds, and fails the test on any other error.
+func retryWhileLocked[T any](t *testing.T, fn func() (T, error)) T {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		v, err := fn()
+		if err != nil && strings.Contains(err.Error(), "locked") && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		require.NoError(t, err)
+		return v
+	}
 }
 
 // A recall-off turn retrieves nothing, so its reply records no "Load Memory" call for the
