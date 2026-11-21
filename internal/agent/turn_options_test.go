@@ -251,3 +251,86 @@ func TestRunChatOnModel_ChangesOnlyTheRunCopy(t *testing.T) {
 	assert.True(t, runCopy.ToolsEnabled)
 	assert.Equal(t, "chat-model", chat.ModelName)
 }
+
+// On a Claude model that takes a thinking budget, max_tokens must stay above budget_tokens: a cap
+// at or under the budget lowers it, or turns thinking off when the minimum budget no longer fits.
+func TestApplyTurnOutputCapClaude_ThinkingBudget(t *testing.T) {
+	t.Parallel()
+	mc := &provider.ModelContext{}
+	mc.AppendUserMessage(provider.RoleUser, "hi", nil, false)
+	lowEffort := func() anthropic.MessageNewParams {
+		params := mc.BuildClaudeParams("claude-sonnet-4-5")
+		provider.ApplyClaudeReasoning(&params, models.ReasoningEffortLow)
+		require.NotNil(t, params.Thinking.OfEnabled, "Sonnet 4.5 takes a thinking budget")
+		require.Equal(t, int64(2048), params.Thinking.OfEnabled.BudgetTokens)
+		return params
+	}
+	capped := func(n int) *chatContext {
+		return &chatContext{turnOptions: &models.TurnOptions{MaxOutputTokens: n}}
+	}
+
+	t.Run("cap under the minimum budget turns thinking off", func(t *testing.T) {
+		t.Parallel()
+		params := lowEffort()
+		applyTurnOutputCapClaude(&params, capped(800))
+		assert.Equal(t, int64(800), params.MaxTokens)
+		assert.Nil(t, params.Thinking.OfEnabled)
+		assert.NotNil(t, params.Thinking.OfDisabled)
+	})
+	t.Run("cap at the minimum budget turns thinking off", func(t *testing.T) {
+		t.Parallel()
+		params := lowEffort()
+		applyTurnOutputCapClaude(&params, capped(1024))
+		assert.NotNil(t, params.Thinking.OfDisabled)
+	})
+	t.Run("cap under the budget lowers it", func(t *testing.T) {
+		t.Parallel()
+		params := lowEffort()
+		applyTurnOutputCapClaude(&params, capped(1500))
+		assert.Equal(t, int64(1500), params.MaxTokens)
+		require.NotNil(t, params.Thinking.OfEnabled)
+		assert.Equal(t, int64(1499), params.Thinking.OfEnabled.BudgetTokens)
+	})
+	t.Run("cap above the budget keeps it", func(t *testing.T) {
+		t.Parallel()
+		params := lowEffort()
+		applyTurnOutputCapClaude(&params, capped(4000))
+		require.NotNil(t, params.Thinking.OfEnabled)
+		assert.Equal(t, int64(2048), params.Thinking.OfEnabled.BudgetTokens)
+	})
+}
+
+// A cap under the Responses API's minimum is raised to it, on every request type.
+func TestTurnMaxOutputTokens_Floor(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, models.MinTurnMaxOutputTokens, (&chatContext{turnOptions: &models.TurnOptions{MaxOutputTokens: 1}}).turnMaxOutputTokens())
+	assert.Equal(t, models.MinTurnMaxOutputTokens, (&chatContext{turnOptions: &models.TurnOptions{MaxOutputTokens: 16}}).turnMaxOutputTokens())
+	assert.Equal(t, 17, (&chatContext{turnOptions: &models.TurnOptions{MaxOutputTokens: 17}}).turnMaxOutputTokens())
+	assert.Zero(t, (&chatContext{turnOptions: &models.TurnOptions{}}).turnMaxOutputTokens())
+}
+
+// z.ai's truncation retry resets the cap with its lower effort; the turn's cap still applies.
+func TestZAITruncationFallback_KeepsTurnCap(t *testing.T) {
+	t.Parallel()
+	mc := &provider.ModelContext{}
+	mc.AppendUserMessage(provider.RoleUser, "hi", nil, false)
+	a := &Agent{logger: zap.NewNop()}
+
+	params := mc.BuildClaudeParams("glm-4.6")
+	chatCtx := &chatContext{model: "glm-4.6", modelProvider: "zai", turnOptions: &models.TurnOptions{MaxOutputTokens: 800}}
+	a.zaiTruncationFallback(chatCtx, uuid.New())(&params)
+	assert.Equal(t, int64(800), params.MaxTokens)
+
+	ordinary := mc.BuildClaudeParams("glm-4.6")
+	a.zaiTruncationFallback(&chatContext{model: "glm-4.6", modelProvider: "zai"}, uuid.New())(&ordinary)
+	assert.Equal(t, int64(provider.ReasoningMaxOutputTokens), ordinary.MaxTokens, "no options: the fallback's own cap")
+}
+
+func TestTurnOptions_HasContext(t *testing.T) {
+	t.Parallel()
+	assert.False(t, (*models.TurnOptions)(nil).HasContext())
+	assert.False(t, (&models.TurnOptions{MaxOutputTokens: 800}).HasContext())
+	assert.False(t, (&models.TurnOptions{PreContext: " \n", PostContext: "\t"}).HasContext(), "blank text adds no context")
+	assert.True(t, (&models.TurnOptions{PreContext: "PRE"}).HasContext())
+	assert.True(t, (&models.TurnOptions{PostContext: "POST"}).HasContext())
+}

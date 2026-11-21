@@ -83,6 +83,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     An account's default model (`user_preferences.default_model`) is optional: a new account gets the catalog's default (`resolveDefaultModelTx`: the admin-marked one, then `DEFAULT_MODEL_NAME`, then any catalog model, never a connection's), and none on an install without a catalog, until it enables a model.
     `CreateChat` without a model and with no default stores none; the chat's turns use the account's default once it has one.
     `assertUserCanUseModelTx` treats a connection's model as nonexistent to anyone but the connection's owner, so it can't be set on another account's chat, job or preference.
+    `CheckUserCanUseModel` runs the same check outside a write (read-only transaction), for a caller that names a model without storing it (a turn's `TurnOptions.ModelID`).
   - Safety violations: `safety_violation_event.go`.
   - Tool call persistence: `toolcall.go`.
 - **`CheckUserPassword`** reports whether a password is the account's current one (false for identity-provider accounts); it backs `reauth`'s default confirmation.
