@@ -307,7 +307,7 @@ func TestSummarizeConversationForCheckpoint_UsesTheSummaryInstructionsSeam(t *te
 	asked := recordChat(t, &checkpointSummaryInstructionsForChat, "Summarize as Lumi's diary.")
 
 	rid := "resp_prev"
-	got, err := a.summarizeConversationForCheckpoint(context.Background(), uuid.New(), &chatContext{chat: chat}, checkpointSummarySource{PreviousResponseID: &rid})
+	got, err := a.summarizeConversationForCheckpoint(withTestUtilityModels(context.Background()), uuid.New(), &chatContext{chat: chat}, checkpointSummarySource{PreviousResponseID: &rid})
 	require.NoError(t, err)
 	require.Equal(t, "new summary", got)
 
@@ -337,7 +337,7 @@ func TestUpdateScratchpad_UsesTheScratchpadPromptSeam(t *testing.T) {
 	asked := recordChat(t, &scratchpadUpdatePromptForChat, "Tenant scratchpad rules.")
 
 	rid := "resp_prev"
-	upd, err := a.updateScratchpad(context.Background(), userID, &rid, &chatContext{chat: chat})
+	upd, err := a.updateScratchpad(withTestUtilityModels(context.Background()), userID, &rid, &chatContext{chat: chat})
 	require.NoError(t, err)
 	require.Equal(t, "updated notes", upd.Content)
 
@@ -357,7 +357,7 @@ func TestUpdateScratchpadClaude_UsesTheScratchpadPromptSeam(t *testing.T) {
 	a.OpenAIProvider = newHTTPTestOpenAIProvider(rec.srv.URL) // only counts the result's tokens
 	asked := recordChat(t, &scratchpadUpdatePromptForChat, "Tenant scratchpad rules.")
 
-	upd, err := a.updateScratchpadClaude(context.Background(), userID, &chatContext{chat: chat}, &provider.ModelContext{})
+	upd, err := a.updateScratchpadClaude(withTestUtilityModels(context.Background()), userID, &chatContext{chat: chat}, &provider.ModelContext{})
 	require.NoError(t, err)
 	require.Equal(t, "updated notes", upd.Content)
 
@@ -382,7 +382,7 @@ func jsonEscaped(t *testing.T, s string) string {
 // wrote, so it writes with the chat's own instructions too.
 func TestRunThreadRehydration_CatchUpUsesTheSummaryInstructionsSeam(t *testing.T) {
 	a, _, client, userID, chat := newSkillsAgentFixture(t)
-	ctx := context.Background()
+	ctx := withTestUtilityModels(context.Background())
 	msgs := turnMsgs(20)
 	for _, m := range msgs {
 		require.NoError(t, client.ChatMessage.Create().SetChatID(chat.ID).SetMessage(m.Message).

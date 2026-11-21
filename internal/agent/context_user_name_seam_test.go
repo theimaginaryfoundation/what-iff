@@ -105,7 +105,7 @@ func newUserNameFixture(t *testing.T) *userNameFixture {
 // load runs the turn's memory loading the way prepareChatContext does.
 func (f *userNameFixture) load(t *testing.T, sandboxed bool) (memories []string, userNameLine string) {
 	t.Helper()
-	memories, _, userNameLine, failed := f.a.loadTurnMemories(context.Background(), nil, f.userID, f.chatID, uuid.Nil, "hello", sandboxed)
+	memories, _, userNameLine, failed := f.a.loadTurnMemories(withTestUtilityModels(context.Background()), nil, f.userID, f.chatID, uuid.Nil, "hello", sandboxed)
 	require.False(t, failed)
 	return memories, userNameLine
 }

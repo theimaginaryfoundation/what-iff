@@ -449,7 +449,7 @@ func TestCheckpoint_SaveOffSkipsOnlyMemoryExtraction(t *testing.T) {
 	for _, saveOff := range []bool{false, true} {
 		t.Run(map[bool]string{false: "save on", true: "save off"}[saveOff], func(t *testing.T) {
 			a, ds, client, userID, chat := newSkillsAgentFixture(t)
-			ctx := context.Background()
+			ctx := withTestUtilityModels(context.Background())
 			p, err := ds.CreatePersonality(ctx, userID, models.Personality{Name: "Ada", SystemPrompt: "You are Ada."})
 			require.NoError(t, err)
 			require.NoError(t, client.Chat.UpdateOneID(chat.ID).SetPersonalityID(p.ID).Exec(ctx))
@@ -491,7 +491,7 @@ func TestCheckpointClaude_SaveOffSkipsOnlyMemoryExtraction(t *testing.T) {
 	for _, saveOff := range []bool{false, true} {
 		t.Run(map[bool]string{false: "save on", true: "save off"}[saveOff], func(t *testing.T) {
 			a, ds, client, userID, chat := newSkillsAgentFixture(t)
-			ctx := context.Background()
+			ctx := withTestUtilityModels(context.Background())
 			p, err := ds.CreatePersonality(ctx, userID, models.Personality{Name: "Ada", SystemPrompt: "You are Ada."})
 			require.NoError(t, err)
 			require.NoError(t, client.Chat.UpdateOneID(chat.ID).SetPersonalityID(p.ID).Exec(ctx))
