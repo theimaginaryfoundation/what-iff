@@ -98,7 +98,8 @@ type turnToolPolicy struct {
 	firstPartyWebSearch bool
 	nativeWebSearch     bool
 	// allowedTools, when non-nil, is the only set of function tools the turn may offer (see
-	// toolAllowlistForChat). Every tool it leaves out is also in disabledTools.
+	// toolAllowlistForChat). A catalog tool it leaves out is also in disabledTools; a turn-only or
+	// MCP tool joins disabledTools when restrictToAllowlist filters its spec.
 	allowedTools map[string]bool
 }
 
@@ -191,7 +192,7 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 	}
 	// A build's allowlist is applied before the tools-enabled early return and before the web
 	// search decision, so neither path can offer a tool it leaves out.
-	applyToolAllowlist(ctx, a, chatCtx.chat, &policy)
+	applyToolAllowlist(ctx, a, chatCtx, &policy)
 	if !policy.toolsEnabled {
 		return policy
 	}

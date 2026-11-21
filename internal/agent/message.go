@@ -653,13 +653,14 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 	// previous behavior for OpenAI chat turns.
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
 	additionalDevContext := ""
-	// The lifecycle note tells the model to load tools; a build's allowlist without load_tools
-	// leaves nothing to load.
-	if policy.toolAllowed(tools.LoadToolsToolSpec.Name) {
+	// The lifecycle note and the loadable-tools note tell the model to load tools; a build's
+	// allowlist without load_tools leaves nothing loadable.
+	canLoad := policy.toolAllowed(tools.LoadToolsToolSpec.Name)
+	if canLoad {
 		additionalDevContext = mcpLifecycleDeveloperContext()
 	}
 	if policy.toolsEnabled {
-		if loadable := loadableToolsDeveloperContext(policy.offeredAgentToolNames(), a.loadedBuiltinToolSet(ctx, userID, chatCtx)); loadable != "" {
+		if loadable := loadableToolsDeveloperContext(policy.offeredAgentToolNames(), a.loadedBuiltinToolSet(ctx, userID, chatCtx), canLoad); loadable != "" {
 			if additionalDevContext != "" {
 				additionalDevContext += "\n\n"
 			}
@@ -672,6 +673,14 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 			additionalDeveloperContextForChat(a, chatCtx.chat),
 		}, "\n\n"))
 	}
+	// The skills index tells the model to call load_skill, and the mode hint to call list_modes and
+	// change_mode; neither is sent when a build's allowlist leaves those tools out.
+	skillsIndex := ""
+	if policy.toolAllowed(tools.LoadSkillToolSpec.Name) {
+		skillsIndex = a.skillsIndexDeveloperContext(chatCtx)
+	}
+	moodToolsAvailable := policy.toolAllowed(tools.ListMoodsToolSpec.Name) && policy.toolAllowed(tools.ChangeMoodToolSpec.Name) &&
+		a.shouldExposeMoodTools(ctx, userID, chatCtx.chat)
 	return b.build(ctx, messageContextBuildRequest{
 		UserID:                     userID,
 		Chat:                       chatCtx.chat,
@@ -683,9 +692,9 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		ActiveMood:                 chatCtx.activeMood,
 		ActiveMoodRituals:          chatCtx.activeMoodRituals,
 		ActiveSkills:               chatCtx.activeSkills(),
-		SkillsIndex:                a.skillsIndexDeveloperContext(chatCtx),
+		SkillsIndex:                skillsIndex,
 		IsAutoMood:                 chatCtx.chat.IsAutoMood,
-		MoodToolsAvailable:         a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
+		MoodToolsAvailable:         moodToolsAvailable,
 		Attachments:                chatMessage.Attachments,
 		ImageBytes:                 imageBytes,
 		ExpressionsEnabled:         chatCtx.expressionsEnabled,
@@ -994,6 +1003,10 @@ type chatContext struct {
 	promptWaited time.Duration
 	// awaitingUser is set when a prompt went unanswered: the turn should end and ask in its reply.
 	awaitingUser bool
+	// toolAllowlist is the build's allowlist resolved for this turn (toolAllowlistForChat), nil for
+	// none. buildTurnToolPolicy sets it; the connector scope, run_subagent and the developer
+	// context read it, since they run without the turn's policy.
+	toolAllowlist map[string]bool
 	// mcpApps are the MCP Apps of this turn's MCP tool calls, by provider tool-call id (ADR 0x042),
 	// until executeToolUses puts them on the saved calls.
 	mcpApps map[string]*models.ToolCallApp
@@ -1227,7 +1240,7 @@ func (a *Agent) generateAssistantForMessage(ctx context.Context, userID uuid.UUI
 	if chatCtx.turnSettings.Advanced() && modelContext != nil {
 		// Advanced turns are told how the loop works (ADR 0x026). Added to the turn's own context so
 		// the Context X-ray shows it.
-		modelContext.InsertBeforeLastUserMessage(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, advancedLoopInstructions, false)
+		modelContext.InsertBeforeLastUserMessage(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, advancedLoopInstructions(chatCtx.toolAllowedThisTurn(tools.UpdatePlanToolSpec.Name)), false)
 		if open, reason := a.previousRunOpenPlan(ctx, userID, chatMessage.ChatID); len(open) > 0 {
 			modelContext.InsertBeforeLastUserMessage(provider.SegmentKindHistoryTurn, provider.RoleUser, openPlanContext(open, reason), false)
 		}
@@ -1403,10 +1416,25 @@ func (a *Agent) finishGeneration(ctx context.Context, userID uuid.UUID, chatMess
 // mock mode exercises the code real chat runs (streamed-text reconciliation,
 // tool-call recording, personality/mood, save).
 func (a *Agent) generateAssistantForMessageMock(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
-	// The mock adapter offers no tools to a model, but record the same tool set the real paths do,
-	// so a scripted tool call is gated exactly like a real model's. That set includes the
-	// turn-only tools and the chat's MCP connectors (see below); a chat with none attached
-	// discovers nothing, so mock e2e stays hermetic.
+	a.prepareMockTurnTools(ctx, chatCtx, userID, chatMessage)
+
+	build := func(*provider.ModelContext) (provider.AgentAdapter, error) {
+		return provider.NewMockAdapter(provider.MockAdapterConfig{
+			Mode:           a.mockLLMMode,
+			EchoText:       chatMessage.Message,
+			FixedResponses: a.mockFixedResponses,
+			ChunkDelay:     a.mockStreamDelay,
+		}), nil
+	}
+	adapter, _ := build(modelContext)
+	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{provider: "mock", rebuild: build, modelContext: modelContext})
+}
+
+// prepareMockTurnTools records the mock turn's offered tools. The mock adapter offers no tools to a
+// model, but it records the same tool set the real paths do, so a scripted tool call is gated
+// exactly like a real model's. That set includes the turn-only tools and the chat's MCP connectors
+// (see below); a chat with none attached discovers nothing, so mock e2e stays hermetic.
+func (a *Agent) prepareMockTurnTools(ctx context.Context, chatCtx *chatContext, userID uuid.UUID, chatMessage *models.ChatMessage) {
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
 	offered := policy.offeredAgentToolNames()
 	// Turn-only tools (update_plan, ask_user) and MCP tools are offered too, so the mock's echo
@@ -1421,17 +1449,6 @@ func (a *Agent) generateAssistantForMessageMock(ctx context.Context, userID uuid
 	}
 	chatCtx.setOfferedTools(offered)
 	a.prepareTurnLoadableTools(ctx, chatCtx, offered)
-
-	build := func(*provider.ModelContext) (provider.AgentAdapter, error) {
-		return provider.NewMockAdapter(provider.MockAdapterConfig{
-			Mode:           a.mockLLMMode,
-			EchoText:       chatMessage.Message,
-			FixedResponses: a.mockFixedResponses,
-			ChunkDelay:     a.mockStreamDelay,
-		}), nil
-	}
-	adapter, _ := build(modelContext)
-	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{provider: "mock", rebuild: build, modelContext: modelContext})
 }
 
 func mergedRitualIDsForTools(chatMessage *models.ChatMessage, activeMood *models.Mood) []uuid.UUID {

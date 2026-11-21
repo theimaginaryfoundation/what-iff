@@ -126,8 +126,9 @@ func visibleResponsesTools(toolParams []responses.ToolUnionParam, hidden func(st
 // loadableToolsDeveloperContext names the loadable built-in tools a turn offers, so the model
 // knows what it can load without being sent their schemas, and says which of them are already
 // loaded in the chat (and so in its toolset). Empty when there are none. The text changes only
-// when the loaded set does, which is also when the tool list changes.
-func loadableToolsDeveloperContext(offered, loaded map[string]struct{}) string {
+// when the loaded set does, which is also when the tool list changes. Without canLoad (a build's
+// allowlist leaves out load_tools) it names only the loaded ones, since the rest cannot be loaded.
+func loadableToolsDeveloperContext(offered, loaded map[string]struct{}, canLoad bool) string {
 	summaries := agenttools.LoadableFunctionToolNames()
 	var loadedNames, unloaded []string
 	for name := range summaries {
@@ -136,7 +137,7 @@ func loadableToolsDeveloperContext(offered, loaded map[string]struct{}) string {
 		}
 		if _, ok := loaded[name]; ok {
 			loadedNames = append(loadedNames, name)
-		} else {
+		} else if canLoad {
 			unloaded = append(unloaded, name)
 		}
 	}
