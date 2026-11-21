@@ -293,12 +293,18 @@ With a dictation model set, the composer gets a **microphone** button beside Sen
 - Recording stops any reply that is playing, and nothing autoplays while it records.
 - A clip is limited to the model's `max_input` or five minutes, whichever is shorter; recording stops at the limit and says so.
 
-**Audio formats.**
-Browsers record in different formats: WebM with Opus in Chromium and Firefox, MP4 with AAC in Safari.
-The client records in the browser's own format when the dictation model's `formats` accept it, and otherwise captures 16 kHz mono WAV through Web Audio (about 10 MB for five minutes).
+**Audio format: PCM WAV only.**
+The client captures 16 kHz mono 16-bit PCM WAV through Web Audio (about 10 MB for five minutes), and the server takes nothing else.
+Dictation is billed by the minute, so the server has to know a clip's length without taking the client's word for it.
+A WAV's length is in its data: the server checks that the header hangs together (PCM, a sample rate, channel count and bit depth in range, and a byte rate and block size that follow from them) and divides the bytes after the data header by the byte rate.
+The data chunk's declared size is ignored, so a short one can't hide audio after it.
+A compressed clip's length is whatever its container says, which the client writes, and its size says little: Opus at 6 kbit/s packs twenty times the minutes of 16 kHz PCM into the same bytes.
+Every dictation model takes WAV; one that doesn't can't be the dictation model.
 The server does no transcoding, so it needs no native audio tooling.
+A model's clip limit counts in bytes as well as seconds, so the limit the composer is given is the shorter of the two at the rate it records.
 
-`POST /speech/transcriptions` takes the clip (multipart), its format, the chat it is for, and an optional language hint from the account's locale, and returns the text.
+`POST /speech/transcriptions` takes the clip (multipart), its format (`wav`), the chat it is for, and an optional language hint from the account's locale, and returns the text.
+The chat is recorded on the usage only when it is the caller's.
 The clip is never stored or logged; only its duration is recorded.
 
 A native shell has to declare microphone access for the web view to get it.
@@ -358,7 +364,8 @@ Each step ships on its own; dictation is useful without voice replies, and Liste
 - **Speaking the whole message, narration included.** "Let me check that. Okay, here's what I found." is not the answer, and reads badly aloud.
 - **Synthesising rounds speculatively before they commit.** Faster to first sound by a second or so, at the cost of paying for narration that is then thrown away.
 - **Synthesis as one utility role.** One model and one voice for everybody; personalities need their own.
-- **Transcoding on the server (ffmpeg).** A native dependency in every deployment; capturing WAV in the browser covers the models that do not take compressed audio.
+- **Transcoding on the server (ffmpeg).** A native dependency in every deployment; capturing WAV in the browser covers every model.
+- **Recording in the browser's own format (WebM, MP4).** Five to ten times smaller, but the billed length would be the client's claim. Reading the length from the container is no better, since the client writes the container; decoding it on the server is transcoding by another name.
 - **OpenAI `gpt-4o-mini-tts` in the meantime.** It shuts down about six weeks after this could ship, with no verbatim successor.
 
 ## Later
