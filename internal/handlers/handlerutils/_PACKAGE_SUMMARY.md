@@ -54,6 +54,7 @@
 
 - **Error details:** `RespondWithErrorDetails` is `RespondWithError` plus `models.ErrorResponse.Details`, for a specific code whose contract includes structured details; the envelope is still built only in `httpresponse.go`.
 - **Missing provider key:** `RespondIfProviderNotConfigured` answers an error caused by `providerkeys.NotConfiguredError` with 409, code `provider_not_configured` and `details.provider`, and reports whether it did; handlers call it before their generic failure response.
+- **Background work that can't run:** `RespondIfUtilityRoleUnavailable` does the same for `models.UtilityRoleUnavailableError`: 409, code `utility_model_not_set`, `utility_role_off` or `utility_model_unavailable`, and `details.role`.
 
 ## Testing
 

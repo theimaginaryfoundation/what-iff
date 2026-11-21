@@ -3055,6 +3055,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '409':
+          description: >-
+            Schedule parsing needs a model the account can't use:
+            `provider_not_configured` (no key for its provider, named in
+            `details`), or `utility_model_not_set` / `utility_role_off` /
+            `utility_model_unavailable` (the simple role has no model chosen, is
+            switched off, or its chosen model can't be used; `details.role` names
+            it)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
           content:
@@ -7256,6 +7268,89 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: Message not found or not owned by the user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chat/{chatId}/background-notices:
+    get:
+      summary: Background work on a chat that failed or fell back
+      description: >-
+        Notices the account hasn't dismissed, newest first: a checkpoint step
+        (scratchpad, memory, summary) that failed at its provider, or a utility
+        role that passed over a chosen model it couldn't use. A notice goes away
+        when the same step succeeds later, so fixing the cause clears it. Each
+        states the step and the cause; what to do about it is the client's.
+      tags: [Chat Management]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The chat's notices; empty for another account's chat
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BackgroundNotice'
+        '400':
+          description: Invalid chat ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chat/{chatId}/background-notices/{noticeId}/dismiss:
+    post:
+      summary: Dismiss a background notice
+      description: Hides the notice until its cause changes.
+      tags: [Chat Management]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: noticeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Dismissed
+        '400':
+          description: Invalid chat or notice ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such notice on this account's chat
           content:
             application/json:
               schema:
@@ -12365,6 +12460,59 @@ components:
             for a scheduled run only: a webhook background run or the onboarding welcome is an
             agent_job_run with no message_id too, but has none.
 
+    BackgroundNotice:
+      type: object
+      required: [id, chat_id, step, code, count, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        chat_id:
+          type: string
+          format: uuid
+        step:
+          type: string
+          description: >-
+            What didn't happen: `scratchpad`, `memory` or `summary` (a checkpoint
+            step); `memory_query`, `chat_name`, `mood_select` or
+            `expression_pick` (a turn's own background calls); or
+            `fallback_<role>` (a utility role passed over the model chosen for
+            it). Each is its own notice, so one succeeding never clears
+            another's.
+        role:
+          allOf:
+            - $ref: '#/components/schemas/UtilityRole'
+          description: >-
+            The utility role the step runs on, so a client can show a role's
+            notices together. Missing for a step this server doesn't know.
+        code:
+          type: string
+          enum: [provider_not_configured, provider_error, model_unavailable, model_not_set]
+          description: >-
+            Why. `provider_not_configured`: the account has no key for
+            `provider` (or the deployment can't reach it at all).
+            `provider_error`: the provider was asked and failed; background work
+            runs again as the chat goes on. `model_unavailable`: the chosen model
+            couldn't be used (turned off, its connection gone or unreachable,
+            its key removed, or experimental after the account opted out); on a
+            `fallback_<role>` step the role ran on its next choice, and on any
+            other step it had none, so the step didn't run. `model_not_set`: no model is chosen for the role, so the
+            step didn't run. A role switched off makes no notice.
+        provider:
+          type: string
+          description: The provider the step went to, when known.
+        model:
+          type: string
+          description: The model the step ran on, when known.
+        count:
+          type: integer
+          description: How many times it has happened since it was last cleared.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     UtilityRole:
       type: string
       enum: [memory, memory_merge, simple, personality]
@@ -15938,6 +16086,9 @@ components:
         - system_prompt_too_long
         - buzz_terms_required
         - provider_not_configured
+        - utility_model_not_set
+        - utility_role_off
+        - utility_model_unavailable
         - reauthentication_required
         - provider_unreachable
         - provider_key_rejected

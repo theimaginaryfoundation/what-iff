@@ -7,6 +7,7 @@ HTTP API for **agent jobs** — async/scheduled assistant work: CRUD, prompt/tit
 ## Responsibilities
 
 - **`Handler`:** Routes under `/api/agent-job/...` (see `handler.go`): list, get, create, update (including schedule parsing via `parse_schedule.go`), delete, status updates.
+  Schedule parsing that can't run for want of a key or of a model for the simple role answers 409 with the cause's code (`provider_not_configured`, `utility_model_not_set`, `utility_role_off`, `utility_model_unavailable`), not 400.
 - Uses **`internal/providers.AgentJobProvider`** pattern where interfaces isolate datastore.
 
 ## Dependencies

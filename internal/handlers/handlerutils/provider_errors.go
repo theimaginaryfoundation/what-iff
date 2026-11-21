@@ -24,3 +24,25 @@ func RespondIfProviderNotConfigured(w http.ResponseWriter, logger *zap.Logger, e
 		notConfigured.Message(), map[string]models.ModelProvider{"provider": notConfigured.Provider}, nil)
 	return true
 }
+
+// RespondIfUtilityRoleUnavailable answers a request that needed background work its utility
+// role's choice keeps from running, and reports whether it did. The response is 409 with code
+// utility_model_not_set (nothing chosen), utility_role_off (switched off) or
+// utility_model_unavailable (the chosen model can't be used), and details
+// {"role": "<role>"}: the request was valid, and succeeds once the role has a model.
+func RespondIfUtilityRoleUnavailable(w http.ResponseWriter, logger *zap.Logger, err error) bool {
+	var unavailable *models.UtilityRoleUnavailableError
+	if !errors.As(err, &unavailable) {
+		return false
+	}
+	code, message := models.ErrCodeUtilityModelNotSet, "No model is chosen for this background work"
+	switch {
+	case errors.Is(err, models.ErrUtilityRoleOff):
+		code, message = models.ErrCodeUtilityRoleOff, "This background work is switched off"
+	case errors.Is(err, models.ErrUtilityModelUnavailable):
+		code, message = models.ErrCodeUtilityModelUnavailable, "The model chosen for this background work can't be used"
+	}
+	RespondWithErrorDetails(w, logger, http.StatusConflict, code, message,
+		map[string]models.UtilityRole{"role": unavailable.Role}, nil)
+	return true
+}

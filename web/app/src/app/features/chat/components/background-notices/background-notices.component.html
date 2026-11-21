@@ -1,0 +1,25 @@
+@for (notice of notices(); track notice.key) {
+  <div class="background-notice" role="status" data-testid="background-notice">
+    <span class="background-notice__icon" aria-hidden="true">!</span>
+    <div class="background-notice__text">
+      <strong>{{ notice.what }}</strong>
+      <span>{{ notice.why }}</span>
+    </div>
+    <div class="background-notice__actions">
+      @if (notice.action) {
+        <button type="button" class="background-notice__fix" data-testid="background-notice-fix" (click)="fix(notice.action)">
+          {{ notice.actionLabel }}
+        </button>
+      }
+      <button
+        type="button"
+        class="background-notice__dismiss"
+        data-testid="background-notice-dismiss"
+        aria-label="Dismiss"
+        (click)="dismiss(notice.ids)"
+      >
+        ×
+      </button>
+    </div>
+  </div>
+}
