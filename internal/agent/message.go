@@ -720,10 +720,9 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 
 	// A client may still send a retired system ritual; it has no row to link to.
 	request.Rituals = dropRetiredRituals(request.Rituals)
-	// A turn sent with memory saving off is flagged on its message, so a later checkpoint knows.
-	if !request.TurnOptions.SavesMemory() {
-		request.ExcludeFromMemory = true
-	}
+	// A turn sent with memory saving off is flagged on its message, so a later checkpoint knows,
+	// and a message with turn options always runs as a turn of its own, never as a steer.
+	turnSendRequest(&request)
 
 	// Create a new chat message in the database
 	chatMessage, err := a.ds.CreateChatMessage(ctx, userID, request)
@@ -2343,7 +2342,8 @@ func memoryToolCallsForChatContext(chatCtx *chatContext) []*models.ToolCall {
 	if chatCtx.memoryEnrichmentFailed {
 		return []*models.ToolCall{failedMemoryEnrichmentToolCall()}
 	}
-	if len(chatCtx.memories) > 0 {
+	// A recall-off turn retrieved nothing: its user-name line alone is no "Load Memory" call.
+	if len(chatCtx.memories) > 0 && !chatCtx.recallOffWithoutMemories() {
 		return []*models.ToolCall{memoryToolCall(chatCtx.memories)}
 	}
 	return nil

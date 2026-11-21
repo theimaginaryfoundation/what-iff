@@ -28,11 +28,20 @@ type TurnOptions struct {
 	// (and the memory-query model call is skipped), and memories earlier turns recalled are not
 	// replayed into its context. The first message's user-name line stays: it is identity, not
 	// memory. Nil (or true) recalls as usual.
+	//
+	// It is not stored: a retry of the message runs without options and recalls as usual (only
+	// MemorySave false survives a retry, through the flag stored on the message). A caller that
+	// regenerates a recall-off turn has to pass the options again.
 	MemoryRecall *bool
-	// MemorySave false keeps this turn out of long-term memory: its messages are flagged
-	// (ChatMessage.ExcludeFromMemory), no checkpoint extracts memories from a conversation that
-	// includes them, and the create_memory tool is not offered on the turn. The scratchpad and the
-	// checkpoint summary are unaffected. Nil (or true) saves as usual.
+	// MemorySave false means no memories are extracted while the turn is in a checkpoint's window,
+	// and create_memory is not offered on the turn. Its messages are flagged
+	// (ChatMessage.ExcludeFromMemory) so a later checkpoint knows. The turn can still reach the
+	// personality's scratchpad (shared across its chats) and the chat's summary (stored as a
+	// Summary memory that find_context searches), and a later checkpoint's extraction reads both.
+	//
+	// Extraction runs over a window of turns, not per turn, so the flag skips the whole window: a
+	// flagged turn suppresses extraction for as long as it is carried over into later windows, and
+	// the save-on turns in a skipped window are never extracted. Nil (or true) saves as usual.
 	MemorySave *bool
 }
 

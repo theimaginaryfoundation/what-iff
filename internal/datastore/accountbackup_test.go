@@ -548,6 +548,47 @@ func TestAdminImportAccountBackup_ChatMessageMissingRefChat(t *testing.T) {
 	require.False(t, exists)
 }
 
+// A restored message keeps the memory-save flag, so the restored chat's next checkpoint skips
+// extraction as the original's would; a line without the field (every older backup) restores
+// unflagged, with the column left NULL.
+func TestAdminImportAccountBackup_KeepsExcludeFromMemory(t *testing.T) {
+	ds, cleanup := newAccountBackupTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := uuid.New()
+	createAccountBackupTestUser(t, ds, userID)
+	createAccountBackupTestModelAndPreference(t, ds, userID)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	chatID, flaggedID, plainID := uuid.New(), uuid.New(), uuid.New()
+	plainLine := accountBackupJSONL(t, models.AccountBackupChatMessage{
+		ID: plainID, ChatID: chatID, Message: "plain", Origin: models.MessageOriginAssistant,
+		ReadStatus: "read", SentAt: now.Add(time.Second),
+	})
+	require.NotContains(t, plainLine, "exclude_from_memory", "an unflagged message writes no field")
+
+	zr := buildZipReaderForTest(t, map[string]string{
+		"manifest.json": `{"format_version":1}`,
+		"chats.jsonl": accountBackupJSONL(t, models.AccountBackupChat{
+			ID: chatID, Name: "Chat", CreatedAt: now, UpdatedAt: now,
+		}),
+		"chat_messages.jsonl": accountBackupJSONL(t, models.AccountBackupChatMessage{
+			ID: flaggedID, ChatID: chatID, Message: "secret", Origin: models.MessageOriginUser,
+			ReadStatus: "read", SentAt: now, ExcludeFromMemory: true,
+		}) + "\n" + plainLine,
+	})
+
+	result, err := ds.AdminImportAccountBackup(ctx, userID, zr, nil)
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Sections["chat_messages"].Created)
+
+	flagged := ds.dbClient.ChatMessage.GetX(ctx, flaggedID)
+	require.NotNil(t, flagged.ExcludeFromMemory)
+	require.True(t, *flagged.ExcludeFromMemory)
+	require.Nil(t, ds.dbClient.ChatMessage.GetX(ctx, plainID).ExcludeFromMemory)
+}
+
 func TestAdminImportAccountBackup_PersonalityMoodMissingRef(t *testing.T) {
 	ds, cleanup := newAccountBackupTestDatastore(t)
 	defer cleanup()

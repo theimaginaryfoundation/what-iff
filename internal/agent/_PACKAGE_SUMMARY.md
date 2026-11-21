@@ -201,12 +201,16 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   `runUserChatPostInferencePhases` hands the expression pick and the checkpoint `ModelContext.WithoutTurnContext()`, so the caller's context never reaches a stored scratchpad, memory or summary.
   Nil options (every ordinary turn) change nothing; `turn_options_test.go` pins that.
 - **Per-turn memory switches** (`turn_memory.go`, `TurnOptions.MemoryRecall` / `MemorySave`; nil or true is the usual behaviour).
-  Recall off: `loadTurnMemoriesFor` skips retrieval (no memory-query model call, no embedding, no lookup, no "Load Memory" row) and keeps only the first message's user-name line, which is identity, not memory.
+  Recall off: `loadTurnMemoriesFor` skips retrieval (no memory-query model call, no embedding, no lookup) and keeps only the first message's user-name line, which is identity, not memory.
+  Nothing is retrieved, so there is no live "Load Memory" row, and `memoryToolCallsForChatContext` saves no "Load Memory" call for the user-name line alone (`recallOffWithoutMemories`).
   The build request's `WithoutMemoryRecall` also drops the memories earlier turns stored on their messages (`withoutRecalledMemories`); the user-name line and other replayed context stay.
-  Save off: `HandleUserMessage` stores `ChatMessage.ExcludeFromMemory` on the user message and `saveAgentResponse` on the reply (a retry, which runs without options, still honours the stored flag), and `buildTurnToolPolicy` drops `create_memory`.
-  Memory extraction runs at a checkpoint over the conversation since the last one (plus carry-over), so it cannot leave one turn out: `buildTurn` reports a flagged message in the replayed conversation, and a checkpoint whose turn is flagged or replayed one skips extraction (`checkpointMayExtractMemories`).
-  The scratchpad, the checkpoint summary and `find_context` are unaffected; the summary can still retell a save-off turn, which is the design's choice (they are load-bearing for long chats).
-  `turn_memory_test.go` pins defaults, recall off, save off and the checkpoint.
+  Recall off is not stored, so a retry (which runs without options) recalls as usual.
+  Save off: `HandleUserMessage` stores `ChatMessage.ExcludeFromMemory` on the user message (`turnSendRequest`) and `saveAgentResponse` on the reply (a retry, which runs without options, still honours the stored flag), and `buildTurnToolPolicy` drops `create_memory`.
+  `turnSendRequest` also never queues a message with options as a steer, since a running turn folding it in (`takeSteering`) would ignore its options; it runs as a turn of its own.
+  Memory extraction runs at a checkpoint over the conversation since the last one (plus carry-over), so it cannot leave one turn out: `buildTurn` reports a flagged message in the replayed conversation, and a checkpoint (OpenAI or Claude path) whose turn is flagged or replayed one skips extraction (`checkpointMayExtractMemories`).
+  A flagged turn therefore suppresses extraction while it is carried over, and save-on turns in a skipped window are never extracted.
+  The scratchpad (the personality's, shared across its chats), the checkpoint summary (a Summary memory `find_context` searches) and `find_context` are unaffected, and a later checkpoint's extraction reads the scratchpad and summary, so save-off content can reach memories that way: the design's choice, as they are load-bearing for long chats.
+  `turn_memory_test.go` pins defaults, recall off, save off, the retry, steering and both checkpoint paths.
 - **`HandleAgentJobPrompt`** (`agentjob_run.go`) applies model/personality overrides only in-memory on `chatContext`; `UpdateChat` receives a copy with the **persisted** chat `ModelID` / `PersonalityID` so scheduled-job overrides never overwrite the chat row.
   `handleEphemeralPrompt` runs on the context its caller passes: the async `agent_job_run` worker passes its cancellable run context, so cancelling that job stops the turn, while the sync entry points (`HandleAgentJobPrompt`, `HandleEphemeralPromptSync`) detach first (`detachedUserContext`) and run to completion.
 - **Reply hooks** (`reply_hook.go`): once a reply is saved and its job is `complete`, `runUserChatPostInferencePhases` and `handleEphemeralPrompt` call `fireReplyHook`, which hands pointers to any hooks registered in `internal/replyhook`.
