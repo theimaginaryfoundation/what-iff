@@ -35,6 +35,13 @@ func renderGeminiMessages(ctx *ModelContext) []openai.ChatCompletionMessageParam
 			messages = append(messages, openai.SystemMessage("Current Scratchpad contents:\n"+seg.Content))
 		case SegmentKindCheckpointSummary:
 			messages = append(messages, openai.SystemMessage("Conversation checkpoint summary:\n"+seg.Content))
+		case SegmentKindPreContext:
+			// With the other system material, after the scratchpad and summary.
+			messages = append(messages, openai.SystemMessage(seg.Content))
+		case SegmentKindPostContext:
+			// No developer role here: a user message just before the new turn, as for the other
+			// developer context.
+			messages = append(messages, openai.UserMessage(seg.Content))
 		case SegmentKindHistoryTurn:
 			if seg.Role == RoleAssistant {
 				messages = append(messages, openai.AssistantMessage(seg.Content))

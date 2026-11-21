@@ -77,8 +77,8 @@ func TestLoadedToolFilter(t *testing.T) {
 }
 
 func TestLoadableToolsDeveloperContext(t *testing.T) {
-	require.Empty(t, loadableToolsDeveloperContext(gatedOffered("recall"), nil))
-	got := loadableToolsDeveloperContext(gatedOffered("recall", "web_search", "generate_image"), nil)
+	require.Empty(t, loadableToolsDeveloperContext(gatedOffered("recall"), nil, true))
+	got := loadableToolsDeveloperContext(gatedOffered("recall", "web_search", "generate_image"), nil, true)
 	require.Contains(t, got, "load_tools")
 	require.Contains(t, got, "- generate_image: ")
 	require.Contains(t, got, "- web_search: ")
@@ -87,13 +87,21 @@ func TestLoadableToolsDeveloperContext(t *testing.T) {
 	require.Less(t, strings.Index(got, "generate_image"), strings.Index(got, "web_search"), "listed in a stable order")
 
 	// Once loaded, a tool is reported as in the toolset, not as needing a load.
-	got = loadableToolsDeveloperContext(gatedOffered("web_search", "generate_image"), gatedOffered("generate_image"))
+	got = loadableToolsDeveloperContext(gatedOffered("web_search", "generate_image"), gatedOffered("generate_image"), true)
 	require.Contains(t, got, "Already loaded in this chat, so they are in your toolset now (call them directly): generate_image.")
 	require.NotContains(t, got, "- generate_image:")
 	require.Contains(t, got, "- web_search: ")
 
-	got = loadableToolsDeveloperContext(gatedOffered("generate_image"), gatedOffered("generate_image"))
+	got = loadableToolsDeveloperContext(gatedOffered("generate_image"), gatedOffered("generate_image"), true)
 	require.NotContains(t, got, "Not loaded yet")
+
+	// Without load_tools (a build's allowlist leaves it out) only the loaded tools are named: the
+	// rest cannot be loaded, so the note does not tell the model to load them.
+	got = loadableToolsDeveloperContext(gatedOffered("web_search", "generate_image"), gatedOffered("generate_image"), false)
+	require.Contains(t, got, "call them directly): generate_image.")
+	require.NotContains(t, got, "load_tools")
+	require.NotContains(t, got, "web_search")
+	require.Empty(t, loadableToolsDeveloperContext(gatedOffered("web_search"), nil, false))
 }
 
 func TestDispatchRefusesUnloadedBuiltinTool(t *testing.T) {

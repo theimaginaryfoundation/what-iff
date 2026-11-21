@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -652,12 +653,22 @@ func (d *Datastore) finalizeChatJobWithPartial(
 		d.rollbackTx(tx)
 		return nil, nil, err
 	}
+	// The partial reply is settled with its turn (settlePartialReplyTx) under the turn's user
+	// message lock, taken first, before this writes the chat row: the lock order SupersedeTurn and
+	// RegenerateTurn take too (see chatmessage_supersede.go).
+	if _, err := lockTurnOfRunTx(ctx, tx, userID, chatID, entJob); err != nil {
+		d.rollbackTx(tx)
+		return nil, nil, err
+	}
 
 	// Phase 1: idempotency fast-path for already-terminal jobs. An Advanced run's draft that no
 	// message took yet (Stop handled by another instance, MarkChatJobCancelled) still becomes the
 	// partial here.
 	if entJob.Status == terminalStatus {
 		resultID, iErr := d.finalizeTerminalPartialIdempotentTx(ctx, tx, entJob, chatID, generationModel, generationPersonality, generationMoodID)
+		if iErr == nil {
+			iErr = settlePartialReplyTx(ctx, tx, userID, chatID, entJob, resultID)
+		}
 		if iErr != nil {
 			d.rollbackTx(tx)
 			return nil, nil, iErr
@@ -687,6 +698,9 @@ func (d *Datastore) finalizeChatJobWithPartial(
 			ctx, tx, chatID, partialText, partialReasoning, generationModel, generationPersonality, generationMoodID,
 		)
 	}
+	if err == nil {
+		err = settlePartialReplyTx(ctx, tx, userID, chatID, entJob, resultID)
+	}
 	if err != nil {
 		d.rollbackTx(tx)
 		return nil, nil, err
@@ -711,6 +725,42 @@ func (d *Datastore) finalizeChatJobWithPartial(
 
 	d.recordJobStatusChange(ctx, entJob.JobType, entJob.CreatedAt, entJob.Status, terminalStatus)
 	return toJobModel(updatedJob), resultID, nil
+}
+
+// settlePartialReplyTx is SettleTurnReply for the partial reply a stopped or failed turn run
+// saved, in the same transaction: a turn taken back while it ran, or regenerated since (a newer
+// run), leaves no live partial behind. A job that is not a turn's run (a scheduled run's reference
+// is its chat), and a job that saved nothing, are left alone.
+func settlePartialReplyTx(ctx context.Context, tx *ent.Tx, userID, chatID uuid.UUID, entJob *ent.Job, resultID *uuid.UUID) error {
+	if resultID == nil {
+		return nil
+	}
+	userMessageID, ok := turnRunUserMessageID(entJob)
+	if !ok {
+		return nil
+	}
+	return settleTurnReplyTx(ctx, tx, userID, chatID, userMessageID, entJob.ID, *resultID, time.Now())
+}
+
+// turnRunUserMessageID is the user message a turn job's reference names, when it may name one
+// (a chat_message job, or an agent_job_run on the synchronous path; a scheduled run's reference is
+// its chat, which names no user message).
+func turnRunUserMessageID(entJob *ent.Job) (uuid.UUID, bool) {
+	if !slices.Contains(turnJobTypes, entJob.JobType) {
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(entJob.Reference)
+	return id, err == nil
+}
+
+// lockTurnOfRunTx locks the user message of the turn entJob runs (lockTurnUserMessageTx), when it
+// runs one in chatID; it returns nil otherwise.
+func lockTurnOfRunTx(ctx context.Context, tx *ent.Tx, userID, chatID uuid.UUID, entJob *ent.Job) (*ent.ChatMessage, error) {
+	userMessageID, ok := turnRunUserMessageID(entJob)
+	if !ok {
+		return nil, nil
+	}
+	return lockTurnUserMessageTx(ctx, tx, userID, chatID, userMessageID)
 }
 
 func (d *Datastore) ensureOwnedChatExistsTx(ctx context.Context, tx *ent.Tx, userID, chatID uuid.UUID) error {

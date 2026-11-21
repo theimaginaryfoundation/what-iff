@@ -430,7 +430,8 @@ func (d *Datastore) forkRemoteMirror(ctx context.Context, tx *ent.Tx, userID uui
 }
 
 // copyMessagesInto copies messages (text and generation names, as the mirror holds them) into a
-// thread, carrying over the remote link of any message that has one.
+// thread, carrying over the remote link of any message that has one, and the memory-save flag
+// (exclude_from_memory), so the copy's next checkpoint skips extraction as the original's would.
 func copyMessagesInto(ctx context.Context, tx *ent.Tx, linkID, chatID uuid.UUID, msgs []*ent.ChatMessage, byLocal map[uuid.UUID]*ent.RemoteSyncMessage) error {
 	for start := 0; start < len(msgs); start += remoteSyncInsertChunk {
 		part := msgs[start:min(start+remoteSyncInsertChunk, len(msgs))]
@@ -440,7 +441,8 @@ func copyMessagesInto(ctx context.Context, tx *ent.Tx, linkID, chatID uuid.UUID,
 			m := part[i]
 			c.SetID(ids[i]).SetChatID(chatID).SetMessage(m.Message).SetOrigin(m.Origin).
 				SetReadStatus(chatmessage.ReadStatusRead).SetSentAt(m.SentAt).
-				SetGenerationModel(m.GenerationModel).SetGenerationPersonality(m.GenerationPersonality)
+				SetGenerationModel(m.GenerationModel).SetGenerationPersonality(m.GenerationPersonality).
+				SetNillableExcludeFromMemory(m.ExcludeFromMemory)
 		}).Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("copy messages: %w", err)

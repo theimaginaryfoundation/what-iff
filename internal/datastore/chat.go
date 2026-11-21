@@ -805,6 +805,7 @@ func (d *Datastore) ListChats(ctx context.Context, userID uuid.UUID, pageNum, pa
 				chatmessage.HasChatWith(entchat.IDIn(chatIDs...)),
 				chatmessage.OriginEQ(chatmessage.Origin(models.MessageOriginAssistant)),
 				chatmessage.ReadStatusEQ(chatmessage.ReadStatusUnread),
+				chatmessage.SupersededAtIsNil(),
 			).
 			GroupBy(chatmessage.ChatColumn).
 			Aggregate(ent.Count()).

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 )
 
@@ -42,12 +43,17 @@ func buildCheckpointConversationSummaryInput(existingSummary string) string {
 	return fmt.Sprintf("Update the existing summary to incorporate new developments in the conversation, keeping it compact.\n\nEXISTING SUMMARY:\n%s", existingSummary)
 }
 
-func buildCheckpointSummaryRequest(userID uuid.UUID, existingSummary string, src checkpointSummarySource) (provider.UtilityRequest, error) {
+// buildCheckpointSummaryRequest builds the checkpoint summary request. instructions "" is What Iff's
+// own, checkpointConversationSummaryInstructions.
+func buildCheckpointSummaryRequest(userID uuid.UUID, instructions, existingSummary string, src checkpointSummarySource) (provider.UtilityRequest, error) {
+	if instructions == "" {
+		instructions = checkpointConversationSummaryInstructions
+	}
 	updatePrompt := buildCheckpointConversationSummaryInput(existingSummary)
 	req := provider.UtilityRequest{
 		Role:            provider.UtilityRoleMemory,
 		CallPath:        telemetry.CallPathConversationSummary,
-		Instructions:    checkpointConversationSummaryInstructions,
+		Instructions:    instructions,
 		MaxOutputTokens: checkpointSummaryMaxTokens,
 		SafetyUserID:    userID.String(),
 	}
@@ -68,11 +74,13 @@ func buildCheckpointSummaryRequest(userID uuid.UUID, existingSummary string, src
 // summarizeConversationForCheckpoint writes the chat's checkpoint summary, updating the
 // existing one, from whichever source the chat's checkpoint path has.
 func (a *Agent) summarizeConversationForCheckpoint(ctx context.Context, userID uuid.UUID, chatCtx *chatContext, src checkpointSummarySource) (string, error) {
+	var chat *models.Chat
 	var existing string
 	if chatCtx != nil && chatCtx.chat != nil {
-		existing = chatCtx.chat.CheckpointSummary
+		chat = chatCtx.chat
+		existing = chat.CheckpointSummary
 	}
-	req, err := buildCheckpointSummaryRequest(userID, existing, src)
+	req, err := buildCheckpointSummaryRequest(userID, a.checkpointSummaryInstructionsFor(ctx, chat), existing, src)
 	if err != nil {
 		return "", err
 	}

@@ -53,7 +53,7 @@ func TestBuildCheckpointSummaryRequest_ThreadedMode(t *testing.T) {
 	t.Parallel()
 
 	rid := "resp_abc"
-	params, err := checkpointSummaryParams(uuid.New(), "", checkpointSummarySource{
+	params, err := checkpointSummaryParams(uuid.New(), "", "", checkpointSummarySource{
 		PreviousResponseID: &rid,
 	})
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestBuildCheckpointSummaryRequest_ExplicitMode(t *testing.T) {
 	mc.Append(provider.SegmentKindHistoryTurn, provider.RoleUser, "hi", true)
 	mc.Append(provider.SegmentKindUserMessage, provider.RoleUser, "current user", false)
 
-	params, err := checkpointSummaryParams(uuid.New(), "prior summary", checkpointSummarySource{
+	params, err := checkpointSummaryParams(uuid.New(), "", "prior summary", checkpointSummarySource{
 		ModelContext:   mc,
 		AssistantReply: "current assistant",
 	})
@@ -104,7 +104,7 @@ func TestBuildCheckpointSummaryRequest_StripsOpenAIUnsafeImages(t *testing.T) {
 		{MediaType: "image/heic", RawBytes: []byte{4, 5}},
 	}, false)
 
-	params, err := checkpointSummaryParams(uuid.New(), "", checkpointSummarySource{ModelContext: mc})
+	params, err := checkpointSummaryParams(uuid.New(), "", "", checkpointSummarySource{ModelContext: mc})
 	require.NoError(t, err)
 
 	sawImage := false
@@ -129,7 +129,7 @@ func TestBuildCheckpointSummaryRequest_StripsOpenAIUnsafeImages(t *testing.T) {
 func TestBuildCheckpointSummaryRequest_RequiresSource(t *testing.T) {
 	t.Parallel()
 
-	_, err := checkpointSummaryParams(uuid.New(), "", checkpointSummarySource{})
+	_, err := checkpointSummaryParams(uuid.New(), "", "", checkpointSummarySource{})
 	require.Error(t, err)
 }
 
@@ -145,8 +145,8 @@ func TestSummarizeConversationForCheckpoint_NoSourceReturnsError(t *testing.T) {
 
 // checkpointSummaryParams renders the summary request the way the memory role's model
 // receives it, so these tests pin the wire shape.
-func checkpointSummaryParams(userID uuid.UUID, existing string, src checkpointSummarySource) (responses.ResponseNewParams, error) {
-	req, err := buildCheckpointSummaryRequest(userID, existing, src)
+func checkpointSummaryParams(userID uuid.UUID, instructions, existing string, src checkpointSummarySource) (responses.ResponseNewParams, error) {
+	req, err := buildCheckpointSummaryRequest(userID, instructions, existing, src)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}

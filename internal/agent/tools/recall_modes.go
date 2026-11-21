@@ -366,7 +366,8 @@ func (t *RecallTool) fetchBookmark(ctx context.Context, userID, chatID, messageI
 		t.logger.Warn("recall: fetch bookmark failed", zap.Error(err))
 		return t.fail(recallModeFetch, "failed to load bookmark")
 	}
-	if message == nil || !message.Bookmarked || message.ChatID != chatID {
+	// A superseded (taken back) message is out of the conversation, bookmarked or not.
+	if message == nil || !message.Bookmarked || message.ChatID != chatID || message.SupersededAt != nil {
 		return t.fail(recallModeFetch, "no bookmarked message found for that conversation")
 	}
 	return t.ok(recallResult{

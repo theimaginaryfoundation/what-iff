@@ -26,6 +26,17 @@ func TestAgentTurnStarterRejectsATurnWithoutAUserOrChat(t *testing.T) {
 	}
 }
 
+func TestAgentTurnStarterRejectsARevisionWithoutAUserOrMessage(t *testing.T) {
+	// A nil agent proves the guard runs before any agent call.
+	var s plugins.TurnReviser = agentTurnStarter{}
+	assert.ErrorIs(t, s.SupersedeTurn(context.Background(), uuid.Nil, uuid.New()), errTurnMissingTarget)
+	assert.ErrorIs(t, s.SupersedeTurn(context.Background(), uuid.New(), uuid.Nil), errTurnMissingTarget)
+	_, err := s.RegenerateTurn(context.Background(), plugins.TurnRegeneration{UserMessageID: uuid.New()})
+	assert.ErrorIs(t, err, errTurnMissingTarget)
+	_, err = s.RegenerateTurn(context.Background(), plugins.TurnRegeneration{UserID: uuid.New()})
+	assert.ErrorIs(t, err, errTurnMissingTarget)
+}
+
 func TestAgentAttachmentIngesterRejectsAFileWithoutAUserChatNameOrBytes(t *testing.T) {
 	// A nil agent and datastore prove the guards run before either is touched.
 	s := agentAttachmentIngester{}

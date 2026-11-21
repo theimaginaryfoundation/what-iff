@@ -86,18 +86,47 @@ type messageContextBuildRequest struct {
 	// vision (set for every vision-capable model): the thumbnails of the most recent
 	// maxHistoryImages of them.
 	LoadHistoryImageBytes bool
+	// PreContext and PostContext are this turn's caller-supplied context (models.TurnOptions):
+	// pre at the end of the system material, post immediately before the user message. Empty
+	// (every ordinary turn) adds nothing.
+	PreContext  string
+	PostContext string
+	// BaseSystemPrompt is the base prompt the system material starts with
+	// (Agent.baseSystemPromptForChat). Empty means What Iff's own, baseSystemPrompt.
+	BaseSystemPrompt string
+	// WithoutMemoryRecall leaves out the memories earlier turns recalled and stored on their
+	// messages (models.TurnOptions.MemoryRecall false); the caller passes none of its own. False
+	// (every ordinary turn) replays them as usual.
+	WithoutMemoryRecall bool
+}
+
+// builtTurn is what building a turn's context found out besides the context itself.
+type builtTurn struct {
+	// replaysExcludedTurn: the replayed conversation (carry-over and history) includes a message
+	// flagged ExcludeFromMemory (turn_memory.go).
+	replaysExcludedTurn bool
 }
 
 func (b *messageContextBuilder) build(ctx context.Context, req messageContextBuildRequest) (*provider.ModelContext, error) {
+	modelCtx, _, err := b.buildTurn(ctx, req)
+	return modelCtx, err
+}
+
+// buildTurn is build, also reporting what it found out about the replayed conversation.
+func (b *messageContextBuilder) buildTurn(ctx context.Context, req messageContextBuildRequest) (*provider.ModelContext, builtTurn, error) {
 	var excludeID *uuid.UUID
 	if req.CurrentMessage != nil {
 		excludeID = &req.CurrentMessage.ID
 	}
-	modelCtx, carryOver, history, err := b.buildHistoryContext(ctx, req.UserID, req.Chat, excludeID, req.LoadHistoryImageBytes)
+	modelCtx, carryOver, history, err := b.buildHistoryContext(ctx, req.UserID, req.Chat, excludeID, req.LoadHistoryImageBytes, req.BaseSystemPrompt, req.PreContext)
 	if err != nil {
-		return nil, err
+		return nil, builtTurn{}, err
 	}
+	built := builtTurn{replaysExcludedTurn: replaysExcludedTurn(carryOver, history)}
 	keepPersisted := b.persistedMemoryFilter(ctx, req.UserID, req.Chat, persistedAdditionalContext(carryOver, history, req.CurrentMessage)...)
+	if req.WithoutMemoryRecall {
+		keepPersisted = withoutRecalledMemories(keepPersisted)
+	}
 	appendMergedAdditionalContext(modelCtx, mergeAdditionalContextItems(carryOver, history, req.CurrentMessage, req.Memories, req.UserNameLine, req.LiveMemories, keepPersisted))
 	if req.IncludeAttachmentContext && len(req.Attachments) > 0 {
 		if hint := b.buildFullAttachmentContext(ctx, req.UserID, req.Chat.ID, req.Attachments); hint != "" {
@@ -115,8 +144,12 @@ func (b *messageContextBuilder) build(ctx context.Context, req messageContextBui
 	if extra := strings.TrimSpace(req.AdditionalDeveloperContext); extra != "" {
 		modelCtx.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, extra, false)
 	}
+	if strings.TrimSpace(req.PostContext) != "" {
+		// Last before the user message; InsertBeforeLastUserMessage keeps it there.
+		modelCtx.Append(provider.SegmentKindPostContext, provider.RoleDeveloper, req.PostContext, false)
+	}
 	modelCtx.AppendUserMessage(provider.RoleUser, req.UserPrompt, userMessageImagesFromAttachments(req.Attachments, req.ImageBytes), false)
-	return modelCtx, nil
+	return modelCtx, built, nil
 }
 
 // userMessageImagesFromAttachments collects the image payloads for vision-capable providers:
@@ -266,14 +299,21 @@ func (b *messageContextBuilder) selectCarryOverTurns(
 	return b.tokenCounter.SelectCarryOverTurns(recent, maxTurns, maxTokens), nil
 }
 
-func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID uuid.UUID, chat *models.Chat, excludeMessageID *uuid.UUID, loadHistoryImageBytes bool) (
+// buildHistoryContext starts the turn's context: the system material (base and personality
+// prompt, checkpoint summary, scratchpad, then the turn's preContext, all cacheable) and the
+// history after it. basePrompt "" is What Iff's own base prompt; preContext is "" on every
+// ordinary turn.
+func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID uuid.UUID, chat *models.Chat, excludeMessageID *uuid.UUID, loadHistoryImageBytes bool, basePrompt, preContext string) (
 	modelCtx *provider.ModelContext,
 	carryOver [][2]*models.ChatMessage,
 	history []*models.ChatMessage,
 	err error,
 ) {
 	modelCtx = &provider.ModelContext{}
-	sysText := mergePrompts(baseSystemPrompt, chat.SystemPrompt)
+	if basePrompt == "" {
+		basePrompt = baseSystemPrompt
+	}
+	sysText := mergePrompts(basePrompt, chat.SystemPrompt)
 	modelCtx.Append(provider.SegmentKindSystemPrompt, provider.RoleDeveloper, sysText, true)
 
 	if chat.CheckpointSummary != "" {
@@ -281,6 +321,9 @@ func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID 
 	}
 	if chat.Scratchpad != "" && !chat.IsSandboxed() {
 		modelCtx.Append(provider.SegmentKindScratchpad, provider.RoleDeveloper, chat.Scratchpad, true)
+	}
+	if strings.TrimSpace(preContext) != "" {
+		modelCtx.Append(provider.SegmentKindPreContext, provider.RoleDeveloper, preContext, true)
 	}
 
 	budget := resolveContextBudget(chat)
