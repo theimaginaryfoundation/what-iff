@@ -298,6 +298,15 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   A job id as its `filter` reads that one job in full (whole prompt, model, skills, parameters and values, any status), which is how the model sees a prompt before rewriting it.
   Auto mood selection does not run in a sandboxed chat (`autoMoodSelectionSkipped`); its `change_mood` picks only its own personality's modes, refuses `model_override`, and mood rituals are not loaded.
   In every chat, dispatch refuses a tool the model was not offered that turn (`setOfferedTools`, recorded on every generation path including the sub-agent loops).
+- **Tool allowlist seam (`tool_allowlist_seam.go`):** `toolAllowlistForChat`, unset here, lets another build give a chat turn a fixed set of tools by name; nil means no restriction.
+  `buildTurnToolPolicy` applies it after every other rule and before the tools-enabled early return, disabling each catalog tool it leaves out, so vendor-native web search follows `web_search`.
+  The turn-only tools (`turnOnlyToolSpecs`) and MCP tools are filtered by `restrictToAllowlist` where their specs are assembled, on every path (including the Responses and mock paths); MCP tools are admitted only by full name.
+  The resolved list is kept on `chatContext.toolAllowlist` for code that runs without the policy.
+  With no MCP name listed the turn does not contact connectors at all: no discovery (`offersMCP`), and `mcpServersInScope` returns no connector, so `list(kind="mcp_servers")` and `load_tools` find none.
+  `run_subagent` passes the list to the sub-agent (`withSubagentToolAllowlist`), whose skills' MCP tools are filtered through it.
+  The developer context follows it: no tool-lifecycle note and no not-yet-loaded tools without `load_tools`, no skills index without `load_skill`, no mode-switch hint without `list_modes` and `change_mode`, and no checklist paragraph in the Advanced instructions without `update_plan`.
+  Loadable built-in and MCP tools need `load_tools` (and, for MCP, `list`) in the list too, or only the ones already loaded in the chat are callable.
+  It only narrows: the chat's own `disabled_tools` and the sandbox rules still apply on top.
 - **Memory provenance (relay threads, Discord, Buzz or Slack):** `memory_provenance.go`.
   `prepareChatContext` records `chatContext.memoryProvenance` (`memoryProvenanceForChat`: external for any chat bound to a Discord channel, sandboxed or not, `datastore.IsExternalRelayChat`; a failed lookup in a sandboxed chat reads as external) and the trigger message id.
   `create_memory` writes with `createMemoryOrigin` (the Discord author of the message being answered, read when the tool runs; the tool's `speaker` argument overrides it).

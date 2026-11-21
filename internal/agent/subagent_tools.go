@@ -209,6 +209,8 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 	if chatCtx.reasoningEffort != "" {
 		subagentCtx = withSubagentReasoningEffort(subagentCtx, chatCtx.turnSettings.ReasoningEffort)
 	}
+	// A build's allowlist for the turn also bounds the sub-agent's MCP tools (toolAllowlistForChat).
+	subagentCtx = withSubagentToolAllowlist(subagentCtx, chatCtx.toolAllowlist)
 	callResult, err := a.callSubagentModelWithCaps(subagentCtx, chatCtx.chat.UserID, caps, modelName, modelContext, ritualUUIDs, chatCtx.chat.IsSandboxed())
 	if callResult != nil && (err == nil || len(callResult.Calls) > 0) {
 		// The meter computes subagent LLM credits and records nothing when the charge rounds to
