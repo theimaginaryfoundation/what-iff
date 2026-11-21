@@ -86,10 +86,12 @@ func TestTranscribe_OnTheAccountsDictationModel(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "whisper-large", d.Model)
 	require.Equal(t, maxDictationSeconds, d.MaxSeconds)
-	require.Contains(t, d.Formats, models.AudioFormatWebM, "a server the table doesn't know takes what OpenAI's route does")
+	require.Equal(t, []models.AudioFormat{models.AudioFormatWAV}, d.Formats, "dictation records WAV only")
 
-	chatID := uuid.NewString()
-	text, err := f.a.Transcribe(alice, f.alice, DictationClip{Audio: wavClip(2.5), Format: models.AudioFormatWAV, ClientSeconds: 0.1, ChatID: chatID})
+	chat, err := f.ent.Chat.Create().SetName("c").SetOwnerID(f.alice).Save(context.Background())
+	require.NoError(t, err)
+	chatID := chat.ID.String()
+	text, err := f.a.Transcribe(alice, f.alice, DictationClip{Audio: wavClip(2.5), Format: models.AudioFormatWAV, ChatID: chatID})
 	require.NoError(t, err)
 	require.Equal(t, "Remind me at five.", text)
 	require.EqualValues(t, 1, calls.Load())
@@ -100,7 +102,16 @@ func TestTranscribe_OnTheAccountsDictationModel(t *testing.T) {
 	require.Equal(t, "whisper-large", rec.Model)
 	require.Equal(t, "custom", rec.SpeechProvider)
 	require.Equal(t, chatID, rec.ChatID)
-	require.InDelta(t, 2.5, rec.AudioSeconds, 0.001, "a WAV's length comes from its header, not the browser")
+	require.InDelta(t, 2.5, rec.AudioSeconds, 0.001, "a WAV's length comes from its data")
+
+	// A chat that isn't the caller's isn't credited with the usage.
+	bobs, err := f.ent.Chat.Create().SetName("b").SetOwnerID(f.bob).Save(context.Background())
+	require.NoError(t, err)
+	for _, other := range []string{bobs.ID.String(), uuid.NewString(), "not-a-uuid"} {
+		_, err = f.a.Transcribe(alice, f.alice, DictationClip{Audio: wavClip(1), Format: models.AudioFormatWAV, ChatID: other})
+		require.NoError(t, err)
+		require.Empty(t, meter.records[len(meter.records)-1].ChatID, other)
+	}
 }
 
 func TestTranscribe_OutOfCreditsSendsNothing(t *testing.T) {
@@ -156,27 +167,52 @@ func TestTranscribe_RefusesClipsTheModelCantTake(t *testing.T) {
 
 	d, err := f.a.Dictation(alice)
 	require.NoError(t, err)
-	require.Equal(t, []models.AudioFormat{models.AudioFormatWAV, models.AudioFormatMP3}, d.Formats, "the composer records WAV for it")
+	require.Equal(t, []models.AudioFormat{models.AudioFormatWAV}, d.Formats)
 
 	_, err = f.a.Transcribe(alice, f.alice, DictationClip{Audio: []byte("webm"), Format: models.AudioFormatWebM})
 	require.ErrorIs(t, err, ErrAudioFormatUnsupported)
+	_, err = f.a.Transcribe(alice, f.alice, DictationClip{Audio: []byte("ID3 mp3"), Format: models.AudioFormatMP3})
+	require.ErrorIs(t, err, ErrAudioFormatUnsupported, "WAV only, though Qwen takes MP3: an MP3's length is the client's word")
+	forged := wavClip(1)
+	binary.LittleEndian.PutUint32(forged[28:32], 16000*2*100) // a byte rate claiming 100x the audio
+	_, err = f.a.Transcribe(alice, f.alice, DictationClip{Audio: forged, Format: models.AudioFormatWAV})
+	require.ErrorIs(t, err, ErrAudioFormatUnsupported, "a header that doesn't hang together is refused")
 	_, err = f.a.Transcribe(alice, f.alice, DictationClip{Audio: wavClip(302), Format: models.AudioFormatWAV})
 	require.ErrorIs(t, err, ErrClipTooLong, "five minutes is Qwen's limit")
 	require.Empty(t, meter.checks)
 }
 
-func TestClipSeconds(t *testing.T) {
+func TestWAVSeconds(t *testing.T) {
 	t.Parallel()
-	require.InDelta(t, 3.0, clipSeconds(DictationClip{Audio: wavClip(3), Format: models.AudioFormatWAV, ClientSeconds: 99}), 0.001, "a WAV header wins")
-	require.InDelta(t, 12.0, clipSeconds(DictationClip{Audio: make([]byte, 16000), Format: models.AudioFormatWebM, ClientSeconds: 12}), 0.001)
-	require.InDelta(t, 10.0, clipSeconds(DictationClip{Audio: make([]byte, 160000), Format: models.AudioFormatWebM, ClientSeconds: 0}), 0.001,
-		"a claimed length can't be shorter than the clip's size allows")
+	s, ok := wavSeconds(wavClip(3))
+	require.True(t, ok)
+	require.InDelta(t, 3.0, s, 0.001)
 
 	streamed := wavClip(2)
 	binary.LittleEndian.PutUint32(streamed[40:44], 0) // a recorder that never filled in the size
-	s, ok := wavSeconds(streamed)
+	s, ok = wavSeconds(streamed)
 	require.True(t, ok)
-	require.InDelta(t, 2.0, s, 0.001)
-	_, ok = wavSeconds([]byte("not a wav"))
-	require.False(t, ok)
+	require.InDelta(t, 2.0, s, 0.001, "everything after the data header counts")
+
+	forge := func(off int, v uint32, two bool) []byte {
+		b := wavClip(2)
+		if two {
+			binary.LittleEndian.PutUint16(b[off:off+2], uint16(v))
+		} else {
+			binary.LittleEndian.PutUint32(b[off:off+4], v)
+		}
+		return b
+	}
+	for name, b := range map[string][]byte{
+		"not a wav":                []byte("not a wav"),
+		"compressed (tag 0x55)":    forge(20, 0x55, true),
+		"byte rate too high":       forge(28, 16000*2*50, false),
+		"byte rate too low":        forge(28, 1, false),
+		"block align inconsistent": forge(32, 1, true),
+		"rate out of range":        forge(24, 1, false),
+		"no fmt chunk":             append([]byte("RIFF\x00\x00\x00\x00WAVEdata\x00\x00\x00\x00"), make([]byte, 64)...),
+	} {
+		_, ok := wavSeconds(b)
+		require.False(t, ok, name)
+	}
 }

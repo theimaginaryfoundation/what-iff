@@ -1,20 +1,4 @@
-import { WAV_SAMPLE_RATE, encodeWav, planRecording, resample } from './clip-recorder';
-
-describe('planRecording', () => {
-  const chromium = (t: string) => t.startsWith('audio/webm');
-  const safari = (t: string) => t === 'audio/mp4';
-
-  it("records in the browser's own format when the model takes it", () => {
-    expect(planRecording(['webm', 'mp4', 'wav'], chromium)).toEqual({ kind: 'media', mimeType: 'audio/webm;codecs=opus', format: 'webm' });
-    expect(planRecording(['webm', 'mp4', 'wav'], safari)).toEqual({ kind: 'media', mimeType: 'audio/mp4', format: 'mp4' });
-  });
-
-  it("captures WAV for a model that takes none of the browser's formats", () => {
-    expect(planRecording(['wav', 'mp3'], chromium)).toEqual({ kind: 'wav' });
-    expect(planRecording([], chromium)).toEqual({ kind: 'wav' });
-    expect(planRecording(['webm'], () => false)).toEqual({ kind: 'wav' }); // no MediaRecorder: WAV is all there is
-  });
-});
+import { WAV_SAMPLE_RATE, encodeWav, resample } from './clip-recorder';
 
 describe('resample', () => {
   it('is a no-op at the same rate', () => {
