@@ -91,8 +91,8 @@ describe('PersonalityVoiceComponent', () => {
     const saved: Personality[] = [];
     component.changed.subscribe(p => saved.push(p));
     await component.save();
-    expect(speech.setVoice).toHaveBeenCalledWith('p1', { model_id: 'q', voice: 'Emily_v3.1', style: 'warm' });
-    expect(saved[0].voice).toEqual({ model_id: 'q', voice: 'Emily_v3.1', style: 'warm' });
+    expect(speech.setVoice).toHaveBeenCalledWith('p1', { model_id: 'q', voice: 'Emily_v3.1', style: 'warm', autoplay: false });
+    expect(saved[0].voice).toEqual({ model_id: 'q', voice: 'Emily_v3.1', style: 'warm', autoplay: false });
     expect(component.editing()).toBe(false);
   });
 
@@ -108,7 +108,7 @@ describe('PersonalityVoiceComponent', () => {
     component.edit();
     component.sample.set('Testing, one two.');
     await component.preview();
-    expect(speech.preview).toHaveBeenCalledWith({ model_id: 'q', voice: 'Emily_v3.1', style: '' }, 'Testing, one two.');
+    expect(speech.preview).toHaveBeenCalledWith({ model_id: 'q', voice: 'Emily_v3.1', style: '', autoplay: false }, 'Testing, one two.');
     expect(player.playAudio).toHaveBeenCalled();
   });
 
@@ -117,7 +117,7 @@ describe('PersonalityVoiceComponent', () => {
     component.edit();
     component.style.set('ignored');
     await component.save();
-    expect(speech.setVoice).toHaveBeenCalledWith('p1', { model_id: 'k', voice: 'af_bella', style: '' });
+    expect(speech.setVoice).toHaveBeenCalledWith('p1', { model_id: 'k', voice: 'af_bella', style: '', autoplay: false });
   });
 
   it('says when the saved voice is no longer available', async () => {
@@ -125,6 +125,13 @@ describe('PersonalityVoiceComponent', () => {
     expect(component.unusable()).toBe(true);
     component.edit();
     expect(component.modelId()).toBe('q'); // an unusable voice opens on the default
+  });
+
+  it('turns reading aloud on arrival on and off, keeping the voice', async () => {
+    const voice = { model_id: 'q', voice: 'Emily_v3.1', style: 'warm', autoplay: false };
+    await render({ ...ADA, voice } as Personality);
+    await component.setAutoplay(true);
+    expect(speech.setVoice).toHaveBeenCalledWith('p1', { ...voice, autoplay: true });
   });
 
   it('removes the voice', async () => {

@@ -56,6 +56,7 @@ import { TurnSettingsPickerComponent } from '../turn-settings-picker/turn-settin
 import { ThreadPickerPopoverComponent } from '../thread-picker-popover/thread-picker-popover.component';
 import { ThreadRefChipsComponent } from '../thread-ref-chips/thread-ref-chips.component';
 import { THREAD_DRAG_MIME, isThreadDrag } from '../../helpers/thread-drag.helpers';
+import { AutoplayToggleComponent } from '../autoplay-toggle/autoplay-toggle.component';
 import { DictationButtonComponent } from '../dictation-button/dictation-button.component';
 import { EmojiAutocompleteMenuComponent } from '../emoji-autocomplete-menu/emoji-autocomplete-menu.component';
 import { SlashMenuComponent } from '../slash-menu/slash-menu.component';
@@ -111,6 +112,7 @@ let nextPreviewId = 0;
     AttachmentPreviewComponent,
     EmojiAutocompleteMenuComponent,
     DictationButtonComponent,
+    AutoplayToggleComponent,
     SlashMenuComponent,
     BoltIconComponent,
     FileIconComponent,
@@ -560,6 +562,7 @@ let nextPreviewId = 0;
 
             <div style="flex: 1"></div>
 
+            <app-autoplay-toggle [chatId]="chatId()" />
             <app-dictation-button [chatId]="chatId()" [disabled]="composerDisabled()" (transcribed)="insertDictation($event)" />
 
             @if (isGenerating()) {

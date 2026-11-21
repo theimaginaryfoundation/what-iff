@@ -26,6 +26,8 @@ export interface PersonalityVoice {
   model_id: string;
   voice: string;
   style: string;
+  /** Whether the personality's replies are read aloud as they arrive, by default. */
+  autoplay?: boolean;
 }
 
 /** A reply's audio in one voice (ADR 0x052 §7), made segment by segment. */
@@ -36,10 +38,15 @@ export interface SpeechTrack {
   /** `open` while segments are still coming; `stopped` when credits ran out partway. */
   status: 'open' | 'complete' | 'failed' | 'stopped';
   error_code?: string;
+  /** For a track its turn made to read aloud on arrival: pending until a client claims it. */
+  autoplay?: 'pending' | 'played' | 'skipped';
+  created_at?: string;
   segments: SpeechSegment[];
 }
 
 export interface SpeechSegment {
+  /** Tells a segment from one that replaced it at the same place (a round withdrawn). */
+  id: string;
   seq: number;
   format: AudioFormat;
   duration_ms: number;

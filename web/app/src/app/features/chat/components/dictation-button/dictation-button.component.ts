@@ -249,6 +249,7 @@ export class DictationButtonComponent implements OnInit {
     this.state.set('recording');
     this.recordingStarted.emit();
     this.player.stop(); // nothing plays aloud while the person talks
+    this.player.recording.set(true);
     this.ticker = setInterval(() => this.tick(), 100);
   }
 
@@ -265,6 +266,7 @@ export class DictationButtonComponent implements OnInit {
   async finish(atLimit = false): Promise<void> {
     const recorder = this.recorder;
     if (!recorder) return;
+    this.player.recording.set(false);
     this.stopTicker();
     this.recorder = null;
     this.state.set('transcribing');
@@ -306,6 +308,7 @@ export class DictationButtonComponent implements OnInit {
 
   /** Stops recording without transcribing. */
   discard(): void {
+    this.player.recording.set(false);
     this.stopTicker();
     this.recorder?.cancel();
     this.recorder = null;

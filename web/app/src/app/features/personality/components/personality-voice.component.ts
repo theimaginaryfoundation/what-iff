@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, ou
 import { firstValueFrom } from 'rxjs';
 
 import { VoiceCostOutletComponent } from '../../../extensions/voice-cost-outlet.component';
+import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 import { Model } from '../../../core/models/model.model';
 import { Personality } from '../../../core/models/personality.model';
 import { PersonalityVoice, voicePreviewSample } from '../../../core/models/speech.model';
@@ -35,7 +36,7 @@ export function orderVoiceModels(models: readonly Model[]): Model[] {
 @Component({
   selector: 'app-personality-voice',
   standalone: true,
-  imports: [VoiceCostOutletComponent],
+  imports: [CheckboxComponent, VoiceCostOutletComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="voice" aria-labelledby="personality-voice-heading" data-testid="personality-voice">
@@ -52,6 +53,17 @@ export function orderVoiceModels(models: readonly Model[]): Model[] {
               <span class="voice__warn" role="status">This voice isn't available any more; choose another.</span>
             }
           </p>
+          <label class="voice__autoplay">
+            <ui-checkbox
+              data-testid="voice-autoplay"
+              [checked]="!!v.autoplay"
+              [disabled]="saving()"
+              (change)="setAutoplay($any($event.target).checked)"
+            />
+            Read replies aloud as they arrive
+            <app-voice-cost-outlet [model]="savedModel()" place="autoplay" />
+          </label>
+          <small>Each chat can change this for itself.</small>
           <div class="voice__actions">
             <button type="button" class="voice__button" (click)="edit()">Change voice</button>
             <button type="button" class="voice__button" data-testid="voice-remove" [disabled]="saving()" (click)="remove()">Remove</button>
@@ -196,6 +208,13 @@ export function orderVoiceModels(models: readonly Model[]): Model[] {
       font: inherit;
       padding: 0.35rem 0.5rem;
     }
+    .voice__autoplay {
+      align-items: center;
+      color: var(--color-text-primary);
+      display: flex;
+      font-size: 0.85rem;
+      gap: 0.4rem;
+    }
     .voice__actions {
       display: flex;
       gap: 0.5rem;
@@ -245,6 +264,7 @@ export class PersonalityVoiceComponent implements OnInit {
   readonly sample = signal('');
 
   readonly model = computed(() => this.models().find(m => m.id === this.modelId()) ?? null);
+  readonly savedModel = computed(() => this.models().find(m => m.id === this.personality().voice?.model_id) ?? null);
   /** The saved voice can't be used: its model is gone or no longer offers it. */
   readonly unusable = computed(() => {
     const v = this.personality().voice;
@@ -298,7 +318,27 @@ export class PersonalityVoiceComponent implements OnInit {
   }
 
   private draft(): PersonalityVoice {
-    return { model_id: this.modelId(), voice: this.voiceId(), style: this.model()?.speech_style ? this.style().trim() : '' };
+    return {
+      model_id: this.modelId(),
+      voice: this.voiceId(),
+      style: this.model()?.speech_style ? this.style().trim() : '',
+      autoplay: !!this.personality().voice?.autoplay,
+    };
+  }
+
+  /** Turns reading replies aloud as they arrive on or off, keeping the voice as it is. */
+  async setAutoplay(autoplay: boolean): Promise<void> {
+    const v = this.personality().voice;
+    if (!v || !!v.autoplay === autoplay) return;
+    this.saving.set(true);
+    this.error.set('');
+    try {
+      this.changed.emit(await firstValueFrom(this.speech.setVoice(this.personality().id, { ...v, autoplay })));
+    } catch (err) {
+      this.error.set(apiErrorMessage(err, "Couldn't save that."));
+    } finally {
+      this.saving.set(false);
+    }
   }
 
   async preview(): Promise<void> {

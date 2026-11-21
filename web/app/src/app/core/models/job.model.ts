@@ -1,14 +1,7 @@
 import { JobRun } from './message.model';
 
 export type JobStatus =
-  | 'pending'
-  | 'processing'
-  | 'inference_complete'
-  | 'expression_complete'
-  | 'compaction_complete'
-  | 'complete'
-  | 'cancelled'
-  | 'failed';
+  'pending' | 'processing' | 'inference_complete' | 'expression_complete' | 'compaction_complete' | 'complete' | 'cancelled' | 'failed';
 
 export interface Job {
   id: string;
@@ -20,6 +13,8 @@ export interface Job {
   /** Stable code for error when it has one (e.g. provider_not_configured). */
   error_code?: string;
   result_id?: string;
+  /** The reply's speech track when its chat reads replies aloud as they arrive (ADR 0x052 §9). */
+  speech_track_id?: string;
   progress_current?: number;
   progress_total?: number;
   status_message?: string;

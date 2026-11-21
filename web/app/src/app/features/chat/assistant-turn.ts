@@ -43,6 +43,11 @@ export interface AssistantTurnDeps {
   watchIntervalMs?: number;
   /** Whether a watch tick may ask now: the tab is visible and the thread has loaded. */
   canWatch?: () => boolean;
+  /**
+   * Called when the active turn's job carries a speech track: the chat reads replies aloud as they
+   * arrive, and the reply can be claimed and heard as it streams (ADR 0x052 §9).
+   */
+  onSpeechTrack?: (chatId: string, trackId: string) => void;
 }
 
 /**
@@ -134,9 +139,7 @@ export class AssistantTurn {
    * phases (expression pick, conversation summarization) continue in the background —
    * they must not keep the stop button up or the composer locked.
    */
-  private readonly inferenceGenerating = computed(
-    () => this.jobPending() && !isPostInferencePhase(this._activeJobPhase()),
-  );
+  private readonly inferenceGenerating = computed(() => this.jobPending() && !isPostInferencePhase(this._activeJobPhase()));
   private readonly cancellationPending = computed(() => {
     const activeJobId = this._activeChatJobId();
     return !!activeJobId && activeJobId === this._cancelRequestedJobId();
@@ -149,11 +152,7 @@ export class AssistantTurn {
   readonly canSteer = computed(() => {
     const jobId = this._activeChatJobId();
     return (
-      this.inferenceGenerating() &&
-      !this.cancellationPending() &&
-      !this._jobRun() &&
-      !!jobId &&
-      jobId !== AssistantTurn.PENDING_SEND_JOB_ID
+      this.inferenceGenerating() && !this.cancellationPending() && !this._jobRun() && !!jobId && jobId !== AssistantTurn.PENDING_SEND_JOB_ID
     );
   });
   /** True while the assistant is generating (core inference pending and/or UI streaming). */
@@ -441,6 +440,8 @@ export class AssistantTurn {
     // composer unlocked, and its late snapshots must not overwrite the new job's phase.
     if (this._activeChatJobId() === job.id) {
       this._activeJobPhase.set(job.status);
+      const chatId = this.deps.activeThreadId();
+      if (job.speech_track_id && chatId) this.deps.onSpeechTrack?.(chatId, job.speech_track_id);
       // The progress payload is rewritten only when the timeline changes, while polls come every
       // second; a long Advanced run's payload (up to 60 calls and a plan) is not re-parsed when it
       // is the same string as last time.

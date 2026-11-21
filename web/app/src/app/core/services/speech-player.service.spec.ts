@@ -28,12 +28,12 @@ function fakeContext() {
   return { ctx, started };
 }
 
-function track(status: SpeechTrack['status'], segments: number): SpeechTrack {
+function track(status: SpeechTrack['status'], segments: number, ids = 'abcdefgh'): SpeechTrack {
   return {
     id: 't1',
     chat_id: 'c1',
     status,
-    segments: Array.from({ length: segments }, (_, seq) => ({ seq, format: 'mp3', duration_ms: 0, size_bytes: 2 })),
+    segments: Array.from({ length: segments }, (_, seq) => ({ id: ids[seq], seq, format: 'mp3' as const, duration_ms: 0, size_bytes: 2 })),
   };
 }
 
@@ -90,6 +90,30 @@ describe('SpeechPlayerService', () => {
     await first;
     expect(audio.started).toHaveLength(1);
     expect(player.playing()).toBeNull();
+  });
+
+  it('follows a claimed track, and drops segments the server withdrew before they start', async () => {
+    const stops: number[] = [];
+    const base = audio.ctx.createBufferSource;
+    audio.ctx.createBufferSource = () => {
+      const src = base();
+      const stop = src.stop;
+      src.stop = vi.fn(() => {
+        stops.push(audio.started.length);
+        stop();
+      });
+      return src;
+    };
+    // Two segments of a round arrive; the round is withdrawn, and the final round replaces them.
+    speech.track
+      .mockReturnValueOnce(of(track('open', 2, 'ab')))
+      .mockReturnValueOnce(of({ ...track('complete', 2, 'xy'), message_id: 'm9' }));
+    await player.playTrack(track('open', 1, 'a'));
+    // Neither withdrawn segment had started on this clock, so both are stopped, and the final
+    // round's segments take their place from now.
+    expect(audio.started.map(s => s.at)).toEqual([10.05, 12.05, 10, 12]);
+    expect(stops).toHaveLength(2);
+    expect(speech.segment).toHaveBeenCalledTimes(4);
   });
 
   it("knows which chats' personalities have a voice", () => {
