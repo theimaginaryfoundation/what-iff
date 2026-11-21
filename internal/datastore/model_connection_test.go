@@ -30,7 +30,7 @@ func createConnectionModelsTestSchema(t *testing.T, db *sql.DB) {
 			id uuid PRIMARY KEY, name text NOT NULL, display_name text NOT NULL, description text NOT NULL,
 			provider text NOT NULL DEFAULT 'openai', tool_support bool NOT NULL DEFAULT false,
 			reasoning_support_override text NULL, vision_support bool NULL,
-			base_credits_per_slab integer NOT NULL DEFAULT 1, subscription_tier text NOT NULL DEFAULT 'high',
+			base_credits_per_slab integer NOT NULL DEFAULT 1, credits_per_1k_chars real NOT NULL DEFAULT 0, credits_per_minute real NOT NULL DEFAULT 0, subscription_tier text NOT NULL DEFAULT 'high',
 			deleted bool NOT NULL DEFAULT false, is_default bool NOT NULL DEFAULT false,
 			kind text NOT NULL DEFAULT 'chat', speech_voices json NULL,
 			connection_id uuid NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
@@ -288,4 +288,28 @@ func TestListAudioModelsForUser(t *testing.T) {
 
 	_, err = f.ds.ListAudioModelsForUser(ctx, f.bob, models.ModelKindChat)
 	require.ErrorIs(t, err, models.ErrInvalidModelKind)
+}
+
+// Speech models are priced on the model row, as chat models are (ADR 0x052).
+func TestSpeechPrices(t *testing.T) {
+	f := newConnectionModelsFixture(t)
+	ctx := context.Background()
+	m, err := f.ds.AdminCreateModel(ctx, models.CreateModelRequest{
+		Name: "qwen-audio-3.1-tts-flash", DisplayName: "Qwen TTS", Provider: "qwen", CreditsPer1kChars: 3.3,
+	})
+	require.NoError(t, err)
+	require.InDelta(t, 3.3, m.CreditsPer1kChars, 1e-9)
+
+	price := 2.25
+	m, err = f.ds.AdminUpdateModel(ctx, m.ID, models.UpdateModelRequest{CreditsPerMinute: &price})
+	require.NoError(t, err)
+	require.InDelta(t, 2.25, m.CreditsPerMinute, 1e-9)
+	require.InDelta(t, 3.3, m.CreditsPer1kChars, 1e-9, "left as it was")
+
+	negative := -1.0
+	_, err = f.ds.AdminUpdateModel(ctx, m.ID, models.UpdateModelRequest{CreditsPer1kChars: &negative})
+	require.ErrorIs(t, err, ErrInvalidSpeechPrice)
+	_, err = f.ds.AdminCreateModel(ctx, models.CreateModelRequest{Name: "x-tts", DisplayName: "X", Provider: "openai", Kind: models.ModelKindSpeech,
+		SpeechVoices: []models.SpeechVoice{{ID: "a"}}, CreditsPer1kChars: -2})
+	require.ErrorIs(t, err, ErrInvalidSpeechPrice)
 }

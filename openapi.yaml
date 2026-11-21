@@ -11444,6 +11444,16 @@ components:
           type: integer
           format: int64
           description: Credits charged per 15k-token slab for chat/job turns using this model
+        credits_per_1k_chars:
+          type: number
+          description: >-
+            Credits charged per 1,000 characters a speech model reads aloud (ADR 0x052),
+            where a meter bills; absent when zero.
+        credits_per_minute:
+          type: number
+          description: >-
+            Credits charged per minute a transcription model transcribes (ADR 0x052),
+            where a meter bills; absent when zero.
         subscription_tier:
           type: string
           enum: [low, medium, high, ultra]

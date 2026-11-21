@@ -19,6 +19,10 @@ export interface Model {
    * The backend schema has a non-zero default, so absence means "not yet returned".
    */
   base_credits_per_slab?: number;
+  /** Credits per 1,000 characters a speech model reads aloud, where a meter bills (ADR 0x052). */
+  credits_per_1k_chars?: number;
+  /** Credits per minute a transcription model transcribes, where a meter bills. */
+  credits_per_minute?: number;
   /**
    * Billing grade: 'low', 'medium', 'high' or 'ultra'. The API sends it only
    * where the deployment bills by tier, so it is absent otherwise.

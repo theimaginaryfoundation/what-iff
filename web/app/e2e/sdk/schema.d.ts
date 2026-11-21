@@ -16306,6 +16306,10 @@ export interface components {
              * @description Credits charged per 15k-token slab for chat/job turns using this model
              */
             base_credits_per_slab: number;
+            /** @description Credits charged per 1,000 characters a speech model reads aloud (ADR 0x052), where a meter bills; absent when zero. */
+            credits_per_1k_chars?: number;
+            /** @description Credits charged per minute a transcription model transcribes (ADR 0x052), where a meter bills; absent when zero. */
+            credits_per_minute?: number;
             /**
              * @description The model's billing grade, lowest to highest. Present only where the deployment bills by tier; omitted where tiers have no effect.
              * @enum {string}
