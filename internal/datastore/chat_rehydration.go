@@ -30,7 +30,7 @@ func (d *Datastore) GetChatMessagesForSummary(ctx context.Context, userID, chatI
 	}
 
 	rows, err := d.dbClient.ChatMessage.Query().
-		Where(chatmessage.HasChatWith(entchat.ID(chatID))).
+		Where(chatmessage.HasChatWith(entchat.ID(chatID)), chatmessage.SupersededAtIsNil()).
 		Order(chatmessage.BySentAt()).
 		Select(chatmessage.FieldMessage, chatmessage.FieldOrigin, chatmessage.FieldSentAt).
 		All(ctx)

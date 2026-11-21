@@ -48,7 +48,7 @@ func (a *Agent) updateScratchpad(ctx context.Context, userID uuid.UUID, response
 		a.logger.Error("failed to get personality by ID", zap.Error(err))
 		return ScratchpadUpdate{}, fmt.Errorf("failed to get personality by ID: %w", err)
 	}
-	prompt := buildUpdateScratchpadPrompt(personalityModel)
+	prompt := buildUpdateScratchpadPrompt(personalityModel, a.defaultScratchpadUpdatePromptFor(ctx, chatCtx.chat))
 
 	// callUtility rather than CallUtility: memory extraction continues from this reply's
 	// stored response, so it needs the response ID.
@@ -154,7 +154,7 @@ func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, ch
 		a.logger.Error("failed to get personality by ID", zap.Error(err))
 		return ScratchpadUpdate{}, fmt.Errorf("failed to get personality by ID: %w", err)
 	}
-	prompt := buildUpdateScratchpadPrompt(personalityModel)
+	prompt := buildUpdateScratchpadPrompt(personalityModel, a.defaultScratchpadUpdatePromptFor(ctx, chatCtx.chat))
 
 	reply, err := a.callUtility(ctx, provider.UtilityRequest{
 		Role:            provider.UtilityRoleMemory,
@@ -222,22 +222,28 @@ func (a *Agent) summarizeScratchpadClaude(ctx context.Context, userID uuid.UUID,
 	return summarized, nil
 }
 
-func buildUpdateScratchpadPrompt(personality *models.Personality) string {
+// buildUpdateScratchpadPrompt is the request for a personality's next scratchpad: the first one
+// (scratchpadInitialPrompt), or an update with the personality's own prompt, else defaultPrompt
+// ("" is What Iff's, scratchpadUpdatePrompt).
+func buildUpdateScratchpadPrompt(personality *models.Personality, defaultPrompt string) string {
 	var userMessage string
 	if personality.Scratchpad != "" {
-		userMessage = scratchpadPromptOrDefault(personality)
+		userMessage = scratchpadPromptOrDefault(personality, defaultPrompt)
 	} else {
 		userMessage = scratchpadInitialPrompt
 	}
 	return fmt.Sprintf("%s\n\n%s", userMessage, scratchpadUpdatePostamble)
 }
 
-func scratchpadPromptOrDefault(personality *models.Personality) string {
+func scratchpadPromptOrDefault(personality *models.Personality, defaultPrompt string) string {
+	if defaultPrompt == "" {
+		defaultPrompt = scratchpadUpdatePrompt
+	}
 	if personality == nil {
-		return scratchpadUpdatePrompt
+		return defaultPrompt
 	}
 	if personality.ScratchpadUpdatePrompt != "" {
 		return personality.ScratchpadUpdatePrompt
 	}
-	return scratchpadUpdatePrompt
+	return defaultPrompt
 }

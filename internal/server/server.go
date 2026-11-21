@@ -489,6 +489,7 @@ func (s *Server) setupRoutes() {
 		CreateEmbedding: pluginEmbedder(keyResolver.Configured(models.ModelProviderOpenAI), providerHTTPClient),
 		Lifecycle:       s.lifecycleCtx,
 		Turns:           agentTurnStarter{agent: agent},
+		TurnRevisions:   agentTurnStarter{agent: agent},
 		Attachments:     newAgentAttachmentIngester(agent, dataStore),
 	})
 

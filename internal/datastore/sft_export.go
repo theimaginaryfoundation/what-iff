@@ -262,7 +262,7 @@ func (d *Datastore) ExportUserSFTJSONL(ctx context.Context, userID uuid.UUID, w 
 
 			for {
 				entMessages, messageErr := tx.ChatMessage.Query().
-					Where(chatmessage.HasChatWith(entchat.ID(entChatItem.ID))).
+					Where(chatmessage.HasChatWith(entchat.ID(entChatItem.ID)), chatmessage.SupersededAtIsNil()).
 					Order(ent.Asc(chatmessage.FieldSentAt), ent.Asc(chatmessage.FieldID)).
 					Offset(messageOffset).
 					Limit(batchSize).

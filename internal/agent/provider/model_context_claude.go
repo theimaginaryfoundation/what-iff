@@ -83,6 +83,16 @@ func renderClaudeContext(ctx *ModelContext) ([]anthropic.TextBlockParam, []anthr
 				tb.CacheControl = claudeEphemeralCacheControl5m()
 			}
 			systemBlocks = append(systemBlocks, tb)
+		case SegmentKindPreContext:
+			// The last system block: after the scratchpad and summary, inside the cached prefix.
+			tb := anthropic.TextBlockParam{Text: seg.Content}
+			if mark {
+				tb.CacheControl = claudeEphemeralCacheControl5m()
+			}
+			systemBlocks = append(systemBlocks, tb)
+		case SegmentKindPostContext:
+			// Anthropic has no developer role: a user message just before the new turn.
+			messages = append(messages, anthropic.NewUserMessage(textBlockUnionWithOptionalCache(seg.Content, mark)))
 		case SegmentKindHistoryTurn:
 			appendClaudeHistoryTurn(&messages, seg, mark)
 		case SegmentKindExpressionPortrait:

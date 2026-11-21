@@ -83,6 +83,9 @@ type AccountBackupChatMessage struct {
 	AgentRun *AgentRun `json:"agent_run,omitempty"`
 	// JobRun is the agent job a scheduled run's reply was written for (ADR 0x040).
 	JobRun *JobRun `json:"job_run,omitempty"`
+	// ExcludeFromMemory marks a message of a turn sent with memory saving off
+	// (ChatMessage.ExcludeFromMemory); absent in older backups (= not flagged).
+	ExcludeFromMemory bool `json:"exclude_from_memory,omitempty"`
 }
 
 type AccountBackupChatMessageContextItem struct {
