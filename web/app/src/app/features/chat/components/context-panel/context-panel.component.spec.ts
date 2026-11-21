@@ -77,13 +77,20 @@ describe('ContextPanelComponent', () => {
         expect(fixture.nativeElement.querySelector('[aria-label="Memory scope"]')).not.toBeNull();
     });
 
-    it('shows the Sandbox control on the Memories tab only', () => {
+    it('shows the Sandbox box on the Memories tab of a sandboxed thread only', () => {
+        context.setActiveChat({ ...chat, context_scope: 'sandbox' });
         context.setActiveTab('memories');
         fixture.detectChanges();
         expect(fixture.nativeElement.querySelector('app-thread-sandbox .sandbox')).not.toBeNull();
 
         context.setActiveTab('tools');
         fixture.detectChanges();
-        expect(fixture.nativeElement.querySelector('app-thread-sandbox')).toBeNull();
+        expect(fixture.nativeElement.querySelector('app-thread-sandbox .sandbox')).toBeNull();
+    });
+
+    it('shows no Sandbox box for a thread that is not sandboxed (it cannot be re-sandboxed)', () => {
+        context.setActiveTab('memories');
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('app-thread-sandbox .sandbox')).toBeNull();
     });
 });

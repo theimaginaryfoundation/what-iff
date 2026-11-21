@@ -110,6 +110,20 @@ export class ThreadListService implements OnDestroy {
   }
 
   /**
+   * Adopts a copy of a thread saved elsewhere (for example a sandbox change from the context panel),
+   * so the sidebar and the Thread Manager show it without a reload. Only replaces a thread that is
+   * already here; it never adds one, so it cannot put a thread on a tab it does not belong to.
+   */
+  applyChatUpdate(chat: Chat): void {
+    if (!chat.id) return;
+    if (this.allThreads().some(item => item.id === chat.id)) {
+      this.allThreads.set(this.allThreads().map(item => (item.id === chat.id ? { ...item, ...chat } : item)));
+    }
+    const outside = this.openedOutsideList();
+    if (outside.has(chat.id)) this.openedOutsideList.set(new Map(outside).set(chat.id, chat));
+  }
+
+  /**
    * Keeps an opened archived thread (or one restored from the archive after being opened) for the
    * sidebar's recent list. Other threads come from the loaded list.
    */

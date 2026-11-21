@@ -642,6 +642,13 @@
   white-space: nowrap;
 }
 
+.app-sidebar__thread-sandbox {
+  align-items: center;
+  color: var(--color-warning);
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
 .app-sidebar__thread-badge {
   background: var(--color-accent, var(--accent-mode));
   border-radius: 999px;
@@ -742,4 +749,40 @@
   .app-sidebar {
     max-width: min(90vw, 300px);
   }
+}
+
+.app-sidebar__thread-row {
+  position: relative;
+}
+
+/* Keep the row's own content (name, shield, unread badge) clear of the ⋮ button that appears on hover. */
+.app-sidebar__thread-row .app-sidebar__pinned-thread {
+  padding-right: 32px;
+}
+
+.app-sidebar__thread-menu {
+  position: absolute;
+  right: 4px;
+  /* Centred on the row without a transform: a transformed ancestor would make the menu's
+     position: fixed relative to this box instead of the viewport. The button is 24px tall. */
+  top: calc(50% - 12px);
+  opacity: 0;
+}
+
+.app-sidebar__thread-row:hover .app-sidebar__thread-menu,
+.app-sidebar__thread-row:focus-within .app-sidebar__thread-menu,
+.app-sidebar__thread-row--menu-open .app-sidebar__thread-menu {
+  opacity: 1;
+}
+
+/* Touch has no hover: keep the button reachable. */
+@media (hover: none) {
+  .app-sidebar__thread-menu {
+    opacity: 1;
+  }
+}
+
+/* Lift the row whose menu is open above the rows below it. */
+.app-sidebar__thread-row--menu-open {
+  z-index: 5;
 }

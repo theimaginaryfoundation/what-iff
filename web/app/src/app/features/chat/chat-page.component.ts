@@ -71,6 +71,7 @@ import { SlackComposerToggleComponent } from '../slack/slack-composer-toggle.com
 import { ThreadListService } from '../../core/services/thread-list.service';
 import { ThreadListPanelComponent } from './components/thread-list-panel/thread-list-panel.component';
 import { ContextPanelService, ContextPanelTab } from './services/context-panel.service';
+import { ThreadSandboxService } from './services/thread-sandbox.service';
 import { FileWorkspaceService } from '../file-workspace/file-workspace.service';
 import { ScratchpadService } from './services/scratchpad.service';
 import { ContextPanelToggleComponent } from './components/context-panel/context-panel-toggle.component';
@@ -84,6 +85,7 @@ import {
   FileIconComponent,
   LayersIconComponent,
   NoteIconComponent,
+  ShieldIconComponent,
   WrenchIconComponent,
   XIconComponent,
 } from '../../shared/ui/icons/icons';
@@ -129,6 +131,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
     LayersIconComponent,
     FileIconComponent,
     NoteIconComponent,
+    ShieldIconComponent,
     WrenchIconComponent,
     XIconComponent,
   ],
@@ -155,6 +158,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   private readonly subscriptions = new Subscription();
   readonly threadList = inject(ThreadListService);
   readonly contextPanel = inject(ContextPanelService);
+  private readonly threadSandbox = inject(ThreadSandboxService);
   private readonly scratchpad = inject(ScratchpadService);
   private readonly mcpApps = inject(McpAppService);
 
@@ -907,13 +911,9 @@ ${text}`
     }
   }
 
-  /** Reveals the Memories tab, where the thread's sandbox is set (never toggles closed). */
-  openSandboxSettings(): void {
-    this.contextPanel.setActiveTab('memories');
-    this.contextPanel.setDesktopVisible(true);
-    if (this.contextPanel.isMobileViewport()) {
-      this.contextPanel.openMobile();
-    }
+  /** The header shield: asks to take this thread out of its sandbox (the same confirmation as the Memories panel). */
+  async removeFromSandbox(): Promise<void> {
+    await this.threadSandbox.leave(this.session.thread());
   }
 
   // "Show context" on a past assistant message: pin that turn's breakdown and open the

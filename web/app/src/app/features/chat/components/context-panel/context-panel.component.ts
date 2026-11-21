@@ -12,6 +12,7 @@ import {
   BrainIconComponent,
   LayersIconComponent,
   NoteIconComponent,
+  ShieldIconComponent,
   WrenchIconComponent,
   XIconComponent,
   FileIconComponent,
@@ -31,6 +32,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
     XIconComponent,
     NoteIconComponent,
     BrainIconComponent,
+    ShieldIconComponent,
     WrenchIconComponent,
     LayersIconComponent,
     FileIconComponent,
@@ -70,7 +72,16 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
           uiTooltip="Memories"
           (click)="context.setActiveTab('memories')"
         >
-          <ui-brain-icon class="context-panel__primary-tab-icon" [size]="20" />
+          <span style="position: relative; display: inline-flex;">
+            <ui-brain-icon class="context-panel__primary-tab-icon" [size]="20" />
+            @if (sandboxed()) {
+              <ui-shield-icon
+                [size]="12"
+                style="position: absolute; top: -4px; right: -8px; color: var(--color-warning);"
+                aria-hidden="true"
+              />
+            }
+          </span>
           <span class="context-panel__primary-tab-label">Memories</span>
         </button>
         <button
@@ -259,6 +270,11 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
 export class ContextPanelComponent {
   readonly context = inject(ContextPanelService);
   readonly isSandboxed = isSandboxed;
+
+  /** True for a sandboxed thread: the Memories tab, where its sandbox is set, carries a shield. */
+  sandboxed(): boolean {
+    return isSandboxed(this.context.activeChat());
+  }
 
   activeTabLabel(): string {
     const tab = this.context.activeTab();

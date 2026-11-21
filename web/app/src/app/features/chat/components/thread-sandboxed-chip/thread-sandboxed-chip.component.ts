@@ -3,23 +3,25 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 import { ShieldIconComponent } from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
-/** Header indicator shown only on a sandboxed thread. Click opens the sandbox setting. */
+/**
+ * Header shield (icon only, no label) shown only on a sandboxed thread (warning tone); click asks to remove the
+ * thread from the sandbox. An ordinary thread shows nothing, and so does an unknown state (`null` / `undefined`).
+ */
 @Component({
   selector: 'app-thread-sandboxed-chip',
   standalone: true,
   imports: [ShieldIconComponent, TooltipDirective],
   template: `
-    @if (sandboxed()) {
+    @if (sandboxed() === true) {
       <button
         type="button"
         class="chip"
-        aria-label="Sandboxed thread. Open sandbox settings."
-        uiTooltip="Sandboxed: this thread can't read memories, conversations or files from outside itself."
+        aria-label="Sandboxed thread. Remove from sandbox."
+        uiTooltip="Sandboxed: this thread can't read memories, conversations or files from outside itself. Click to remove it from the sandbox."
         placement="bottom"
-        (click)="openSettings.emit()"
+        (click)="remove.emit()"
       >
-        <ui-shield-icon [size]="12" />
-        <span>Sandboxed</span>
+        <ui-shield-icon [size]="14" />
       </button>
     }
   `,
@@ -37,16 +39,23 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
         color: var(--color-warning);
         cursor: pointer;
         display: inline-flex;
-        font-size: 0.6875rem;
-        font-weight: 600;
-        gap: 0.25rem;
-        padding: 0.1875rem 0.5rem;
+        height: 1.75rem;
+        justify-content: center;
+        padding: 0;
+        width: 1.75rem;
+      }
+
+
+      .chip:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
       }
     `,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ThreadSandboxedChipComponent {
-  readonly sandboxed = input<boolean | null | undefined>(false);
-  readonly openSettings = output<void>();
+  readonly sandboxed = input<boolean | null | undefined>(null);
+  /** Asks to take the thread out of its sandbox; the parent confirms. */
+  readonly remove = output<void>();
 }
