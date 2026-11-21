@@ -45,6 +45,13 @@ func toModelModel(e *ent.Model) *models.Model {
 		Kind:               models.ModelKind(e.Kind),
 		SpeechVoices:       e.SpeechVoices,
 	}
+	if m.Kind == models.ModelKindSpeech {
+		known, ok := models.LookupKnownSpeechModel(models.ModelProvider(m.Provider), m.Name)
+		m.SpeechStyle = !ok || known.Style
+		if ok {
+			m.AvailableVoices = known.Voices
+		}
+	}
 	if conn := e.Edges.Connection; conn != nil {
 		m.ConnectionName = conn.Name
 	}

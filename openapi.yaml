@@ -11353,6 +11353,16 @@ components:
           description: The voices a speech model offers (ADR 0x052); absent for other kinds.
           items:
             $ref: '#/components/schemas/SpeechVoice'
+        speech_style:
+          type: boolean
+          description: Whether a speech model takes a style instruction.
+        available_voices:
+          type: array
+          description: >-
+            All the voices a known speech model has, so one narrowed away can be offered
+            again; absent for a model added by id, whose voices are typed.
+          items:
+            $ref: '#/components/schemas/SpeechVoice'
       required:
         - id
         - name

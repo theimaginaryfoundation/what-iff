@@ -16136,6 +16136,10 @@ export interface components {
             kind?: components["schemas"]["ModelKind"];
             /** @description The voices a speech model offers (ADR 0x052); absent for other kinds. */
             speech_voices?: components["schemas"]["SpeechVoice"][];
+            /** @description Whether a speech model takes a style instruction. */
+            speech_style?: boolean;
+            /** @description All the voices a known speech model has, so one narrowed away can be offered again; absent for a model added by id, whose voices are typed. */
+            available_voices?: components["schemas"]["SpeechVoice"][];
         };
         /**
          * @example pending

@@ -42,6 +42,14 @@ type Model struct {
 	Kind ModelKind `json:"kind"`
 	// SpeechVoices are the voices a speech model offers; empty for other kinds.
 	SpeechVoices []SpeechVoice `json:"speech_voices,omitempty"`
+	// SpeechStyle is whether a speech model takes a style instruction: the known table's
+	// answer, and true for one it doesn't know (OpenAI's route sends it as instructions,
+	// which a server without them ignores). Read-only.
+	SpeechStyle bool `json:"speech_style,omitempty"`
+	// AvailableVoices are all the voices a known speech model has, from the known table,
+	// so a voice narrowed away can be offered again; empty for a model the table doesn't
+	// know, whose voices are typed. Read-only.
+	AvailableVoices []SpeechVoice `json:"available_voices,omitempty"`
 }
 
 type CreateModelRequest struct {
