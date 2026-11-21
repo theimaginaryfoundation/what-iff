@@ -142,4 +142,115 @@ describe('PersonaPickerDialogComponent', () => {
         expect(component.loading()).toBe(false);
         expect(component.errorMessage()).toContain('Failed to load personalities');
     });
+
+    describe('new-thread form', () => {
+        function openForm(): void {
+            fixture.componentRef.setInput('threadForm', true);
+            setOpen(true);
+            flushList([vera, card]);
+        }
+
+        function el(selector: string): HTMLElement | null {
+            return fixture.nativeElement.querySelector(selector);
+        }
+
+        function startButton(): HTMLButtonElement {
+            return el('[data-testid="new-thread-start"] button') as HTMLButtonElement;
+        }
+
+        it('orders Thread Title, Choose a Personality, then Private, with only the buttons in the footer', () => {
+            openForm();
+
+            const title = el('app-thread-title-field') as HTMLElement;
+            const personality = el('#new-thread-personality-heading') as HTMLElement;
+            const privateRow = el('[data-testid="new-thread-sandbox"]') as HTMLElement;
+            expect(title.compareDocumentPosition(personality) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+            expect(personality.compareDocumentPosition(privateRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+            expect(fixture.nativeElement.textContent).not.toContain('Privacy');
+            // The footer's full-width top border is the line above the buttons, so Private sits above it.
+            expect(el('footer [data-testid="new-thread-sandbox"]')).toBeNull();
+            expect(el('footer [data-testid="new-thread-start"]')).not.toBeNull();
+        });
+
+        it('starts with the default thread name in the title', () => {
+            openForm();
+
+            expect((el('[data-testid="new-thread-title"]') as HTMLInputElement).value).toBe('New thread');
+            expect(component.threadTitle()).toBe('New thread');
+        });
+
+        it('does not pick a personality when the title text is selected on focus', () => {
+            const hostSelect = vi.fn();
+            fixture.nativeElement.addEventListener('select', hostSelect);
+            const picked: Personality[] = [];
+            component.select.subscribe(p => picked.push(p));
+            openForm();
+
+            (el('[data-testid="new-thread-title"]') as HTMLInputElement).dispatchEvent(new Event('select', { bubbles: true }));
+
+            expect(hostSelect).not.toHaveBeenCalled();
+            expect(picked).toEqual([]);
+        });
+
+        it('puts Start thread before Cancel in the DOM (primary first)', () => {
+            openForm();
+
+            const labels = Array.from(fixture.nativeElement.querySelectorAll('footer ui-button') as NodeListOf<HTMLElement>)
+                .map(b => b.textContent?.trim());
+            expect(labels).toEqual(['Start thread', 'Cancel']);
+        });
+
+        it('only marks a personality on click; Start thread is what picks it', () => {
+            const picked: Personality[] = [];
+            component.select.subscribe(p => picked.push(p));
+            openForm();
+            expect(startButton().disabled).toBe(true);
+
+            (fixture.nativeElement.querySelectorAll('[role="option"]')[1] as HTMLElement).click();
+            fixture.detectChanges();
+            expect(picked).toEqual([]);
+            expect(component.chosen()?.id).toBe('p-card');
+            expect(startButton().disabled).toBe(false);
+
+            startButton().click();
+            expect(picked.map(p => p.id)).toEqual(['p-card']);
+        });
+
+        it('carries the Privacy choice and the Thread Title to the parent', () => {
+            openForm();
+            const input = el('[data-testid="new-thread-title"]') as HTMLInputElement;
+            input.value = 'Q3 retro';
+            input.dispatchEvent(new Event('input'));
+            component.sandboxed.set(true);
+
+            expect(component.threadTitle()).toBe('Q3 retro');
+            expect(component.sandboxed()).toBe(true);
+        });
+
+        it('reopens fresh: no last pick, the title back to the default name, and Private unticked', () => {
+            openForm();
+            component.chosen.set(vera);
+            component.threadTitle.set('Old title');
+            component.sandboxed.set(true);
+            setOpen(false);
+
+            setOpen(true);
+            flushList([vera, card]);
+
+            expect(component.chosen()).toBeNull();
+            expect(component.threadTitle()).toBe('New thread');
+            expect(component.sandboxed()).toBe(false);
+        });
+
+        it('keeps the one-click pick for every other caller', () => {
+            const picked: Personality[] = [];
+            component.select.subscribe(p => picked.push(p));
+            setOpen(true);
+            flushList([vera]);
+
+            (fixture.nativeElement.querySelectorAll('[role="option"]')[0] as HTMLElement).click();
+
+            expect(picked.map(p => p.id)).toEqual(['p-vera']);
+        });
+    });
 });

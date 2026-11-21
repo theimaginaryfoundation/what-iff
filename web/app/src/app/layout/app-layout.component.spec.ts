@@ -199,6 +199,36 @@ describe('AppLayoutComponent', () => {
         expect(nav.setCollapsed).toHaveBeenCalledWith(true);
     });
 
+    it('names a new thread from the form title, and falls back to the default when it is blank', async () => {
+        const fixture = TestBed.createComponent(AppLayoutComponent);
+        const chatService = TestBed.inject(ChatService);
+        fixture.detectChanges();
+        const create = vi.spyOn(chatService, 'createChat').mockReturnValue(of({ id: 'c1', name: 'x', personality_id: 'p' } as any));
+
+        fixture.componentInstance.newThreadTitle.set('  Q3 retro  ');
+        await fixture.componentInstance.onPersonaPicked({ id: 'personality-1' } as any);
+        expect(create).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Q3 retro' }));
+        expect(fixture.componentInstance.newThreadTitle()).toBe('');
+
+        await fixture.componentInstance.onPersonaPicked({ id: 'personality-1' } as any);
+        expect(create).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'New thread' }));
+    });
+
+    it('creates the thread as a sandbox only when Private is checked, and clears the choice afterwards', async () => {
+        const fixture = TestBed.createComponent(AppLayoutComponent);
+        const chatService = TestBed.inject(ChatService);
+        fixture.detectChanges();
+        const create = vi.spyOn(chatService, 'createChat').mockReturnValue(of({ id: 'c1', name: 'x', personality_id: 'p' } as any));
+
+        fixture.componentInstance.newThreadSandboxed.set(true);
+        await fixture.componentInstance.onPersonaPicked({ id: 'personality-1' } as any);
+        expect(create).toHaveBeenLastCalledWith(expect.objectContaining({ personality_id: 'personality-1', context_scope: 'sandbox' }));
+        expect(fixture.componentInstance.newThreadSandboxed()).toBe(false);
+
+        await fixture.componentInstance.onPersonaPicked({ id: 'personality-1' } as any);
+        expect(create.mock.lastCall?.[0]).not.toHaveProperty('context_scope');
+    });
+
     it('closes the mobile drawer when a nav pick changes the page (#348)', async () => {
         vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => fakeMediaQueryList(query, false));
         const fixture = TestBed.createComponent(AppLayoutComponent);

@@ -50,6 +50,7 @@ import { RightPanelHostComponent } from './right-panel/right-panel-host.componen
 import { AppSidebarComponent } from './sidebar/app-sidebar.component';
 import { ContextPanelComponent } from '../features/chat/components/context-panel/context-panel.component';
 import { ModalComponent, ModalDismissReason } from '../shared/ui/modal/modal.component';
+import { AnnouncerService } from '../core/services/announcer.service';
 import { ConfirmationService } from '../core/services/confirmation.service';
 import { SheetComponent } from '../shared/ui/sheet/sheet.component';
 import { createFocusTrap, releaseFocusTrap, type FocusTrapHandle } from '../shared/ui/helpers/focus-trap.helpers';
@@ -104,6 +105,7 @@ export class AppLayoutComponent implements OnInit, OnDestroy {
   readonly generatePersonalityModal = inject(GeneratePersonalityModalService);
   readonly profileSettingsModal = inject(ProfileSettingsModalService);
   private readonly confirmation = inject(ConfirmationService);
+  private readonly announcer = inject(AnnouncerService);
   private readonly personalityService = inject(PersonalityService);
 
   readonly personaPickerOpen = signal(false);
@@ -278,17 +280,28 @@ export class AppLayoutComponent implements OnInit, OnDestroy {
     this.personaPickerOpen.set(false);
   }
 
+  /** The new-thread form's "Private (sandboxed) thread" choice for the thread about to be created. */
+  readonly newThreadSandboxed = signal(false);
+  /** The form's Thread Title; blank keeps the default name. */
+  readonly newThreadTitle = signal('');
+
   async onPersonaPicked(personality: Personality): Promise<void> {
     this.personaPickerOpen.set(false);
+    const sandbox = this.newThreadSandboxed();
+    const title = this.newThreadTitle().trim();
+    this.newThreadSandboxed.set(false);
+    this.newThreadTitle.set('');
     try {
       const chat = await firstValueFrom(
         this.chatService.createChat({
-          name: DEFAULT_THREAD_NAME,
+          name: title || DEFAULT_THREAD_NAME,
           personality_id: personality.id,
+          ...(sandbox ? { context_scope: 'sandbox' as const } : {}),
         }),
       );
       this.chatService.setLastChatId(chat.id);
       await this.router.navigate(['/chat', chat.id]);
+      this.announcer.announce(sandbox ? 'Sandboxed thread created' : 'Thread created');
       if (this.isMobileNav()) {
         this.closeMobileSidebar();
       }

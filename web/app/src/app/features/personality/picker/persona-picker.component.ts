@@ -44,7 +44,13 @@ interface PersonaPickerRow {
   standalone: true,
   imports: [AsyncPipe, AuthImagePipe, AvatarComponent, PersonaCoverComponent, PersonaAccentScopeComponent, TooltipDirective],
   template: `
-    <div class="persona-picker flex flex-col gap-3 p-4" role="dialog" aria-modal="true" [attr.aria-label]="ariaLabel()">
+    <div
+      class="persona-picker flex flex-col gap-3"
+      [class.p-4]="!compact()"
+      role="dialog"
+      aria-modal="true"
+      [attr.aria-label]="ariaLabel()"
+    >
       <label class="flex flex-col gap-1">
         <span class="persona-picker__search-label text-xs font-medium text-(--color-text-secondary)" [attr.id]="searchLabelId">Search personalities</span>
         @if (appearance() === 'filter-list') {
@@ -128,6 +134,7 @@ interface PersonaPickerRow {
         <ul
           #list
           class="persona-picker__list flex max-h-[60vh] flex-col gap-1 overflow-y-auto"
+          [style.max-height]="compact() ? 'calc(5 * 3.25rem + 4 * 0.25rem)' : null"
           role="listbox"
           [attr.id]="listId"
           [attr.aria-activedescendant]="activeId()"
@@ -140,6 +147,7 @@ interface PersonaPickerRow {
               [attr.aria-selected]="i === highlightedIndex()"
               class="persona-picker__row flex cursor-pointer items-center gap-3 rounded-lg p-2 outline-none transition-colors hover:bg-(--color-surface-elevated) focus:bg-(--color-surface-elevated)"
               [class.persona-picker__row--active]="i === highlightedIndex()"
+              [class.persona-picker__row--chosen]="row.id === selectedId()"
               (mousemove)="setHighlight(i)"
               (click)="emitSelect(row)"
               [uiTooltip]="row.name"
@@ -171,7 +179,11 @@ interface PersonaPickerRow {
       }
 
       @if (appearance() !== 'filter-list') {
-        <div class="persona-picker__footer flex items-center justify-between gap-2 border-t border-(--color-border-default) pt-3">
+        <div
+          class="persona-picker__footer flex items-center justify-between gap-2 border-t border-(--color-border-default) pt-3"
+          [style.border-top-style]="compact() ? 'none' : null"
+          [class.pl-2]="compact()"
+        >
           <button
             type="button"
             class="text-sm font-medium text-(--color-accent) hover:underline focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
@@ -194,6 +206,11 @@ interface PersonaPickerRow {
     `
       .persona-picker__row--active {
         background: var(--color-surface-elevated, var(--color-surface-base));
+      }
+
+      /* A hosting form that confirms the pick later (new-thread dialog) marks the chosen row. */
+      .persona-picker__row--chosen {
+        box-shadow: inset 0 0 0 2px var(--color-accent);
       }
 
       .persona-picker:has(.app-sidebar__personality-picker) {
@@ -296,6 +313,12 @@ export class PersonaPickerComponent {
   readonly ariaLabel = input<string>('Pick a personality');
   readonly showCancel = input<boolean>(true);
   readonly appearance = input<'rich' | 'filter-list'>('rich');
+  /** Off when the host puts an earlier decision first and focuses that instead. */
+  readonly focusSearchOnOpen = input<boolean>(true);
+  /** The personality a hosting form has already marked; outlined in the list. Null when a click commits at once. */
+  readonly selectedId = input<string | null>(null);
+  /** A shorter list, for a host that stacks more sections under it. */
+  readonly compact = input<boolean>(false);
 
   readonly select = output<Personality>();
   readonly cancel = output<void>();
@@ -352,7 +375,7 @@ export class PersonaPickerComponent {
 
     effect(() => {
       const input = this.searchInput()?.nativeElement;
-      if (input) setTimeout(() => input.focus(), 0);
+      if (input && this.focusSearchOnOpen()) setTimeout(() => input.focus(), 0);
     });
   }
 
