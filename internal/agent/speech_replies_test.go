@@ -173,6 +173,9 @@ func TestListen_ReadsTheFinalRoundInSegmentsAndStoresThem(t *testing.T) {
 	require.Equal(t, []string{models.ActionTypeSpeechSynthesis, models.ActionTypeSpeechSynthesis}, meter.checks)
 	require.Equal(t, len([]rune("It will rain on Tuesday.")), meter.records[0].SpeechCharacters)
 	require.Equal(t, "kokoro", meter.records[0].Model)
+	first, second := len([]rune("It will rain on Tuesday.")), len([]rune("Take a coat.\n\nThe rest of the week is dry."))
+	require.Equal(t, first, meter.records[0].SpeechTrackCharacters)
+	require.Equal(t, first+second, meter.records[1].SpeechTrackCharacters, "the track's running total, for rounding once per track")
 
 	audio, format, err := f.a.SpeechSegmentAudio(ctx, f.alice, track.ID, 0)
 	require.NoError(t, err)
@@ -273,6 +276,7 @@ func TestPreviewVoice(t *testing.T) {
 	require.Equal(t, "ID3Hi, I'm Ada.", string(audio.Data))
 	require.Len(t, meter.records, 1)
 	require.Zero(t, f.files.count(), "a preview isn't stored")
+	require.Equal(t, meter.records[0].SpeechCharacters, meter.records[0].SpeechTrackCharacters, "a preview is its own track")
 
 	_, err = f.a.PreviewVoice(ctx, f.alice, pv, strings.Repeat("a", models.MaxPreviewChars+1))
 	require.ErrorIs(t, err, ErrPreviewTooLong)

@@ -212,6 +212,12 @@ func (a *Agent) synthesizeTrack(ctx context.Context, userID uuid.UUID, track *mo
 		return models.SpeechTrackFailed, "internal_error"
 	}
 	format := preferredSpeechFormat(v.target.spec)
+	// The characters already synthesised for this track (a worker taking over one whose
+	// worker went away), so billing rounds the track's total once.
+	trackChars := 0
+	for _, s := range track.Segments {
+		trackChars += utf8.RuneCountInString(s.Text)
+	}
 	for seq := len(track.Segments); seq < len(segments); seq++ {
 		if err := ctx.Err(); err != nil {
 			return models.SpeechTrackFailed, "cancelled"
@@ -241,7 +247,8 @@ func (a *Agent) synthesizeTrack(ctx context.Context, userID uuid.UUID, track *mo
 		if err := a.ds.AddSpeechSegment(ctx, track.ID, seg); err != nil {
 			return models.SpeechTrackFailed, "internal_error"
 		}
-		a.recordSpeech(ctx, decision, userID, track.ChatID, v, usage)
+		trackChars += usage.Characters
+		a.recordSpeech(ctx, decision, userID, track.ChatID, v, usage, trackChars)
 	}
 	return models.SpeechTrackComplete, ""
 }
@@ -282,13 +289,16 @@ func (a *Agent) checkSpeechQuota(ctx context.Context, userID uuid.UUID) (meterin
 	return d, d.Allowed, nil
 }
 
-func (a *Agent) recordSpeech(ctx context.Context, d metering.Decision, userID, chatID uuid.UUID, v voice, usage provider.SpeechUsage) {
+// recordSpeech records one synthesis. trackChars is the track's characters so far, this
+// synthesis included (metering.Usage.SpeechTrackCharacters).
+func (a *Agent) recordSpeech(ctx context.Context, d metering.Decision, userID, chatID uuid.UUID, v voice, usage provider.SpeechUsage, trackChars int) {
 	if a.meter == nil {
 		return
 	}
 	u := metering.Usage{
 		UserID: userID, ActionType: models.ActionTypeSpeechSynthesis, Model: v.target.model,
-		SpeechProvider: v.target.provider, SpeechCharacters: usage.Characters, Source: metering.TurnSourceApp,
+		SpeechProvider: v.target.provider, SpeechCharacters: usage.Characters, SpeechTrackCharacters: trackChars,
+		Source: metering.TurnSourceApp,
 	}
 	if chatID != uuid.Nil {
 		u.ChatID = chatID.String()
@@ -377,7 +387,7 @@ func (a *Agent) PreviewVoice(ctx context.Context, userID uuid.UUID, pv models.Pe
 	if err != nil {
 		return provider.SpeechAudio{}, err
 	}
-	a.recordSpeech(ctx, decision, userID, uuid.Nil, v, usage)
+	a.recordSpeech(ctx, decision, userID, uuid.Nil, v, usage, usage.Characters)
 	return audio, nil
 }
 

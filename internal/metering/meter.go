@@ -130,6 +130,12 @@ type Usage struct {
 	// SpeechCharacters is the text one synthesis read aloud, in characters. Only meaningful
 	// for models.ActionTypeSpeechSynthesis.
 	SpeechCharacters int
+	// SpeechTrackCharacters is how many characters the reply's speech track has had
+	// synthesised so far, this one included: a track is billed segment by segment, and an
+	// implementation that rounds up to whole credits can round the track's total once
+	// rather than every segment (charging the rise in the rounded total). Equal to
+	// SpeechCharacters for a one-off synthesis such as a voice preview.
+	SpeechTrackCharacters int
 	// AudioSeconds is the length of one transcribed clip. Only meaningful for
 	// models.ActionTypeTranscription.
 	AudioSeconds float64

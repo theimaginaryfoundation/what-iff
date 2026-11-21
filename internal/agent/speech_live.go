@@ -230,6 +230,9 @@ type liveSegmenter struct {
 	roundSeq  int
 	committed bool
 	spoken    string
+	// chars is the track's characters synthesised so far, withdrawn rounds included (they
+	// were paid for), for billing (metering.Usage.SpeechTrackCharacters).
+	chars int
 }
 
 // step reads what the streaming text allows now. stop is set when the track has to end
@@ -315,7 +318,8 @@ func (s *liveSegmenter) say(ctx context.Context, piece string) (models.SpeechTra
 	if err := a.ds.AddSpeechSegment(ctx, l.trackID, seg); err != nil {
 		return models.SpeechTrackFailed, "internal_error", true
 	}
-	a.recordSpeech(ctx, decision, l.userID, l.chatID, l.v, usage)
+	s.chars += usage.Characters
+	a.recordSpeech(ctx, decision, l.userID, l.chatID, l.v, usage, s.chars)
 	s.seq++
 	return "", "", false
 }
