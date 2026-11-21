@@ -249,7 +249,7 @@ func (c *geminiSpeechClient) waitActive(ctx context.Context, f geminiFile) (gemi
 		}
 		var next geminiFile
 		if err := json.Unmarshal(raw, &next); err != nil {
-			return f, err
+			return f, fmt.Errorf("unreadable state for %s: %w", f.Name, err)
 		}
 		f = next
 	}

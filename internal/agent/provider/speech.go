@@ -111,9 +111,10 @@ func orDefault(v, fallback string) string {
 	return v
 }
 
-// maxSpeechAudioBytes caps an audio answer or download: a segment of speech is
-// a paragraph, a few hundred kilobytes even as WAV.
-const maxSpeechAudioBytes = 32 << 20
+// maxSpeechAudioBytes caps an audio answer or download. A segment is at most a
+// model's MaxInputChars: about two minutes of speech, under 6 MB even as Gemini's
+// 24 kHz WAV, and base64 in a JSON answer adds a third.
+const maxSpeechAudioBytes = 16 << 20
 
 // speechHTTP is the HTTP plumbing the speech clients share, on top of the image
 // adapters' JSON POST with its 429/503 backoff.

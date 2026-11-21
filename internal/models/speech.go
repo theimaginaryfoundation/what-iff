@@ -100,7 +100,9 @@ type KnownSpeechModel struct {
 	Voices []SpeechVoice
 	// Style is whether the model takes a free-text style instruction.
 	Style bool
-	// MaxInputChars is the most text one synthesis request carries (speech).
+	// MaxInputChars is the most text one synthesis request carries (speech): the
+	// provider's limit, or less where its audio is large (Gemini answers in WAV,
+	// so a segment is kept to about two minutes).
 	MaxInputChars int
 	// MaxClipSeconds and MaxClipBytes bound one transcription clip; zero is no
 	// limit the provider documents.
@@ -157,12 +159,12 @@ var knownSpeechModels = []KnownSpeechModel{
 	{
 		Provider: ModelProviderGoogle, ID: "gemini-3.8-flash-tts", DisplayName: "Gemini 3.8 Flash TTS",
 		Kind: ModelKindSpeech, Adapter: SpeechAdapterGemini, Voices: geminiVoices, Style: true,
-		MaxInputChars: 4000, Formats: []AudioFormat{AudioFormatWAV},
+		MaxInputChars: 2000, Formats: []AudioFormat{AudioFormatWAV},
 	},
 	{
 		Provider: ModelProviderGoogle, ID: "gemini-3.8-flash-lite-tts", DisplayName: "Gemini 3.8 Flash-Lite TTS",
 		Kind: ModelKindSpeech, Adapter: SpeechAdapterGemini, Voices: geminiVoices, Style: true,
-		MaxInputChars: 4000, Formats: []AudioFormat{AudioFormatWAV},
+		MaxInputChars: 2000, Formats: []AudioFormat{AudioFormatWAV},
 	},
 	{
 		Provider: ModelProviderQwen, ID: "qwen-audio-3.1-tts-flash", DisplayName: "Qwen Audio 3.1 TTS Flash",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
@@ -231,7 +232,8 @@ func (d *Datastore) connectionModels(ctx context.Context, userID uuid.UUID) ([]*
 
 // ListAudioModelsForUser returns the speech or transcription models (kind) an
 // account can use (ADR 0x052): the deployment's catalog ones, then those on the
-// account's own provider connections. Chat lists never include them.
+// account's own provider connections, each by name. Chat lists never include
+// them, and a chat kind is models.ErrInvalidModelKind: ListModelsForUser lists those.
 func (d *Datastore) ListAudioModelsForUser(ctx context.Context, userID uuid.UUID, kind models.ModelKind) ([]*models.Model, error) {
 	if !kind.IsAudio() {
 		return nil, models.ErrInvalidModelKind
@@ -252,17 +254,12 @@ func (d *Datastore) ListAudioModelsForUser(ctx context.Context, userID uuid.UUID
 		d.logger.Error(i18n.T1("query.failed", "Entity", "models"), zap.Error(err))
 		return nil, err
 	}
-	out := make([]*models.Model, 0, len(rows))
-	for _, row := range rows {
-		if row.ConnectionID == nil {
-			out = append(out, toModelModel(row))
-		}
+	out := make([]*models.Model, len(rows))
+	for i, row := range rows {
+		out[i] = toModelModel(row)
 	}
-	for _, row := range rows {
-		if row.ConnectionID != nil {
-			out = append(out, toModelModel(row))
-		}
-	}
+	// The catalog first, keeping the query's name order within each group.
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ConnectionID == nil && out[j].ConnectionID != nil })
 	return out, nil
 }
 
@@ -806,6 +803,7 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 	}
 	if req.SpeechVoices != nil {
 		voices, verr := models.NormalizeSpeechVoices(req.SpeechVoices)
+		// kind is NOT NULL with a chat default, so every row has one.
 		if verr == nil && current.Kind != entmodel.KindSpeech {
 			verr = models.ErrInvalidSpeechVoices
 		}
