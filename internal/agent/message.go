@@ -869,9 +869,8 @@ func detachTurnContext(ctx context.Context) (context.Context, uuid.UUID, error) 
 	return detachedCtx, userID, nil
 }
 
-// rerunUserMessage starts another chat_message job answering the saved user message msg (a retry,
-// or a regenerate with msg.TurnOptions set), on detachedCtx (detachTurnContext). action names the
-// path in the job's logs.
+// rerunUserMessage starts another chat_message job answering the saved user message msg (a
+// retry), on detachedCtx (detachTurnContext). action names the path in the job's logs.
 func (a *Agent) rerunUserMessage(detachedCtx context.Context, userID uuid.UUID, msg *models.ChatMessage, action string) (*models.ChatMessageResponse, error) {
 	if err := a.ds.SetChatMessageLastError(detachedCtx, userID, msg.ID, nil, ""); err != nil {
 		a.logger.Warn("failed to clear last_error_message before "+action, zap.Error(err))
@@ -886,7 +885,12 @@ func (a *Agent) rerunUserMessage(detachedCtx context.Context, userID uuid.UUID, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create job: %w", err)
 	}
+	return a.startUserMessageRun(detachedCtx, userID, newJob, msg, action), nil
+}
 
+// startUserMessageRun starts newJob, a chat_message job just created for the saved user message
+// msg (a retry, or a regenerate with msg.TurnOptions set), in the background on detachedCtx.
+func (a *Agent) startUserMessageRun(detachedCtx context.Context, userID uuid.UUID, newJob *models.Job, msg *models.ChatMessage, action string) *models.ChatMessageResponse {
 	runCtx, cancel := context.WithCancel(detachedCtx)
 	a.registerRunningJobCancel(newJob.ID, userID, cancel)
 	// Like a new send, the run stops when it is cancelled from another API instance (a Stop, or
@@ -901,7 +905,7 @@ func (a *Agent) rerunUserMessage(detachedCtx context.Context, userID uuid.UUID, 
 		ID:    msg.ID,
 		JobID: newJob.ID.String(),
 		Type:  JobTypeChatMessage,
-	}, nil
+	}
 }
 
 // chatContext holds the context needed for processing a chat message
@@ -1432,7 +1436,7 @@ func (a *Agent) finishGeneration(ctx context.Context, userID uuid.UUID, chatMess
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to save %s agent response: %w", opts.provider, err)
 	}
-	a.settleTurnReply(ctx, userID, chatMessage, agentMessage.ID)
+	a.settleTurnReply(ctx, userID, chatCtx, chatMessage, agentMessage.ID)
 
 	if opts.afterSave != nil {
 		opts.afterSave(ctx, agentMessage)
@@ -1783,7 +1787,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to save local model agent response: %w", err)
 	}
-	a.settleTurnReply(ctx, userID, chatMessage, agentMessage.ID)
+	a.settleTurnReply(ctx, userID, chatCtx, chatMessage, agentMessage.ID)
 
 	return agentMessage, result, nil
 }

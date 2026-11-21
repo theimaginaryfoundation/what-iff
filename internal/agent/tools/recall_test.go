@@ -1422,6 +1422,25 @@ func TestParseBookmarkFetchTargetAndBuilder(t *testing.T) {
 	require.Error(t, err)
 }
 
+// A bookmarked message that was taken back (superseded) is out of the conversation: fetching its
+// bookmark fails as for a message that is not there, and its text is not returned.
+func TestRecallFetchBookmark_RefusesASupersededMessage(t *testing.T) {
+	chat := recallTestChat()
+	live := &models.ChatMessage{ID: uuid.New(), ChatID: chat.ID, Message: "LIVE-TEXT", Bookmarked: true}
+	gone := time.Now()
+	taken := &models.ChatMessage{ID: uuid.New(), ChatID: chat.ID, Message: "TAKEN-BACK-TEXT", Bookmarked: true, SupersededAt: &gone}
+	rt := newTestRecallTool(&fakeRecallStore{messages: []*models.ChatMessage{live, taken}})
+
+	out, _, _, err := rt.Recall(context.Background(), chat, []byte(`{"mode":"fetch","target":"`+bookmarkFetchTarget(chat.ID, live.ID)+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, out, "LIVE-TEXT")
+
+	out, _, _, err = rt.Recall(context.Background(), chat, []byte(`{"mode":"fetch","target":"`+bookmarkFetchTarget(chat.ID, taken.ID)+`"}`))
+	require.NoError(t, err)
+	require.NotContains(t, out, "TAKEN-BACK-TEXT")
+	require.NotEmpty(t, decodeRecall(t, out).Error)
+}
+
 func TestConversationWindow_UsesCursorBounds(t *testing.T) {
 	now := time.Now().UTC()
 	min := now.Add(-2 * time.Hour).Format(time.RFC3339Nano)

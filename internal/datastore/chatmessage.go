@@ -1214,6 +1214,8 @@ func (d *Datastore) ListChatMessageBookmarks(ctx context.Context, userID, chatID
 	rows, err := d.dbClient.ChatMessage.Query().
 		Where(
 			chatmessage.Bookmarked(true),
+			// A superseded (taken back) message is out of the conversation: no bookmark leads to it.
+			chatmessage.SupersededAtIsNil(),
 			chatmessage.HasChatWith(
 				entchat.ID(chatID),
 				entchat.HasOwnerWith(user.ID(userID)),
@@ -1239,6 +1241,8 @@ func (d *Datastore) ListChatMessageBookmarksPage(ctx context.Context, userID, ch
 	query := d.dbClient.ChatMessage.Query().
 		Where(
 			chatmessage.Bookmarked(true),
+			// A superseded (taken back) message is out of the conversation: no bookmark leads to it.
+			chatmessage.SupersededAtIsNil(),
 			chatmessage.HasChatWith(
 				entchat.ID(chatID),
 				entchat.HasOwnerWith(user.ID(userID)),

@@ -68,6 +68,34 @@ func (f *supersedeFixture) get(t *testing.T, id uuid.UUID) *models.ChatMessage {
 	return m
 }
 
+// takeBack takes back the turn userMessageID starts, as userID (SupersedeTurn).
+func (f *supersedeFixture) takeBack(userID, userMessageID uuid.UUID) error {
+	_, err := f.ds.SupersedeTurn(context.Background(), userID, userMessageID, time.Now())
+	return err
+}
+
+// regenerateErr regenerates the turn userMessageID starts, as userID (RegenerateTurn).
+func (f *supersedeFixture) regenerateErr(userID, userMessageID uuid.UUID) error {
+	_, err := f.ds.RegenerateTurn(context.Background(), userID, userMessageID, false, time.Now())
+	return err
+}
+
+// regenerate regenerates the turn userMessageID starts and returns the new run's job.
+func (f *supersedeFixture) regenerate(t *testing.T, userMessageID uuid.UUID) *models.Job {
+	t.Helper()
+	j, err := f.ds.RegenerateTurn(context.Background(), f.userID, userMessageID, false, time.Now())
+	require.NoError(t, err)
+	time.Sleep(5 * time.Millisecond) // runs created after it are ordered after it by created_at
+	return j
+}
+
+// finish marks a run complete, as its worker does once the turn is done.
+func (f *supersedeFixture) finish(t *testing.T, run *models.Job) {
+	t.Helper()
+	_, err := f.ds.UpdateJobStatus(context.Background(), f.userID, run.ID, models.JobStatusComplete, "")
+	require.NoError(t, err)
+}
+
 func TestSupersedeTurn_HidesTheTurnEverywhereMessagesAreRead(t *testing.T) {
 	ds, cleanup := newSupersedeTestDatastore(t)
 	defer cleanup()
@@ -80,7 +108,7 @@ func TestSupersedeTurn_HidesTheTurnEverywhereMessagesAreRead(t *testing.T) {
 	a2 := f.add(t, models.MessageOriginAssistant, "a2")
 	require.NoError(t, ds.UpdateChatContinuity(ctx, f.userID, f.chatID, "resp_a2", nil))
 
-	require.NoError(t, ds.SupersedeTurn(ctx, f.userID, u2, false, time.Now()))
+	require.NoError(t, f.takeBack(f.userID, u2))
 
 	require.Equal(t, []string{"u1", "a1"}, f.listed(t, models.ChatMessageFilters{}), "the model's history and the message routes list through here")
 	require.Equal(t, []string{"u1", "a1", "u2", "a2"}, f.listed(t, models.ChatMessageFilters{IncludeSuperseded: true}), "past versions are kept")
@@ -124,18 +152,18 @@ func TestSupersedeTurn_OnlyTheLatestTurn(t *testing.T) {
 	u2 := f.add(t, models.MessageOriginUser, "u2")
 	f.add(t, models.MessageOriginAssistant, "a2")
 
-	require.ErrorIs(t, ds.SupersedeTurn(ctx, f.userID, u1, false, time.Now()), ErrTurnNotLatest)
-	require.ErrorIs(t, ds.SupersedeTurn(ctx, f.userID, u1, true, time.Now()), ErrTurnNotLatest)
+	require.ErrorIs(t, f.takeBack(f.userID, u1), ErrTurnNotLatest)
+	require.ErrorIs(t, f.regenerateErr(f.userID, u1), ErrTurnNotLatest)
 	_, err := ds.CheckTurnRevisable(ctx, f.userID, u1)
 	require.ErrorIs(t, err, ErrTurnNotLatest)
-	require.ErrorIs(t, ds.SupersedeTurn(ctx, f.userID, a1, false, time.Now()), ErrTurnNotUserMessage)
-	require.ErrorIs(t, ds.SupersedeTurn(ctx, createCMTestUser(t, ds), u2, false, time.Now()), ErrChatMessageNotFound)
-	require.ErrorIs(t, ds.SupersedeTurn(ctx, f.userID, uuid.New(), false, time.Now()), ErrChatMessageNotFound)
+	require.ErrorIs(t, f.takeBack(f.userID, a1), ErrTurnNotUserMessage)
+	require.ErrorIs(t, f.takeBack(createCMTestUser(t, ds), u2), ErrChatMessageNotFound)
+	require.ErrorIs(t, f.takeBack(f.userID, uuid.New()), ErrChatMessageNotFound)
 	require.Equal(t, []string{"u1", "a1", "u2", "a2"}, f.listed(t, models.ChatMessageFilters{}), "a refused supersede changes nothing")
 
-	require.NoError(t, ds.SupersedeTurn(ctx, f.userID, u2, false, time.Now()))
-	require.NoError(t, ds.SupersedeTurn(ctx, f.userID, u2, false, time.Now()), "superseding a superseded turn is a no-op")
-	require.ErrorIs(t, ds.SupersedeTurn(ctx, f.userID, u2, true, time.Now()), ErrTurnSuperseded, "a turn taken back cannot be regenerated")
+	require.NoError(t, f.takeBack(f.userID, u2))
+	require.NoError(t, f.takeBack(f.userID, u2), "superseding a superseded turn is a no-op")
+	require.ErrorIs(t, f.regenerateErr(f.userID, u2), ErrTurnSuperseded, "a turn taken back cannot be regenerated")
 	turn, err := ds.CheckTurnRevisable(ctx, f.userID, u2)
 	require.NoError(t, err)
 	require.True(t, turn.Superseded)
@@ -145,7 +173,7 @@ func TestSupersedeTurn_OnlyTheLatestTurn(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, turn.Superseded)
 	require.Equal(t, f.chatID, turn.ChatID)
-	require.NoError(t, ds.SupersedeTurn(ctx, f.userID, u1, false, time.Now()))
+	require.NoError(t, f.takeBack(f.userID, u1))
 	require.Empty(t, f.listed(t, models.ChatMessageFilters{}))
 
 	has, err := ds.ChatHasMessages(ctx, f.userID, f.chatID, models.MessageOriginFilterUser)
@@ -168,16 +196,23 @@ func TestSupersedeTurn_RegenerateLinksTheNewReply(t *testing.T) {
 	// A later turn taken back outright: its reply must not be linked to u1's new reply.
 	u2 := f.add(t, models.MessageOriginUser, "u2")
 	a2 := f.add(t, models.MessageOriginAssistant, "a2")
-	require.NoError(t, ds.SupersedeTurn(ctx, f.userID, u2, false, time.Now()))
+	require.NoError(t, f.takeBack(f.userID, u2))
 
-	require.NoError(t, ds.SupersedeTurn(ctx, f.userID, u1, true, time.Now()))
+	second := f.regenerate(t, u1)
+	require.Equal(t, "chat_message", second.JobType)
+	require.Equal(t, u1.String(), second.Reference)
+	require.Equal(t, models.JobStatusPending, second.Status)
 	require.Equal(t, []string{"u1"}, f.listed(t, models.ChatMessageFilters{}), "the user message stays, to be answered again")
 	require.NotNil(t, f.get(t, a1).SupersededAt)
 	require.Nil(t, f.get(t, a1).SupersededBy, "linked only once the new reply is saved")
 
-	// The new run's reply (sent after the superseded u2) is saved and settled.
+	// The new run's reply (sent after the superseded u2) is saved and settled; it is recorded on
+	// its run.
 	a3 := f.add(t, models.MessageOriginAssistant, "a3")
-	require.NoError(t, ds.SettleTurnReply(ctx, f.userID, f.chatID, u1, a3))
+	require.NoError(t, ds.SettleTurnReply(ctx, f.userID, f.chatID, u1, second.ID, a3))
+	run, err := ds.GetJob(ctx, f.userID, second.ID)
+	require.NoError(t, err)
+	require.Equal(t, a3, *run.ResultID)
 
 	require.Equal(t, []string{"u1", "a3"}, f.listed(t, models.ChatMessageFilters{}))
 	require.Equal(t, a3, *f.get(t, a1).SupersededBy)
@@ -185,13 +220,11 @@ func TestSupersedeTurn_RegenerateLinksTheNewReply(t *testing.T) {
 	require.Nil(t, f.get(t, a3).SupersededAt)
 
 	// Regenerating again supersedes a3 (positioned after u2, still u1's reply).
-	second := createActiveChatMessageJob(t, ds, f.userID, u1.String(), models.JobStatusComplete)
-	_, err = ds.SetJobResult(ctx, f.userID, second.ID, a3)
-	require.NoError(t, err)
-	require.NoError(t, ds.SupersedeTurn(ctx, f.userID, u1, true, time.Now()))
+	f.finish(t, second)
+	third := f.regenerate(t, u1)
 	require.NotNil(t, f.get(t, a3).SupersededAt)
 	a4 := f.add(t, models.MessageOriginAssistant, "a4")
-	require.NoError(t, ds.SettleTurnReply(ctx, f.userID, f.chatID, u1, a4))
+	require.NoError(t, ds.SettleTurnReply(ctx, f.userID, f.chatID, u1, third.ID, a4))
 	require.Equal(t, a3, *f.get(t, a1).SupersededBy, "an earlier link is kept")
 	require.Equal(t, a4, *f.get(t, a3).SupersededBy)
 	require.Equal(t, []string{"u1", "a4"}, f.listed(t, models.ChatMessageFilters{}))
@@ -206,11 +239,11 @@ func TestSettleTurnReply_ALateReplyOfATurnTakenBackIsSuperseded(t *testing.T) {
 	f.add(t, models.MessageOriginUser, "u1")
 	f.add(t, models.MessageOriginAssistant, "a1")
 	u2 := f.add(t, models.MessageOriginUser, "u2")
-	require.NoError(t, ds.SupersedeTurn(ctx, f.userID, u2, false, time.Now()))
+	require.NoError(t, f.takeBack(f.userID, u2))
 
 	// The stopped run's reply lands after the supersede.
 	late := f.add(t, models.MessageOriginAssistant, "late")
-	require.NoError(t, ds.SettleTurnReply(ctx, f.userID, f.chatID, u2, late))
+	require.NoError(t, ds.SettleTurnReply(ctx, f.userID, f.chatID, u2, uuid.Nil, late))
 	require.NotNil(t, f.get(t, late).SupersededAt)
 	require.Equal(t, []string{"u1", "a1"}, f.listed(t, models.ChatMessageFilters{}))
 }
@@ -223,10 +256,10 @@ func TestSettleTurnReply_OrdinaryTurnIsLeftAlone(t *testing.T) {
 
 	u1 := f.add(t, models.MessageOriginUser, "u1")
 	a1 := f.add(t, models.MessageOriginAssistant, "a1")
-	require.NoError(t, ds.SettleTurnReply(ctx, f.userID, f.chatID, u1, a1))
+	require.NoError(t, ds.SettleTurnReply(ctx, f.userID, f.chatID, u1, uuid.Nil, a1))
 	// A reference that is not a user message (a scheduled run's is its chat) is a no-op.
-	require.NoError(t, ds.SettleTurnReply(ctx, f.userID, f.chatID, f.chatID, a1))
-	require.NoError(t, ds.SettleTurnReply(ctx, f.userID, f.chatID, a1, a1))
+	require.NoError(t, ds.SettleTurnReply(ctx, f.userID, f.chatID, f.chatID, uuid.Nil, a1))
+	require.NoError(t, ds.SettleTurnReply(ctx, f.userID, f.chatID, a1, uuid.Nil, a1))
 
 	m := f.get(t, a1)
 	require.Nil(t, m.SupersededAt)
@@ -250,7 +283,7 @@ func TestFinalizeCancelledChatJobWithPartial_TurnTakenBackSupersedesThePartial(t
 	running, err := ds.CreateJob(ctx, f.userID, jobModel)
 	require.NoError(t, err)
 
-	require.NoError(t, ds.SupersedeTurn(ctx, f.userID, u2, false, time.Now()))
+	require.NoError(t, f.takeBack(f.userID, u2))
 	_, resultID, err := ds.FinalizeCancelledChatJobWithPartial(ctx, f.userID, running.ID, f.chatID, "m", "p", nil)
 	require.NoError(t, err)
 	require.NotNil(t, resultID)
@@ -274,7 +307,7 @@ func TestSupersedeTurn_ScheduledRunRepliesStayLive(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, ds.SupersedeTurn(ctx, f.userID, u1, false, time.Now()))
+	require.NoError(t, f.takeBack(f.userID, u1))
 	require.Equal(t, []string{"scheduled"}, f.listed(t, models.ChatMessageFilters{}), "a scheduled run answers its own prompt, not the turn")
 }
 

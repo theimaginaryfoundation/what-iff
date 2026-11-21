@@ -152,26 +152,45 @@ func TestSupersedeTurn_OnlyTheLatestTurn(t *testing.T) {
 	require.NoError(t, a.SupersedeTurn(ctx, s.userID, u1.ID), "u1 is the latest turn again")
 }
 
-// A running turn is stopped before it is taken back: in this process through its cancel func, and
-// a job with no local worker (another instance, or orphaned) by marking it cancelled.
-func TestSupersedeTurn_StopsTheRunningTurnFirst(t *testing.T) {
-	a, s, _ := newSupersedeTurns(t)
+// The turn's runs are stopped as it is taken back: in this process through their cancel func, and
+// a run with no local worker (another instance, or orphaned) by marking it cancelled. Only the
+// turn's own: a scheduled run in the chat and an earlier turn still answering keep running, and a
+// take-back that is refused stops nothing.
+func TestSupersedeTurn_StopsOnlyTheTurnsRuns(t *testing.T) {
+	a, s, chat := newSupersedeTurns(t)
 	ctx := context.Background()
+	newJob := func(jobType, reference string, status models.JobStatus) *models.Job {
+		t.Helper()
+		j, err := s.ds.CreateJob(ctx, s.userID, models.Job{JobType: jobType, Reference: reference, Status: status, DraftDeltas: []string{}})
+		require.NoError(t, err)
+		return j
+	}
+	statusOf := func(j *models.Job) models.JobStatus {
+		t.Helper()
+		st, err := s.ds.JobStatus(ctx, s.userID, j.ID)
+		require.NoError(t, err)
+		return st
+	}
+
 	u1 := s.add(models.MessageOriginUser, "u1")
-	elsewhere, err := s.ds.CreateJob(ctx, s.userID, models.Job{JobType: JobTypeChatMessage, Reference: u1.ID.String(), Status: models.JobStatusProcessing, DraftDeltas: []string{}})
-	require.NoError(t, err)
-	local, err := s.ds.CreateJob(ctx, s.userID, models.Job{JobType: JobTypeChatMessage, Reference: u1.ID.String(), Status: models.JobStatusPending, DraftDeltas: []string{}})
-	require.NoError(t, err)
+	earlier := newJob(JobTypeChatMessage, u1.ID.String(), models.JobStatusProcessing)
+	scheduled := newJob(JobTypeAgentJobRun, chat.ID.String(), models.JobStatusProcessing)
+	u2 := s.add(models.MessageOriginUser, "u2")
+	elsewhere := newJob(JobTypeChatMessage, u2.ID.String(), models.JobStatusProcessing)
+	local := newJob(JobTypeChatMessage, u2.ID.String(), models.JobStatusPending)
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	a.registerRunningJobCancel(local.ID, s.userID, cancel)
 
-	require.NoError(t, a.SupersedeTurn(ctx, s.userID, u1.ID))
+	require.ErrorIs(t, a.SupersedeTurn(ctx, s.userID, u1.ID), ErrTurnNotLatest)
+	assert.Equal(t, models.JobStatusProcessing, statusOf(earlier), "a refused take-back stops nothing")
+
+	require.NoError(t, a.SupersedeTurn(ctx, s.userID, u2.ID))
 	assert.ErrorIs(t, runCtx.Err(), context.Canceled, "the run in this process is cancelled")
-	status, err := s.ds.JobStatus(ctx, s.userID, elsewhere.ID)
-	require.NoError(t, err)
-	assert.Equal(t, models.JobStatusCancelled, status, "a run elsewhere is cancelled through the database")
-	msg, err := s.ds.GetChatMessage(ctx, s.userID, u1.ID)
+	assert.Equal(t, models.JobStatusCancelled, statusOf(elsewhere), "a run elsewhere is cancelled through the database")
+	assert.Equal(t, models.JobStatusProcessing, statusOf(earlier), "an earlier turn still answering keeps running")
+	assert.Equal(t, models.JobStatusProcessing, statusOf(scheduled), "a scheduled run in the chat keeps running")
+	msg, err := s.ds.GetChatMessage(ctx, s.userID, u2.ID)
 	require.NoError(t, err)
 	assert.NotNil(t, msg.SupersededAt)
 }
@@ -212,7 +231,7 @@ func TestRegenerateTurn_StartsANewRunForTheSameMessage(t *testing.T) {
 	ctx := middleware.ContextWithUser(context.Background(), s.userID, "")
 	u1 := s.add(models.MessageOriginUser, "u1")
 	a1 := s.add(models.MessageOriginAssistant, "a1")
-	first, err := s.ds.CreateJob(ctx, s.userID, models.Job{JobType: JobTypeChatMessage, Reference: u1.ID.String(), Status: models.JobStatusComplete, DraftDeltas: []string{}})
+	first, err := s.ds.CreateJob(ctx, s.userID, models.Job{JobType: JobTypeChatMessage, Reference: u1.ID.String(), Status: models.JobStatusComplete, DraftDeltas: []string{}, ResultID: &a1.ID})
 	require.NoError(t, err)
 	time.Sleep(10 * time.Millisecond) // the new run is ordered after it by created_at
 
@@ -247,8 +266,50 @@ func TestRegenerateTurn_StartsANewRunForTheSameMessage(t *testing.T) {
 }
 
 func TestSettleTurnReply_NilSafe(t *testing.T) {
-	(&Agent{logger: zap.NewNop()}).settleTurnReply(context.Background(), uuid.New(), &models.ChatMessage{}, uuid.New())
+	(&Agent{logger: zap.NewNop()}).settleTurnReply(context.Background(), uuid.New(), nil, &models.ChatMessage{}, uuid.New())
 	a, s, _ := newSupersedeTurns(t)
-	a.settleTurnReply(context.Background(), s.userID, nil, uuid.New())
-	a.settleTurnReply(context.Background(), s.userID, &models.ChatMessage{ID: uuid.New(), ChatID: s.chatID}, uuid.Nil)
+	a.settleTurnReply(context.Background(), s.userID, nil, nil, uuid.New())
+	a.settleTurnReply(context.Background(), s.userID, &chatContext{turnID: "not-a-uuid"}, &models.ChatMessage{ID: uuid.New(), ChatID: s.chatID}, uuid.Nil)
+	assert.Equal(t, uuid.Nil, (*chatContext)(nil).turnJobID())
+	id := uuid.New()
+	assert.Equal(t, id, (&chatContext{turnID: id.String()}).turnJobID())
+}
+
+// The agent settles a reply by the run that saved it (the turn's job on chatCtx): a reply of a run
+// a regenerate replaced is superseded as it is saved.
+func TestSettleTurnReply_ByTheRunThatSavedIt(t *testing.T) {
+	a, s, _ := newSupersedeTurns(t)
+	ctx := context.Background()
+	u1 := s.add(models.MessageOriginUser, "u1")
+	stopped, err := s.ds.CreateJob(ctx, s.userID, models.Job{JobType: JobTypeChatMessage, Reference: u1.ID.String(), Status: models.JobStatusCancelled, DraftDeltas: []string{}})
+	require.NoError(t, err)
+	time.Sleep(5 * time.Millisecond)
+	_, err = s.ds.RegenerateTurn(ctx, s.userID, u1.ID, false, time.Now())
+	require.NoError(t, err)
+
+	late := s.add(models.MessageOriginAssistant, "late")
+	a.settleTurnReply(ctx, s.userID, &chatContext{turnID: stopped.ID.String()}, u1, late.ID)
+	got, err := s.ds.GetChatMessage(ctx, s.userID, late.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, got.SupersededAt)
+}
+
+// The options a regenerate is given reach its run, as a new send's do: here a one-turn model that
+// does not exist, which the run fails on resolving.
+func TestRegenerateTurn_PassesTheTurnOptionsToTheRun(t *testing.T) {
+	a, s, _ := newSupersedeTurns(t)
+	ctx := middleware.ContextWithUser(context.Background(), s.userID, "")
+	u1 := s.add(models.MessageOriginUser, "u1")
+	s.add(models.MessageOriginAssistant, "a1")
+
+	missing := uuid.New()
+	resp, err := a.RegenerateTurn(ctx, u1.ID, &models.TurnOptions{ModelID: &missing})
+	require.NoError(t, err)
+	jobID := uuid.MustParse(resp.JobID)
+	var job *models.Job
+	require.Eventually(t, func() bool {
+		job, err = s.ds.GetJob(context.Background(), s.userID, jobID)
+		return err == nil && job.Status == models.JobStatusFailed
+	}, 10*time.Second, 20*time.Millisecond)
+	assert.Contains(t, job.Error, ErrJobModelGone.Error(), "the run resolved the options' model")
 }

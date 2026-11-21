@@ -119,11 +119,16 @@ type TurnRegeneration struct {
 // (agent.ErrTurnNotLatest and the rest; datastore.ErrChatMessageNotFound for a
 // message that is not the user's).
 type TurnReviser interface {
-	// SupersedeTurn takes back the turn userMessageID starts, stopping it first
-	// when it is still running. Taking back a turn already taken back succeeds.
+	// SupersedeTurn takes back the turn userMessageID starts and stops the
+	// turn's own runs that are still going (not other runs in the chat); a
+	// reply one of them saves while it winds down is not live. Taking back a
+	// turn already taken back succeeds.
 	SupersedeTurn(ctx context.Context, userID, userMessageID uuid.UUID) error
 	// RegenerateTurn supersedes the turn's replies and answers its user message
-	// again. The response carries the user message id and the new job id.
+	// again, with turn.Options (they are not stored: pass the turn's pre/post
+	// context and the rest again). One run at a time: while a run of the turn is
+	// unfinished, a regenerate is agent.ErrTurnRunning. The response carries the
+	// user message id and the new job id.
 	RegenerateTurn(ctx context.Context, turn TurnRegeneration) (*models.ChatMessageResponse, error)
 }
 
