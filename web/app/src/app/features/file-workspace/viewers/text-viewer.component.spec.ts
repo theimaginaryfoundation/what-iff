@@ -13,6 +13,7 @@ import { mermaidExtension } from '../../../core/utils/mermaid.helpers';
 import { fakeMonaco } from '../editors/fake-monaco.spec-helper';
 import { MONACO_LOADER } from '../editors/monaco/monaco-loader';
 import { PageFiles } from '../../web-preview/page-files.service';
+import { PREVIEW_URL } from '../../web-preview/preview-site.config';
 import { TextViewerComponent } from './text-viewer.component';
 
 function file(overrides: Partial<FileAttachment> = {}): FileAttachment {
@@ -45,6 +46,8 @@ describe('TextViewerComponent', () => {
         { provide: CommentPeopleService, useValue: { me: signal({ id: 'user:u-1', name: 'Pat Lee' }) } },
         { provide: TextCommentsService, useValue: textComments },
         { provide: COMMENT_SAVER, useValue: saver },
+        // No preview site: an .html file renders on its own (ADR 0x050 §1).
+        { provide: PREVIEW_URL, useValue: null },
         {
           provide: PageFiles,
           useValue: {

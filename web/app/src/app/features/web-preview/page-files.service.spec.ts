@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
+import { FolderFiles } from './folder-files.service';
 import { PageFiles } from './page-files.service';
 
 const page = { id: 'page', name: 'index.html', folder: 'site', file_type: 'text/html' } as FileAttachment;
@@ -74,7 +75,7 @@ describe('PageFiles', () => {
   it('lists the folder once while rebuilt quickly, and downloads each file version once', async () => {
     const { pages, gallery, files } = setup({ 'styles.css': 'p { color: blue }' });
     let now = 0;
-    pages.now = () => now;
+    TestBed.inject(FolderFiles).now = () => now;
     await pages.build(page, '<link rel="stylesheet" href="styles.css"><p>a</p>');
     await pages.build(page, '<link rel="stylesheet" href="styles.css"><p>ab</p>');
     expect(gallery.listImages).toHaveBeenCalledTimes(1);

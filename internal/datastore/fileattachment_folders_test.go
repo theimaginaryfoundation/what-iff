@@ -330,3 +330,26 @@ func TestRenameGalleryFileByACopyRenamesTheOriginal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "sleep-score.png", att.Name, "the gallery original carries the new name")
 }
+
+func TestListFileAttachmentsCarriesTheContentVersion(t *testing.T) {
+	f := newFolderFixture(t)
+	ctx := context.Background()
+	id := f.ids["notes.txt"]
+	att, err := f.ds.GetFileAttachment(ctx, f.user, id)
+	require.NoError(t, err)
+	swapped, err := f.ds.SwapFileObject(ctx, f.user, id, att.S3Key, att.S3Key+".v2", SwapFileObjectOptions{})
+	require.NoError(t, err)
+	require.True(t, swapped)
+
+	page, err := f.ds.ListFileAttachments(ctx, f.user, 1, 100, models.FileAttachmentFilters{Folder: strp("")})
+	require.NoError(t, err)
+	for _, row := range page.Results {
+		if file := row.(*models.FileAttachment); file.ID == id {
+			// A list is what tiles and previews key by version, so a save must show in it.
+			assert.Equal(t, att.ContentVersion+1, file.ContentVersion)
+			assert.False(t, file.UpdatedAt.IsZero())
+			return
+		}
+	}
+	t.Fatal("notes.txt was not listed")
+}

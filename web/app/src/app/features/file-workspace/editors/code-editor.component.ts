@@ -31,7 +31,7 @@ import { TextCommentsState } from '../text-comments/text-comments-state';
 import { TextCommentThread, TextCommentsService } from '../text-comments/text-comments.service';
 import { MONACO_LOADER, type Monaco, monacoLanguageFor, vfsUriFor } from './monaco/monaco-loader';
 import { appTheme, followAppTheme, monacoThemeFor } from './monaco/monaco-themes';
-import { HtmlPageFrameComponent } from '../../web-preview/html-page-frame.component';
+import { HtmlPreviewComponent } from '../../web-preview/html-preview.component';
 
 const PREVIEW_DEBOUNCE_MS = 250;
 /** A page is rebuilt after a longer pause: each rebuild runs its scripts again. */
@@ -45,7 +45,7 @@ const PAGE_PREVIEW_DEBOUNCE_MS = 800;
 @Component({
   selector: 'app-code-editor',
   standalone: true,
-  imports: [MarkdownModule, CommentsPanelComponent, HtmlPageFrameComponent],
+  imports: [MarkdownModule, CommentsPanelComponent, HtmlPreviewComponent],
   templateUrl: './code-editor.component.html',
   styleUrl: './code-editor.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

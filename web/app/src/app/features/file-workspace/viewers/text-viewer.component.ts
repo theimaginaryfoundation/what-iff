@@ -18,7 +18,7 @@ import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { renderLatexMath } from '../../../core/utils/latex-math.helpers';
 import { asMermaidMarkdown, renderMermaid } from '../../../core/utils/mermaid.helpers';
 import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
-import { HtmlPageFrameComponent } from '../../web-preview/html-page-frame.component';
+import { HtmlPreviewComponent } from '../../web-preview/html-preview.component';
 import { CommentAgentService } from '../../office/comments/comment-agent.service';
 import { CommentPeopleService } from '../../office/comments/comment-people.service';
 import { CommentsPanelComponent } from '../../office/comments/comments-panel.component';
@@ -53,7 +53,7 @@ const MAX_HIGHLIGHT_CHARS = 200_000;
 @Component({
   selector: 'app-text-viewer',
   standalone: true,
-  imports: [MarkdownModule, CheckboxComponent, CommentsPanelComponent, HtmlPageFrameComponent],
+  imports: [MarkdownModule, CheckboxComponent, CommentsPanelComponent, HtmlPreviewComponent],
   templateUrl: './text-viewer.component.html',
   styleUrl: './text-viewer.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -52,7 +52,7 @@
     <div class="text-viewer__main">
       <div class="text-viewer__body" [class.text-viewer__body--page]="showRendered() && isHtml()">
         @if (showRendered() && isHtml()) {
-          <app-html-page-frame class="text-viewer__page" [file]="file()" [html]="text()" />
+          <app-html-preview class="text-viewer__page" [file]="file()" [html]="text()" />
         } @else if (showRendered() && asMarkdown()) {
           <markdown
             class="text-viewer__markdown prose prose-sm max-w-none dark:prose-invert"

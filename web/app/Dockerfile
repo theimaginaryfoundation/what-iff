@@ -15,6 +15,7 @@ ARG ENABLE_GALLERY_EXPRESSION_ASSIGNMENT=false
 ARG DOCS_URL=https://whatiff.chat/docs.html
 ARG JUPYTERLITE_URL=
 ARG DIAGRAMS_URL=
+ARG PREVIEW_URL=
 # Build provenance written to /version.json (scripts/write-version.mjs).
 # .git is dockerignored, so COMMIT must come from a build arg here — pass it
 # as e.g. --build-arg COMMIT=$(git rev-parse HEAD). BUILT_AT must be RFC
@@ -34,7 +35,8 @@ RUN sed -i "s|__API_URL__|${API_URL}|g" src/environments/environment.docker.ts &
     sed -i "s|__ENABLE_GALLERY_EXPRESSION_ASSIGNMENT__|${ENABLE_GALLERY_EXPRESSION_ASSIGNMENT}|g" src/environments/environment.docker.ts && \
     sed -i "s|__DOCS_URL__|${DOCS_URL}|g" src/environments/environment.docker.ts && \
     sed -i "s|__JUPYTERLITE_URL__|${JUPYTERLITE_URL}|g" src/environments/environment.docker.ts && \
-    sed -i "s|__DIAGRAMS_URL__|${DIAGRAMS_URL}|g" src/environments/environment.docker.ts
+    sed -i "s|__DIAGRAMS_URL__|${DIAGRAMS_URL}|g" src/environments/environment.docker.ts && \
+    sed -i "s|__PREVIEW_URL__|${PREVIEW_URL}|g" src/environments/environment.docker.ts
 
 RUN env VERSION="${VERSION}" COMMIT="${COMMIT}" BUILT_AT="${BUILT_AT}" OVERLAY_COMMIT="${OVERLAY_COMMIT}" npm run build:docker
 

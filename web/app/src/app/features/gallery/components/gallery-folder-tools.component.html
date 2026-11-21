@@ -29,6 +29,16 @@
       }
 
       <div class="folder-tools__actions">
+        @if (siteEntry()) {
+          <button
+            type="button"
+            class="folder-tools__button"
+            title="Open this folder's index.html, with the folder as the site"
+            (click)="openAsSite()"
+          >
+            Open as site
+          </button>
+        }
         @if (view.browsingFolders()) {
           <button type="button" class="folder-tools__button" (click)="startCreating()">New folder</button>
         }
@@ -89,7 +99,7 @@
         (action)="onBulkAction($event)"
         (clear)="view.clearSelection()"
       >
-        @if (view.layout() === 'grid') {
+        @if (view.layout() === "grid") {
           <label uiBulkLead class="folder-tools__select-all">
             <ui-checkbox
               inputClass="folder-tools__select-all-box"
@@ -110,18 +120,16 @@
         @if (deleting()) {
           <span class="folder-tools__bulk-hint" role="status">Deleting…</span>
         }
-        @if (view.layout() === 'grid') {
+        @if (view.layout() === "grid") {
           <button uiBulkTrail type="button" class="folder-tools__bulk-done" (click)="view.setSelectionMode(false)">Done</button>
         }
       </ui-bulk-action-bar>
     }
 
     @if (view.bulkResult(); as result) {
-      <p
-        class="folder-tools__bulk-result"
-        [class.folder-tools__error]="result.failed"
-        [attr.role]="result.failed ? 'alert' : 'status'"
-      >{{ result.text }}</p>
+      <p class="folder-tools__bulk-result" [class.folder-tools__error]="result.failed" [attr.role]="result.failed ? 'alert' : 'status'">
+        {{ result.text }}
+      </p>
     }
 
     @if (view.folderError(); as message) {

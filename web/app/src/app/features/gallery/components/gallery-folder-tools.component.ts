@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 
 import { ConfirmationService } from '../../../core/services/confirmation.service';
 import { GalleryViewService } from '../../../core/services/gallery-view.service';
@@ -8,6 +9,7 @@ import { isGalleryDrag } from '../helpers/gallery-dnd.helpers';
 import { moveDestinations } from '../helpers/gallery-folder.helpers';
 import { GalleryMoveModalComponent } from './gallery-move-modal.component';
 import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
+import { PREVIEW_URL } from '../../web-preview/preview-site.config';
 
 /**
  * The folder controls above the gallery grid or list: where you are, a new-folder form, the flat
@@ -25,6 +27,22 @@ import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.componen
 export class GalleryFolderToolsComponent {
   readonly view = inject(GalleryViewService);
   private readonly confirmation = inject(ConfirmationService);
+  private readonly router = inject(Router);
+  private readonly hasPreviewSite = !!inject(PREVIEW_URL);
+  /**
+   * The folder's `index.html`, which Open as site opens: served by the preview site with this
+   * folder as its root (ADR 0x050 §2). Null outside a folder, without one, or without a site.
+   */
+  readonly siteEntry = computed(() => {
+    const folder = this.view.currentFolder();
+    if (!this.hasPreviewSite || !this.view.browsingFolders() || !folder) return null;
+    return this.view.images().find(f => (f.folder ?? '') === folder && f.name.toLowerCase() === 'index.html') ?? null;
+  });
+
+  openAsSite(): void {
+    const entry = this.siteEntry();
+    if (entry) void this.router.navigate([], { queryParams: { file: entry.id }, queryParamsHandling: 'merge' });
+  }
   /** Hide the bar (the file viewer has the page) while keeping the move dialogs usable. */
   readonly barHidden = input(false);
 
@@ -41,9 +59,7 @@ export class GalleryFolderToolsComponent {
   readonly moveIds = computed<readonly string[]>(() => this.view.moveRequest() ?? [...this.view.selectedIds()]);
   readonly moveOpen = computed(() => this.movingImages() || this.view.moveRequest() !== null);
   /** Grid select mode always shows the bar (it is how you leave the mode); the list shows it once something is picked. */
-  readonly showBulkBar = computed(() =>
-    this.view.layout() === 'list' ? this.view.selectedCount() > 0 : this.view.selectionMode(),
-  );
+  readonly showBulkBar = computed(() => (this.view.layout() === 'list' ? this.view.selectedCount() > 0 : this.view.selectionMode()));
   /** The bar's actions; their accessible names say how many items they act on. */
   readonly bulkActions = computed<BulkAction[]>(() => {
     const count = this.view.selectedCount();

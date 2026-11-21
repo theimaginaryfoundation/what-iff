@@ -259,6 +259,18 @@ DRAWIO_SHA256 := a57b06b3b6a876a351dacfe65d027d9509319cd030e9bacf6ae04a034d66a38
 diagrams-site: ## Build the draw.io site for .drawio files into web/diagrams/dist
 	@scripts/build-diagrams-site.sh $(DRAWIO_VERSION) $(DRAWIO_SHA256)
 
+# The preview site that serves web projects (ADR 0x050 §3): our host page and service worker,
+# served from an origin other than the app's. PREVIEW_HOST_ORIGINS lists the app origins that may
+# frame it (comma-separated); the checked-in web/preview/site/config.js is the local one.
+PREVIEW_HOST_ORIGINS ?= http://localhost:4200
+
+.PHONY: preview-site
+preview-site: ## Build the preview site for web projects into web/preview/dist (PREVIEW_HOST_ORIGINS=...)
+	@rm -rf web/preview/dist && mkdir -p web/preview/dist
+	@cp web/preview/site/index.html web/preview/site/host.js web/preview/site/sw.js web/preview/dist/
+	@python3 -c "import json,sys; origins=[o.strip() for o in sys.argv[1].split(',') if o.strip()]; open('web/preview/dist/config.js','w').write('// Written by make preview-site (ADR 0x050 §3).\nwindow.WHATIFF_PREVIEW_HOST_ORIGINS = ' + json.dumps(origins) + ';\n')" '$(PREVIEW_HOST_ORIGINS)'
+	@echo "✅ preview site in web/preview/dist (host origins: $(PREVIEW_HOST_ORIGINS))"
+
 .PHONY: jupyterlite-serve
 jupyterlite-serve: ## Serve the built JupyterLite site on :4203 for local development
 	@python3 -m http.server 4203 --bind 127.0.0.1 --directory $(JUPYTERLITE_DIR)/dist
