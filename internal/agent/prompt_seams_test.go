@@ -363,7 +363,7 @@ func TestUpdateScratchpadClaude_UsesTheScratchpadPromptSeam(t *testing.T) {
 
 	reqs := rec.requests(t)
 	require.Len(t, reqs, 1)
-	sent, err := json.Marshal(reqs[0]["messages"])
+	sent, err := json.Marshal(reqs[0]) // a Responses request: the memory model is OpenAI
 	require.NoError(t, err)
 	require.Contains(t, string(sent), "Tenant scratchpad rules.")
 	require.NotContains(t, string(sent), jsonEscaped(t, scratchpadUpdatePrompt))
