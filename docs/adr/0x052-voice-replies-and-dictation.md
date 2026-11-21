@@ -54,7 +54,7 @@ What the providers we support offer today:
 | LM Studio | None | n/a | n/a | None | n/a |
 
 Gemini 3.8 and Qwen Audio 3.1 are the only options with all three things a personality voice wants: verbatim reading, a choice of base voices, and a free-text style instruction kept apart from the text.
-Most of the rest share OpenAI's audio routes (`/v1/audio/speech`, `/v1/audio/transcriptions`), so one client covers Mistral, OpenRouter, Z.AI transcription, Ollama, and self-hosted servers behind a Custom connection (Speaches, Kokoro-FastAPI, LocalAI).
+Most of the rest share OpenAI's audio routes (`/v1/audio/speech`, `/v1/audio/transcriptions`), so one client covers OpenRouter, Mistral and Z.AI transcription, Ollama, and self-hosted servers behind a Custom connection (Speaches, Kokoro-FastAPI, LocalAI); Mistral's synthesis differs only in its field names and answer.
 
 Two facts about the app shape the design:
 
@@ -104,11 +104,13 @@ Adapters in this pass, chosen by the model's `adapter`:
 
 | Adapter | Synthesis | Transcription | Serves |
 | --- | --- | --- | --- |
-| `openai_audio` | `POST {base}/audio/speech` (`instructions` sent only where `style` is true) | `POST {base}/audio/transcriptions` (multipart) | OpenAI (transcription only), Mistral, OpenRouter, Z.AI (transcription only), Ollama, Custom |
-| `gemini` | Native `v1beta` Interactions API, `speech_metadata.style` for the style, WAV out | Native `v1beta`, audio in, `gemini-3.5-transcribe` | Google |
+| `openai_audio` | `POST {base}/audio/speech` (`instructions` sent only where `style` is true) | `POST {base}/audio/transcriptions` (multipart) | OpenAI (transcription only), Mistral and Z.AI transcription, OpenRouter, Ollama, Custom |
+| `mistral` | `POST {base}/audio/speech` with `voice_id`, answering base64 JSON | (uses `openai_audio`) | Mistral synthesis |
+| `gemini` | Native `v1beta` Interactions API, `speech_metadata.style` for the style, WAV out | The clip uploaded through the Files API, transcribed by `gemini-3.5-transcribe`, and the upload deleted | Google |
 | `qwen` | Native DashScope `SpeechSynthesizer`, `instruction` for the style; the returned audio URL is fetched before returning | Compatible-mode chat completions with the clip as an `input_audio` part, `qwen3-asr-flash` | Qwen |
 
 The Gemini and Qwen adapters derive their native roots from the connection's base URL the way their image generators already do, and use the connection's key through the same credential transport.
+Gemini's native API takes its key as `x-goog-api-key`, so its speech paths (`/interactions`, `/files`, and the Files API upload under `/upload`) get path-scoped credential rules beside the one images use.
 Each adapter retries a provider's transient failures as image generation does, and names the provider in a failure.
 
 DeepSeek, Xiaomi MiMo and Z.AI synthesis are left for later (see Later); each is one more adapter.
