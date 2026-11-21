@@ -488,7 +488,7 @@ func TestSummarizeText_ProviderErrorIsWrapped(t *testing.T) {
 func TestSummarizeImportedThread_EmptyTranscriptReturnsError(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
-	_, err := a.summarizeImportedThread(context.Background(), uuid.New(), "", []models.ChatMessage{{Message: "   "}})
+	_, err := a.summarizeImportedThread(context.Background(), uuid.New(), "", "", []models.ChatMessage{{Message: "   "}})
 	require.ErrorContains(t, err, "empty transcript")
 }
 
@@ -499,7 +499,7 @@ func TestSummarizeImportedThread_SinglePassUnderCharBudget(t *testing.T) {
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 	msgs := turnMsgs(2)
-	got, err := a.summarizeImportedThread(withTestUtilityModels(context.Background()), uuid.New(), "", msgs)
+	got, err := a.summarizeImportedThread(withTestUtilityModels(context.Background()), uuid.New(), "", "", msgs)
 	require.NoError(t, err)
 	require.Equal(t, "short thread summary", got)
 }
@@ -515,7 +515,7 @@ func TestSummarizeImportedThread_MapReduceForLongTranscript(t *testing.T) {
 	msgs := []models.ChatMessage{
 		{Message: strings.Repeat("x", rehydrationSinglePassChars+1), Origin: models.MessageOriginUser},
 	}
-	got, err := a.summarizeImportedThread(withTestUtilityModels(context.Background()), uuid.New(), "", msgs)
+	got, err := a.summarizeImportedThread(withTestUtilityModels(context.Background()), uuid.New(), "", "", msgs)
 	require.NoError(t, err)
 	require.Equal(t, "rolled-up summary", got)
 }
@@ -532,7 +532,7 @@ func TestSummarizeImportedThread_ACatchUpCarriesTheEarlierSummary(t *testing.T) 
 	defer srv.Close()
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
-	got, err := a.summarizeImportedThread(withTestUtilityModels(context.Background()), uuid.New(), "They planned a trip to Lisbon.", turnMsgs(2))
+	got, err := a.summarizeImportedThread(withTestUtilityModels(context.Background()), uuid.New(), "", "They planned a trip to Lisbon.", turnMsgs(2))
 	require.NoError(t, err)
 	require.Equal(t, "caught up", got)
 	require.Contains(t, body, "They planned a trip to Lisbon.", "one summary covers the earlier one and what followed")

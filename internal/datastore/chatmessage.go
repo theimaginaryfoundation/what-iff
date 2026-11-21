@@ -64,6 +64,9 @@ func toChatMessageModel(e *ent.ChatMessage) *models.ChatMessage {
 		SentAt:                e.SentAt,
 		Tokens:                e.Tokens,
 		Bookmarked:            e.Bookmarked,
+		ExcludeFromMemory:     e.ExcludeFromMemory != nil && *e.ExcludeFromMemory,
+		SupersededAt:          e.SupersededAt,
+		SupersededBy:          e.SupersededBy,
 		FinalRoundOffset:      e.FinalRoundOffset,
 	}
 
@@ -340,6 +343,10 @@ func (d *Datastore) CreateChatMessage(ctx context.Context, userID uuid.UUID, cha
 	}
 	if chatMessage.JobRun != nil {
 		create.SetJobRun(chatMessage.JobRun)
+	}
+	if chatMessage.ExcludeFromMemory {
+		// Only ever set, never stored false: NULL is every ordinary message.
+		create.SetExcludeFromMemory(true)
 	}
 	if len(chatMessage.CommentRefs) > 0 {
 		create.SetCommentRefs(chatMessage.CommentRefs)
@@ -795,6 +802,13 @@ func (d *Datastore) listChatMessages(ctx context.Context, userID, chatID uuid.UU
 			q.WithImage()
 		})
 
+	// A superseded message is a past version: hidden unless the caller asks for it. This is the
+	// one listing the model's history (and carry-over), the message routes and find_context's
+	// thread reads all go through.
+	if !filters.IncludeSuperseded {
+		query = query.Where(chatmessage.SupersededAtIsNil())
+	}
+
 	// Apply filters if provided
 	if filters.Origin != nil {
 		query = query.Where(chatmessage.OriginEQ(chatmessage.Origin(*filters.Origin)))
@@ -911,6 +925,7 @@ func (d *Datastore) FirstChatMessageSentAtSince(ctx context.Context, userID, cha
 		Where(
 			chatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))),
 			chatmessage.SentAtGTE(since),
+			chatmessage.SupersededAtIsNil(),
 		)
 	if len(excludeIDs) > 0 {
 		query = query.Where(chatmessage.IDNotIn(excludeIDs...))
@@ -997,12 +1012,16 @@ func (d *Datastore) countChatMessages(ctx context.Context, userID, chatID uuid.U
 		return 0, ErrChatNotFound
 	}
 
-	// Build query for counting messages
+	// Build query for counting messages. A superseded message is not counted: it is out of the
+	// conversation. So when a chat's only turn was taken back, ChatHasMessages reports no user
+	// message and the next turn gets the first message's user-name line again, which is right:
+	// the superseded message that carried it is no longer replayed into the model's context.
 	query := tx.ChatMessage.Query().
 		Where(
 			chatmessage.HasChatWith(
 				entchat.ID(chatID),
 			),
+			chatmessage.SupersededAtIsNil(),
 		)
 
 	// Apply origin filter if not ALL
@@ -1199,6 +1218,8 @@ func (d *Datastore) ListChatMessageBookmarks(ctx context.Context, userID, chatID
 	rows, err := d.dbClient.ChatMessage.Query().
 		Where(
 			chatmessage.Bookmarked(true),
+			// A superseded (taken back) message is out of the conversation: no bookmark leads to it.
+			chatmessage.SupersededAtIsNil(),
 			chatmessage.HasChatWith(
 				entchat.ID(chatID),
 				entchat.HasOwnerWith(user.ID(userID)),
@@ -1224,6 +1245,8 @@ func (d *Datastore) ListChatMessageBookmarksPage(ctx context.Context, userID, ch
 	query := d.dbClient.ChatMessage.Query().
 		Where(
 			chatmessage.Bookmarked(true),
+			// A superseded (taken back) message is out of the conversation: no bookmark leads to it.
+			chatmessage.SupersededAtIsNil(),
 			chatmessage.HasChatWith(
 				entchat.ID(chatID),
 				entchat.HasOwnerWith(user.ID(userID)),

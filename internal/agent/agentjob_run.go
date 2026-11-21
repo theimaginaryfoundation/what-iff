@@ -318,9 +318,7 @@ func (a *Agent) handleEphemeralPrompt(
 	// Overrides below apply only to this run; the save after inference writes continuity only, so
 	// they never reach the Chat row.
 	if model != nil {
-		chatCtx.chat.ModelID = model.ID
-		chatCtx.chat.ModelName = model.Name
-		chatCtx.chat.ToolsEnabled = model.ToolSupport
+		runChatOnModel(chatCtx.chat, model)
 	}
 	if personalityOverrideID != nil {
 		personality, err := a.ds.GetPersonality(ctx, userID, *personalityOverrideID)

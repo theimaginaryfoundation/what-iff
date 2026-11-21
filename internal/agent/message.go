@@ -656,10 +656,20 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 	}
 	// Attachment labels are only injected when tools are enabled, matching the
 	// previous behavior for OpenAI chat turns.
-	additionalDevContext := mcpLifecycleDeveloperContext()
-	if policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage); policy.toolsEnabled {
-		if loadable := loadableToolsDeveloperContext(policy.offeredAgentToolNames(), a.loadedBuiltinToolSet(ctx, userID, chatCtx)); loadable != "" {
-			additionalDevContext += "\n\n" + loadable
+	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
+	additionalDevContext := ""
+	// The lifecycle note and the loadable-tools note tell the model to load tools; a build's
+	// allowlist without load_tools leaves nothing loadable.
+	canLoad := policy.toolAllowed(tools.LoadToolsToolSpec.Name)
+	if canLoad {
+		additionalDevContext = mcpLifecycleDeveloperContext()
+	}
+	if policy.toolsEnabled {
+		if loadable := loadableToolsDeveloperContext(policy.offeredAgentToolNames(), a.loadedBuiltinToolSet(ctx, userID, chatCtx), canLoad); loadable != "" {
+			if additionalDevContext != "" {
+				additionalDevContext += "\n\n"
+			}
+			additionalDevContext += loadable
 		}
 	}
 	if additionalDeveloperContextForChat != nil {
@@ -668,7 +678,15 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 			additionalDeveloperContextForChat(a, chatCtx.chat),
 		}, "\n\n"))
 	}
-	return b.build(ctx, messageContextBuildRequest{
+	// The skills index tells the model to call load_skill, and the mode hint to call list_modes and
+	// change_mode; neither is sent when a build's allowlist leaves those tools out.
+	skillsIndex := ""
+	if policy.toolAllowed(tools.LoadSkillToolSpec.Name) {
+		skillsIndex = a.skillsIndexDeveloperContext(chatCtx)
+	}
+	moodToolsAvailable := policy.toolAllowed(tools.ListMoodsToolSpec.Name) && policy.toolAllowed(tools.ChangeMoodToolSpec.Name) &&
+		a.shouldExposeMoodTools(ctx, userID, chatCtx.chat)
+	modelCtx, built, err := b.buildTurn(ctx, messageContextBuildRequest{
 		UserID:                     userID,
 		Chat:                       chatCtx.chat,
 		UserPrompt:                 userPrompt,
@@ -679,16 +697,25 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		ActiveMood:                 chatCtx.activeMood,
 		ActiveMoodRituals:          chatCtx.activeMoodRituals,
 		ActiveSkills:               chatCtx.activeSkills(),
-		SkillsIndex:                a.skillsIndexDeveloperContext(chatCtx),
+		SkillsIndex:                skillsIndex,
 		IsAutoMood:                 chatCtx.chat.IsAutoMood,
-		MoodToolsAvailable:         a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
+		MoodToolsAvailable:         moodToolsAvailable,
 		Attachments:                chatMessage.Attachments,
 		ImageBytes:                 imageBytes,
 		ExpressionsEnabled:         chatCtx.expressionsEnabled,
 		IncludeAttachmentContext:   chatCtx.chat.ToolsEnabled,
 		AdditionalDeveloperContext: additionalDevContext,
 		LoadHistoryImageBytes:      chatCtx.modelVisionSupport,
+		PreContext:                 chatCtx.turnOptions.TurnPreContext(),
+		PostContext:                chatCtx.turnOptions.TurnPostContext(),
+		BaseSystemPrompt:           a.baseSystemPromptForChat(ctx, chatCtx.chat),
+		WithoutMemoryRecall:        !chatCtx.turnOptions.RecallsMemory(),
 	})
+	if err != nil {
+		return nil, err
+	}
+	chatCtx.historyExcludedFromMemory = built.replaysExcludedTurn
+	return modelCtx, nil
 }
 
 func mcpLifecycleDeveloperContext() string {
@@ -714,15 +741,27 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 	ctx = metering.WithTurnSource(ctx, turnSource)
 	// Extract user ID from context
 	userID, _ := middleware.GetUserIDFromContext(ctx)
+	// A turn that names a model the sender cannot use fails here, before anything is stored
+	// (ErrTurnModelUnavailable), rather than as a failed job or on the chat's model.
+	if id := request.TurnOptions.TurnModelID(); id != nil {
+		if _, err := a.turnModel(ctx, userID, *id); err != nil {
+			return nil, err
+		}
+	}
 
 	// A client may still send a retired system ritual; it has no row to link to.
 	request.Rituals = dropRetiredRituals(request.Rituals)
+	// A turn sent with memory saving off is flagged on its message, so a later checkpoint knows,
+	// and a message with turn options always runs as a turn of its own, never as a steer.
+	turnSendRequest(&request)
 
 	// Create a new chat message in the database
 	chatMessage, err := a.ds.CreateChatMessage(ctx, userID, request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create chat message: %w", err)
 	}
+	// Request-only, never stored: carried to the turn in memory (nil on an ordinary send).
+	chatMessage.TurnOptions = request.TurnOptions
 
 	// Create a job for asynchronous processing
 	newJob, err := a.ds.CreateJob(ctx, userID, models.Job{
@@ -736,10 +775,12 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 		return nil, fmt.Errorf("failed to create job: %w", err)
 	}
 
-	// Start the background processing with a cancellable runtime context.
+	// Start the background processing with a cancellable runtime context. The run owns newJob
+	// from here on (updateJobStatus rewrites it), so the response uses the id read before.
+	jobID := newJob.ID
 	runCtx, cancel := context.WithCancel(ctx)
-	a.registerRunningJobCancel(newJob.ID, userID, cancel)
-	go a.watchChatJobCancel(runCtx, userID, newJob.ID, cancel)
+	a.registerRunningJobCancel(jobID, userID, cancel)
+	go a.watchChatJobCancel(runCtx, userID, jobID, cancel)
 	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, chatMessage.ID, "processing", func() error {
 		_, err := a.handleUserMessage(runCtx, newJob, chatMessage)
 		return err
@@ -748,7 +789,7 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 	// Return response with job details
 	return &models.ChatMessageResponse{
 		ID:    chatMessage.ID,
-		JobID: newJob.ID.String(),
+		JobID: jobID.String(),
 		Type:  JobTypeChatMessage,
 	}, nil
 }
@@ -810,16 +851,10 @@ func (a *Agent) recoverAsyncMessageJob(runCtx context.Context, userID, jobID, ch
 // RetryUserChatMessage enqueues another chat_message job for an existing user turn.
 // When a non-terminal job already exists for that message, returns its job id without creating a duplicate.
 func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid.UUID) (*models.ChatMessageResponse, error) {
-	// Detach from request cancellation before enqueue + background execution. User id and timezone
-	// are copied into a fresh Background context (see middleware.CopyUserToIDContext), and so is
-	// the turn source, as in HandleUserMessage.
-	turnSource := metering.TurnSourceFromContext(ctx)
-	detachedCtx, ok := middleware.CopyUserToIDContext(ctx, context.Background())
-	if !ok {
-		return nil, errors.New("user ID not found in context")
+	detachedCtx, userID, err := detachTurnContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-	detachedCtx = metering.WithTurnSource(detachedCtx, turnSource)
-	userID, _ := middleware.GetUserIDFromContext(detachedCtx)
 
 	msg, err := a.ds.GetChatMessage(detachedCtx, userID, messageID)
 	if err != nil {
@@ -830,6 +865,11 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 	}
 	if msg.Origin != models.MessageOriginUser {
 		return nil, ErrRetryNotUserOrigin
+	}
+	if msg.SupersededAt != nil {
+		// Taken back (SupersedeTurn): hidden like a message that is not there, and its reply
+		// would be superseded as it was saved.
+		return nil, datastore.ErrChatMessageNotFound
 	}
 
 	active, err := a.ds.FindLatestActiveChatMessageJob(detachedCtx, userID, messageID)
@@ -844,32 +884,62 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 		}, nil
 	}
 
-	if err := a.ds.SetChatMessageLastError(detachedCtx, userID, messageID, nil, ""); err != nil {
-		a.logger.Warn("failed to clear last_error_message before retry", zap.Error(err))
+	return a.rerunUserMessage(detachedCtx, userID, msg, "retry")
+}
+
+// detachTurnContext detaches a turn started from a request from the request's cancellation: the
+// user id and timezone are copied into a fresh Background context (see
+// middleware.CopyUserToIDContext), and so is the turn source, as in HandleUserMessage.
+func detachTurnContext(ctx context.Context) (context.Context, uuid.UUID, error) {
+	turnSource := metering.TurnSourceFromContext(ctx)
+	detachedCtx, ok := middleware.CopyUserToIDContext(ctx, context.Background())
+	if !ok {
+		return nil, uuid.Nil, errors.New("user ID not found in context")
+	}
+	detachedCtx = metering.WithTurnSource(detachedCtx, turnSource)
+	userID, _ := middleware.GetUserIDFromContext(detachedCtx)
+	return detachedCtx, userID, nil
+}
+
+// rerunUserMessage starts another chat_message job answering the saved user message msg (a
+// retry), on detachedCtx (detachTurnContext). action names the path in the job's logs.
+func (a *Agent) rerunUserMessage(detachedCtx context.Context, userID uuid.UUID, msg *models.ChatMessage, action string) (*models.ChatMessageResponse, error) {
+	if err := a.ds.SetChatMessageLastError(detachedCtx, userID, msg.ID, nil, ""); err != nil {
+		a.logger.Warn("failed to clear last_error_message before "+action, zap.Error(err))
 	}
 
 	newJob, err := a.ds.CreateJob(detachedCtx, userID, models.Job{
 		JobType:     JobTypeChatMessage,
-		Reference:   messageID.String(),
+		Reference:   msg.ID.String(),
 		Status:      models.JobStatusPending,
 		DraftDeltas: []string{},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create job: %w", err)
 	}
+	return a.startUserMessageRun(detachedCtx, userID, newJob, msg, action), nil
+}
 
+// startUserMessageRun starts newJob, a chat_message job just created for the saved user message
+// msg (a retry, or a regenerate with msg.TurnOptions set), in the background on detachedCtx.
+func (a *Agent) startUserMessageRun(detachedCtx context.Context, userID uuid.UUID, newJob *models.Job, msg *models.ChatMessage, action string) *models.ChatMessageResponse {
+	// The run owns newJob once it starts (updateJobStatus rewrites it): read its id first.
+	jobID := newJob.ID
 	runCtx, cancel := context.WithCancel(detachedCtx)
-	a.registerRunningJobCancel(newJob.ID, userID, cancel)
-	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, msg.ID, "retry", func() error {
+	a.registerRunningJobCancel(jobID, userID, cancel)
+	// Like a new send, the run stops when it is cancelled from another API instance (a Stop, or
+	// the turn taken back there: SupersedeTurn).
+	go a.watchChatJobCancel(runCtx, userID, jobID, cancel)
+	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, msg.ID, action, func() error {
 		_, err := a.handleUserMessage(runCtx, newJob, msg)
 		return err
 	})
 
 	return &models.ChatMessageResponse{
-		ID:    messageID,
-		JobID: newJob.ID.String(),
+		ID:    msg.ID,
+		JobID: jobID.String(),
 		Type:  JobTypeChatMessage,
-	}, nil
+	}
 }
 
 // chatContext holds the context needed for processing a chat message
@@ -990,6 +1060,10 @@ type chatContext struct {
 	promptWaited time.Duration
 	// awaitingUser is set when a prompt went unanswered: the turn should end and ask in its reply.
 	awaitingUser bool
+	// toolAllowlist is the build's allowlist resolved for this turn (toolAllowlistForChat), nil for
+	// none. buildTurnToolPolicy sets it; the connector scope, run_subagent and the developer
+	// context read it, since they run without the turn's policy.
+	toolAllowlist map[string]bool
 	// mcpApps are the MCP Apps of this turn's MCP tool calls, by provider tool-call id (ADR 0x042),
 	// until executeToolUses puts them on the saved calls.
 	mcpApps map[string]*models.ToolCallApp
@@ -1004,6 +1078,16 @@ type chatContext struct {
 	// so a later call can use them as reference images (ADR 0x047). See rememberTurnImages.
 	turnImagesMu sync.Mutex
 	turnImages   []*models.FileAttachment
+	// turnOptions are the caller's per-turn settings (pre/post context, output cap; see
+	// models.TurnOptions and turn_options.go). Nil on every ordinary turn.
+	turnOptions *models.TurnOptions
+	// memorySaveOff: the turn is kept out of long-term memory (models.TurnOptions.MemorySave false,
+	// or a retry of a message flagged ExcludeFromMemory). Its reply is flagged too, create_memory is
+	// not offered, and a checkpoint at its end extracts no memories (turn_memory.go).
+	memorySaveOff bool
+	// historyExcludedFromMemory: the conversation the turn replayed includes a message flagged
+	// ExcludeFromMemory, so a checkpoint at its end extracts no memories either.
+	historyExcludedFromMemory bool
 }
 
 func (c *chatContext) setMCPServerCache(servers []*models.MCPServer, loadedByServer map[uuid.UUID][]string) {
@@ -1066,8 +1150,8 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	// window rather than the full (possibly huge) history. No-op for native/ready threads.
 	a.WaitForThreadRehydration(ctx, chatJob.UserID, chatMessage.ChatID)
 
-	// Prepare chat context (chat, memories, model)
-	chatCtx, err := a.prepareChatContext(ctx, chatJob.UserID, chatMessage, a.newMemoryLoadProgress(chatJob))
+	// Prepare chat context (chat, memories, model). A turn whose options name a model runs on it.
+	chatCtx, err := a.prepareUserTurnContext(ctx, chatJob.UserID, chatMessage, a.newMemoryLoadProgress(chatJob))
 	if err != nil {
 		a.logger.Error("failed to prepare chat context", zap.Error(err))
 		a.setJobStatusFailed(ctx, chatJob, err)
@@ -1194,6 +1278,10 @@ func (a *Agent) runUserChatPostInferencePhases(
 		return
 	}
 
+	// The caller's per-turn context applied to this turn's reply only: the expression pick and
+	// the checkpoint (scratchpad, memories, summary) never see it, so none of it gets stored.
+	modelContext = modelContext.WithoutTurnContext()
+
 	if err := a.applyExpressionPhase(ctx, chatJob.UserID, chatJob, chatCtx, modelContext, chatMessage.Message, agentMessage); err != nil {
 		a.logger.Error("expression phase failed", zap.Error(err))
 	}
@@ -1223,7 +1311,7 @@ func (a *Agent) generateAssistantForMessage(ctx context.Context, userID uuid.UUI
 	if chatCtx.turnSettings.Advanced() && modelContext != nil {
 		// Advanced turns are told how the loop works (ADR 0x026). Added to the turn's own context so
 		// the Context X-ray shows it.
-		modelContext.InsertBeforeLastUserMessage(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, advancedLoopInstructions, false)
+		modelContext.InsertBeforeLastUserMessage(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, advancedLoopInstructions(chatCtx.toolAllowedThisTurn(tools.UpdatePlanToolSpec.Name)), false)
 		if open, reason := a.previousRunOpenPlan(ctx, userID, chatMessage.ChatID); len(open) > 0 {
 			modelContext.InsertBeforeLastUserMessage(provider.SegmentKindHistoryTurn, provider.RoleUser, openPlanContext(open, reason), false)
 		}
@@ -1383,10 +1471,11 @@ func (a *Agent) finishGeneration(ctx context.Context, userID uuid.UUID, chatMess
 
 	personalityName := a.resolvePersonalityName(ctx, userID, chatCtx.chat.PersonalityID)
 	moodID := activeMoodID(chatCtx.activeMood)
-	agentMessage, err := a.saveAgentResponse(ctx, userID, chatMessage.ChatID, result, toolCalls, generatedAttachments, chatCtx.model, personalityName, moodID, chatCtx.agentRun)
+	agentMessage, err := a.saveAgentResponse(ctx, userID, chatMessage.ChatID, result, toolCalls, generatedAttachments, chatCtx.model, personalityName, moodID, chatCtx.agentRun, chatCtx.memorySaveOff)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to save %s agent response: %w", opts.provider, err)
 	}
+	a.settleTurnReply(ctx, userID, chatCtx, chatMessage, agentMessage.ID)
 
 	if opts.afterSave != nil {
 		opts.afterSave(ctx, agentMessage)
@@ -1400,24 +1489,7 @@ func (a *Agent) finishGeneration(ctx context.Context, userID uuid.UUID, chatMess
 // mock mode exercises the code real chat runs (streamed-text reconciliation,
 // tool-call recording, personality/mood, save).
 func (a *Agent) generateAssistantForMessageMock(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
-	// The mock adapter offers no tools to a model, but record the same tool set the real paths do,
-	// so a scripted tool call is gated exactly like a real model's. That set includes the
-	// turn-only tools and the chat's MCP connectors (see below); a chat with none attached
-	// discovers nothing, so mock e2e stays hermetic.
-	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	offered := policy.offeredAgentToolNames()
-	// Turn-only tools (update_plan, ask_user) and MCP tools are offered too, so the mock's echo
-	// directives can drive them locally (provider/mock_directives.go).
-	for _, spec := range turnOnlyToolSpecs(chatCtx) {
-		offered[spec.Name] = struct{}{}
-	}
-	if policy.toolsEnabled {
-		for _, spec := range a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs) {
-			offered[spec.Name] = struct{}{}
-		}
-	}
-	chatCtx.setOfferedTools(offered)
-	a.prepareTurnLoadableTools(ctx, chatCtx, offered)
+	a.prepareMockTurnTools(ctx, chatCtx, userID, chatMessage)
 
 	build := func(*provider.ModelContext) (provider.AgentAdapter, error) {
 		return provider.NewMockAdapter(provider.MockAdapterConfig{
@@ -1429,6 +1501,27 @@ func (a *Agent) generateAssistantForMessageMock(ctx context.Context, userID uuid
 	}
 	adapter, _ := build(modelContext)
 	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{provider: "mock", rebuild: build, modelContext: modelContext})
+}
+
+// prepareMockTurnTools records the mock turn's offered tools. The mock adapter offers no tools to a
+// model, but it records the same tool set the real paths do, so a scripted tool call is gated
+// exactly like a real model's. That set includes the turn-only tools and the chat's MCP connectors
+// (see below); a chat with none attached discovers nothing, so mock e2e stays hermetic.
+func (a *Agent) prepareMockTurnTools(ctx context.Context, chatCtx *chatContext, userID uuid.UUID, chatMessage *models.ChatMessage) {
+	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
+	offered := policy.offeredAgentToolNames()
+	// Turn-only tools (update_plan, ask_user) and MCP tools are offered too, so the mock's echo
+	// directives can drive them locally (provider/mock_directives.go).
+	for _, spec := range policy.restrictToAllowlist(turnOnlyToolSpecs(chatCtx)) {
+		offered[spec.Name] = struct{}{}
+	}
+	if policy.offersMCP() {
+		for _, spec := range policy.restrictToAllowlist(a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)) {
+			offered[spec.Name] = struct{}{}
+		}
+	}
+	chatCtx.setOfferedTools(offered)
+	a.prepareTurnLoadableTools(ctx, chatCtx, offered)
 }
 
 func mergedRitualIDsForTools(chatMessage *models.ChatMessage, activeMood *models.Mood) []uuid.UUID {
@@ -1481,9 +1574,12 @@ func (a *Agent) openAIResponseParamsForChat(ctx context.Context, chatCtx *chatCo
 			NativeWebSearch: policy.nativeWebSearch,
 		})
 		agentTools := getAgentToolsList(policy.disabledTools, policy.showMoodTools)
-		turnSpecs := turnOnlyToolSpecs(chatCtx)
+		turnSpecs := policy.restrictToAllowlist(turnOnlyToolSpecs(chatCtx))
 		agentTools = append(agentTools, tools.OpenAIFunctionTools(turnSpecs)...)
-		mcpSpecs := a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)
+		var mcpSpecs []tools.FunctionToolSpec
+		if policy.offersMCP() {
+			mcpSpecs = policy.restrictToAllowlist(a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs))
+		}
 		mcpTools := tools.OpenAIFunctionTools(mcpSpecs)
 		toolParams = provider.BuildOpenAITools(chatCtx.model, chatTools, agentTools, mcpTools)
 		offered := offeredToolNames(append(append(tools.AgentFunctionToolSpecs(policy.showMoodTools), turnSpecs...), mcpSpecs...), policy.disabledTools)
@@ -1522,6 +1618,7 @@ func (a *Agent) generateAssistantForMessageOpenAI(ctx context.Context, userID uu
 		params := a.openAIResponseParamsForChat(ctx, chatCtx, userID, chatMessage, mc)
 		// A selected reasoning effort (ADR 0x026); none leaves the request as it was.
 		provider.ApplyOpenAIReasoning(&params, chatCtx.reasoningEffort)
+		applyTurnOutputCapResponses(&params, chatCtx)
 		adapter = provider.NewOpenAIAdapter(a.OpenAIProvider, params)
 		built = append(built, adapter)
 		return adapter, nil
@@ -1615,6 +1712,7 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 			// The turn streams, so high effort can have the larger cap a non-streamed call cannot.
 			provider.RaiseClaudeStreamingOutputCap(&claudeParams, chatCtx.reasoningEffort)
 		}
+		applyTurnOutputCapClaude(&claudeParams, chatCtx)
 
 		policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
 		specs := a.turnFunctionToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy)
@@ -1624,14 +1722,7 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 		built = append(built, adapter)
 		adapter.SetReplayThinking(replayThinking)
 		if zai {
-			adapter.SetTruncationFallback(func(params *anthropic.MessageNewParams) {
-				a.logger.Warn("z.ai response truncated before any reply text; retrying at lower reasoning effort",
-					zap.String("model", chatCtx.model),
-					zap.String("chat_id", chatMessage.ChatID.String()),
-					zap.String("effort", provider.ZAIFallbackReasoningEffort),
-				)
-				provider.ApplyZAIReasoningEffort(params, provider.ZAIFallbackReasoningEffort)
-			})
+			adapter.SetTruncationFallback(a.zaiTruncationFallback(chatCtx, chatMessage.ChatID))
 		}
 		return adapter, nil
 	}
@@ -1651,6 +1742,20 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, first, opts)
 }
 
+// zaiTruncationFallback is the z.ai adapter's retry for a reply truncated before any text: lower
+// reasoning effort, with the turn's own output cap kept (the effort resets the cap).
+func (a *Agent) zaiTruncationFallback(chatCtx *chatContext, chatID uuid.UUID) func(params *anthropic.MessageNewParams) {
+	return func(params *anthropic.MessageNewParams) {
+		a.logger.Warn("z.ai response truncated before any reply text; retrying at lower reasoning effort",
+			zap.String("model", chatCtx.model),
+			zap.String("chat_id", chatID.String()),
+			zap.String("effort", provider.ZAIFallbackReasoningEffort),
+		)
+		provider.ApplyZAIReasoningEffort(params, provider.ZAIFallbackReasoningEffort)
+		applyTurnOutputCapClaude(params, chatCtx)
+	}
+}
+
 // generateAssistantForMessageGemini drives a chat turn through Google's
 // OpenAI-compatible Chat Completions API. It mirrors the Claude path but omits
 // Anthropic-native features (web search, MCP).
@@ -1662,6 +1767,7 @@ func (a *Agent) generateAssistantForMessageGemini(ctx context.Context, userID uu
 	build := func(mc *provider.ModelContext) (provider.AgentAdapter, error) {
 		geminiParams := visionRenderContext(chatCtx, mc).BuildGeminiParams(chatCtx.model)
 		provider.ApplyGeminiReasoning(&geminiParams, chatCtx.reasoningEffort)
+		applyTurnOutputCapChat(&geminiParams, chatCtx)
 
 		policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
 		specs := a.turnFunctionToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy)
@@ -1699,6 +1805,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	renderCtx := modelContext.Clone()
 	renderCtx.PrepareForTextOnly()
 	params := renderCtx.BuildOpenAIChatCompletionParams(a.localLLMModel)
+	applyTurnOutputCapChat(&params, chatCtx)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
 	specs := a.turnFunctionToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy)
@@ -1741,10 +1848,11 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 
 	personalityName := a.resolvePersonalityName(ctx, userID, chatCtx.chat.PersonalityID)
 	moodID := activeMoodID(chatCtx.activeMood)
-	agentMessage, err := a.saveAgentResponse(ctx, userID, chatMessage.ChatID, result, toolCalls, generatedAttachments, chatCtx.model, personalityName, moodID, nil)
+	agentMessage, err := a.saveAgentResponse(ctx, userID, chatMessage.ChatID, result, toolCalls, generatedAttachments, chatCtx.model, personalityName, moodID, nil, chatCtx.memorySaveOff)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to save local model agent response: %w", err)
 	}
+	a.settleTurnReply(ctx, userID, chatCtx, chatMessage, agentMessage.ID)
 
 	return agentMessage, result, nil
 }
@@ -1789,7 +1897,9 @@ func visionRenderContext(chatCtx *chatContext, modelContext *provider.ModelConte
 }
 
 func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai.ChatCompletionNewParams, functionTools []openai.ChatCompletionToolUnionParam, disabledTools map[string]bool) (provider.AgentAdapter, error) {
+	// The turn's output cap goes on last, after any reasoning effort raised the cap.
 	if chatCtx.connection != nil {
+		applyTurnOutputCapChat(&params, chatCtx)
 		return provider.NewConnectionChatAdapter(a.connectionChatProvider(chatCtx.connection), params, functionTools, disabledTools), nil
 	}
 	switch models.ProviderForModel(chatCtx.modelProvider, chatCtx.model) {
@@ -1798,23 +1908,29 @@ func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai
 			return nil, providerNotConfigured("Mistral model %q requested but MISTRAL_API_KEY is not configured", chatCtx.model)
 		}
 		provider.ApplyMistralReasoning(&params, chatCtx.reasoningEffort)
+		applyTurnOutputCapChat(&params, chatCtx)
 		return provider.NewMistralAdapter(a.MistralProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderDeepSeek:
 		if a.DeepSeekProvider == nil {
 			return nil, providerNotConfigured("DeepSeek model %q requested but DEEPSEEK_API_KEY is not configured", chatCtx.model)
 		}
 		provider.ApplyDeepSeekReasoning(&params, chatCtx.reasoningEffort)
+		applyTurnOutputCapChat(&params, chatCtx)
 		return provider.NewDeepSeekAdapter(a.DeepSeekProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderQwen:
 		if a.QwenProvider == nil {
 			return nil, providerNotConfigured("Qwen model %q requested but QWEN_API_KEY is not configured", chatCtx.model)
 		}
 		provider.ApplyQwenReasoning(&params, chatCtx.reasoningEffort)
+		applyTurnOutputCapChat(&params, chatCtx)
 		return provider.NewQwenAdapter(a.QwenProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderXiaomi:
 		if a.XiaomiProvider == nil {
 			return nil, providerNotConfigured("Xiaomi model %q requested but XIAOMI_API_KEY is not configured", chatCtx.model)
 		}
+		// MiMo's adapter raises only the default cap (DefaultMaxContentLength) to its reasoning
+		// cap; any other cap, a turn's included, is kept.
+		applyTurnOutputCapChat(&params, chatCtx)
 		adapter := provider.NewXiaomiAdapter(a.XiaomiProvider, params, functionTools, disabledTools)
 		// MiMo's only reasoning control: an effort of off turns thinking off (ADR 0x026).
 		if chatCtx.reasoningEffort == models.ReasoningEffortOff {
@@ -2355,7 +2471,8 @@ func memoryToolCallsForChatContext(chatCtx *chatContext) []*models.ToolCall {
 	if chatCtx.memoryEnrichmentFailed {
 		return []*models.ToolCall{failedMemoryEnrichmentToolCall()}
 	}
-	if len(chatCtx.memories) > 0 {
+	// A recall-off turn retrieved nothing: its user-name line alone is no "Load Memory" call.
+	if len(chatCtx.memories) > 0 && !chatCtx.recallOffWithoutMemories() {
 		return []*models.ToolCall{memoryToolCall(chatCtx.memories)}
 	}
 	return nil
@@ -2379,8 +2496,8 @@ func (a *Agent) prepareChatContextOn(ctx context.Context, userID uuid.UUID, chat
 		return nil, fmt.Errorf("failed to get chat: %w", err)
 	}
 
-	// Get relevant memories.
-	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message, parentChat.IsSandboxed())
+	// Get relevant memories (only the user-name line when the turn's options turn recall off).
+	memories, liveMemories, userNameLine, memoryEnrichmentFailed := a.loadTurnMemoriesFor(ctx, memoryProgress, userID, chatMessage, parentChat)
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
 	// (gpt-5.1) even when the user selected a different provider.
@@ -2414,8 +2531,6 @@ func (a *Agent) prepareChatContextOn(ctx context.Context, userID uuid.UUID, chat
 
 	// ExpressionsEnabled comes from the personality edge already eager-loaded by GetChat.
 	expressionsEnabled := parentChat.PersonalityExpressionsEnabled
-
-	userNameLine := a.recognizeUserNameLine(ctx, userID, memories)
 
 	return &chatContext{
 		userID:                 userID,
@@ -2609,14 +2724,16 @@ func (a *Agent) assertUserCanRunChatModel(ctx context.Context, userID uuid.UUID,
 	return fmt.Errorf("experimental model provider %q: %w", modelProvider, datastore.ErrExperimentalModelNotAllowed)
 }
 
-func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, error) {
+// getMemoriesForEnrichment is getMemories, or the test override (which adds no user-name line),
+// or nothing in mock/local mode.
+func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) (memories []string, liveMemories []*models.Memory, userNameLine string, err error) {
 	if a.testHooks.GetMemoriesOverride != nil {
 		formatted, err := a.testHooks.GetMemoriesOverride(ctx, userID, chatID, personalityID, userMessage)
-		return formatted, nil, err
+		return formatted, nil, "", err
 	}
 	if !a.memoryEnrichmentRuns() {
 		a.logger.Debug("mock/local mode: skipping memory enrichment", zap.String("chat_id", chatID.String()))
-		return nil, nil, nil
+		return nil, nil, "", nil
 	}
 	return a.getMemories(ctx, userID, chatID, personalityID, userMessage, sandboxed)
 }
@@ -2632,23 +2749,25 @@ func (a *Agent) memoryEnrichmentRuns() bool {
 // loadTurnMemories runs best-effort memory enrichment for a turn, shown in the job's live tool
 // timeline as a "Load Memory" row: running during retrieval, then complete with the memories (or
 // an error). The row is only added when retrieval really runs, so mock/local turns (which skip
-// it) never show one.
-func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgress, userID, chatID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, bool) {
+// it) never show one. userNameLine is the user-name line getMemories put first in memories ("" when
+// none, or when retrieval failed and memories is empty).
+func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgress, userID, chatID, personalityID uuid.UUID, userMessage string, sandboxed bool) (memories []string, liveMemories []*models.Memory, userNameLine string, failed bool) {
 	if progress != nil && a.memoryEnrichmentRuns() {
 		progress.Started(ctx)
 	}
-	memories, liveMemories, failed := a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage, sandboxed)
+	memories, liveMemories, userNameLine, failed = a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage, sandboxed)
 	if progress != nil {
 		progress.Finished(ctx, memories, failed)
 	}
-	return memories, liveMemories, failed
+	return memories, liveMemories, userNameLine, failed
 }
 
 // getMemoriesBestEffort attempts memory enrichment and degrades gracefully on any failure.
-// When it fails, it logs the error and returns an empty memory list along with a failure flag.
-func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, bool) {
+// When it fails, it logs the error and returns an empty memory list (and no user-name line) along
+// with a failure flag.
+func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) (memories []string, liveMemories []*models.Memory, userNameLine string, failed bool) {
 	defer a.timeTurnStage(ctx, turnStageMemoryEnrichment)()
-	memories, liveMemories, err := a.getMemoriesForEnrichment(ctx, userID, chatID, personalityID, userMessage, sandboxed)
+	memories, liveMemories, userNameLine, err := a.getMemoriesForEnrichment(ctx, userID, chatID, personalityID, userMessage, sandboxed)
 	if err != nil {
 		// Note: the underlying memory retrieval path logs errors at the failure site(s).
 		// Keep this at Debug to avoid duplicate error logs while still attaching user/chat context.
@@ -2661,9 +2780,9 @@ func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, cha
 		if memories == nil {
 			memories = []string{}
 		}
-		return memories, nil, true
+		return memories, nil, userNameLine, true
 	}
-	return memories, liveMemories, false
+	return memories, liveMemories, userNameLine, false
 }
 
 // appendMemoryMessages adds memory messages to the input message list
@@ -2697,7 +2816,7 @@ var tzLocationCache sync.Map // map[string]*time.Location
 // offset so agents can reason about day-of-week without parsing ISO-8601.
 // Example: "Sun 2026-09-13 08:46:51 -04:00". This is intentionally not
 // RFC3339; treat layout changes as a prompt/protocol change (update
-// baseSystemPrompt + docs together).
+// baseSystemPromptMechanics + docs together).
 const agentMessageTimestampLayout = "Mon 2006-01-02 15:04:05 -07:00"
 
 // formatUserMessageWithTime prefixes body with a [sys:…] timestamp tag using
@@ -2843,7 +2962,8 @@ func isTruncationStopReason(stopReason string) bool {
 // handled separately by the OpenAI adapter path.
 // agentRun is the structured record of an Advanced turn (nil on Standard turns, whose reasoning is
 // result.Reasoning).
-func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID, result *provider.GenerateResponse, toolCalls []*models.ToolCall, generatedAttachments []*models.FileAttachment, generationModel string, generationPersonality string, generationMoodID *uuid.UUID, agentRun *models.AgentRun) (*models.ChatMessage, error) {
+// excludeFromMemory flags the reply of a turn kept out of memory (chatContext.memorySaveOff).
+func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID, result *provider.GenerateResponse, toolCalls []*models.ToolCall, generatedAttachments []*models.FileAttachment, generationModel string, generationPersonality string, generationMoodID *uuid.UUID, agentRun *models.AgentRun, excludeFromMemory bool) (*models.ChatMessage, error) {
 	agentMessage, err := a.ds.CreateChatMessage(ctx, userID, models.ChatMessage{
 		ChatID:           chatID,
 		Message:          result.Text,
@@ -2860,7 +2980,8 @@ func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID,
 		GenerationMoodID:      generationMoodID,
 		ToolCalls:             toolCalls,
 		// The comments the reply made on the user's files, shown as links (ADR 0x046).
-		CommentRefs: tools.CommentRefsFromCalls(toolCalls),
+		CommentRefs:       tools.CommentRefsFromCalls(toolCalls),
+		ExcludeFromMemory: excludeFromMemory,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create chat message: %w", err)
@@ -3245,9 +3366,16 @@ func (a *Agent) logCheckpointSkipped(chatID uuid.UUID, err error) {
 
 // checkpointRebuildsFromDB reports whether a chat's checkpoint rebuilds its
 // context from the DB (the "Claude" path) rather than chaining off an OpenAI
-// Responses id: every chat but one on OpenAI's own Responses API.
+// Responses id: every chat but one on OpenAI's own Responses API, and every turn that carried
+// pre/post context (models.TurnOptions), whatever its model. That turn's response chain holds the
+// caller's context in its input, so chaining off it would let the scratchpad, memories and summary
+// see it; the rebuild reads the context with the turn's context stripped. A later turn without
+// context chains safely: each turn's Responses input is built afresh from the DB (the adapter
+// chains previous_response_id only across one turn's own tool rounds), so its chain never reaches
+// an earlier turn's response.
 func checkpointRebuildsFromDB(chatCtx *chatContext) bool {
-	return chatCtx.connection != nil ||
+	return chatCtx.turnOptions.HasContext() ||
+		chatCtx.connection != nil ||
 		models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model) ||
 		models.UsesOpenAIChatCompletionsAPI(chatCtx.modelProvider, chatCtx.model)
 }
@@ -3294,7 +3422,7 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	if sandboxed {
 		newScratchpadResponseID = agentMessage.ResponseID
 	}
-	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction {
+	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction && a.checkpointMayExtractMemories(chatCtx, chatMessage.ChatID) {
 		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		err := a.extractMemoriesWithScratchpadDelta(ctx, userID, chatMessage.ChatID, newScratchpadResponseID, inferenceModelContext, chatCtx, compactionEventID)
 		doneMemory()
@@ -3375,7 +3503,7 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	// scratchpad is the just-generated content. If scratchpad generation failed, intentionally
 	// defer both extraction and roll-forward dedupe to the next checkpoint: compaction requires
 	// that delta, and a later checkpoint safely retries it.
-	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction {
+	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction && a.checkpointMayExtractMemories(chatCtx, chatMessage.ChatID) {
 		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		err := a.extractMemoriesWithScratchpadDeltaClaude(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID)
 		backgroundRunFrom(ctx).step(models.BackgroundStepMemory, err)

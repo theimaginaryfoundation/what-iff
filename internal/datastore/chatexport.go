@@ -139,6 +139,8 @@ func (d *Datastore) ExportChat(ctx context.Context, userID, chatID uuid.UUID, w 
 				chatmessage.HasChatWith(
 					entchat.ID(chatID),
 				),
+				// Past versions (superseded messages) are not part of the transcript.
+				chatmessage.SupersededAtIsNil(),
 			).
 			WithFileAttachments().
 			WithRituals().

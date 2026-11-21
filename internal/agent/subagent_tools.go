@@ -201,7 +201,7 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 		})
 	}
 
-	modelContext := buildSubagentModelContext(systemPrompt, scratchpad, message)
+	modelContext := buildSubagentModelContext(a.baseSystemPromptForChat(ctx, chatCtx.chat), systemPrompt, scratchpad, message)
 	subagentCtx := telemetry.WithCallPath(ctx, telemetry.CallPathSubagent)
 	// The sub-agent inherits the turn's selected reasoning effort (ADR 0x026), only when the turn's
 	// own model runs with one: a selection the parent model ignores does not start reasoning (and
@@ -209,6 +209,8 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 	if chatCtx.reasoningEffort != "" {
 		subagentCtx = withSubagentReasoningEffort(subagentCtx, chatCtx.turnSettings.ReasoningEffort)
 	}
+	// A build's allowlist for the turn also bounds the sub-agent's MCP tools (toolAllowlistForChat).
+	subagentCtx = withSubagentToolAllowlist(subagentCtx, chatCtx.toolAllowlist)
 	callResult, err := a.callSubagentModelWithCaps(subagentCtx, chatCtx.chat.UserID, caps, modelName, modelContext, ritualUUIDs, chatCtx.chat.IsSandboxed())
 	if callResult != nil && (err == nil || len(callResult.Calls) > 0) {
 		// The meter computes subagent LLM credits and records nothing when the charge rounds to
@@ -274,9 +276,14 @@ func subagentScratchpad(chat *models.Chat, scratchpad string) string {
 	return scratchpad
 }
 
-func buildSubagentModelContext(systemPrompt, scratchpad, message string) *provider.ModelContext {
+// buildSubagentModelContext is a sub-agent's context: the base prompt ("" is What Iff's own,
+// baseSystemPrompt) merged with the personality prompt, the scratchpad, then the task.
+func buildSubagentModelContext(basePrompt, systemPrompt, scratchpad, message string) *provider.ModelContext {
+	if basePrompt == "" {
+		basePrompt = baseSystemPrompt
+	}
 	modelContext := &provider.ModelContext{}
-	modelContext.Append(provider.SegmentKindSystemPrompt, provider.RoleDeveloper, mergePrompts(baseSystemPrompt, systemPrompt), true)
+	modelContext.Append(provider.SegmentKindSystemPrompt, provider.RoleDeveloper, mergePrompts(basePrompt, systemPrompt), true)
 	if strings.TrimSpace(scratchpad) != "" {
 		modelContext.Append(provider.SegmentKindScratchpad, provider.RoleDeveloper, scratchpad, true)
 	}

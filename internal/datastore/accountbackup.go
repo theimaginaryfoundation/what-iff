@@ -500,6 +500,10 @@ func (d *Datastore) importBackupChatMessages(ctx context.Context, targetUserID u
 		if rec.JobRun != nil {
 			create.SetJobRun(rec.JobRun)
 		}
+		if rec.ExcludeFromMemory {
+			// As CreateChatMessage: only ever set, so an unflagged message keeps NULL.
+			create.SetExcludeFromMemory(true)
+		}
 		if rec.GenerationModel != "" {
 			create.SetGenerationModel(rec.GenerationModel)
 		}

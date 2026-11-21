@@ -60,6 +60,10 @@ type Deps struct {
 	// messages from outside the app (another chat service, say). It is nil when
 	// the server was built without an agent; callers must check before use.
 	Turns TurnStarter
+	// TurnRevisions takes a turn back or answers it again, for plugins that start
+	// turns through Turns. It is nil when the server was built without an agent;
+	// callers must check before use.
+	TurnRevisions TurnReviser
 	// Attachments saves a file to one of a user's chats, for plugins that receive
 	// files from outside the app (a picture posted in another chat service, say).
 	// The attachment it returns goes on the UserTurn's message. It is nil when the
@@ -92,6 +96,40 @@ type UserTurn struct {
 // does not belong to UserID is not found.
 type TurnStarter interface {
 	StartUserTurn(ctx context.Context, turn UserTurn) (*models.ChatMessageResponse, error)
+}
+
+// TurnRegeneration answers a saved user message again (TurnReviser.RegenerateTurn).
+type TurnRegeneration struct {
+	// UserID owns the chat. The run, and its metering, are this user's.
+	UserID uuid.UUID
+	// Timezone is the user's IANA timezone, as for UserTurn. Empty means the server default.
+	Timezone string
+	// UserMessageID is the user message whose turn is regenerated: the latest in its chat.
+	UserMessageID uuid.UUID
+	// Options are the new run's per-turn options; nil runs it as an ordinary turn.
+	Options *models.TurnOptions
+	// Source names the plugin, for the meter, as for UserTurn. Empty means "plugin".
+	Source string
+}
+
+// TurnReviser takes a turn back (supersedes it) or regenerates its reply, the way
+// agent.SupersedeTurn and agent.RegenerateTurn do: superseded messages are kept,
+// but left out of the model's context and of message listings. Only the latest
+// turn in a chat can be revised, and the errors are the agent's
+// (agent.ErrTurnNotLatest and the rest; datastore.ErrChatMessageNotFound for a
+// message that is not the user's).
+type TurnReviser interface {
+	// SupersedeTurn takes back the turn userMessageID starts and stops the
+	// turn's own runs that are still going (not other runs in the chat); a
+	// reply one of them saves while it winds down is not live. Taking back a
+	// turn already taken back succeeds.
+	SupersedeTurn(ctx context.Context, userID, userMessageID uuid.UUID) error
+	// RegenerateTurn supersedes the turn's replies and answers its user message
+	// again, with turn.Options (they are not stored: pass the turn's pre/post
+	// context and the rest again). One run at a time: while a run of the turn is
+	// unfinished, a regenerate is agent.ErrTurnRunning. The response carries the
+	// user message id and the new job id.
+	RegenerateTurn(ctx context.Context, turn TurnRegeneration) (*models.ChatMessageResponse, error)
 }
 
 // AttachmentUpload is one file to save to a chat.

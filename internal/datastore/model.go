@@ -323,6 +323,28 @@ func (d *Datastore) assertUserCanUseModel(ctx context.Context, tx *ent.Tx, userI
 	return assertUserCanUseModelTx(ctx, tx, userID, modelID)
 }
 
+// CheckUserCanUseModel runs the check that creating or updating a chat runs on its model, outside
+// a write: nil when userID may pick modelID, else ErrModelNotFound (no such model, retired or
+// deleted, or another account's connection model) or ErrExperimentalModelNotAllowed. A nil id is
+// ErrModelNotFound here, since the caller is naming a model.
+func (d *Datastore) CheckUserCanUseModel(ctx context.Context, userID, modelID uuid.UUID) error {
+	if modelID == uuid.Nil {
+		return ErrModelNotFound
+	}
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T("tx.start_failed"), zap.Error(err))
+		return err
+	}
+	// Read-only: always rolled back.
+	defer func() {
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+	}()
+	return assertUserCanUseModelTx(ctx, tx, userID, modelID)
+}
+
 // AdminPatchUserExperimentalModels toggles experimental model access for a user.
 func (d *Datastore) AdminPatchUserExperimentalModels(ctx context.Context, userID uuid.UUID, enabled bool) (*models.UserResponse, error) {
 	tx, err := d.dbClient.Tx(ctx)
