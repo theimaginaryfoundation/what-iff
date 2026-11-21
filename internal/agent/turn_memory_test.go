@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -276,6 +277,61 @@ func TestTurnSendRequest(t *testing.T) {
 			assert.Equal(t, tt.wantExclude, req.ExcludeFromMemory)
 		})
 	}
+}
+
+// The send path goes through turnSendRequest: a save-off message sent as a steer while a turn runs
+// is stored flagged and queued as a turn of its own, so the running turn cannot take it in
+// (ClaimSteerMessages, what takeSteering reads) and answer it with create_memory offered, an
+// unflagged reply and a checkpoint free to extract. An ordinary steer sent the same way is taken
+// in, which shows the setup reaches the steering path. A retry of the flagged message reloads it
+// with the flag (TestPrepareUserTurnContext_SaveOffFlagsTheReply).
+func TestHandleUserMessage_SaveOffIsNeverTakenInAsASteer(t *testing.T) {
+	a, ds, _, userID, chat := newSkillsAgentFixture(t)
+	ctx := middleware.ContextWithUser(context.Background(), userID, "")
+
+	// A turn running in the chat: its job is live, so the sends below wait in the turn gate.
+	first, err := ds.CreateChatMessage(ctx, userID, models.ChatMessage{ChatID: chat.ID, Message: "first", Origin: models.MessageOriginUser})
+	require.NoError(t, err)
+	running, err := ds.CreateJob(ctx, userID, models.Job{
+		JobType: JobTypeChatMessage, Reference: first.ID.String(), Status: models.JobStatusProcessing, DraftDeltas: []string{},
+	})
+	require.NoError(t, err)
+
+	saveOff, err := a.HandleUserMessage(ctx, models.ChatMessage{
+		ChatID: chat.ID, Message: "keep this out", Origin: models.MessageOriginUser, Steer: true,
+		TurnOptions: &models.TurnOptions{MemorySave: ptrTo(false)},
+	})
+	require.NoError(t, err)
+	ordinary, err := a.HandleUserMessage(ctx, models.ChatMessage{
+		ChatID: chat.ID, Message: "by the way", Origin: models.MessageOriginUser, Steer: true,
+	})
+	require.NoError(t, err)
+	saveOffJob, ordinaryJob := uuid.MustParse(saveOff.JobID), uuid.MustParse(ordinary.JobID)
+	t.Cleanup(func() {
+		// Stop the queued workers and wait for them before the fixture closes the database.
+		_ = a.CancelJob(context.Background(), userID, saveOffJob)
+		assert.Eventually(t, func() bool { return !a.hasRunningJob(saveOffJob) && !a.hasRunningJob(ordinaryJob) },
+			10*time.Second, 20*time.Millisecond)
+	})
+
+	stored, err := ds.GetChatMessage(ctx, userID, saveOff.ID)
+	require.NoError(t, err)
+	assert.True(t, stored.ExcludeFromMemory, "the save-off message is stored flagged")
+	job, err := ds.GetJob(ctx, userID, saveOffJob)
+	require.NoError(t, err)
+	assert.False(t, job.Steer, "a message with turn options is never queued as a steer")
+	steerJob, err := ds.GetJob(ctx, userID, ordinaryJob)
+	require.NoError(t, err)
+	require.True(t, steerJob.Steer, "an ordinary steer stays a steer")
+
+	claimed, err := ds.ClaimSteerMessages(ctx, userID, chat.ID, running.ID, running.CreatedAt)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1, "the running turn takes in the ordinary steer only")
+	assert.Equal(t, ordinary.ID, claimed[0].MessageID)
+	job, err = ds.GetJob(ctx, userID, saveOffJob)
+	require.NoError(t, err)
+	assert.Contains(t, []models.JobStatus{models.JobStatusPending, models.JobStatusProcessing}, job.Status,
+		"the save-off message is still queued for a turn of its own")
 }
 
 // A recall-off turn retrieves nothing, so its reply records no "Load Memory" call for the
