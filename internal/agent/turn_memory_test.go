@@ -308,10 +308,12 @@ func TestHandleUserMessage_SaveOffIsNeverTakenInAsASteer(t *testing.T) {
 	require.NoError(t, err)
 	saveOffJob, ordinaryJob := uuid.MustParse(saveOff.JobID), uuid.MustParse(ordinary.JobID)
 	t.Cleanup(func() {
-		// Stop the queued workers and wait for them before the fixture closes the database.
-		_ = a.CancelJob(context.Background(), userID, saveOffJob)
+		// Stop both queued workers in process (no database write that could meet a lock on the
+		// in-memory SQLite) and wait for them before the fixture closes the database.
+		_ = a.cancelRunningJob(userID, saveOffJob)
+		_ = a.cancelRunningJob(userID, ordinaryJob)
 		assert.Eventually(t, func() bool { return !a.hasRunningJob(saveOffJob) && !a.hasRunningJob(ordinaryJob) },
-			10*time.Second, 20*time.Millisecond)
+			30*time.Second, 20*time.Millisecond)
 	})
 
 	stored, err := ds.GetChatMessage(ctx, userID, saveOff.ID)

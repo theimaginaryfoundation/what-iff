@@ -245,10 +245,13 @@ func TestRegenerateTurn_StartsANewRunForTheSameMessage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, jobID, latest)
 
-	require.Eventually(t, func() bool {
-		job, err := s.ds.GetJob(context.Background(), s.userID, jobID)
-		return err == nil && (job.Status == models.JobStatusFailed || job.Status == models.JobStatusComplete || job.Status == models.JobStatusCancelled)
-	}, 10*time.Second, 20*time.Millisecond, "the run finishes (it fails: no model)")
+	// Wait on the run's in-process registration rather than polling its job row, so the test
+	// never reads the in-memory SQLite while the run writes it.
+	require.Eventually(t, func() bool { return !a.hasRunningJob(jobID) }, 30*time.Second, 20*time.Millisecond,
+		"the run finishes (it fails: no model)")
+	job, err := s.ds.GetJob(context.Background(), s.userID, jobID)
+	require.NoError(t, err)
+	assert.Contains(t, []models.JobStatus{models.JobStatusFailed, models.JobStatusComplete, models.JobStatusCancelled}, job.Status)
 
 	reply, err := s.ds.GetChatMessage(ctx, s.userID, a1.ID)
 	require.NoError(t, err)

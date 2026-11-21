@@ -770,10 +770,12 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 		return nil, fmt.Errorf("failed to create job: %w", err)
 	}
 
-	// Start the background processing with a cancellable runtime context.
+	// Start the background processing with a cancellable runtime context. The run owns newJob
+	// from here on (updateJobStatus rewrites it), so the response uses the id read before.
+	jobID := newJob.ID
 	runCtx, cancel := context.WithCancel(ctx)
-	a.registerRunningJobCancel(newJob.ID, userID, cancel)
-	go a.watchChatJobCancel(runCtx, userID, newJob.ID, cancel)
+	a.registerRunningJobCancel(jobID, userID, cancel)
+	go a.watchChatJobCancel(runCtx, userID, jobID, cancel)
 	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, chatMessage.ID, "processing", func() error {
 		_, err := a.handleUserMessage(runCtx, newJob, chatMessage)
 		return err
@@ -782,7 +784,7 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 	// Return response with job details
 	return &models.ChatMessageResponse{
 		ID:    chatMessage.ID,
-		JobID: newJob.ID.String(),
+		JobID: jobID.String(),
 		Type:  JobTypeChatMessage,
 	}, nil
 }
@@ -916,11 +918,13 @@ func (a *Agent) rerunUserMessage(detachedCtx context.Context, userID uuid.UUID, 
 // startUserMessageRun starts newJob, a chat_message job just created for the saved user message
 // msg (a retry, or a regenerate with msg.TurnOptions set), in the background on detachedCtx.
 func (a *Agent) startUserMessageRun(detachedCtx context.Context, userID uuid.UUID, newJob *models.Job, msg *models.ChatMessage, action string) *models.ChatMessageResponse {
+	// The run owns newJob once it starts (updateJobStatus rewrites it): read its id first.
+	jobID := newJob.ID
 	runCtx, cancel := context.WithCancel(detachedCtx)
-	a.registerRunningJobCancel(newJob.ID, userID, cancel)
+	a.registerRunningJobCancel(jobID, userID, cancel)
 	// Like a new send, the run stops when it is cancelled from another API instance (a Stop, or
 	// the turn taken back there: SupersedeTurn).
-	go a.watchChatJobCancel(runCtx, userID, newJob.ID, cancel)
+	go a.watchChatJobCancel(runCtx, userID, jobID, cancel)
 	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, msg.ID, action, func() error {
 		_, err := a.handleUserMessage(runCtx, newJob, msg)
 		return err
@@ -928,7 +932,7 @@ func (a *Agent) startUserMessageRun(detachedCtx context.Context, userID uuid.UUI
 
 	return &models.ChatMessageResponse{
 		ID:    msg.ID,
-		JobID: newJob.ID.String(),
+		JobID: jobID.String(),
 		Type:  JobTypeChatMessage,
 	}
 }
