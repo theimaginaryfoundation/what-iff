@@ -38,8 +38,8 @@ And a thread is anchored on a range of the file's text, which the server carries
 - Paths in the project are the gallery's: folder segments are lower case (the gallery normalizes them), file names keep their case.
   A reference whose folder case differs from the gallery's still resolves, as folder segments are matched without case, so `Assets/logo.png` finds `assets/logo.png`; a name must match exactly.
 - Files are found as the page asks for them, a folder at a time, so a project has no size limit of its own; a folder's listing is reused for a few seconds and each file version is downloaded once.
-- A page an agent builds in a folder (`site/index.html`) opens from the conversation as from the gallery.
-  Files attached to messages have no folder; once paths are the same everywhere (§7), a conversation's files at their workspace paths are a project too.
+- **A conversation is a project too.** A page opened in a conversation finds a path among that conversation's files (its context, ADR 0x043 §4, at their workspace paths, §7) before the gallery's: the conversation's project is what its agent's container holds, and a file of the same name elsewhere in the gallery does not stand in for it.
+  A path the conversation has no file at is looked for in the gallery folder, as outside a conversation.
 
 ### 3. The preview site: an origin of its own, asking the app for each file
 

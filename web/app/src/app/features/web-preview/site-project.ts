@@ -14,11 +14,16 @@ export interface SiteAnswer {
 const MODULE_EXTENSIONS = ['.js', '.mjs'];
 const HTML_EXTENSIONS = ['.html', '.htm'];
 
+/** A conversation's files by workspace path (ADR 0x050 §7); `fresh` lists them again now. */
+export type ConversationFiles = (fresh: boolean) => Promise<Map<string, FileAttachment>>;
+
 /**
  * One open project on the preview site (ADR 0x050 §2, §3): a gallery folder as the site's root,
  * whose files are found by path when the page asks for them. A path's folders are the gallery's
  * (matched without case: the gallery keeps folder names lower case), its name is the file's name.
- * Text the editor holds but has not saved is served in place of the stored file.
+ * In a conversation, its files at that path come first: the conversation's project is what its
+ * agent's container holds, and a file of the same name elsewhere in the gallery does not stand in
+ * for it. Text the editor holds but has not saved is served in place of the stored file.
  *
  * It remembers what it served and what it could not find, so `changed` can tell when a reload would
  * show something new: a served file with a new version, or a missing one that now exists.
@@ -40,6 +45,8 @@ export class SiteProject {
     private readonly unsaved: ReadonlyMap<string, string>,
     /** Parses HTML (the document's DOMParser). */
     private readonly parseHtml: (html: string) => Document,
+    /** The conversation's files, when the page is open in one. */
+    private readonly conversation: ConversationFiles | null = null,
   ) {}
 
   /** The file at `path` in the project, ready to serve. */
@@ -48,7 +55,7 @@ export class SiteProject {
     if (!place) return { status: 400, message: `${path} is not a path in this project.` };
     const text = this.unsaved.get(path);
     if (text !== undefined) return this.serve(path, place.name, null, new TextEncoder().encode(text));
-    const file = (await this.folders.list(place.folder)).get(place.name);
+    const file = await this.find(place, this.lookups(false));
     if (!file) {
       this.missing.set(path, place);
       this.served.delete(path);
@@ -62,18 +69,28 @@ export class SiteProject {
 
   /** Whether anything served, or asked for and missing, is different now. */
   async changed(): Promise<boolean> {
-    const folders = new Set([...this.served.values(), ...this.missing.values()].map(p => p.folder));
-    const listings = new Map<string, Map<string, FileAttachment>>();
-    for (const folder of folders) listings.set(folder, await this.folders.list(folder, true));
+    // Each folder and the conversation are listed once, now, however many paths share them.
+    const lookups = this.lookups(true);
     for (const [path, was] of this.served) {
       if (this.unsaved.has(path)) continue;
-      const now = listings.get(was.folder)?.get(was.name);
+      const now = await this.find(was, lookups);
       if (!now || versionOf(now) !== was.version) return true;
     }
     for (const was of this.missing.values()) {
-      if (listings.get(was.folder)?.has(was.name)) return true;
+      if (await this.find(was, lookups)) return true;
     }
     return false;
+  }
+
+  /** The file at a place: the conversation's at that path first, then the gallery folder's. */
+  private async find(place: { folder: string; name: string }, lookups: Lookups): Promise<FileAttachment | undefined> {
+    const inConversation = (await lookups.conversation())?.get(place.folder ? `${place.folder}/${place.name}` : place.name);
+    return inConversation ?? (await lookups.folder(place.folder)).get(place.name);
+  }
+
+  /** Fresh listings (to see changes) or recent ones (to serve), each read once per lookup. */
+  private lookups(fresh: boolean): Lookups {
+    return new Lookups(folder => this.folders.list(folder, fresh), this.conversation ? () => this.conversation!(fresh) : null);
   }
 
   /** The gallery folder and name of a project path, or null when it is not one. */
@@ -133,4 +150,29 @@ export class SiteProject {
 
 function versionOf(file: FileAttachment): string {
   return `${file.id}@${file.content_version ?? '?'}`;
+}
+
+/** The listings one lookup (a request, or one check for changes) reads, each at most once. */
+class Lookups {
+  private readonly folders = new Map<string, Promise<Map<string, FileAttachment>>>();
+  private conversationFiles: Promise<Map<string, FileAttachment>> | null | undefined;
+
+  constructor(
+    private readonly listFolder: (folder: string) => Promise<Map<string, FileAttachment>>,
+    private readonly listConversation: (() => Promise<Map<string, FileAttachment>>) | null,
+  ) {}
+
+  folder(folder: string): Promise<Map<string, FileAttachment>> {
+    let files = this.folders.get(folder);
+    if (!files) {
+      files = this.listFolder(folder);
+      this.folders.set(folder, files);
+    }
+    return files;
+  }
+
+  conversation(): Promise<Map<string, FileAttachment>> | null {
+    if (this.conversationFiles === undefined) this.conversationFiles = this.listConversation?.() ?? null;
+    return this.conversationFiles;
+  }
 }

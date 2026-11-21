@@ -36,7 +36,7 @@ import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { CommentAgentService } from '../office/comments/comment-agent.service';
 import { CommentsPanelState } from '../office/comments/comments-panel-state.service';
-import { COMMENT_SAVER, CommentSaveResult, CommentSaver, FileEditor } from './editors/file-editor';
+import { COMMENT_SAVER, CommentSaveResult, CommentSaver, FileEditor, WORKSPACE_CONTEXT, WorkspaceContext } from './editors/file-editor';
 import { ImageMarkupComponent, MarkupResult } from './markup/image-markup.component';
 import { galleryDisplayBaseName, galleryFilenameFromBaseName } from '../gallery/helpers/gallery-filename.helpers';
 import { FilePreviewKind, fileTypeLabel, previewKindFor } from '../gallery/helpers/file-preview.helpers';
@@ -78,9 +78,12 @@ const MARKUP_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/web
   styleUrl: './file-workspace.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
   // The viewer it hosts saves comments made while viewing through it (ADR 0x045).
-  providers: [{ provide: COMMENT_SAVER, useExisting: forwardRef(() => FileWorkspaceComponent) }],
+  providers: [
+    { provide: COMMENT_SAVER, useExisting: forwardRef(() => FileWorkspaceComponent) },
+    { provide: WORKSPACE_CONTEXT, useExisting: forwardRef(() => FileWorkspaceComponent) },
+  ],
 })
-export class FileWorkspaceComponent implements CommentSaver {
+export class FileWorkspaceComponent implements CommentSaver, WorkspaceContext {
   private readonly files = inject(FileAttachmentService);
   private readonly confirmationService = inject(ConfirmationService);
   private readonly workspace = inject(FileWorkspaceService);

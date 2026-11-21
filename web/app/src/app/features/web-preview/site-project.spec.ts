@@ -100,4 +100,30 @@ describe('SiteProject', () => {
     tree['site']['index.html'] = { text: 'saved', version: 2 };
     expect(await project.changed()).toBe(false);
   });
+
+  it('finds a conversation’s files at their workspace paths before the gallery’s, and sees them change', async () => {
+    const tree: Tree = {
+      '': { 'styles.css': { text: 'gallery copy' } },
+      css: { 'app.css': { text: 'gallery app.css' } },
+    };
+    let conversation = new Map<string, FileAttachment>([
+      ['styles.css', { id: 'chat-styles', name: 'styles.css', folder: '', content_version: 1 } as FileAttachment],
+    ]);
+    const files = folders(tree);
+    files.download.mockImplementation(
+      async (f: FileAttachment) => new Blob([f.id === 'chat-styles' ? 'chat copy' : tree[f.folder ?? '']![f.name]!.text]),
+    );
+    const listed: boolean[] = [];
+    const project = new SiteProject(files, '', new Map(), parse, async fresh => (listed.push(fresh), conversation));
+    expect(text((await project.get('styles.css')).body)).toBe('chat copy');
+    // Not in the conversation: the gallery folder's.
+    expect(text((await project.get('css/app.css')).body)).toBe('gallery app.css');
+    expect(listed).toEqual([false, false]);
+
+    expect(await project.changed()).toBe(false);
+    conversation = new Map([['styles.css', { id: 'chat-styles', name: 'styles.css', folder: '', content_version: 2 } as FileAttachment]]);
+    expect(await project.changed()).toBe(true);
+    // One fresh listing of the conversation per check, however many paths it serves.
+    expect(listed.slice(2)).toEqual([true, true]);
+  });
 });

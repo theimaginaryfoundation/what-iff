@@ -96,7 +96,7 @@ There is no version history: Save overwrites, and Save As keeps a copy.
 
 `internal/agent/contextfiles.go` defines `ContextFilesForChat`: attachments on messages since the checkpoint, `find_context` results in those messages, the last 10 user messages' attachments, this turn's tool outputs, active skill bundles, and agent-authored files created in this chat.
 Agent files from before `created_by_chat_id` existed have no recorded chat and are left out; a message or `find_context` still brings them in.
-Each file has a workspace path, and the reasons it is there.
+Each file has a workspace path (its gallery folder and name, the path it has everywhere: ADR 0x050 §7), and the reasons it is there.
 Deduplication is newest wins per path; shadowed duplicates are listed greyed out, so the name-collision rule is visible.
 
 `GET /chat/{chatId}/context-files` returns the list.

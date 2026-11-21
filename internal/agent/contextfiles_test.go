@@ -34,6 +34,23 @@ func TestContextWorkspacePath(t *testing.T) {
 	_, err := ContextWorkspacePath(nil)
 	require.Error(t, err)
 
+	// The folder is part of the path, so a file has the same path in the gallery, the file tools
+	// and the container (ADR 0x050 §7).
+	for _, c := range []struct{ folder, name, want string }{
+		{"notes", "journal.md", "notes/journal.md"},
+		{"site/css", "app.css", "site/css/app.css"},
+		{"", "top.md", "top.md"},
+		{"/site/", "index.html", "site/index.html"},
+	} {
+		got, err := ContextWorkspacePath(&models.FileAttachment{Folder: c.folder, Name: c.name})
+		require.NoError(t, err, c)
+		require.Equal(t, c.want, got, c)
+	}
+	_, err = ContextWorkspacePath(&models.FileAttachment{Folder: "site", Name: ""})
+	require.Error(t, err, "a folder alone is not a file's path")
+	_, err = ContextWorkspacePath(&models.FileAttachment{Folder: "..", Name: "x.md"})
+	require.Error(t, err, "a folder cannot climb out of the workspace")
+
 	p, err := SkillBundleWorkspacePath("tidy", "scripts/run.sh")
 	require.NoError(t, err)
 	require.Equal(t, "skills/tidy/scripts/run.sh", p)

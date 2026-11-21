@@ -22,7 +22,7 @@ const MAX_CACHED_FILES = 400;
 export class FolderFiles {
   private readonly files = inject(FileAttachmentService);
   private readonly gallery = inject(ImageGalleryService);
-  /** Recent folder listings, by folder. */
+  /** Recent folder listings, by folder; a conversation's under a key no folder can have. */
   private readonly listings = new Map<string, { at: number; files: Promise<Map<string, FileAttachment>> }>();
   /** Downloaded files by id and content version, least recently used first. */
   private readonly downloads = new Map<string, Promise<Blob>>();
@@ -31,11 +31,28 @@ export class FolderFiles {
 
   /** The folder's files by name (the newest of a name wins); `fresh` lists it again now. */
   list(folder: string, fresh = false): Promise<Map<string, FileAttachment>> {
-    const kept = this.listings.get(folder);
+    return this.listed(folder, fresh, () => this.listFolder(folder));
+  }
+
+  /**
+   * A conversation's files by workspace path (its context, ADR 0x043 §4, at the paths of ADR 0x050
+   * §7), the one that takes each path: files shadowed by a newer one are left out.
+   */
+  conversation(chatId: string, fresh = false): Promise<Map<string, FileAttachment>> {
+    return this.listed(`\u0000chat:${chatId}`, fresh, async () => {
+      const response = await firstValueFrom(this.files.listChatContextFiles(chatId));
+      const byPath = new Map<string, FileAttachment>();
+      for (const f of response.files) if (!f.shadowed_by) byPath.set(f.workspace_path, f.file);
+      return byPath;
+    });
+  }
+
+  private listed(key: string, fresh: boolean, list: () => Promise<Map<string, FileAttachment>>): Promise<Map<string, FileAttachment>> {
+    const kept = this.listings.get(key);
     if (kept && !fresh && this.now() - kept.at < LISTING_TTL_MS) return kept.files;
-    const files = this.listFolder(folder);
-    files.catch(() => this.listings.get(folder)?.files === files && this.listings.delete(folder));
-    this.listings.set(folder, { at: this.now(), files });
+    const files = list();
+    files.catch(() => this.listings.get(key)?.files === files && this.listings.delete(key));
+    this.listings.set(key, { at: this.now(), files });
     return files;
   }
 
