@@ -651,10 +651,20 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 	}
 	// Attachment labels are only injected when tools are enabled, matching the
 	// previous behavior for OpenAI chat turns.
-	additionalDevContext := mcpLifecycleDeveloperContext()
-	if policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage); policy.toolsEnabled {
-		if loadable := loadableToolsDeveloperContext(policy.offeredAgentToolNames(), a.loadedBuiltinToolSet(ctx, userID, chatCtx)); loadable != "" {
-			additionalDevContext += "\n\n" + loadable
+	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
+	additionalDevContext := ""
+	// The lifecycle note and the loadable-tools note tell the model to load tools; a build's
+	// allowlist without load_tools leaves nothing loadable.
+	canLoad := policy.toolAllowed(tools.LoadToolsToolSpec.Name)
+	if canLoad {
+		additionalDevContext = mcpLifecycleDeveloperContext()
+	}
+	if policy.toolsEnabled {
+		if loadable := loadableToolsDeveloperContext(policy.offeredAgentToolNames(), a.loadedBuiltinToolSet(ctx, userID, chatCtx), canLoad); loadable != "" {
+			if additionalDevContext != "" {
+				additionalDevContext += "\n\n"
+			}
+			additionalDevContext += loadable
 		}
 	}
 	if additionalDeveloperContextForChat != nil {
@@ -663,6 +673,14 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 			additionalDeveloperContextForChat(a, chatCtx.chat),
 		}, "\n\n"))
 	}
+	// The skills index tells the model to call load_skill, and the mode hint to call list_modes and
+	// change_mode; neither is sent when a build's allowlist leaves those tools out.
+	skillsIndex := ""
+	if policy.toolAllowed(tools.LoadSkillToolSpec.Name) {
+		skillsIndex = a.skillsIndexDeveloperContext(chatCtx)
+	}
+	moodToolsAvailable := policy.toolAllowed(tools.ListMoodsToolSpec.Name) && policy.toolAllowed(tools.ChangeMoodToolSpec.Name) &&
+		a.shouldExposeMoodTools(ctx, userID, chatCtx.chat)
 	modelCtx, built, err := b.buildTurn(ctx, messageContextBuildRequest{
 		UserID:                     userID,
 		Chat:                       chatCtx.chat,
@@ -674,9 +692,9 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		ActiveMood:                 chatCtx.activeMood,
 		ActiveMoodRituals:          chatCtx.activeMoodRituals,
 		ActiveSkills:               chatCtx.activeSkills(),
-		SkillsIndex:                a.skillsIndexDeveloperContext(chatCtx),
+		SkillsIndex:                skillsIndex,
 		IsAutoMood:                 chatCtx.chat.IsAutoMood,
-		MoodToolsAvailable:         a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
+		MoodToolsAvailable:         moodToolsAvailable,
 		Attachments:                chatMessage.Attachments,
 		ImageBytes:                 imageBytes,
 		ExpressionsEnabled:         chatCtx.expressionsEnabled,
@@ -685,6 +703,7 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		LoadHistoryImageBytes:      chatCtx.modelVisionSupport,
 		PreContext:                 chatCtx.turnOptions.TurnPreContext(),
 		PostContext:                chatCtx.turnOptions.TurnPostContext(),
+		BaseSystemPrompt:           a.baseSystemPromptForChat(ctx, chatCtx.chat),
 		WithoutMemoryRecall:        !chatCtx.turnOptions.RecallsMemory(),
 	})
 	if err != nil {
@@ -1005,6 +1024,10 @@ type chatContext struct {
 	promptWaited time.Duration
 	// awaitingUser is set when a prompt went unanswered: the turn should end and ask in its reply.
 	awaitingUser bool
+	// toolAllowlist is the build's allowlist resolved for this turn (toolAllowlistForChat), nil for
+	// none. buildTurnToolPolicy sets it; the connector scope, run_subagent and the developer
+	// context read it, since they run without the turn's policy.
+	toolAllowlist map[string]bool
 	// mcpApps are the MCP Apps of this turn's MCP tool calls, by provider tool-call id (ADR 0x042),
 	// until executeToolUses puts them on the saved calls.
 	mcpApps map[string]*models.ToolCallApp
@@ -1252,7 +1275,7 @@ func (a *Agent) generateAssistantForMessage(ctx context.Context, userID uuid.UUI
 	if chatCtx.turnSettings.Advanced() && modelContext != nil {
 		// Advanced turns are told how the loop works (ADR 0x026). Added to the turn's own context so
 		// the Context X-ray shows it.
-		modelContext.InsertBeforeLastUserMessage(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, advancedLoopInstructions, false)
+		modelContext.InsertBeforeLastUserMessage(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, advancedLoopInstructions(chatCtx.toolAllowedThisTurn(tools.UpdatePlanToolSpec.Name)), false)
 		if open, reason := a.previousRunOpenPlan(ctx, userID, chatMessage.ChatID); len(open) > 0 {
 			modelContext.InsertBeforeLastUserMessage(provider.SegmentKindHistoryTurn, provider.RoleUser, openPlanContext(open, reason), false)
 		}
@@ -1428,24 +1451,7 @@ func (a *Agent) finishGeneration(ctx context.Context, userID uuid.UUID, chatMess
 // mock mode exercises the code real chat runs (streamed-text reconciliation,
 // tool-call recording, personality/mood, save).
 func (a *Agent) generateAssistantForMessageMock(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
-	// The mock adapter offers no tools to a model, but record the same tool set the real paths do,
-	// so a scripted tool call is gated exactly like a real model's. That set includes the
-	// turn-only tools and the chat's MCP connectors (see below); a chat with none attached
-	// discovers nothing, so mock e2e stays hermetic.
-	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	offered := policy.offeredAgentToolNames()
-	// Turn-only tools (update_plan, ask_user) and MCP tools are offered too, so the mock's echo
-	// directives can drive them locally (provider/mock_directives.go).
-	for _, spec := range turnOnlyToolSpecs(chatCtx) {
-		offered[spec.Name] = struct{}{}
-	}
-	if policy.toolsEnabled {
-		for _, spec := range a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs) {
-			offered[spec.Name] = struct{}{}
-		}
-	}
-	chatCtx.setOfferedTools(offered)
-	a.prepareTurnLoadableTools(ctx, chatCtx, offered)
+	a.prepareMockTurnTools(ctx, chatCtx, userID, chatMessage)
 
 	build := func(*provider.ModelContext) (provider.AgentAdapter, error) {
 		return provider.NewMockAdapter(provider.MockAdapterConfig{
@@ -1457,6 +1463,27 @@ func (a *Agent) generateAssistantForMessageMock(ctx context.Context, userID uuid
 	}
 	adapter, _ := build(modelContext)
 	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{provider: "mock", rebuild: build, modelContext: modelContext})
+}
+
+// prepareMockTurnTools records the mock turn's offered tools. The mock adapter offers no tools to a
+// model, but it records the same tool set the real paths do, so a scripted tool call is gated
+// exactly like a real model's. That set includes the turn-only tools and the chat's MCP connectors
+// (see below); a chat with none attached discovers nothing, so mock e2e stays hermetic.
+func (a *Agent) prepareMockTurnTools(ctx context.Context, chatCtx *chatContext, userID uuid.UUID, chatMessage *models.ChatMessage) {
+	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
+	offered := policy.offeredAgentToolNames()
+	// Turn-only tools (update_plan, ask_user) and MCP tools are offered too, so the mock's echo
+	// directives can drive them locally (provider/mock_directives.go).
+	for _, spec := range policy.restrictToAllowlist(turnOnlyToolSpecs(chatCtx)) {
+		offered[spec.Name] = struct{}{}
+	}
+	if policy.offersMCP() {
+		for _, spec := range policy.restrictToAllowlist(a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)) {
+			offered[spec.Name] = struct{}{}
+		}
+	}
+	chatCtx.setOfferedTools(offered)
+	a.prepareTurnLoadableTools(ctx, chatCtx, offered)
 }
 
 func mergedRitualIDsForTools(chatMessage *models.ChatMessage, activeMood *models.Mood) []uuid.UUID {
@@ -1509,9 +1536,12 @@ func (a *Agent) openAIResponseParamsForChat(ctx context.Context, chatCtx *chatCo
 			NativeWebSearch: policy.nativeWebSearch,
 		})
 		agentTools := getAgentToolsList(policy.disabledTools, policy.showMoodTools)
-		turnSpecs := turnOnlyToolSpecs(chatCtx)
+		turnSpecs := policy.restrictToAllowlist(turnOnlyToolSpecs(chatCtx))
 		agentTools = append(agentTools, tools.OpenAIFunctionTools(turnSpecs)...)
-		mcpSpecs := a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)
+		var mcpSpecs []tools.FunctionToolSpec
+		if policy.offersMCP() {
+			mcpSpecs = policy.restrictToAllowlist(a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs))
+		}
 		mcpTools := tools.OpenAIFunctionTools(mcpSpecs)
 		toolParams = provider.BuildOpenAITools(chatCtx.model, chatTools, agentTools, mcpTools)
 		offered := offeredToolNames(append(append(tools.AgentFunctionToolSpecs(policy.showMoodTools), turnSpecs...), mcpSpecs...), policy.disabledTools)
@@ -2382,7 +2412,7 @@ func (a *Agent) prepareChatContextOn(ctx context.Context, userID uuid.UUID, chat
 	}
 
 	// Get relevant memories (only the user-name line when the turn's options turn recall off).
-	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemoriesFor(ctx, memoryProgress, userID, chatMessage, parentChat)
+	memories, liveMemories, userNameLine, memoryEnrichmentFailed := a.loadTurnMemoriesFor(ctx, memoryProgress, userID, chatMessage, parentChat)
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
 	// (gpt-5.1) even when the user selected a different provider.
@@ -2416,8 +2446,6 @@ func (a *Agent) prepareChatContextOn(ctx context.Context, userID uuid.UUID, chat
 
 	// ExpressionsEnabled comes from the personality edge already eager-loaded by GetChat.
 	expressionsEnabled := parentChat.PersonalityExpressionsEnabled
-
-	userNameLine := a.recognizeUserNameLine(ctx, userID, memories)
 
 	return &chatContext{
 		userID:                 userID,
@@ -2611,14 +2639,16 @@ func (a *Agent) assertUserCanRunChatModel(ctx context.Context, userID uuid.UUID,
 	return fmt.Errorf("experimental model provider %q: %w", modelProvider, datastore.ErrExperimentalModelNotAllowed)
 }
 
-func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, error) {
+// getMemoriesForEnrichment is getMemories, or the test override (which adds no user-name line),
+// or nothing in mock/local mode.
+func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) (memories []string, liveMemories []*models.Memory, userNameLine string, err error) {
 	if a.testHooks.GetMemoriesOverride != nil {
 		formatted, err := a.testHooks.GetMemoriesOverride(ctx, userID, chatID, personalityID, userMessage)
-		return formatted, nil, err
+		return formatted, nil, "", err
 	}
 	if !a.memoryEnrichmentRuns() {
 		a.logger.Debug("mock/local mode: skipping memory enrichment", zap.String("chat_id", chatID.String()))
-		return nil, nil, nil
+		return nil, nil, "", nil
 	}
 	return a.getMemories(ctx, userID, chatID, personalityID, userMessage, sandboxed)
 }
@@ -2634,23 +2664,25 @@ func (a *Agent) memoryEnrichmentRuns() bool {
 // loadTurnMemories runs best-effort memory enrichment for a turn, shown in the job's live tool
 // timeline as a "Load Memory" row: running during retrieval, then complete with the memories (or
 // an error). The row is only added when retrieval really runs, so mock/local turns (which skip
-// it) never show one.
-func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgress, userID, chatID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, bool) {
+// it) never show one. userNameLine is the user-name line getMemories put first in memories ("" when
+// none, or when retrieval failed and memories is empty).
+func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgress, userID, chatID, personalityID uuid.UUID, userMessage string, sandboxed bool) (memories []string, liveMemories []*models.Memory, userNameLine string, failed bool) {
 	if progress != nil && a.memoryEnrichmentRuns() {
 		progress.Started(ctx)
 	}
-	memories, liveMemories, failed := a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage, sandboxed)
+	memories, liveMemories, userNameLine, failed = a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage, sandboxed)
 	if progress != nil {
 		progress.Finished(ctx, memories, failed)
 	}
-	return memories, liveMemories, failed
+	return memories, liveMemories, userNameLine, failed
 }
 
 // getMemoriesBestEffort attempts memory enrichment and degrades gracefully on any failure.
-// When it fails, it logs the error and returns an empty memory list along with a failure flag.
-func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, bool) {
+// When it fails, it logs the error and returns an empty memory list (and no user-name line) along
+// with a failure flag.
+func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) (memories []string, liveMemories []*models.Memory, userNameLine string, failed bool) {
 	defer a.timeTurnStage(ctx, turnStageMemoryEnrichment)()
-	memories, liveMemories, err := a.getMemoriesForEnrichment(ctx, userID, chatID, personalityID, userMessage, sandboxed)
+	memories, liveMemories, userNameLine, err := a.getMemoriesForEnrichment(ctx, userID, chatID, personalityID, userMessage, sandboxed)
 	if err != nil {
 		// Note: the underlying memory retrieval path logs errors at the failure site(s).
 		// Keep this at Debug to avoid duplicate error logs while still attaching user/chat context.
@@ -2659,9 +2691,9 @@ func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, cha
 			zap.String("chat_id", chatID.String()),
 			zap.Error(err),
 		)
-		return []string{}, nil, true
+		return []string{}, nil, "", true
 	}
-	return memories, liveMemories, false
+	return memories, liveMemories, userNameLine, false
 }
 
 // appendMemoryMessages adds memory messages to the input message list
@@ -2695,7 +2727,7 @@ var tzLocationCache sync.Map // map[string]*time.Location
 // offset so agents can reason about day-of-week without parsing ISO-8601.
 // Example: "Sun 2026-09-13 08:46:51 -04:00". This is intentionally not
 // RFC3339; treat layout changes as a prompt/protocol change (update
-// baseSystemPrompt + docs together).
+// baseSystemPromptMechanics + docs together).
 const agentMessageTimestampLayout = "Mon 2006-01-02 15:04:05 -07:00"
 
 // formatUserMessageWithTime prefixes body with a [sys:…] timestamp tag using

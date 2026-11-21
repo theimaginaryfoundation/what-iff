@@ -52,9 +52,10 @@ func TestLoadTurnMemoriesFor_RecallSwitch(t *testing.T) {
 			calls := 0
 			a := &Agent{logger: zap.NewNop(), testHooks: countingMemoryHook(&calls, []string{"User likes tea"})}
 			msg := &models.ChatMessage{ChatID: chat.ID, Message: "hi", TurnOptions: tt.opts}
-			memories, live, failed := a.loadTurnMemoriesFor(context.Background(), nil, uuid.New(), msg, chat)
+			memories, live, nameLine, failed := a.loadTurnMemoriesFor(context.Background(), nil, uuid.New(), msg, chat)
 			assert.False(t, failed)
 			assert.Nil(t, live)
+			assert.Empty(t, nameLine, "the hook adds no user-name line")
 			if tt.wantRecall {
 				assert.Equal(t, 1, calls)
 				assert.Equal(t, []string{"User likes tea"}, memories)
@@ -73,23 +74,25 @@ func TestRecallOff_KeepsUserNameLineWithoutAModelCall(t *testing.T) {
 	require.Nil(t, a.OpenAIProvider)
 	msg := &models.ChatMessage{ChatID: chat.ID, Message: "hi", TurnOptions: &models.TurnOptions{MemoryRecall: ptrTo(false)}}
 
-	memories, live, failed := a.loadTurnMemoriesFor(context.Background(), nil, userID, msg, chat)
+	memories, live, nameLine, failed := a.loadTurnMemoriesFor(context.Background(), nil, userID, msg, chat)
 	require.False(t, failed)
 	require.Nil(t, live)
 	require.Len(t, memories, 1)
 	assert.True(t, strings.HasPrefix(memories[0], userNameContextPrefix+"skills-"), memories[0])
-	assert.Equal(t, memories[0], a.recognizeUserNameLine(context.Background(), userID, memories))
+	assert.Equal(t, memories[0], nameLine, "the line it put first is returned, for chatContext.userNameLine")
 
 	// A sandboxed chat never gets the line, recall or not.
 	sandboxed := *chat
 	sandboxed.ContextScope = models.ContextScopeSandbox
-	memories, _, _ = a.loadTurnMemoriesFor(context.Background(), nil, userID, msg, &sandboxed)
+	memories, _, nameLine, _ = a.loadTurnMemoriesFor(context.Background(), nil, userID, msg, &sandboxed)
 	assert.Empty(t, memories)
+	assert.Empty(t, nameLine)
 
 	// Mock/local mode adds nothing, as recall adds nothing there.
 	a.mockLLM = true
-	memories, _, _ = a.loadTurnMemoriesFor(context.Background(), nil, userID, msg, chat)
+	memories, _, nameLine, _ = a.loadTurnMemoriesFor(context.Background(), nil, userID, msg, chat)
 	assert.Empty(t, memories)
+	assert.Empty(t, nameLine)
 }
 
 // Recall off also keeps out the memories earlier turns recalled and stored on their messages; the

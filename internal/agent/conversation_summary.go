@@ -44,13 +44,18 @@ func buildCheckpointConversationSummaryInput(existingSummary string) string {
 	return fmt.Sprintf("Update the existing summary to incorporate new developments in the conversation, keeping it compact.\n\nEXISTING SUMMARY:\n%s", existingSummary)
 }
 
-func buildCheckpointSummaryParams(userID uuid.UUID, existingSummary string, src checkpointSummarySource) (responses.ResponseNewParams, error) {
+// buildCheckpointSummaryParams builds the checkpoint summary request. instructions "" is What Iff's
+// own, checkpointConversationSummaryInstructions.
+func buildCheckpointSummaryParams(userID uuid.UUID, instructions, existingSummary string, src checkpointSummarySource) (responses.ResponseNewParams, error) {
+	if instructions == "" {
+		instructions = checkpointConversationSummaryInstructions
+	}
 	updatePrompt := buildCheckpointConversationSummaryInput(existingSummary)
 	params := responses.ResponseNewParams{
 		Model:            archivalOpenAIModel,
 		SafetyIdentifier: openai.String(userID.String()),
 		MaxOutputTokens:  openai.Int(checkpointSummaryMaxTokens),
-		Instructions:     openai.String(checkpointConversationSummaryInstructions),
+		Instructions:     openai.String(instructions),
 	}
 
 	switch {
@@ -79,7 +84,7 @@ func (a *Agent) summarizeConversationForCheckpoint(ctx context.Context, userID u
 		return "", fmt.Errorf("OpenAIProvider is nil, cannot summarize conversation for checkpoint")
 	}
 
-	params, err := buildCheckpointSummaryParams(userID, chatCtx.chat.CheckpointSummary, src)
+	params, err := buildCheckpointSummaryParams(userID, a.checkpointSummaryInstructionsFor(ctx, chatCtx.chat), chatCtx.chat.CheckpointSummary, src)
 	if err != nil {
 		return "", err
 	}

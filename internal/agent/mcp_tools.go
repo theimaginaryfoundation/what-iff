@@ -19,22 +19,19 @@ import (
 // getSubagentMCPTools returns MCP tool params for ritual-only contexts (e.g. run_subagent).
 // It loads ritual MCP servers only — no chat-level MCP servers are included.
 func (a *Agent) getSubagentMCPTools(ctx context.Context, userID uuid.UUID, ritualIDs []uuid.UUID, _ string) []responses.ToolUnionParam {
-	if len(ritualIDs) == 0 {
+	specs, _ := a.getSubagentMCPFunctionToolSpecs(ctx, userID, ritualIDs)
+	if len(specs) == 0 {
 		return nil
 	}
-	servers, err := a.ds.ListRitualMCPServers(ctx, userID, ritualIDs)
-	if err != nil {
-		a.logger.Warn("failed to load ritual mcp servers for subagent",
-			zap.String("user_id", userID.String()),
-			zap.Error(err))
-		return nil
-	}
-	specs := a.discoverMCPFunctionToolSpecs(ctx, userID, servers, nil)
 	return agenttools.OpenAIFunctionTools(specs)
 }
 
+// getSubagentMCPFunctionToolSpecs returns the MCP tools of the given skills' connectors for a
+// sub-agent, and those connectors. The parent turn's allowlist (withSubagentToolAllowlist) filters
+// the tools; one that names no MCP tool leaves the connectors uncontacted.
 func (a *Agent) getSubagentMCPFunctionToolSpecs(ctx context.Context, userID uuid.UUID, ritualIDs []uuid.UUID) ([]agenttools.FunctionToolSpec, []*models.MCPServer) {
-	if len(ritualIDs) == 0 {
+	allowed := subagentToolAllowlist(ctx)
+	if len(ritualIDs) == 0 || !allowlistAdmitsMCP(allowed) {
 		return nil, nil
 	}
 	servers, err := a.ds.ListRitualMCPServers(ctx, userID, ritualIDs)
@@ -44,7 +41,7 @@ func (a *Agent) getSubagentMCPFunctionToolSpecs(ctx context.Context, userID uuid
 			zap.Error(err))
 		return nil, nil
 	}
-	return a.discoverMCPFunctionToolSpecs(ctx, userID, servers, nil), servers
+	return keepAllowlisted(a.discoverMCPFunctionToolSpecs(ctx, userID, servers, nil), allowed), servers
 }
 
 // prepareTurnMCPToolSpecs returns all discoverable MCP tool definitions for this
@@ -96,8 +93,11 @@ func (a *Agent) getChatMCPServers(ctx context.Context, userID, chatID uuid.UUID,
 // prepareTurnMCPToolSpecs filled for the turn, or (cache miss) a fresh resolve over the same
 // thread-attached + active-skill sources. list(kind="mcp_servers"), load/unload_tools and
 // dispatchMCPToolUse all use it so a connector that is registered is also findable, loadable
-// and callable.
+// and callable. A turn whose allowlist names no MCP tool has no connector in scope.
 func (a *Agent) mcpServersInScope(ctx context.Context, chatCtx *chatContext) ([]*models.MCPServer, error) {
+	if !allowlistAdmitsMCP(chatCtx.toolAllowlist) {
+		return nil, nil
+	}
 	if len(chatCtx.mcpServers) > 0 {
 		return chatCtx.mcpServers, nil
 	}

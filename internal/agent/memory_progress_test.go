@@ -122,7 +122,7 @@ func TestLoadTurnMemories_TimelineRow(t *testing.T) {
 func TestLoadTurnMemories_NilProgressIsSafe(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop(), testHooks: memoryHook([]string{"m1"}, nil)}
-	memories, _, failed := a.loadTurnMemories(context.Background(), nil, uuid.New(), uuid.New(), uuid.New(), "hi", false)
+	memories, _, _, failed := a.loadTurnMemories(context.Background(), nil, uuid.New(), uuid.New(), uuid.New(), "hi", false)
 	assert.False(t, failed)
 	assert.Equal(t, []string{"m1"}, memories)
 }

@@ -91,6 +91,9 @@ type messageContextBuildRequest struct {
 	// (every ordinary turn) adds nothing.
 	PreContext  string
 	PostContext string
+	// BaseSystemPrompt is the base prompt the system material starts with
+	// (Agent.baseSystemPromptForChat). Empty means What Iff's own, baseSystemPrompt.
+	BaseSystemPrompt string
 	// WithoutMemoryRecall leaves out the memories earlier turns recalled and stored on their
 	// messages (models.TurnOptions.MemoryRecall false); the caller passes none of its own. False
 	// (every ordinary turn) replays them as usual.
@@ -115,7 +118,7 @@ func (b *messageContextBuilder) buildTurn(ctx context.Context, req messageContex
 	if req.CurrentMessage != nil {
 		excludeID = &req.CurrentMessage.ID
 	}
-	modelCtx, carryOver, history, err := b.buildHistoryContext(ctx, req.UserID, req.Chat, excludeID, req.LoadHistoryImageBytes, req.PreContext)
+	modelCtx, carryOver, history, err := b.buildHistoryContext(ctx, req.UserID, req.Chat, excludeID, req.LoadHistoryImageBytes, req.BaseSystemPrompt, req.PreContext)
 	if err != nil {
 		return nil, builtTurn{}, err
 	}
@@ -298,15 +301,19 @@ func (b *messageContextBuilder) selectCarryOverTurns(
 
 // buildHistoryContext starts the turn's context: the system material (base and personality
 // prompt, checkpoint summary, scratchpad, then the turn's preContext, all cacheable) and the
-// history after it. preContext is "" on every ordinary turn.
-func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID uuid.UUID, chat *models.Chat, excludeMessageID *uuid.UUID, loadHistoryImageBytes bool, preContext string) (
+// history after it. basePrompt "" is What Iff's own base prompt; preContext is "" on every
+// ordinary turn.
+func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID uuid.UUID, chat *models.Chat, excludeMessageID *uuid.UUID, loadHistoryImageBytes bool, basePrompt, preContext string) (
 	modelCtx *provider.ModelContext,
 	carryOver [][2]*models.ChatMessage,
 	history []*models.ChatMessage,
 	err error,
 ) {
 	modelCtx = &provider.ModelContext{}
-	sysText := mergePrompts(baseSystemPrompt, chat.SystemPrompt)
+	if basePrompt == "" {
+		basePrompt = baseSystemPrompt
+	}
+	sysText := mergePrompts(basePrompt, chat.SystemPrompt)
 	modelCtx.Append(provider.SegmentKindSystemPrompt, provider.RoleDeveloper, sysText, true)
 
 	if chat.CheckpointSummary != "" {

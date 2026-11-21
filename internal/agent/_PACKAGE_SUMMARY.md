@@ -70,6 +70,10 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
   Sub-agent loops are not load-gated: `loadedToolFilter` is nil there, so their skills' MCP tools are all sent.
 - **Checkpoint tool unload (`checkpoint_tool_unload.go`, #304):** after a checkpoint persists its summary, `unloadToolsUnusedInSegment` unloads every loaded tool (MCP or built-in) that no message since the previous checkpoint's window start called (`ChatToolNamesUsedSince` + `RetainChatLoadedTools`), so unused tool definitions are not carried into the next segment.
   It runs inside the turn, under the chat's turn gate, so no later turn can load a tool mid-prune; the model reloads what it needs with `load_tools`.
+- **The user's name in context (`context_user_name_seam.go`):** the first-message line "The user's name is …" uses `contextUserName`, which asks `contextUserNameForUser` (a private seam, nil here) and falls back to the username.
+  It lets a build that provisions accounts with generated usernames name the person properly.
+  The answer must be a short single-line name: a blank answer, one over 50 runes, or one with a control, line/paragraph separator or format character keeps the username.
+  `getMemories` returns the line it built and the turn records exactly that line as `chatContext.userNameLine`, so the line the model saw is the one persisted as the user-name context item.
 - **Files in context (`contextfiles.go`, ADR 0x043 §4):** `ContextFilesForChat` is the one rule for which files an agent working in a thread is expected to see: attachments on every message since the last checkpoint and the files `find_context` pulled in for them, attachments on the last ten user messages, the files tools produced this turn (`extraContextFilesForChat`, a private seam), the agent's own files written in the thread (`ListAgentFilesCreatedInChat`), and the active skills' bundle files.
   Each `ContextFile` carries its `WorkspacePath` (`ContextWorkspacePath`: the name alone, traversal refused; `SkillBundleWorkspacePath` for bundles) and `Reasons`; files sharing a path are all listed and the newest takes it (`ShadowedBy` on the rest).
   `GET /chat/{chatId}/context-files` serves it; the private build hydrates its container from it and reports the container through `containerStatusForChat`, so the Files tab and the container cannot drift.
@@ -204,6 +208,12 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   `runUserChatPostInferencePhases` hands the expression pick and the checkpoint `ModelContext.WithoutTurnContext()`, so the caller's context never reaches a stored scratchpad, memory or summary.
   A turn with pre/post context checkpoints from the DB on every model (`checkpointRebuildsFromDB`), since an OpenAI Responses chain off its response would carry the context; later turns chain safely, as no turn chains off an earlier one's response.
   Nil options (every ordinary turn) change nothing; `turn_options_test.go` pins that.
+- **Base prompt: norms and mechanics** (`prompts.go`, `prompt_seams.go`): `baseSystemPrompt` is `baseSystemPromptNorms` (What Iff's voice, identity and safety framing) + `baseSystemPromptSeparator` + `baseSystemPromptMechanics` (what the `[sys:…]` stamp means), byte for byte the prompt sent before the split.
+  The scratchpad, checkpoint summary and recalled memories are labelled where `provider.ModelContext` renders them, so the mechanics need no text for them.
+  `baseSystemPromptNormsForChat` (nil here) may replace the norms per chat; `composeBaseSystemPrompt` always keeps the mechanics after the replacement.
+  It applies to a chat turn (`buildModelContextForChatMessage` resolves it into `messageContextBuildRequest.BaseSystemPrompt`, merged with the personality prompt in `buildHistoryContext`) and to a sub-agent the turn starts (`buildSubagentModelContext`).
+  `checkpointSummaryInstructionsForChat` may replace `checkpointConversationSummaryInstructions` for a chat's checkpoint summary and for the final summary when an imported or remote-synced thread is rehydrated (`checkpointSummaryInstructionsForChatID` loads the chat only when the seam is set), and `scratchpadUpdatePromptForChat` may replace the app's scratchpad update prompt for a personality without its own (the personality's own still wins; the first scratchpad's prompt is unchanged).
+  Nil, a nil chat or a blank answer means What Iff's own text; `prompt_seams_test.go` pins the byte-identical default against a frozen copy of the old constant, and each call site (turn, sub-agent, checkpoint summary, both scratchpad paths, rehydration) passing the seam's answer.
 - **Per-turn memory switches** (`turn_memory.go`, `TurnOptions.MemoryRecall` / `MemorySave`; nil or true is the usual behaviour).
   Recall off: `loadTurnMemoriesFor` skips retrieval (no memory-query model call, no embedding, no lookup) and keeps only the first message's user-name line, which is identity, not memory.
   Nothing is retrieved, so there is no live "Load Memory" row, and `memoryToolCallsForChatContext` saves no "Load Memory" call for the user-name line alone (`recallOffWithoutMemories`).
@@ -320,6 +330,15 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   A job id as its `filter` reads that one job in full (whole prompt, model, skills, parameters and values, any status), which is how the model sees a prompt before rewriting it.
   Auto mood selection does not run in a sandboxed chat (`autoMoodSelectionSkipped`); its `change_mood` picks only its own personality's modes, refuses `model_override`, and mood rituals are not loaded.
   In every chat, dispatch refuses a tool the model was not offered that turn (`setOfferedTools`, recorded on every generation path including the sub-agent loops).
+- **Tool allowlist seam (`tool_allowlist_seam.go`):** `toolAllowlistForChat`, unset here, lets another build give a chat turn a fixed set of tools by name; nil means no restriction.
+  `buildTurnToolPolicy` applies it after every other rule and before the tools-enabled early return, disabling each catalog tool it leaves out, so vendor-native web search follows `web_search`.
+  The turn-only tools (`turnOnlyToolSpecs`) and MCP tools are filtered by `restrictToAllowlist` where their specs are assembled, on every path (including the Responses and mock paths); MCP tools are admitted only by full name.
+  The resolved list is kept on `chatContext.toolAllowlist` for code that runs without the policy.
+  With no MCP name listed the turn does not contact connectors at all: no discovery (`offersMCP`), and `mcpServersInScope` returns no connector, so `list(kind="mcp_servers")` and `load_tools` find none.
+  `run_subagent` passes the list to the sub-agent (`withSubagentToolAllowlist`), whose skills' MCP tools are filtered through it.
+  The developer context follows it: no tool-lifecycle note and no not-yet-loaded tools without `load_tools`, no skills index without `load_skill`, no mode-switch hint without `list_modes` and `change_mode`, and no checklist paragraph in the Advanced instructions without `update_plan`.
+  Loadable built-in and MCP tools need `load_tools` (and, for MCP, `list`) in the list too, or only the ones already loaded in the chat are callable.
+  It only narrows: the chat's own `disabled_tools` and the sandbox rules still apply on top.
 - **Memory provenance (relay threads, Discord, Buzz or Slack):** `memory_provenance.go`.
   `prepareChatContext` records `chatContext.memoryProvenance` (`memoryProvenanceForChat`: external for any chat bound to a Discord channel, sandboxed or not, `datastore.IsExternalRelayChat`; a failed lookup in a sandboxed chat reads as external) and the trigger message id.
   `create_memory` writes with `createMemoryOrigin` (the Discord author of the message being answered, read when the tool runs; the tool's `speaker` argument overrides it).

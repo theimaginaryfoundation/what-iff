@@ -52,7 +52,7 @@ func TestBuildCheckpointSummaryParams_ThreadedMode(t *testing.T) {
 	t.Parallel()
 
 	rid := "resp_abc"
-	params, err := buildCheckpointSummaryParams(uuid.New(), "", checkpointSummarySource{
+	params, err := buildCheckpointSummaryParams(uuid.New(), "", "", checkpointSummarySource{
 		PreviousResponseID: &rid,
 	})
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestBuildCheckpointSummaryParams_ExplicitMode(t *testing.T) {
 	mc.Append(provider.SegmentKindHistoryTurn, provider.RoleUser, "hi", true)
 	mc.Append(provider.SegmentKindUserMessage, provider.RoleUser, "current user", false)
 
-	params, err := buildCheckpointSummaryParams(uuid.New(), "prior summary", checkpointSummarySource{
+	params, err := buildCheckpointSummaryParams(uuid.New(), "", "prior summary", checkpointSummarySource{
 		ModelContext:   mc,
 		AssistantReply: "current assistant",
 	})
@@ -103,7 +103,7 @@ func TestBuildCheckpointSummaryParams_StripsOpenAIUnsafeImages(t *testing.T) {
 		{MediaType: "image/heic", RawBytes: []byte{4, 5}},
 	}, false)
 
-	params, err := buildCheckpointSummaryParams(uuid.New(), "", checkpointSummarySource{ModelContext: mc})
+	params, err := buildCheckpointSummaryParams(uuid.New(), "", "", checkpointSummarySource{ModelContext: mc})
 	require.NoError(t, err)
 
 	sawImage := false
@@ -128,7 +128,7 @@ func TestBuildCheckpointSummaryParams_StripsOpenAIUnsafeImages(t *testing.T) {
 func TestBuildCheckpointSummaryParams_RequiresSource(t *testing.T) {
 	t.Parallel()
 
-	_, err := buildCheckpointSummaryParams(uuid.New(), "", checkpointSummarySource{})
+	_, err := buildCheckpointSummaryParams(uuid.New(), "", "", checkpointSummarySource{})
 	require.Error(t, err)
 }
 
