@@ -62,10 +62,16 @@ func markSpeech(m *ListedModel, known models.KnownSpeechModel) {
 }
 
 // needsListing reports whether enabling c for the first time must find it in
-// the provider's listing. A built-in provider's known speech model need not
-// (Qwen's compatible-mode listing has no synthesis models, for one), and on an
-// open-ended connection a speech or transcription model is added by id, since
-// such servers seldom list them.
+// the provider's listing:
+//
+//   - a built-in provider's known speech model (Qwen's TTS, which its
+//     compatible-mode listing lacks): no, the table vouches for it;
+//   - a speech or transcription model added by id on OpenRouter, Ollama or
+//     Custom: no, such servers seldom list them;
+//   - any chat model, on any connection: yes, as before.
+//
+// Known speech models are added to a built-in provider's listing after its own
+// models (withKnownSpeechModels); the chooser groups by kind, not position.
 func needsListing(preset Preset, c ModelChoice) bool {
 	if _, ok := models.LookupKnownSpeechModel(models.ModelProvider(preset.ID), strings.TrimSpace(c.ID)); ok && preset.Builtin {
 		return false

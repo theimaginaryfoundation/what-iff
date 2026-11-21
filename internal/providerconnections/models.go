@@ -399,6 +399,8 @@ func enableModel(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConnection, 
 			update.SetVisionSupport(*c.VisionSupport)
 		}
 	}
+	// Voices sent for an enabled speech model replace the ones it offers: this is
+	// how an account narrows or relabels them. Left out, they stay.
 	if kind == models.ModelKindSpeech && c.Voices != nil {
 		v, err := models.NormalizeSpeechVoices(c.Voices)
 		if err != nil {
