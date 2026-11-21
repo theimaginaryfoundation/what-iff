@@ -14,7 +14,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func ensureChatMessageBookmarkedTestColumn(t *testing.T, db *sql.DB) {
+func ensureChatMessageTestColumns(t *testing.T, db *sql.DB) {
 	t.Helper()
 
 	var tableName string
@@ -64,7 +64,7 @@ func newTestDatastore(t *testing.T, schemas ...func(*testing.T, *sql.DB)) (*Data
 	for _, schema := range schemas {
 		schema(t, db)
 	}
-	ensureChatMessageBookmarkedTestColumn(t, db)
+	ensureChatMessageTestColumns(t, db)
 
 	drv := entsql.OpenDB(dialect.SQLite, db)
 	client := ent.NewClient(ent.Driver(drv))

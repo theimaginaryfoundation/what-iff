@@ -717,13 +717,19 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 	ctx = metering.WithTurnSource(ctx, turnSource)
 	// Extract user ID from context
 	userID, _ := middleware.GetUserIDFromContext(ctx)
+	// A turn that names a model the sender cannot use fails here, before anything is stored
+	// (ErrTurnModelUnavailable), rather than as a failed job or on the chat's model.
+	if id := request.TurnOptions.TurnModelID(); id != nil {
+		if _, err := a.turnModel(ctx, userID, *id); err != nil {
+			return nil, err
+		}
+	}
 
 	// A client may still send a retired system ritual; it has no row to link to.
 	request.Rituals = dropRetiredRituals(request.Rituals)
-	// A turn sent with memory saving off is flagged on its message, so a later checkpoint knows.
-	if !request.TurnOptions.SavesMemory() {
-		request.ExcludeFromMemory = true
-	}
+	// A turn sent with memory saving off is flagged on its message, so a later checkpoint knows,
+	// and a message with turn options always runs as a turn of its own, never as a steer.
+	turnSendRequest(&request)
 
 	// Create a new chat message in the database
 	chatMessage, err := a.ds.CreateChatMessage(ctx, userID, request)
@@ -1665,14 +1671,7 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 		built = append(built, adapter)
 		adapter.SetReplayThinking(replayThinking)
 		if zai {
-			adapter.SetTruncationFallback(func(params *anthropic.MessageNewParams) {
-				a.logger.Warn("z.ai response truncated before any reply text; retrying at lower reasoning effort",
-					zap.String("model", chatCtx.model),
-					zap.String("chat_id", chatMessage.ChatID.String()),
-					zap.String("effort", provider.ZAIFallbackReasoningEffort),
-				)
-				provider.ApplyZAIReasoningEffort(params, provider.ZAIFallbackReasoningEffort)
-			})
+			adapter.SetTruncationFallback(a.zaiTruncationFallback(chatCtx, chatMessage.ChatID))
 		}
 		return adapter, nil
 	}
@@ -1690,6 +1689,20 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 		opts.vendorWebSearches = func() int { return sumWebSearches(built) }
 	}
 	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, first, opts)
+}
+
+// zaiTruncationFallback is the z.ai adapter's retry for a reply truncated before any text: lower
+// reasoning effort, with the turn's own output cap kept (the effort resets the cap).
+func (a *Agent) zaiTruncationFallback(chatCtx *chatContext, chatID uuid.UUID) func(params *anthropic.MessageNewParams) {
+	return func(params *anthropic.MessageNewParams) {
+		a.logger.Warn("z.ai response truncated before any reply text; retrying at lower reasoning effort",
+			zap.String("model", chatCtx.model),
+			zap.String("chat_id", chatID.String()),
+			zap.String("effort", provider.ZAIFallbackReasoningEffort),
+		)
+		provider.ApplyZAIReasoningEffort(params, provider.ZAIFallbackReasoningEffort)
+		applyTurnOutputCapClaude(params, chatCtx)
+	}
 }
 
 // generateAssistantForMessageGemini drives a chat turn through Google's
@@ -2372,7 +2385,8 @@ func memoryToolCallsForChatContext(chatCtx *chatContext) []*models.ToolCall {
 	if chatCtx.memoryEnrichmentFailed {
 		return []*models.ToolCall{failedMemoryEnrichmentToolCall()}
 	}
-	if len(chatCtx.memories) > 0 {
+	// A recall-off turn retrieved nothing: its user-name line alone is no "Load Memory" call.
+	if len(chatCtx.memories) > 0 && !chatCtx.recallOffWithoutMemories() {
 		return []*models.ToolCall{memoryToolCall(chatCtx.memories)}
 	}
 	return nil
@@ -3214,9 +3228,16 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 
 // checkpointRebuildsFromDB reports whether a chat's checkpoint rebuilds its
 // context from the DB (the "Claude" path) rather than chaining off an OpenAI
-// Responses id: every chat but one on OpenAI's own Responses API.
+// Responses id: every chat but one on OpenAI's own Responses API, and every turn that carried
+// pre/post context (models.TurnOptions), whatever its model. That turn's response chain holds the
+// caller's context in its input, so chaining off it would let the scratchpad, memories and summary
+// see it; the rebuild reads the context with the turn's context stripped. A later turn without
+// context chains safely: each turn's Responses input is built afresh from the DB (the adapter
+// chains previous_response_id only across one turn's own tool rounds), so its chain never reaches
+// an earlier turn's response.
 func checkpointRebuildsFromDB(chatCtx *chatContext) bool {
-	return chatCtx.connection != nil ||
+	return chatCtx.turnOptions.HasContext() ||
+		chatCtx.connection != nil ||
 		models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model) ||
 		models.UsesOpenAIChatCompletionsAPI(chatCtx.modelProvider, chatCtx.model)
 }

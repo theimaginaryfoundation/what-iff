@@ -30,6 +30,7 @@
 - **Webhook surface (`webhook_token.go`, `webhook_message.go`):** `WebhookScope` (`messages:write`, `chat:read`) with `NormalizeWebhookScopes` (validates a request; empty means the write-only default) and `EffectiveWebhookScopes` (a token stored with no scopes, i.e. created before scopes existed, is write-only).
   `WebhookMessage` and `WebhookPersonality` are the allow-listed shapes the webhook read routes return, built by `NewWebhookMessage` and `NewWebhookPersonality`; they deliberately omit tool calls, model reasoning, thumbnails, storage keys and a persona's prompt and scratchpad.
 - **Per-turn options (`turn_options.go`):** `TurnOptions` (pre/post context, a one-turn model id, an output cap) rides on `ChatMessage.TurnOptions`, which is request-only (`json:"-"`, no column) like `ChatMessage.Steer`.
+  Pre context is trusted as system instruction and post context as developer/user text, so an extension passes only text it vouches for; `HasContext` reports either, and `MinTurnMaxOutputTokens` is the cap's floor.
   Nil on every ordinary message; the nil-safe accessors (`TurnPreContext` and the rest) let callers read it without a check.
   `MemoryRecall` / `MemorySave` (`*bool`, nil = usual) switch memory recall and saving off for one turn; `RecallsMemory` / `SavesMemory` read them.
   `ChatMessage.ExcludeFromMemory` is the one stored trace of a turn: set on both messages of a save-off turn (`chat_message.exclude_from_memory`, nullable), never in the API (`json:"-"`).

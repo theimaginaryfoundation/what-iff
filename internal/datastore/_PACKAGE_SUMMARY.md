@@ -83,6 +83,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     An account's default model (`user_preferences.default_model`) is optional: a new account gets the catalog's default (`resolveDefaultModelTx`: the admin-marked one, then `DEFAULT_MODEL_NAME`, then any catalog model, never a connection's), and none on an install without a catalog, until it enables a model.
     `CreateChat` without a model and with no default stores none; the chat's turns use the account's default once it has one.
     `assertUserCanUseModelTx` treats a connection's model as nonexistent to anyone but the connection's owner, so it can't be set on another account's chat, job or preference.
+    `CheckUserCanUseModel` runs the same check outside a write (read-only transaction), for a caller that names a model without storing it (a turn's `TurnOptions.ModelID`).
   - Safety violations: `safety_violation_event.go`.
   - Tool call persistence: `toolcall.go`.
 - **`CheckUserPassword`** reports whether a password is the account's current one (false for identity-provider accounts); it backs `reauth`'s default confirmation.
@@ -126,9 +127,11 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   `chat_messages`, `chats` and `memories` therefore also carry a single-column index on their parent FK (`index.Edges(...)` alone); add one wherever queries filter by an edge without its leading field.
 - **Context X-ray column:** `chat_message.context_breakdown` is a typed **`jsonb`** column (`field.JSON` over `*models.ContextBreakdown`); ent handles (un)marshalling, so `toChatMessageModel` just surfaces it (guarding empty snapshots) and `SetChatMessageContextBreakdown` sets the pointer (assistant rows only; best-effort).
   It is a scalar column rather than a `ChatMessageContextItem` row on purpose — context items are re-fed into the model context, and this snapshot must not be.
+  It's a value object (write-once, read-with-parent, never queried by field), so no child table; `jsonb` (not text) keeps DB-side JSON queries open and the embedded `version` guards shape evolution.
 - **Memory-save flag:** `chat_message.exclude_from_memory` (nullable bool) marks the messages of a turn sent with memory saving off (`models.TurnOptions.MemorySave`).
   `CreateChatMessage` writes it only when true, so every ordinary message keeps NULL, and `toChatMessageModel` reads NULL as false.
-  The hand-written SQLite test schemas list it, or get it from `ensureChatMessageBookmarkedTestColumn`.
+  Copies keep it: the remote-sync fork (`copyMessagesInto`) carries the column as-is, and the account-backup restore sets it from the optional `exclude_from_memory` field (absent in older backups, so unflagged).
+  The hand-written SQLite test schemas list it, or get it from `ensureChatMessageTestColumns`.
 - **Superseded messages** (`chatmessage_supersede.go`): `chat_message.superseded_at` (nullable time) marks a message taken back, `superseded_by` (nullable uuid) the reply that replaced it on a regenerate.
   Every chat-message read filters `superseded_at IS NULL`: `listChatMessages` (unless `ChatMessageFilters.IncludeSuperseded`, which nothing sets yet), the counts behind `ChatHasMessages` / `GetChatMessageCount`, `FirstChatMessageSentAtSince`, the unread counts, `GetLatestMessagesForChats`, the rehydration transcript, the chat/account/SFT exports and the checkpoint's tool-call reads.
   `GetChatMessage` by id still returns a superseded message.
@@ -137,8 +140,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   `SettleTurnReply` (and `finalizeChatJobWithPartial`, which takes the lock before it writes the chat row) supersedes a reply whose turn was taken back or whose run is no longer the turn's newest, records it on its run otherwise, and links `superseded_by` from the replies a regenerate replaced.
   Both clear `chat.response_id`.
   The bookmark lists (`ListChatMessageBookmarks`, `ListChatMessageBookmarksPage`) leave superseded messages out too.
-  The hand-written SQLite test schemas get both columns from `ensureChatMessageBookmarkedTestColumn` or list them.
-  It's a value object (write-once, read-with-parent, never queried by field), so no child table; `jsonb` (not text) keeps DB-side JSON queries open and the embedded `version` guards shape evolution.
+  The hand-written SQLite test schemas get both columns from `ensureChatMessageTestColumns` or list them.
 - **DB metric semantics:** one sample per logical ent call as the caller sees it (scanning included).
   Eager-loaded edges are folded into their parent query, and a `CreateBulk` is one `create` sample: ent re-enters every builder's hooks with the caller's own context, so nested creates on the same context are skipped (two concurrent creates sharing one context can fold into one sample, a deliberate undercount).
   ent NotFound from `First`/`Only` is produced after the query returns, so an empty result is a successful `query`; NotFound from `UpdateOne`/`DeleteOne` is `error.type=not_found`, and constraint violations are `client_error`.

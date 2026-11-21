@@ -16183,7 +16183,7 @@ export interface components {
         };
         /** @description One segment-kind row of a per-turn context breakdown ("Context X-ray"). */
         ContextSegmentStat: {
-            /** @description Model-context segment kind, e.g. system_prompt, checkpoint_summary, scratchpad, memory_context, mood, history_turn, attachment_context, tool_result, developer_context, expression_portrait, tool_definitions, vendor_prompt_other, user_message. expression_portrait is presented under developer_context in the UI. */
+            /** @description Model-context segment kind, e.g. system_prompt, checkpoint_summary, scratchpad, memory_context, mood, pre_context, history_turn, attachment_context, tool_result, developer_context, expression_portrait, post_context, tool_definitions, vendor_prompt_other, user_message. expression_portrait is presented under developer_context in the UI. pre_context and post_context are context sent with one turn only (placed before the history and just before the user message). */
             kind: string;
             /** @description How many segments of this kind were present in the turn. */
             segments: number;
