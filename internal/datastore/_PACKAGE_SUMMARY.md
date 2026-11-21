@@ -79,6 +79,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   - Models: `model.go`.
     `ListModels` is the deployment's own catalog (models with no `connection_id`); `ListModelsForUser` adds the models the user enabled on their own provider connections (ADR 0x027), each with its connection's name (`connection_name`).
     An account may enable a model with a catalog model's name, so lookups by name that mean the catalog (`GetModelByName`, a new account's default, the admin create and rename checks, and boot's seeding) look only at models with no connection.
+    Every list, name lookup, default and usage check that feeds chat sees only chat models (`kind = chat`, ADR 0x052); `GetModel` by id sees every kind, for speech code.
+    `ListAudioModelsForUser` lists the speech or transcription models an account can use, the catalog's first; admin create takes a kind and voices (`models.ResolveSpeechModel`) and update can replace a speech model's voices, never its kind.
     `GetDisabledConnectionModel` and `ModelRowExists` let a chat or job tell a model turned off, or gone with its connection, from a retired catalog model.
     An account's default model (`user_preferences.default_model`) is optional: a new account gets the catalog's default (`resolveDefaultModelTx`: the admin-marked one, then `DEFAULT_MODEL_NAME`, then any catalog model, never a connection's), and none on an install without a catalog, until it enables a model.
     `CreateChat` without a model and with no default stores none; the chat's turns use the account's default once it has one.

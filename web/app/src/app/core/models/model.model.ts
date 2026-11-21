@@ -35,5 +35,18 @@ export interface Model {
   connection_id?: string;
   /** That connection's name, as the account named it; absent where connection_id is. */
   connection_name?: string;
+  /** What the model does (ADR 0x052). Chat lists only ever carry chat models; absent reads as chat. */
+  kind?: ModelKind;
+  /** The voices a speech model offers; absent for other kinds. */
+  speech_voices?: SpeechVoice[];
+}
+
+/** What a model does (ADR 0x052): chat, a voice (speech), or dictation (transcription). */
+export type ModelKind = 'chat' | 'speech' | 'transcription';
+
+/** One base voice a speech model offers: the provider's id, and the name people see. */
+export interface SpeechVoice {
+  id: string;
+  name: string;
 }
 

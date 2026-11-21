@@ -29,6 +29,10 @@
   The total uses vendor-reported input usage when available; named context/tool estimates are cl100k and `vendor_prompt_other` reconciles vendor framing, image input, and other un-attributable usage.
 - **Webhook surface (`webhook_token.go`, `webhook_message.go`):** `WebhookScope` (`messages:write`, `chat:read`) with `NormalizeWebhookScopes` (validates a request; empty means the write-only default) and `EffectiveWebhookScopes` (a token stored with no scopes, i.e. created before scopes existed, is write-only).
   `WebhookMessage` and `WebhookPersonality` are the allow-listed shapes the webhook read routes return, built by `NewWebhookMessage` and `NewWebhookPersonality`; they deliberately omit tool calls, model reasoning, thumbnails, storage keys and a persona's prompt and scratchpad.
+- **Speech models (`speech.go`, ADR 0x052):** `ModelKind` (`chat`, `speech`, `transcription`) says what a model does; `Model.EffectiveKind` reads an empty one as chat.
+  The known speech models table (`KnownSpeechModels`, `LookupKnownSpeechModel`) gives what a provider's listing doesn't: each model's kind, `SpeechAdapter`, voices, style support, input limits and audio formats.
+  It is kept by hand and has no OpenAI synthesis model, since those shut down 2027-01-06.
+  `ResolveSpeechModel` decides a new model's kind and voices (the table's for a model it knows), and `NormalizeSpeechVoices` checks a voice list; both connection and catalog models go through them.
 - **Utility roles (`utility.go`):** `UtilityRole` (`memory`, `memory_merge`, `simple`, `personality`) groups background work that runs on the same model (ADR 0x027 section 6).
   `UtilityRoleUnavailableError` is work that didn't run because its role is off (`ErrUtilityRoleOff`), has no model (`ErrUtilityRoleNotSet`) or has only models that can't be used (`ErrUtilityModelUnavailable`, wrapping the cause); the error codes `utility_model_not_set`, `utility_role_off` and `utility_model_unavailable` name them to clients.
   A `BackgroundStep` knows its role (`Role`), so notices can be shown by role.

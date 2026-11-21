@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	entmodel "github.com/theimaginaryfoundation/what-iff/ent/model"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -31,6 +32,7 @@ func createConnectionModelsTestSchema(t *testing.T, db *sql.DB) {
 			reasoning_support_override text NULL, vision_support bool NULL,
 			base_credits_per_slab integer NOT NULL DEFAULT 1, subscription_tier text NOT NULL DEFAULT 'high',
 			deleted bool NOT NULL DEFAULT false, is_default bool NOT NULL DEFAULT false,
+			kind text NOT NULL DEFAULT 'chat', speech_voices json NULL,
 			connection_id uuid NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
 			UNIQUE (connection_id, name)
 		)`,
@@ -171,4 +173,119 @@ func TestAdminModelFunctions_AreTheCatalogOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, own.Deleted)
 	require.False(t, own.IsDefault)
+}
+
+// Speech and transcription models are never offered for chat (ADR 0x052): the
+// lists that feed chat pickers, and the usage check a chat's model passes,
+// see only chat models.
+func TestSpeechModels_AreNotChatModels(t *testing.T) {
+	f := newConnectionModelsFixture(t)
+	ctx := context.Background()
+	conn, err := f.ds.dbClient.ProviderConnection.Query().Only(ctx)
+	require.NoError(t, err)
+	voice, err := f.ds.dbClient.Model.Create().
+		SetName("phonon").SetDisplayName("Phonon").SetDescription("").
+		SetProvider("ollama").SetConnectionID(conn.ID).SetKind("speech").
+		SetSpeechVoices([]models.SpeechVoice{{ID: "af_bella", Name: "Bella"}}).
+		Save(ctx)
+	require.NoError(t, err)
+	_, err = f.ds.dbClient.Model.Create().
+		SetName("gemini-3.8-flash-tts").SetDisplayName("Gemini TTS").SetDescription("").
+		SetProvider("google").SetKind("speech").
+		Save(ctx)
+	require.NoError(t, err)
+
+	catalog, err := f.ds.ListModels(ctx)
+	require.NoError(t, err)
+	require.Len(t, catalog, 1, "the catalog's speech model is not a chat model")
+
+	own, err := f.ds.connectionModels(ctx, f.alice)
+	require.NoError(t, err)
+	require.Len(t, own, 1)
+	require.Equal(t, f.aliceOwn, own[0].ID)
+
+	tx, err := f.ds.dbClient.Tx(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	err = assertUserCanUseModelTx(ctx, tx, f.alice, voice.ID)
+	require.ErrorIs(t, err, ErrModelNotFound, "a chat can't be set to a voice")
+
+	got, err := f.ds.GetModel(ctx, voice.ID)
+	require.NoError(t, err, "speech code still finds it by id")
+	require.Equal(t, models.ModelKindSpeech, got.Kind)
+	require.Equal(t, []models.SpeechVoice{{ID: "af_bella", Name: "Bella"}}, got.SpeechVoices)
+}
+
+// A deployment adds speech models to its catalog: a model the known table knows
+// takes its kind and voices; one it doesn't needs its kind and voices given.
+func TestAdminCreateModel_SpeechModels(t *testing.T) {
+	f := newConnectionModelsFixture(t)
+	ctx := context.Background()
+
+	gemini, err := f.ds.AdminCreateModel(ctx, models.CreateModelRequest{
+		Name: "gemini-3.8-flash-tts", DisplayName: "Gemini TTS", Provider: "google", ToolSupport: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, models.ModelKindSpeech, gemini.Kind)
+	require.Len(t, gemini.SpeechVoices, 30)
+	require.False(t, gemini.ToolSupport, "a voice takes no tools")
+
+	_, err = f.ds.AdminCreateModel(ctx, models.CreateModelRequest{
+		Name: "house-voice", DisplayName: "House voice", Provider: "openai", Kind: models.ModelKindSpeech,
+	})
+	require.ErrorIs(t, err, models.ErrInvalidSpeechVoices, "a voice the table doesn't know needs voices")
+
+	_, err = f.ds.AdminCreateModel(ctx, models.CreateModelRequest{
+		Name: "house-voice", DisplayName: "House voice", Provider: "openai", Kind: "video",
+	})
+	require.ErrorIs(t, err, models.ErrInvalidModelKind)
+
+	narrowed, err := f.ds.AdminUpdateModel(ctx, gemini.ID, models.UpdateModelRequest{
+		SpeechVoices: []models.SpeechVoice{{ID: "Kore", Name: "Kore (warm)"}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []models.SpeechVoice{{ID: "Kore", Name: "Kore (warm)"}}, narrowed.SpeechVoices)
+
+	_, err = f.ds.AdminUpdateModel(ctx, f.catalog, models.UpdateModelRequest{
+		SpeechVoices: []models.SpeechVoice{{ID: "Kore"}},
+	})
+	require.ErrorIs(t, err, models.ErrInvalidSpeechVoices, "a chat model has no voices")
+
+	_, err = f.ds.AdminSetDefaultModel(ctx, gemini.ID)
+	require.ErrorIs(t, err, ErrModelNotFound, "a voice can't be the default chat model")
+}
+
+func TestListAudioModelsForUser(t *testing.T) {
+	f := newConnectionModelsFixture(t)
+	ctx := context.Background()
+	conn, err := f.ds.dbClient.ProviderConnection.Query().Only(ctx)
+	require.NoError(t, err)
+	mk := func(name, kind string, connID *uuid.UUID) {
+		c := f.ds.dbClient.Model.Create().SetName(name).SetDisplayName(name).SetDescription("").SetKind(entmodel.Kind(kind))
+		if connID != nil {
+			c.SetConnectionID(*connID)
+		}
+		_, err := c.Save(ctx)
+		require.NoError(t, err)
+	}
+	mk("own-voice", "speech", &conn.ID)
+	mk("catalog-voice", "speech", nil)
+	mk("catalog-ears", "transcription", nil)
+
+	voices, err := f.ds.ListAudioModelsForUser(ctx, f.alice, models.ModelKindSpeech)
+	require.NoError(t, err)
+	require.Len(t, voices, 2)
+	require.Equal(t, "catalog-voice", voices[0].Name, "the deployment's first")
+	require.Equal(t, "own-voice", voices[1].Name)
+
+	others, err := f.ds.ListAudioModelsForUser(ctx, f.bob, models.ModelKindSpeech)
+	require.NoError(t, err)
+	require.Len(t, others, 1, "not another account's connection models")
+
+	ears, err := f.ds.ListAudioModelsForUser(ctx, f.bob, models.ModelKindTranscription)
+	require.NoError(t, err)
+	require.Len(t, ears, 1)
+
+	_, err = f.ds.ListAudioModelsForUser(ctx, f.bob, models.ModelKindChat)
+	require.ErrorIs(t, err, models.ErrInvalidModelKind)
 }
