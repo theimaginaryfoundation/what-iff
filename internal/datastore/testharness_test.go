@@ -14,7 +14,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func ensureChatMessageBookmarkedTestColumn(t *testing.T, db *sql.DB) {
+func ensureChatMessageTestColumns(t *testing.T, db *sql.DB) {
 	t.Helper()
 
 	var tableName string
@@ -28,20 +28,28 @@ func ensureChatMessageBookmarkedTestColumn(t *testing.T, db *sql.DB) {
 	require.NoError(t, err)
 	defer rows.Close()
 
+	// Columns added after the hand-written test schemas were, and the DDL that adds each.
+	missing := map[string]string{
+		"bookmarked":          `ALTER TABLE chat_messages ADD COLUMN bookmarked bool NOT NULL DEFAULT false`,
+		"exclude_from_memory": `ALTER TABLE chat_messages ADD COLUMN exclude_from_memory bool`,
+		"superseded_at":       `ALTER TABLE chat_messages ADD COLUMN superseded_at datetime`,
+		"superseded_by":       `ALTER TABLE chat_messages ADD COLUMN superseded_by uuid`,
+	}
 	for rows.Next() {
 		var cid int
 		var name, columnType string
 		var notNull, pk int
 		var defaultValue any
 		require.NoError(t, rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk))
-		if name == "bookmarked" {
-			return
-		}
+		delete(missing, name)
 	}
 	require.NoError(t, rows.Err())
+	require.NoError(t, rows.Close())
 
-	_, err = db.Exec(`ALTER TABLE chat_messages ADD COLUMN bookmarked bool NOT NULL DEFAULT false`)
-	require.NoError(t, err)
+	for _, ddl := range missing {
+		_, err = db.Exec(ddl)
+		require.NoError(t, err)
+	}
 }
 
 // newTestDatastore opens an in-memory sqlite DB, applies the given schema-creation funcs in
@@ -56,7 +64,7 @@ func newTestDatastore(t *testing.T, schemas ...func(*testing.T, *sql.DB)) (*Data
 	for _, schema := range schemas {
 		schema(t, db)
 	}
-	ensureChatMessageBookmarkedTestColumn(t, db)
+	ensureChatMessageTestColumns(t, db)
 
 	drv := entsql.OpenDB(dialect.SQLite, db)
 	client := ent.NewClient(ent.Driver(drv))

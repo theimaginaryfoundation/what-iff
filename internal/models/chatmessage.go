@@ -65,7 +65,20 @@ type ChatMessage struct {
 	Steer bool `json:"-"`
 	// TurnOptions is request-only too, and never stored: per-turn settings for the turn this
 	// message starts (see TurnOptions). Nil on every ordinary message.
-	TurnOptions           *TurnOptions      `json:"-"`
+	TurnOptions *TurnOptions `json:"-"`
+	// ExcludeFromMemory is set (stored, never in the API) on both messages of a turn sent with
+	// memory saving off (TurnOptions.MemorySave false): a checkpoint whose conversation includes a
+	// flagged message extracts no memories. A partial reply saved when such a turn is stopped or
+	// fails is not flagged; its user message is. False on every ordinary message.
+	ExcludeFromMemory bool `json:"-"`
+	// SupersededAt is set (stored, never in the API) when the message was taken back: its turn was
+	// superseded, or it is the reply of a turn that was regenerated (see agent.SupersedeTurn and
+	// agent.RegenerateTurn). A superseded message is kept as a past version, but it is left out of
+	// the model's context, history listings and later memory extraction. Nil on a live message.
+	SupersededAt *time.Time `json:"-"`
+	// SupersededBy is the reply that replaced this one when its turn was regenerated, set once the
+	// new reply is saved; nil when nothing replaced it (a turn taken back outright).
+	SupersededBy          *uuid.UUID        `json:"-"`
 	ID                    uuid.UUID         `json:"id"`
 	ChatID                uuid.UUID         `json:"chat_id"`
 	Message               string            `json:"message"`
@@ -164,6 +177,10 @@ type ChatMessageFilters struct {
 	// message in the chat, a full pass over a long chat. Set it when the caller only needs the
 	// page; an empty NextCursor already says nothing older remains.
 	SkipTotal bool `json:"-"`
+	// IncludeSuperseded also lists messages that were taken back (ChatMessage.SupersededAt). Off by
+	// default, so a superseded message is hidden everywhere messages are listed, the model's
+	// history included; nothing sets it yet (how past versions are shown is decided later).
+	IncludeSuperseded bool `json:"-"`
 }
 
 type ChatMessageResponse struct {

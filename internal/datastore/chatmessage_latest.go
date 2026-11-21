@@ -34,6 +34,7 @@ func (d *Datastore) GetLatestMessagesForChats(ctx context.Context, userID uuid.U
 					entchat.ID(chatID),
 					entchat.HasOwnerWith(user.ID(userID)),
 				),
+				chatmessage.SupersededAtIsNil(),
 			).
 			Order(ent.Desc(chatmessage.FieldSentAt)).
 			Limit(1).

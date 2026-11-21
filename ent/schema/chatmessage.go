@@ -85,6 +85,18 @@ func (ChatMessage) Fields() []ent.Field {
 		field.Bool("bookmarked").
 			Default(false).
 			Comment("User-flagged bookmark for navigating long threads; either origin can be bookmarked."),
+		field.Bool("exclude_from_memory").
+			Optional().
+			Nillable().
+			Comment("Set to true on both messages of a turn sent with memory saving off (models.TurnOptions.MemorySave): a checkpoint whose conversation includes a flagged message extracts no memories from it. NULL on every ordinary message. A column, not turn state in memory, because extraction runs at a later checkpoint, possibly in another process."),
+		field.Time("superseded_at").
+			Optional().
+			Nillable().
+			Comment("When the message was taken back (agent.SupersedeTurn, or the reply of a regenerated turn). A superseded message is kept as a past version but left out of the model's context, history listings and later memory extraction. NULL on every live message."),
+		field.UUID("superseded_by", uuid.UUID{}).
+			Optional().
+			Nillable().
+			Comment("The reply that replaced this one when its turn was regenerated, set once the new reply is saved. NULL when nothing replaced it (a turn taken back outright) and on every live message."),
 	}
 }
 

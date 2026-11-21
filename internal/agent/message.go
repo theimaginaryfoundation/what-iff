@@ -681,7 +681,7 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 	}
 	moodToolsAvailable := policy.toolAllowed(tools.ListMoodsToolSpec.Name) && policy.toolAllowed(tools.ChangeMoodToolSpec.Name) &&
 		a.shouldExposeMoodTools(ctx, userID, chatCtx.chat)
-	return b.build(ctx, messageContextBuildRequest{
+	modelCtx, built, err := b.buildTurn(ctx, messageContextBuildRequest{
 		UserID:                     userID,
 		Chat:                       chatCtx.chat,
 		UserPrompt:                 userPrompt,
@@ -704,7 +704,13 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		PreContext:                 chatCtx.turnOptions.TurnPreContext(),
 		PostContext:                chatCtx.turnOptions.TurnPostContext(),
 		BaseSystemPrompt:           a.baseSystemPromptForChat(ctx, chatCtx.chat),
+		WithoutMemoryRecall:        !chatCtx.turnOptions.RecallsMemory(),
 	})
+	if err != nil {
+		return nil, err
+	}
+	chatCtx.historyExcludedFromMemory = built.replaysExcludedTurn
+	return modelCtx, nil
 }
 
 func mcpLifecycleDeveloperContext() string {
@@ -740,6 +746,9 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 
 	// A client may still send a retired system ritual; it has no row to link to.
 	request.Rituals = dropRetiredRituals(request.Rituals)
+	// A turn sent with memory saving off is flagged on its message, so a later checkpoint knows,
+	// and a message with turn options always runs as a turn of its own, never as a steer.
+	turnSendRequest(&request)
 
 	// Create a new chat message in the database
 	chatMessage, err := a.ds.CreateChatMessage(ctx, userID, request)
@@ -835,16 +844,10 @@ func (a *Agent) recoverAsyncMessageJob(runCtx context.Context, userID, jobID, ch
 // RetryUserChatMessage enqueues another chat_message job for an existing user turn.
 // When a non-terminal job already exists for that message, returns its job id without creating a duplicate.
 func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid.UUID) (*models.ChatMessageResponse, error) {
-	// Detach from request cancellation before enqueue + background execution. User id and timezone
-	// are copied into a fresh Background context (see middleware.CopyUserToIDContext), and so is
-	// the turn source, as in HandleUserMessage.
-	turnSource := metering.TurnSourceFromContext(ctx)
-	detachedCtx, ok := middleware.CopyUserToIDContext(ctx, context.Background())
-	if !ok {
-		return nil, errors.New("user ID not found in context")
+	detachedCtx, userID, err := detachTurnContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-	detachedCtx = metering.WithTurnSource(detachedCtx, turnSource)
-	userID, _ := middleware.GetUserIDFromContext(detachedCtx)
 
 	msg, err := a.ds.GetChatMessage(detachedCtx, userID, messageID)
 	if err != nil {
@@ -855,6 +858,11 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 	}
 	if msg.Origin != models.MessageOriginUser {
 		return nil, ErrRetryNotUserOrigin
+	}
+	if msg.SupersededAt != nil {
+		// Taken back (SupersedeTurn): hidden like a message that is not there, and its reply
+		// would be superseded as it was saved.
+		return nil, datastore.ErrChatMessageNotFound
 	}
 
 	active, err := a.ds.FindLatestActiveChatMessageJob(detachedCtx, userID, messageID)
@@ -869,32 +877,60 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 		}, nil
 	}
 
-	if err := a.ds.SetChatMessageLastError(detachedCtx, userID, messageID, nil, ""); err != nil {
-		a.logger.Warn("failed to clear last_error_message before retry", zap.Error(err))
+	return a.rerunUserMessage(detachedCtx, userID, msg, "retry")
+}
+
+// detachTurnContext detaches a turn started from a request from the request's cancellation: the
+// user id and timezone are copied into a fresh Background context (see
+// middleware.CopyUserToIDContext), and so is the turn source, as in HandleUserMessage.
+func detachTurnContext(ctx context.Context) (context.Context, uuid.UUID, error) {
+	turnSource := metering.TurnSourceFromContext(ctx)
+	detachedCtx, ok := middleware.CopyUserToIDContext(ctx, context.Background())
+	if !ok {
+		return nil, uuid.Nil, errors.New("user ID not found in context")
+	}
+	detachedCtx = metering.WithTurnSource(detachedCtx, turnSource)
+	userID, _ := middleware.GetUserIDFromContext(detachedCtx)
+	return detachedCtx, userID, nil
+}
+
+// rerunUserMessage starts another chat_message job answering the saved user message msg (a
+// retry), on detachedCtx (detachTurnContext). action names the path in the job's logs.
+func (a *Agent) rerunUserMessage(detachedCtx context.Context, userID uuid.UUID, msg *models.ChatMessage, action string) (*models.ChatMessageResponse, error) {
+	if err := a.ds.SetChatMessageLastError(detachedCtx, userID, msg.ID, nil, ""); err != nil {
+		a.logger.Warn("failed to clear last_error_message before "+action, zap.Error(err))
 	}
 
 	newJob, err := a.ds.CreateJob(detachedCtx, userID, models.Job{
 		JobType:     JobTypeChatMessage,
-		Reference:   messageID.String(),
+		Reference:   msg.ID.String(),
 		Status:      models.JobStatusPending,
 		DraftDeltas: []string{},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create job: %w", err)
 	}
+	return a.startUserMessageRun(detachedCtx, userID, newJob, msg, action), nil
+}
 
+// startUserMessageRun starts newJob, a chat_message job just created for the saved user message
+// msg (a retry, or a regenerate with msg.TurnOptions set), in the background on detachedCtx.
+func (a *Agent) startUserMessageRun(detachedCtx context.Context, userID uuid.UUID, newJob *models.Job, msg *models.ChatMessage, action string) *models.ChatMessageResponse {
 	runCtx, cancel := context.WithCancel(detachedCtx)
 	a.registerRunningJobCancel(newJob.ID, userID, cancel)
-	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, msg.ID, "retry", func() error {
+	// Like a new send, the run stops when it is cancelled from another API instance (a Stop, or
+	// the turn taken back there: SupersedeTurn).
+	go a.watchChatJobCancel(runCtx, userID, newJob.ID, cancel)
+	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, msg.ID, action, func() error {
 		_, err := a.handleUserMessage(runCtx, newJob, msg)
 		return err
 	})
 
 	return &models.ChatMessageResponse{
-		ID:    messageID,
+		ID:    msg.ID,
 		JobID: newJob.ID.String(),
 		Type:  JobTypeChatMessage,
-	}, nil
+	}
 }
 
 // chatContext holds the context needed for processing a chat message
@@ -1036,6 +1072,13 @@ type chatContext struct {
 	// turnOptions are the caller's per-turn settings (pre/post context, output cap; see
 	// models.TurnOptions and turn_options.go). Nil on every ordinary turn.
 	turnOptions *models.TurnOptions
+	// memorySaveOff: the turn is kept out of long-term memory (models.TurnOptions.MemorySave false,
+	// or a retry of a message flagged ExcludeFromMemory). Its reply is flagged too, create_memory is
+	// not offered, and a checkpoint at its end extracts no memories (turn_memory.go).
+	memorySaveOff bool
+	// historyExcludedFromMemory: the conversation the turn replayed includes a message flagged
+	// ExcludeFromMemory, so a checkpoint at its end extracts no memories either.
+	historyExcludedFromMemory bool
 }
 
 func (c *chatContext) setMCPServerCache(servers []*models.MCPServer, loadedByServer map[uuid.UUID][]string) {
@@ -1418,10 +1461,11 @@ func (a *Agent) finishGeneration(ctx context.Context, userID uuid.UUID, chatMess
 
 	personalityName := a.resolvePersonalityName(ctx, userID, chatCtx.chat.PersonalityID)
 	moodID := activeMoodID(chatCtx.activeMood)
-	agentMessage, err := a.saveAgentResponse(ctx, userID, chatMessage.ChatID, result, toolCalls, generatedAttachments, chatCtx.model, personalityName, moodID, chatCtx.agentRun)
+	agentMessage, err := a.saveAgentResponse(ctx, userID, chatMessage.ChatID, result, toolCalls, generatedAttachments, chatCtx.model, personalityName, moodID, chatCtx.agentRun, chatCtx.memorySaveOff)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to save %s agent response: %w", opts.provider, err)
 	}
+	a.settleTurnReply(ctx, userID, chatCtx, chatMessage, agentMessage.ID)
 
 	if opts.afterSave != nil {
 		opts.afterSave(ctx, agentMessage)
@@ -1782,10 +1826,11 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 
 	personalityName := a.resolvePersonalityName(ctx, userID, chatCtx.chat.PersonalityID)
 	moodID := activeMoodID(chatCtx.activeMood)
-	agentMessage, err := a.saveAgentResponse(ctx, userID, chatMessage.ChatID, result, toolCalls, generatedAttachments, chatCtx.model, personalityName, moodID, nil)
+	agentMessage, err := a.saveAgentResponse(ctx, userID, chatMessage.ChatID, result, toolCalls, generatedAttachments, chatCtx.model, personalityName, moodID, nil, chatCtx.memorySaveOff)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to save local model agent response: %w", err)
 	}
+	a.settleTurnReply(ctx, userID, chatCtx, chatMessage, agentMessage.ID)
 
 	return agentMessage, result, nil
 }
@@ -2370,7 +2415,8 @@ func memoryToolCallsForChatContext(chatCtx *chatContext) []*models.ToolCall {
 	if chatCtx.memoryEnrichmentFailed {
 		return []*models.ToolCall{failedMemoryEnrichmentToolCall()}
 	}
-	if len(chatCtx.memories) > 0 {
+	// A recall-off turn retrieved nothing: its user-name line alone is no "Load Memory" call.
+	if len(chatCtx.memories) > 0 && !chatCtx.recallOffWithoutMemories() {
 		return []*models.ToolCall{memoryToolCall(chatCtx.memories)}
 	}
 	return nil
@@ -2394,8 +2440,8 @@ func (a *Agent) prepareChatContextOn(ctx context.Context, userID uuid.UUID, chat
 		return nil, fmt.Errorf("failed to get chat: %w", err)
 	}
 
-	// Get relevant memories.
-	memories, liveMemories, userNameLine, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message, parentChat.IsSandboxed())
+	// Get relevant memories (only the user-name line when the turn's options turn recall off).
+	memories, liveMemories, userNameLine, memoryEnrichmentFailed := a.loadTurnMemoriesFor(ctx, memoryProgress, userID, chatMessage, parentChat)
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
 	// (gpt-5.1) even when the user selected a different provider.
@@ -2856,7 +2902,8 @@ func isTruncationStopReason(stopReason string) bool {
 // handled separately by the OpenAI adapter path.
 // agentRun is the structured record of an Advanced turn (nil on Standard turns, whose reasoning is
 // result.Reasoning).
-func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID, result *provider.GenerateResponse, toolCalls []*models.ToolCall, generatedAttachments []*models.FileAttachment, generationModel string, generationPersonality string, generationMoodID *uuid.UUID, agentRun *models.AgentRun) (*models.ChatMessage, error) {
+// excludeFromMemory flags the reply of a turn kept out of memory (chatContext.memorySaveOff).
+func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID, result *provider.GenerateResponse, toolCalls []*models.ToolCall, generatedAttachments []*models.FileAttachment, generationModel string, generationPersonality string, generationMoodID *uuid.UUID, agentRun *models.AgentRun, excludeFromMemory bool) (*models.ChatMessage, error) {
 	agentMessage, err := a.ds.CreateChatMessage(ctx, userID, models.ChatMessage{
 		ChatID:         chatID,
 		Message:        result.Text,
@@ -2872,7 +2919,8 @@ func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID,
 		GenerationMoodID:      generationMoodID,
 		ToolCalls:             toolCalls,
 		// The comments the reply made on the user's files, shown as links (ADR 0x046).
-		CommentRefs: tools.CommentRefsFromCalls(toolCalls),
+		CommentRefs:       tools.CommentRefsFromCalls(toolCalls),
+		ExcludeFromMemory: excludeFromMemory,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create chat message: %w", err)
@@ -3267,7 +3315,7 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	if sandboxed {
 		newScratchpadResponseID = agentMessage.ResponseID
 	}
-	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction {
+	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction && a.checkpointMayExtractMemories(chatCtx, chatMessage.ChatID) {
 		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		a.extractMemoriesWithScratchpadDelta(ctx, userID, chatMessage.ChatID, newScratchpadResponseID, inferenceModelContext, chatCtx, compactionEventID)
 		doneMemory()
@@ -3344,7 +3392,7 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	// scratchpad is the just-generated content. If scratchpad generation failed, intentionally
 	// defer both extraction and roll-forward dedupe to the next checkpoint: compaction requires
 	// that delta, and a later checkpoint safely retries it.
-	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction {
+	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction && a.checkpointMayExtractMemories(chatCtx, chatMessage.ChatID) {
 		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		if err := a.extractMemoriesWithScratchpadDeltaClaude(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID); err != nil {
 			a.logger.Error("failed to extract memories during Claude checkpoint", zap.Error(err))

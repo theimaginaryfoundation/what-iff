@@ -351,6 +351,37 @@ func TestApplyForksWhenBothSidesWrote(t *testing.T) {
 	assert.Equal(t, 6, s.Totals.Messages, "distinct remote messages, not copies")
 }
 
+// A fork copies the memory-save flag with each message (copyMessagesInto), so the fork's next
+// checkpoint skips extraction as the original's would; an unflagged message stays NULL.
+func TestApplyForkKeepsExcludeFromMemory(t *testing.T) {
+	f := newRemoteSyncFixture(t)
+	ctx := context.Background()
+	remote := uuid.New()
+	th := f.thread(remote, "Trip")
+	original := f.apply(t, th, f.msgs(0, "A1", "B1")).ChatID
+	n, err := f.ds.dbClient.ChatMessage.Update().
+		Where(chatmessage.HasChatWith(entchat.ID(original)), chatmessage.Message("A1")).
+		SetExcludeFromMemory(true).Save(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	f.writeLocal(t, original, "a2 (home)", f.t0.Add(10*time.Minute))
+	res := f.apply(t, th, f.msgs(2, "A2 (phone)"))
+	require.Equal(t, models.RemoteSyncForked, res.Outcome)
+
+	copied, err := f.ds.dbClient.ChatMessage.Query().
+		Where(chatmessage.HasChatWith(entchat.ID(res.ChatID))).All(ctx)
+	require.NoError(t, err)
+	flags := map[string]*bool{}
+	for _, m := range copied {
+		flags[m.Message] = m.ExcludeFromMemory
+	}
+	require.Contains(t, flags, "A1")
+	require.NotNil(t, flags["A1"], "the flag is copied")
+	assert.True(t, *flags["A1"])
+	assert.Nil(t, flags["B1"], "an unflagged message stays NULL")
+}
+
 func TestApplyForksALocalReplyFiledBeforeTheRemoteHead(t *testing.T) {
 	f := newRemoteSyncFixture(t)
 	remote := uuid.New()
