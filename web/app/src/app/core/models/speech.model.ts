@@ -8,16 +8,17 @@ export interface DictationModel {
   code?: string;
   model?: string;
   display_name?: string;
-  /** The formats it takes; the composer records WAV when it takes none the browser records. */
+  /** Always `['wav']`: dictation sends 16 kHz mono PCM WAV only. */
   formats?: AudioFormat[];
   /** The longest clip it takes, in seconds. */
   max_seconds?: number;
 }
 
-/** One recorded clip, ready to transcribe. */
+/** One recorded clip, ready to transcribe: 16 kHz mono PCM WAV. */
 export interface DictationClip {
   audio: Blob;
-  format: AudioFormat;
+  format: 'wav';
+  /** How long it ran, for skipping a press too short to hold speech; the server bills from the data. */
   seconds: number;
 }
 

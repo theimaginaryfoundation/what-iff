@@ -153,6 +153,11 @@ func (h speechHTTP) postForAudio(ctx context.Context, endpoint string, headers m
 			if len(resp.body) == 0 {
 				return nil, errNoAudio
 			}
+			// postOnce stops reading at the image limit (64 MB), so a body past this one may
+			// also be cut short: refuse it rather than store truncated audio.
+			if len(resp.body) > maxSpeechAudioBytes {
+				return nil, fmt.Errorf("answer larger than %d bytes", maxSpeechAudioBytes)
+			}
 			return resp.body, nil
 		}
 		apiErr := &imageAPIError{Status: resp.status, Body: string(resp.body)}
@@ -182,8 +187,10 @@ var (
 )
 
 // postMultipart sends one multipart form, the file last, and returns the 2xx
-// body; a non-2xx answer is an *imageAPIError. Uploads are not retried: a clip
-// is the person's, and a second copy is not sent on a guess.
+// body; a non-2xx answer is an *imageAPIError. It is never retried: a clip is
+// the person's, and a second copy is not sent on a guess. (Qwen takes its clip
+// inline in JSON, through postJSON, which retries only a 429 or 503: an explicit
+// refusal, so the first copy was never transcribed.)
 func (h speechHTTP) postMultipart(ctx context.Context, endpoint string, headers map[string]string, fields map[string]string, fileField, fileName, fileType string, file []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)

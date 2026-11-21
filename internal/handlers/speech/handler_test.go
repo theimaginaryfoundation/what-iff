@@ -115,17 +115,16 @@ func TestTranscribe(t *testing.T) {
 	t.Parallel()
 	s := &fakeSpeech{text: "Hello there."}
 	chat := uuid.NewString()
-	rec := serve(t, s, clipRequest(t, map[string]string{"format": "WEBM", "duration_seconds": "4.5", "chat_id": chat, "language": "en-GB"}, []byte("opus")), true)
+	rec := serve(t, s, clipRequest(t, map[string]string{"format": "WAV", "chat_id": chat, "language": "en-GB"}, []byte("pcm")), true)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var out Transcription
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
 	require.Equal(t, "Hello there.", out.Text)
-	require.Equal(t, []agent.DictationClip{{Audio: []byte("opus"), Format: models.AudioFormatWebM, ClientSeconds: 4.5, Language: "en-GB", ChatID: chat}}, s.got)
+	require.Equal(t, []agent.DictationClip{{Audio: []byte("pcm"), Format: models.AudioFormatWAV, Language: "en-GB", ChatID: chat}}, s.got)
 
-	rec = serve(t, s, clipRequest(t, map[string]string{"format": "webm", "chat_id": "not-a-uuid", "duration_seconds": "-3"}, []byte("opus")), true)
+	rec = serve(t, s, clipRequest(t, map[string]string{"format": "wav", "chat_id": "not-a-uuid"}, []byte("pcm")), true)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Empty(t, s.got[1].ChatID, "a bad chat id is dropped, not trusted")
-	require.Zero(t, s.got[1].ClientSeconds)
 }
 
 func TestTranscribe_Refusals(t *testing.T) {
