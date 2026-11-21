@@ -294,22 +294,21 @@ func TestSettleTurnReply_ByTheRunThatSavedIt(t *testing.T) {
 	assert.NotNil(t, got.SupersededAt)
 }
 
-// The options a regenerate is given reach its run, as a new send's do: here a one-turn model that
-// does not exist, which the run fails on resolving.
-func TestRegenerateTurn_PassesTheTurnOptionsToTheRun(t *testing.T) {
+// A regenerate whose options name a model the sender cannot use is refused before anything is
+// taken back or started, as a new send with one is refused before anything is stored.
+func TestRegenerateTurn_RefusesAnUnavailableModelFirst(t *testing.T) {
 	a, s, _ := newSupersedeTurns(t)
 	ctx := middleware.ContextWithUser(context.Background(), s.userID, "")
 	u1 := s.add(models.MessageOriginUser, "u1")
-	s.add(models.MessageOriginAssistant, "a1")
+	a1 := s.add(models.MessageOriginAssistant, "a1")
 
 	missing := uuid.New()
-	resp, err := a.RegenerateTurn(ctx, u1.ID, &models.TurnOptions{ModelID: &missing})
+	_, err := a.RegenerateTurn(ctx, u1.ID, &models.TurnOptions{ModelID: &missing})
+	require.ErrorIs(t, err, ErrTurnModelUnavailable)
+	got, err := s.ds.GetChatMessage(context.Background(), s.userID, a1.ID)
 	require.NoError(t, err)
-	jobID := uuid.MustParse(resp.JobID)
-	var job *models.Job
-	require.Eventually(t, func() bool {
-		job, err = s.ds.GetJob(context.Background(), s.userID, jobID)
-		return err == nil && job.Status == models.JobStatusFailed
-	}, 10*time.Second, 20*time.Millisecond)
-	assert.Contains(t, job.Error, ErrJobModelGone.Error(), "the run resolved the options' model")
+	assert.Nil(t, got.SupersededAt, "the reply stays live")
+	jobID, err := s.ds.LatestChatMessageJobID(context.Background(), s.userID, u1.ID)
+	require.NoError(t, err)
+	assert.Equal(t, uuid.Nil, jobID, "no run was started")
 }

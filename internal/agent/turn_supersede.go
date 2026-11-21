@@ -110,6 +110,13 @@ func (a *Agent) RegenerateTurn(ctx context.Context, userMessageID uuid.UUID, opt
 	if turn.Superseded {
 		return nil, ErrTurnSuperseded
 	}
+	// A model the sender cannot use is refused here, before any reply is taken back, as
+	// HandleUserMessage refuses it before storing a message (ErrTurnModelUnavailable).
+	if id := opts.TurnModelID(); id != nil {
+		if _, err := a.turnModel(detachedCtx, userID, *id); err != nil {
+			return nil, err
+		}
+	}
 	// Nothing may be running in the chat, as a client following the chat sees it (and as the turn
 	// gate does): a turn left non-terminal by a worker that died long ago does not count. The
 	// turn's own runs are checked again under the lock, race-free, as the job is created.
