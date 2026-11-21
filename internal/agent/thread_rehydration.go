@@ -10,8 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/memoryutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
@@ -541,69 +540,52 @@ func (a *Agent) extractAndStoreImportedMemories(ctx context.Context, userID, cha
 }
 
 // extractMemoriesFromTranscript runs one structured-JSON memory-extraction call over a plain
-// role-tagged transcript using the fixed archival model. Unlike the live path it does not chain off a
+// role-tagged transcript on the memory role's model. Unlike the live path it does not chain off a
 // PreviousResponseID; the transcript is the direct input.
 func (a *Agent) extractMemoriesFromTranscript(ctx context.Context, userID uuid.UUID, transcript string) ([]models.ExtractedMemory, error) {
 	if strings.TrimSpace(transcript) == "" {
 		return nil, nil
 	}
-	params := responses.ResponseNewParams{
-		Model:            archivalOpenAIModel,
-		SafetyIdentifier: openai.String(userID.String()),
-		MaxOutputTokens:  openai.Int(importMemoryExtractMaxTokens),
-		Instructions:     openai.String(importMemoryExtractionInstructions),
-		Input: responses.ResponseNewParamsInputUnion{
-			OfString: openai.String(transcript),
+	raw, err := a.CallUtility(ctx, provider.UtilityRequest{
+		Role:            provider.UtilityRoleMemory,
+		CallPath:        telemetry.CallPathMemory,
+		Instructions:    importMemoryExtractionInstructions,
+		Input:           transcript,
+		MaxOutputTokens: importMemoryExtractMaxTokens,
+		SafetyUserID:    userID.String(),
+		Schema: &provider.UtilitySchema{
+			Name:        "MemoryExtraction",
+			Description: "Memory Extraction JSON",
+			Schema:      memoryExtractionSchema,
 		},
-		Text: responses.ResponseTextConfigParam{
-			Format: responses.ResponseFormatTextConfigUnionParam{
-				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-					Name:        "MemoryExtraction",
-					Schema:      memoryExtractionSchema,
-					Strict:      openai.Bool(true),
-					Description: openai.String("Memory Extraction JSON"),
-					Type:        "json_schema",
-				},
-			},
-		},
-	}
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathMemory), params)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("openai memory extraction: %w", err)
+		return nil, fmt.Errorf("memory extraction: %w", err)
 	}
 	var out models.ExtractedMemoryResponse
-	if err := json.Unmarshal([]byte(resp.OutputText()), &out); err != nil {
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		return nil, fmt.Errorf("unmarshal memory extraction: %w", err)
 	}
 	return out.Memories, nil
 }
 
-// summarizeText runs a one-shot summarization with the given instructions over input text using the
-// fixed archival OpenAI model (the app's primary provider). Returns an error if no OpenAI provider is
-// configured; there is no secondary provider for archival summarization.
+// summarizeText runs a one-shot summarization with the given instructions over input text on the
+// memory role's model.
 func (a *Agent) summarizeText(ctx context.Context, userID uuid.UUID, instructions, input string, maxTokens int) (string, error) {
-	pathCtx := telemetry.WithCallPath(ctx, telemetry.CallPathConversationSummary)
-
-	if a.OpenAIProvider != nil {
-		params := responses.ResponseNewParams{
-			Model:            archivalOpenAIModel,
-			SafetyIdentifier: openai.String(userID.String()),
-			MaxOutputTokens:  openai.Int(int64(maxTokens)),
-			Instructions:     openai.String(instructions),
-			Input: responses.ResponseNewParamsInputUnion{
-				OfString: openai.String(input),
-			},
-		}
-		resp, err := a.OpenAIProvider.CallWithRetry(pathCtx, params)
-		if err != nil {
-			return "", fmt.Errorf("openai summarize: %w", err)
-		}
-		summary := strings.TrimSpace(resp.OutputText())
-		if summary == "" {
-			return "", fmt.Errorf("openai summarize returned empty summary")
-		}
-		return summary, nil
+	summary, err := a.CallUtility(ctx, provider.UtilityRequest{
+		Role:            provider.UtilityRoleMemory,
+		CallPath:        telemetry.CallPathConversationSummary,
+		Instructions:    instructions,
+		Input:           input,
+		MaxOutputTokens: int64(maxTokens),
+		SafetyUserID:    userID.String(),
+	})
+	if err != nil {
+		return "", fmt.Errorf("summarize: %w", err)
 	}
-
-	return "", fmt.Errorf("no summarization provider configured")
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return "", fmt.Errorf("summarize returned empty summary")
+	}
+	return summary, nil
 }

@@ -447,7 +447,7 @@ func TestSummarizeText_NoProviderConfiguredReturnsError(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
 	_, err := a.summarizeText(context.Background(), uuid.New(), "instructions", "input", 100)
-	require.ErrorContains(t, err, "no summarization provider configured")
+	require.ErrorContains(t, err, "no OpenAI provider is configured")
 }
 
 func TestSummarizeText_SuccessReturnsTrimmedOutput(t *testing.T) {
@@ -480,7 +480,7 @@ func TestSummarizeText_ProviderErrorIsWrapped(t *testing.T) {
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 	_, err := a.summarizeText(context.Background(), uuid.New(), "instructions", "input", 100)
-	require.ErrorContains(t, err, "openai summarize")
+	require.ErrorContains(t, err, "summarize:")
 }
 
 // --- summarizeImportedThread ---
@@ -584,7 +584,7 @@ func TestExtractMemoriesFromTranscript_ProviderErrorIsWrapped(t *testing.T) {
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 	_, err := a.extractMemoriesFromTranscript(context.Background(), uuid.New(), "User: hi")
-	require.ErrorContains(t, err, "openai memory extraction")
+	require.ErrorContains(t, err, "memory extraction:")
 }
 
 // --- extractAndStoreImportedMemories ---

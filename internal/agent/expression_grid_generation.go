@@ -11,8 +11,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -280,11 +278,13 @@ func (a *Agent) inferExpressionGridLikeness(ctx context.Context, systemPrompt st
 		return "", nil
 	}
 
-	var input responses.ResponseNewParamsInputUnion
-
+	req := provider.UtilityRequest{
+		Role:            provider.UtilityRoleSimple,
+		Instructions:    expressionLikenessInstructions,
+		Input:           "Personality system prompt:\n\n" + systemPrompt,
+		MaxOutputTokens: 768,
+	}
 	if len(referenceImageBytes) > 0 {
-		// Build a multipart user message with text + reference image.
-		textPart := responses.ResponseInputContentParamOfInputText("Personality system prompt:\n\n" + systemPrompt)
 		// mimeType carries the attachment's actual media type (e.g. "image/jpeg", "image/png").
 		// Defaulting to "image/png" only as a last resort; correct type matters for
 		// the vision model to decode the image properly.
@@ -292,40 +292,13 @@ func (a *Agent) inferExpressionGridLikeness(ctx context.Context, systemPrompt st
 		if mimeType == "" {
 			mimeType = "image/png"
 		}
-		dataURL := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(referenceImageBytes)
-		imgPart := responses.ResponseInputContentUnionParam{
-			OfInputImage: &responses.ResponseInputImageParam{
-				ImageURL: openai.String(dataURL),
-				Detail:   responses.ResponseInputImageDetailAuto,
-			},
-		}
-		var parts responses.ResponseInputMessageContentListParam
-		parts = append(parts, textPart, imgPart)
-		input = responses.ResponseNewParamsInputUnion{
-			OfInputItemList: []responses.ResponseInputItemUnionParam{
-				responses.ResponseInputItemParamOfMessage(parts, responses.EasyInputMessageRoleUser),
-			},
-		}
-	} else {
-		input = responses.ResponseNewParamsInputUnion{
-			OfString: openai.String("Personality system prompt:\n\n" + systemPrompt),
-		}
+		req.InputImageDataURL = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(referenceImageBytes)
 	}
-
-	params := responses.ResponseNewParams{
-		Model:           chatNameModel,
-		MaxOutputTokens: openai.Int(768),
-		Instructions:    openai.String(expressionLikenessInstructions),
-		Input:           input,
-	}
-	resp, err := a.OpenAIProvider.CallWithRetry(ctx, params)
+	out, err := a.CallUtility(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("likeness inference: %w", err)
 	}
-	if resp == nil {
-		return "", fmt.Errorf("likeness inference: nil response")
-	}
-	return strings.TrimSpace(resp.OutputText()), nil
+	return strings.TrimSpace(out), nil
 }
 
 // uploadExpressionCellAttachment persists one grid cell image in S3 (not file_content) as a
