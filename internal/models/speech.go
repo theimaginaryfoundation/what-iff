@@ -292,10 +292,52 @@ func ResolveSpeechModel(provider ModelProvider, id string, kind ModelKind, reque
 	}
 	if requested != nil {
 		v, err := NormalizeSpeechVoices(requested)
-		return kind, v, err
+		if err != nil {
+			return "", nil, err
+		}
+		if isKnown && len(known.Voices) > 0 {
+			// A known model's voices can be narrowed or renamed, not invented: the provider
+			// refuses a voice it doesn't have, and only when someone presses play.
+			if err := knownVoicesOnly(known, v); err != nil {
+				return "", nil, err
+			}
+		}
+		return kind, v, nil
 	}
 	if isKnown && len(known.Voices) > 0 {
 		return kind, append([]SpeechVoice(nil), known.Voices...), nil
 	}
 	return "", nil, ErrInvalidSpeechVoices
+}
+
+// CheckSpeechVoices normalises voices for a speech model and, for one the known table
+// has, refuses a voice it doesn't offer.
+func CheckSpeechVoices(provider ModelProvider, id string, voices []SpeechVoice) ([]SpeechVoice, error) {
+	v, err := NormalizeSpeechVoices(voices)
+	if err != nil {
+		return nil, err
+	}
+	if known, ok := LookupKnownSpeechModel(provider, id); ok && len(known.Voices) > 0 {
+		if err := knownVoicesOnly(known, v); err != nil {
+			return nil, err
+		}
+	}
+	return v, nil
+}
+
+// knownVoicesOnly refuses a voice the known model doesn't offer.
+func knownVoicesOnly(known KnownSpeechModel, voices []SpeechVoice) error {
+	for _, v := range voices {
+		found := false
+		for _, k := range known.Voices {
+			if k.ID == v.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("%w: %s has no voice %q", ErrInvalidSpeechVoices, known.ID, v.ID)
+		}
+	}
+	return nil
 }

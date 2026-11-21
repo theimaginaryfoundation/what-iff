@@ -1197,6 +1197,13 @@ func (d *Datastore) SetChatActiveMood(ctx context.Context, userID, chatID uuid.U
 		}
 	}
 
+	if modelID != nil && *modelID != uuid.Nil {
+		// The mood's model is checked like any chat model: a chat model, and one this account may use.
+		if err := d.CheckUserCanUseModel(ctx, userID, *modelID); err != nil {
+			return err
+		}
+	}
+
 	update := d.dbClient.Chat.UpdateOneID(chatID)
 	if moodID == nil || *moodID == uuid.Nil {
 		update.ClearActiveMood()

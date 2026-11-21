@@ -46,7 +46,8 @@ func (a *Agent) resolveModelByReference(ctx context.Context, raw string, opts mo
 
 	if parsed, err := uuid.Parse(query); err == nil {
 		model, getErr := a.ds.GetModel(ctx, parsed)
-		if getErr == nil && (model.ConnectionID == nil || containsModel(allModels, model.ID)) {
+		// Only a chat model is resolved here (ADR 0x052): a voice or dictation model's id names nothing.
+		if getErr == nil && model.EffectiveKind() == models.ModelKindChat && (model.ConnectionID == nil || containsModel(allModels, model.ID)) {
 			return model, nil
 		}
 		if getErr != nil && !errors.Is(getErr, datastore.ErrModelNotFound) {

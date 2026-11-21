@@ -86,9 +86,10 @@ type ModelChoice struct {
 	DisplayName   string `json:"display_name,omitempty"`
 	ToolSupport   *bool  `json:"tool_support,omitempty"`
 	VisionSupport *bool  `json:"vision_support,omitempty"`
-	// Kind is the model's kind where the account chooses it: on an open-ended
-	// connection (OpenRouter, Ollama, Custom). A built-in provider's known
-	// speech model takes the table's; empty is chat (ADR 0x052).
+	// Kind is the model's kind for a model the known speech table doesn't
+	// know: any model on an open-ended connection (OpenRouter, Ollama, Custom),
+	// or a built-in provider's speech model newer than the table. A known
+	// model always takes the table's; empty is chat (ADR 0x052).
 	Kind models.ModelKind `json:"kind,omitempty"`
 	// Voices are the voices a speech model offers: narrowed or relabelled from
 	// the known table's, or typed for a model the table doesn't know. Nil keeps
@@ -402,7 +403,7 @@ func enableModel(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConnection, 
 	// Voices sent for an enabled speech model replace the ones it offers: this is
 	// how an account narrows or relabels them. Left out, they stay.
 	if kind == models.ModelKindSpeech && c.Voices != nil {
-		v, err := models.NormalizeSpeechVoices(c.Voices)
+		v, err := models.CheckSpeechVoices(models.ModelProvider(conn.Preset), c.ID, c.Voices)
 		if err != nil {
 			return uuid.Nil, "", err
 		}
@@ -414,13 +415,14 @@ func enableModel(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConnection, 
 	return existing.ID, kind, nil
 }
 
-// withRowSpeech shows an enabled row's kind and voices in place of the listing's.
+// withRowSpeech shows an enabled row's kind and voices in place of the listing's guess:
+// once enabled, a model is what its row says.
 func withRowSpeech(m *ListedModel, row *ent.Model) {
+	m.Kind, m.Voices = "", nil
 	kind := models.ModelKind(row.Kind)
-	if !kind.IsAudio() {
-		return
+	if kind.IsAudio() {
+		m.Kind = kind
 	}
-	m.Kind = kind
 	if kind == models.ModelKindSpeech {
 		m.Voices = row.SpeechVoices
 	}
