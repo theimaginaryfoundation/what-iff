@@ -54,7 +54,7 @@ func TestCallSubagentModel_InheritsReasoningEffort(t *testing.T) {
 		a := newSubagentChatCompletionsAgent(rec.srv.URL)
 		a.ds = ds
 
-		out, err := a.callSubagentModel(ctx, uuid.New(), "qwen3.7-plus", buildSubagentModelContext("", "", "hi"), nil, false)
+		out, err := a.callSubagentModel(ctx, uuid.New(), "qwen3.7-plus", buildSubagentModelContext("", "", "", "hi"), nil, false)
 		require.NoError(t, err)
 		assert.Equal(t, models.ReasoningEffort(""), out.ReasoningEffort, "high is qwen3.7's native level")
 		assert.Equal(t, true, rec.bodies[0]["enable_thinking"])
@@ -70,7 +70,7 @@ func TestCallSubagentModel_InheritsReasoningEffort(t *testing.T) {
 		a := newTestAgent(ds)
 		a.ClaudeProvider = newHTTPTestClaudeProvider(srv.URL)
 
-		out, err := a.callSubagentModel(ctx, uuid.New(), "claude-opus-5-5", buildSubagentModelContext("", "", "hi"), nil, false)
+		out, err := a.callSubagentModel(ctx, uuid.New(), "claude-opus-5-5", buildSubagentModelContext("", "", "", "hi"), nil, false)
 		require.NoError(t, err)
 		assert.Equal(t, models.ReasoningEffortHigh, out.ReasoningEffort)
 		assert.Equal(t, "adaptive", bodies()[0]["thinking"].(map[string]any)["type"])
@@ -86,7 +86,7 @@ func TestCallSubagentModel_InheritsReasoningEffort(t *testing.T) {
 		a := newTestAgent(ds)
 		a.ZAIProvider = newHTTPTestClaudeProvider(srv.URL)
 
-		out, err := a.callSubagentModel(ctx, uuid.New(), "glm-5.2", buildSubagentModelContext("", "", "hi"), nil, false)
+		out, err := a.callSubagentModel(ctx, uuid.New(), "glm-5.2", buildSubagentModelContext("", "", "", "hi"), nil, false)
 		require.NoError(t, err)
 		assert.Equal(t, models.ReasoningEffort(""), out.ReasoningEffort, "GLM reasons at its deepest level unasked")
 		assert.Equal(t, "max", bodies()[0]["output_config"].(map[string]any)["effort"])
@@ -101,7 +101,7 @@ func TestCallSubagentModel_InheritsReasoningEffort(t *testing.T) {
 		a := newTestAgent(ds)
 		a.ZAIProvider = newHTTPTestClaudeProvider(srv.URL)
 
-		out, err := a.callSubagentModel(context.Background(), uuid.New(), "glm-5.2", buildSubagentModelContext("", "", "hi"), nil, false)
+		out, err := a.callSubagentModel(context.Background(), uuid.New(), "glm-5.2", buildSubagentModelContext("", "", "", "hi"), nil, false)
 		require.NoError(t, err)
 		assert.Empty(t, out.ReasoningEffort)
 		_, hasOutputConfig := bodies()[0]["output_config"]

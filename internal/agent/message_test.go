@@ -392,10 +392,11 @@ func TestGetMemoriesBestEffort_DegradesOnError(t *testing.T) {
 		},
 	}
 
-	memories, liveMemories, failed := a.getMemoriesBestEffort(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hi", false)
+	memories, liveMemories, userNameLine, failed := a.getMemoriesBestEffort(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hi", false)
 	assert.True(t, failed)
 	assert.Equal(t, []string{}, memories)
 	assert.Nil(t, liveMemories)
+	assert.Empty(t, userNameLine, "a failed retrieval records no user-name line")
 }
 
 func TestGetMemoriesBestEffort_PassesThroughOnSuccess(t *testing.T) {
@@ -410,8 +411,9 @@ func TestGetMemoriesBestEffort_PassesThroughOnSuccess(t *testing.T) {
 		},
 	}
 
-	memories, liveMemories, failed := a.getMemoriesBestEffort(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hi", false)
+	memories, liveMemories, userNameLine, failed := a.getMemoriesBestEffort(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hi", false)
 	assert.False(t, failed)
 	assert.Equal(t, []string{"m1"}, memories)
 	assert.Nil(t, liveMemories)
+	assert.Empty(t, userNameLine, "the test override adds no user-name line")
 }

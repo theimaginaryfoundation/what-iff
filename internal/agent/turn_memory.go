@@ -34,12 +34,14 @@ import (
 // usual; save off survives it through the stored flag.
 
 // loadTurnMemoriesFor loads the memory context for the turn chatMessage starts: the usual recall
-// (loadTurnMemories), or, with recall off, only the user-name line.
-func (a *Agent) loadTurnMemoriesFor(ctx context.Context, progress *memoryLoadProgress, userID uuid.UUID, chatMessage *models.ChatMessage, chat *models.Chat) ([]string, []*models.Memory, bool) {
+// (loadTurnMemories), or, with recall off, only the user-name line. userNameLine is the user-name
+// line it put first in memories ("" when none), recorded as chatContext.userNameLine.
+func (a *Agent) loadTurnMemoriesFor(ctx context.Context, progress *memoryLoadProgress, userID uuid.UUID, chatMessage *models.ChatMessage, chat *models.Chat) (memories []string, liveMemories []*models.Memory, userNameLine string, failed bool) {
 	if chatMessage.TurnOptions.RecallsMemory() {
 		return a.loadTurnMemories(ctx, progress, userID, chatMessage.ChatID, chat.PersonalityID, chatMessage.Message, chat.IsSandboxed())
 	}
-	return a.userNameLinesWithoutRecall(ctx, userID, chatMessage.ChatID, chat.IsSandboxed()), nil, false
+	memories = a.userNameLinesWithoutRecall(ctx, userID, chatMessage.ChatID, chat.IsSandboxed())
+	return memories, nil, firstUserNameLine(memories), false
 }
 
 // userNameLinesWithoutRecall is a recall-off turn's memory context: the user-name line on a chat's

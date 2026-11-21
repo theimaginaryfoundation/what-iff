@@ -12,7 +12,7 @@ import (
 )
 
 func TestBuildSubagentModelContext_MinimalSegments(t *testing.T) {
-	ctx := buildSubagentModelContext("personality prompt", "scratch", "hello")
+	ctx := buildSubagentModelContext("", "personality prompt", "scratch", "hello")
 	require.NotNil(t, ctx)
 	require.Len(t, ctx.Segments, 3)
 
@@ -24,7 +24,7 @@ func TestBuildSubagentModelContext_MinimalSegments(t *testing.T) {
 }
 
 func TestBuildSubagentModelContext_ExcludesOptionalContext(t *testing.T) {
-	ctx := buildSubagentModelContext("personality prompt", "", "hello")
+	ctx := buildSubagentModelContext("", "personality prompt", "", "hello")
 	require.NotNil(t, ctx)
 	require.Len(t, ctx.Segments, 2)
 

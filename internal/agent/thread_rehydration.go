@@ -201,12 +201,7 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 	// on are split, and the older part of them is folded into the existing summary.
 	prior, err := a.ds.GetChatSummary(ctx, userID, chatID)
 	if errors.Is(err, datastore.ErrChatNotFound) {
-		// Deleted since the transcript was read: nothing to persist to, and nothing wrong.
-		a.logger.Info("thread rehydration: chat gone before summarizing", zap.String("chat_id", chatID.String()))
-		if _, err := a.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
-			a.logger.Warn("thread rehydration: failed to complete job", zap.String("job_id", jobID.String()), zap.Error(err))
-		}
-		return telemetry.JobOutcomeSuccess
+		return a.completeRehydrationOfGoneChat(ctx, userID, chatID, jobID)
 	}
 	if err != nil {
 		a.failRehydration(ctx, userID, chatID, jobID, fmt.Sprintf("load summary: %v", err))
@@ -252,8 +247,17 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 		}
 		a.logger.Debug("mock/local mode: using deterministic rehydration summary", zap.String("chat_id", chatID.String()))
 	} else {
-		var err error
-		summary, err = a.summarizeImportedThread(ctx, userID, priorSummary, summarizeMsgs)
+		// The chat's own summary instructions, as its checkpoints use: a catch-up rewrites the
+		// summary they wrote.
+		instructions, err := a.checkpointSummaryInstructionsForChatID(ctx, userID, chatID)
+		if errors.Is(err, datastore.ErrChatNotFound) {
+			return a.completeRehydrationOfGoneChat(ctx, userID, chatID, jobID)
+		}
+		if err != nil {
+			a.failRehydration(ctx, userID, chatID, jobID, fmt.Sprintf("load chat: %v", err))
+			return telemetry.JobOutcomeFailed
+		}
+		summary, err = a.summarizeImportedThread(ctx, userID, instructions, priorSummary, summarizeMsgs)
 		if err != nil {
 			a.failRehydration(ctx, userID, chatID, jobID, fmt.Sprintf("summarize: %v", err))
 			return telemetry.JobOutcomeFailed
@@ -297,6 +301,16 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 		zap.Int("summarized_messages", len(summarizeMsgs)),
 		zap.Int("kept_turns", rehydrationKeepTurns),
 		zap.Time("window_start", windowStart))
+	return telemetry.JobOutcomeSuccess
+}
+
+// completeRehydrationOfGoneChat ends a rehydration whose chat was deleted while it ran: there is
+// nothing to persist to, and nothing wrong, so the job completes.
+func (a *Agent) completeRehydrationOfGoneChat(ctx context.Context, userID, chatID, jobID uuid.UUID) string {
+	a.logger.Info("thread rehydration: chat gone before summarizing", zap.String("chat_id", chatID.String()))
+	if _, err := a.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
+		a.logger.Warn("thread rehydration: failed to complete job", zap.String("job_id", jobID.String()), zap.Error(err))
+	}
 	return telemetry.JobOutcomeSuccess
 }
 
@@ -380,15 +394,20 @@ func buildTranscript(msgs []models.ChatMessage) string {
 // summarizeImportedThread produces a single compact summary of the pre-window transcript. For long
 // threads it map-reduces: summarize message chunks, then roll the partial summaries up into one.
 // prior, when set, is the thread's existing summary of everything before msgs: the result covers
-// both (a catch-up after remote sync appended messages past the summary).
-func (a *Agent) summarizeImportedThread(ctx context.Context, userID uuid.UUID, prior string, msgs []models.ChatMessage) (string, error) {
+// both (a catch-up after remote sync appended messages past the summary). instructions are the
+// summary's ("" is What Iff's own, checkpointConversationSummaryInstructions); the map step's
+// section summaries keep rehydrationChunkInstructions.
+func (a *Agent) summarizeImportedThread(ctx context.Context, userID uuid.UUID, instructions, prior string, msgs []models.ChatMessage) (string, error) {
 	transcript := buildTranscript(msgs)
 	if strings.TrimSpace(transcript) == "" {
 		return "", fmt.Errorf("empty transcript")
 	}
+	if instructions == "" {
+		instructions = checkpointConversationSummaryInstructions
+	}
 
 	if len(transcript) <= rehydrationSinglePassChars {
-		return a.summarizeText(ctx, userID, checkpointConversationSummaryInstructions, withPriorSummary(prior, transcript), rehydrationSummaryMaxTokens)
+		return a.summarizeText(ctx, userID, instructions, withPriorSummary(prior, transcript), rehydrationSummaryMaxTokens)
 	}
 
 	// Map: chunk by message boundaries within a character budget and summarize each chunk.
@@ -404,7 +423,7 @@ func (a *Agent) summarizeImportedThread(ctx context.Context, userID uuid.UUID, p
 
 	// Reduce: roll the section summaries up into one cohesive summary.
 	rollupInput := fmt.Sprintf("The following are ordered section summaries of one long conversation. Produce a single cohesive summary as instructed.\n\n%s", strings.Join(partials, "\n\n"))
-	return a.summarizeText(ctx, userID, checkpointConversationSummaryInstructions, withPriorSummary(prior, rollupInput), rehydrationSummaryMaxTokens)
+	return a.summarizeText(ctx, userID, instructions, withPriorSummary(prior, rollupInput), rehydrationSummaryMaxTokens)
 }
 
 // withPriorSummary puts a thread's existing summary ahead of what continues it, so one summary
