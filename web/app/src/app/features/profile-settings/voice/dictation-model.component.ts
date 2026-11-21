@@ -2,12 +2,15 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { firstValueFrom } from 'rxjs';
 
 import { Model } from '../../../core/models/model.model';
-import { UtilityModels, UtilityRoleModel } from '../../../core/models/utility-model.model';
+import { UtilityModels, UtilityRole, UtilityRoleModel } from '../../../core/models/utility-model.model';
 import { ModelService } from '../../../core/services/model.service';
 import { SpeechService } from '../../../core/services/speech.service';
 import { UtilityModelsService } from '../../../core/services/utility-models.service';
 import { apiErrorMessage } from '../../../core/utils/api-error.helpers';
 import { OFF_VALUE, backgroundModelLabel } from '../../../core/utils/background-models';
+
+/** The utility role dictation runs on. */
+const DICTATION_ROLE: UtilityRole = 'transcription';
 
 /**
  * The account's dictation model (ADR 0x052 §4): the `transcription` utility role, chosen from the
@@ -99,7 +102,7 @@ export class DictationModelComponent implements OnInit {
   readonly error = signal('');
 
   private readonly role = computed<UtilityRoleModel | null>(
-    () => this.utility()?.speech_roles?.find(r => r.role === 'transcription') ?? null,
+    () => this.utility()?.speech_roles?.find(r => r.role === DICTATION_ROLE) ?? null,
   );
   /** The account's choice: a model id, OFF_VALUE, or '' when it chose nothing. */
   readonly chosen = computed(() => {
@@ -133,9 +136,7 @@ export class DictationModelComponent implements OnInit {
     this.error.set('');
     try {
       const next = await firstValueFrom(
-        value === OFF_VALUE
-          ? this.utilityModels.switchOff('transcription')
-          : this.utilityModels.choose('transcription', { model_id: value }),
+        value === OFF_VALUE ? this.utilityModels.switchOff(DICTATION_ROLE) : this.utilityModels.choose(DICTATION_ROLE, { model_id: value }),
       );
       this.utility.set(next);
       await this.speech.loadDictation(true);

@@ -113,12 +113,17 @@ export class ClipRecorder {
   private chunks: Blob[] = [];
   private pcm: Float32Array[] = [];
   private processor: ScriptProcessorNode | null = null;
+  private source: MediaStreamAudioSourceNode | null = null;
+  /** Samples kept so far, bounded by maxSamples. */
+  private pcmSamples = 0;
   private startedAt: number | null = null;
   private levelBuffer: Float32Array<ArrayBuffer> | null = null;
 
   constructor(
     private readonly plan: RecordingPlan,
     private readonly deps: RecorderDeps = browserRecorderDeps,
+    /** The longest clip; WAV capture keeps no more than this (plus a second). */
+    private readonly maxSeconds = 301,
   ) {}
 
   /** Asks for the microphone and starts recording; rejects when permission is refused. */
@@ -127,6 +132,7 @@ export class ClipRecorder {
     const wav = this.plan.kind === 'wav';
     this.context = this.deps.createAudioContext(wav ? { sampleRate: WAV_SAMPLE_RATE } : undefined);
     const source = this.context.createMediaStreamSource(this.stream);
+    this.source = source;
     this.analyser = this.context.createAnalyser();
     this.analyser.fftSize = 512;
     source.connect(this.analyser);
@@ -140,7 +146,13 @@ export class ClipRecorder {
       // ScriptProcessorNode is deprecated, but every browser has it, and an AudioWorklet would need
       // a module the page's script policy may not allow.
       this.processor = this.context.createScriptProcessor(4096, 1, 1);
-      this.processor.onaudioprocess = e => this.pcm.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      this.processor.onaudioprocess = e => {
+        // Never more than the longest clip, whatever the browser sends.
+        if (!this.context || this.pcmSamples >= this.maxSeconds * this.context.sampleRate) return;
+        const chunk = new Float32Array(e.inputBuffer.getChannelData(0));
+        this.pcm.push(chunk);
+        this.pcmSamples += chunk.length;
+      };
       source.connect(this.processor);
       this.processor.connect(this.context.destination); // Chromium only processes a connected node
     }
@@ -201,11 +213,13 @@ export class ClipRecorder {
   }
 
   private release(): void {
+    this.source?.disconnect();
     this.processor?.disconnect();
     this.stream?.getTracks().forEach(t => t.stop());
     void this.context?.close().catch(() => undefined);
-    this.stream = this.context = this.analyser = this.media = this.processor = null;
+    this.stream = this.context = this.analyser = this.media = this.processor = this.source = null;
     this.chunks = [];
     this.pcm = [];
+    this.pcmSamples = 0;
   }
 }

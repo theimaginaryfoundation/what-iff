@@ -43,7 +43,9 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/speech/transcriptions", h.Transcribe).Methods(http.MethodPost)
 }
 
-// maxUploadBytes bounds a transcription request: the clip and a few form fields.
+// maxUploadBytes bounds a transcription request, the clip and a few form fields:
+// it is both the whole body's cap (MaxBytesReader) and what ParseMultipartForm
+// keeps in memory, so a request never spills to disk.
 const maxUploadBytes = 13 << 20
 
 // Dictation is what GET /speech/dictation answers: whether the composer has a

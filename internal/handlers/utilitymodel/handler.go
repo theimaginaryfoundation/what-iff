@@ -216,7 +216,8 @@ func (h *Handler) checkModel(w http.ResponseWriter, r *http.Request, modelID uui
 		return false
 	}
 	if m.EffectiveKind() != role.ModelKind() {
-		// The store refuses it too; this says why.
+		// The datastore refuses it too (assertUserCanUseModelOfKindTx), as a plain
+		// not-available; this check exists only to say why, as model_wrong_kind.
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, models.ErrCodeModelWrongKind,
 			fmt.Sprintf("%s can't run on %s: it needs a %s model", role, m.DisplayName, role.ModelKind()), nil)
 		return false

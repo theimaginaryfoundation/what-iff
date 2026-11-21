@@ -229,7 +229,7 @@ export class DictationButtonComponent implements OnInit {
     if (!model?.available) return;
     this.error.set('');
     this.state.set('starting');
-    const recorder = new ClipRecorder(planRecording(model.formats ?? [], this.canRecord), this.deps);
+    const recorder = new ClipRecorder(planRecording(model.formats ?? [], this.canRecord), this.deps, this.maxSeconds() + 1);
     try {
       await recorder.start();
     } catch (err) {
