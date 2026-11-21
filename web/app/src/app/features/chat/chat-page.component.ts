@@ -62,6 +62,7 @@ import {
 import { ChatSessionService } from './chat-session.service';
 import { isChatSendFailed, isChatSendSucceeded } from './chat-send-result';
 import { ChatSendGate } from './services/chat-send-gate';
+import { SpeechPlayerService } from '../../core/services/speech-player.service';
 import { Mood } from '../../core/models/mood.model';
 import { InheritedTurnSettings, effectiveReasoningEffort, resolveEffectiveTurnSettings } from '../../core/models/turn-settings.model';
 import { BackgroundNoticesComponent } from './components/background-notices/background-notices.component';
@@ -143,6 +144,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   readonly session = inject(ChatSessionService);
   readonly isSandboxed = isSandboxed;
   readonly sendGate = inject(ChatSendGate);
+  private readonly speechPlayer = inject(SpeechPlayerService);
   private readonly chatService = inject(ChatService);
   private readonly fileAttachmentService = inject(FileAttachmentService);
   private readonly imageGallery = inject(ImageGalleryService);
@@ -570,8 +572,13 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   private readonly syncActiveThreadPersonality = effect(onCleanup => {
     const personalityId = this.session.thread()?.personality_id;
     if (!personalityId) return;
+    const threadId = this.session.thread()?.id;
     const sub = this.personalityService.getPersonality(personalityId).subscribe({
-      next: personality => this.upsertPersonality(personality),
+      next: personality => {
+        this.upsertPersonality(personality);
+        // Replies get Listen when the personality has a voice (ADR 0x052).
+        if (threadId) this.speechPlayer.setChatVoice(threadId, !!personality.voice);
+      },
     });
     onCleanup(() => sub.unsubscribe());
   });

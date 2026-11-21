@@ -1,3 +1,4 @@
+import { ListenButtonComponent } from '../listen-button/listen-button.component';
 import { McpAppFrameComponent } from '../mcp-app-frame/mcp-app-frame.component';
 import {
   ChangeDetectionStrategy,
@@ -49,6 +50,7 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
   selector: 'app-message-bubble',
   standalone: true,
   imports: [
+    ListenButtonComponent,
     BubbleResizeDirective,
     AgentRunNotesComponent,
     McpAppFrameComponent,
@@ -174,6 +176,7 @@ function jobChip(run: JobRun, liveLabel: string | null): JobChip {
               <span>{{ shortTime(message().sent_at) }}</span>
             </time>
             <button type="button" class="bubble__copy" (click)="copy.emit(message())">Copy</button>
+            <app-listen-button [message]="message()" />
             <button
               type="button"
               class="bubble__bookmark"

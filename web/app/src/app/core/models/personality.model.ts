@@ -1,3 +1,4 @@
+import { PersonalityVoice } from './speech.model';
 import { AgentLoop, ReasoningEffort } from './turn-settings.model';
 
 export interface Personality {
@@ -28,6 +29,8 @@ export interface Personality {
   expressions_enabled: boolean;
   /** Preferred image generation style (e.g. 'auto', 'anime', 'none'). */
   image_style: string;
+  /** The personality's voice (ADR 0x052); absent for none. Set on its own route, never by a personality save. */
+  voice?: PersonalityVoice | null;
   /**
    * Reasoning effort for this personality's threads that set none of their own, over the account
    * default (ADR 0x026). Read at each turn, so a change applies to existing threads; not used in

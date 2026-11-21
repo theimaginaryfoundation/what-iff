@@ -3,7 +3,8 @@ import { Injectable, inject, signal } from '@angular/core';
 import { Observable, firstValueFrom, map } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
-import { DictationClip, DictationModel } from '../models/speech.model';
+import { Personality } from '../models/personality.model';
+import { DictationClip, DictationModel, PersonalityVoice, SpeechTrack } from '../models/speech.model';
 
 /**
  * Voice replies and dictation (ADR 0x052). The dictation model is read once and
@@ -57,5 +58,32 @@ export class SpeechService {
       form.append('language', language);
     }
     return this.http.post<{ text: string }>(`${this.baseUrl}/transcriptions`, form).pipe(map(r => r.text));
+  }
+
+  /** The reply's track in its personality's voice, started if it isn't there yet. */
+  listen(messageId: string): Observable<SpeechTrack> {
+    return this.http.post<SpeechTrack>(`${this.baseUrl}/messages/${messageId}`, {});
+  }
+
+  track(trackId: string): Observable<SpeechTrack> {
+    return this.http.get<SpeechTrack>(`${this.baseUrl}/tracks/${trackId}`);
+  }
+
+  /** One segment's audio, to decode. */
+  segment(trackId: string, seq: number): Observable<ArrayBuffer> {
+    return this.http.get(`${this.baseUrl}/tracks/${trackId}/segments/${seq}`, { responseType: 'arraybuffer' });
+  }
+
+  /** Text read aloud in a voice not yet saved; billed, not stored. */
+  preview(voice: PersonalityVoice, text: string): Observable<ArrayBuffer> {
+    return this.http.post(`${this.baseUrl}/preview`, { ...voice, text }, { responseType: 'arraybuffer' });
+  }
+
+  setVoice(personalityId: string, voice: PersonalityVoice): Observable<Personality> {
+    return this.http.put<Personality>(`${environment.apiUrl}/personality/${personalityId}/voice`, voice);
+  }
+
+  clearVoice(personalityId: string): Observable<Personality> {
+    return this.http.delete<Personality>(`${environment.apiUrl}/personality/${personalityId}/voice`);
   }
 }

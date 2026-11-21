@@ -2,6 +2,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, input, output, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
+import { SpeechPlayerService } from '../../../../core/services/speech-player.service';
 import { SpeechService } from '../../../../core/services/speech.service';
 import { apiErrorMessage, hasErrorCode } from '../../../../core/utils/api-error.helpers';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
@@ -160,6 +161,7 @@ export type DictationState = 'idle' | 'starting' | 'recording' | 'transcribing';
 export class DictationButtonComponent implements OnInit {
   private readonly speech = inject(SpeechService);
   private readonly sendGate = inject(ChatSendGate, { optional: true });
+  private readonly player = inject(SpeechPlayerService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly chatId = input<string | null>(null);
@@ -246,6 +248,7 @@ export class DictationButtonComponent implements OnInit {
     this.elapsed.set(0);
     this.state.set('recording');
     this.recordingStarted.emit();
+    this.player.stop(); // nothing plays aloud while the person talks
     this.ticker = setInterval(() => this.tick(), 100);
   }
 

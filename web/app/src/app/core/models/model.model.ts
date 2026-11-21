@@ -39,6 +39,10 @@ export interface Model {
   kind?: ModelKind;
   /** The voices a speech model offers; absent for other kinds. */
   speech_voices?: SpeechVoice[];
+  /** Whether a speech model takes a style instruction. */
+  speech_style?: boolean;
+  /** All the voices a known speech model has, so one narrowed away can be offered again. */
+  available_voices?: SpeechVoice[];
 }
 
 /** What a model does (ADR 0x052): chat, a voice (speech), or dictation (transcription). */

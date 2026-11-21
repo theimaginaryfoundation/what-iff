@@ -20,3 +20,33 @@ export interface DictationClip {
   format: AudioFormat;
   seconds: number;
 }
+
+/** A personality's voice: a speech model, one of its voices, and how it sounds. */
+export interface PersonalityVoice {
+  model_id: string;
+  voice: string;
+  style: string;
+}
+
+/** A reply's audio in one voice (ADR 0x052 §7), made segment by segment. */
+export interface SpeechTrack {
+  id: string;
+  chat_id: string;
+  message_id?: string;
+  /** `open` while segments are still coming; `stopped` when credits ran out partway. */
+  status: 'open' | 'complete' | 'failed' | 'stopped';
+  error_code?: string;
+  segments: SpeechSegment[];
+}
+
+export interface SpeechSegment {
+  seq: number;
+  format: AudioFormat;
+  duration_ms: number;
+  size_bytes: number;
+}
+
+/** The sample line a personality's preview speaks, until the person writes their own. */
+export function voicePreviewSample(name: string): string {
+  return `Hi, I'm ${name.trim() || 'your assistant'}. This is how I'll sound when I read my replies to you.`;
+}
