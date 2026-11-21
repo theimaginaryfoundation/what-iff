@@ -2328,7 +2328,7 @@ func (a *Agent) prepareChatContextOn(ctx context.Context, userID uuid.UUID, chat
 	}
 
 	// Get relevant memories.
-	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message, parentChat.IsSandboxed())
+	memories, liveMemories, userNameLine, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message, parentChat.IsSandboxed())
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
 	// (gpt-5.1) even when the user selected a different provider.
@@ -2362,8 +2362,6 @@ func (a *Agent) prepareChatContextOn(ctx context.Context, userID uuid.UUID, chat
 
 	// ExpressionsEnabled comes from the personality edge already eager-loaded by GetChat.
 	expressionsEnabled := parentChat.PersonalityExpressionsEnabled
-
-	userNameLine := a.recognizeUserNameLine(ctx, userID, memories)
 
 	return &chatContext{
 		userID:                 userID,
@@ -2557,14 +2555,16 @@ func (a *Agent) assertUserCanRunChatModel(ctx context.Context, userID uuid.UUID,
 	return fmt.Errorf("experimental model provider %q: %w", modelProvider, datastore.ErrExperimentalModelNotAllowed)
 }
 
-func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, error) {
+// getMemoriesForEnrichment is getMemories, or the test override (which adds no user-name line),
+// or nothing in mock/local mode.
+func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) (memories []string, liveMemories []*models.Memory, userNameLine string, err error) {
 	if a.testHooks.GetMemoriesOverride != nil {
 		formatted, err := a.testHooks.GetMemoriesOverride(ctx, userID, chatID, personalityID, userMessage)
-		return formatted, nil, err
+		return formatted, nil, "", err
 	}
 	if !a.memoryEnrichmentRuns() {
 		a.logger.Debug("mock/local mode: skipping memory enrichment", zap.String("chat_id", chatID.String()))
-		return nil, nil, nil
+		return nil, nil, "", nil
 	}
 	return a.getMemories(ctx, userID, chatID, personalityID, userMessage, sandboxed)
 }
@@ -2580,23 +2580,25 @@ func (a *Agent) memoryEnrichmentRuns() bool {
 // loadTurnMemories runs best-effort memory enrichment for a turn, shown in the job's live tool
 // timeline as a "Load Memory" row: running during retrieval, then complete with the memories (or
 // an error). The row is only added when retrieval really runs, so mock/local turns (which skip
-// it) never show one.
-func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgress, userID, chatID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, bool) {
+// it) never show one. userNameLine is the user-name line getMemories put first in memories ("" when
+// none, or when retrieval failed and memories is empty).
+func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgress, userID, chatID, personalityID uuid.UUID, userMessage string, sandboxed bool) (memories []string, liveMemories []*models.Memory, userNameLine string, failed bool) {
 	if progress != nil && a.memoryEnrichmentRuns() {
 		progress.Started(ctx)
 	}
-	memories, liveMemories, failed := a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage, sandboxed)
+	memories, liveMemories, userNameLine, failed = a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage, sandboxed)
 	if progress != nil {
 		progress.Finished(ctx, memories, failed)
 	}
-	return memories, liveMemories, failed
+	return memories, liveMemories, userNameLine, failed
 }
 
 // getMemoriesBestEffort attempts memory enrichment and degrades gracefully on any failure.
-// When it fails, it logs the error and returns an empty memory list along with a failure flag.
-func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, bool) {
+// When it fails, it logs the error and returns an empty memory list (and no user-name line) along
+// with a failure flag.
+func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) (memories []string, liveMemories []*models.Memory, userNameLine string, failed bool) {
 	defer a.timeTurnStage(ctx, turnStageMemoryEnrichment)()
-	memories, liveMemories, err := a.getMemoriesForEnrichment(ctx, userID, chatID, personalityID, userMessage, sandboxed)
+	memories, liveMemories, userNameLine, err := a.getMemoriesForEnrichment(ctx, userID, chatID, personalityID, userMessage, sandboxed)
 	if err != nil {
 		// Note: the underlying memory retrieval path logs errors at the failure site(s).
 		// Keep this at Debug to avoid duplicate error logs while still attaching user/chat context.
@@ -2605,9 +2607,9 @@ func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, cha
 			zap.String("chat_id", chatID.String()),
 			zap.Error(err),
 		)
-		return []string{}, nil, true
+		return []string{}, nil, "", true
 	}
-	return memories, liveMemories, false
+	return memories, liveMemories, userNameLine, false
 }
 
 // appendMemoryMessages adds memory messages to the input message list
