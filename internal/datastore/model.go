@@ -573,6 +573,17 @@ func (d *Datastore) AdminGetModel(ctx context.Context, id uuid.UUID) (*models.Mo
 	return toModelModel(dbModel), nil
 }
 
+// AdminModelKind is the kind AdminCreateModel gives req: the known table's for a model it knows
+// (on the provider an empty one defaults to), else the requested kind.
+func AdminModelKind(req models.CreateModelRequest) (models.ModelKind, error) {
+	providerValue, err := normalizeModelProvider(req.Provider)
+	if err != nil {
+		return "", err
+	}
+	kind, _, err := models.ResolveSpeechModel(models.ModelProvider(providerValue), strings.TrimSpace(req.Name), req.Kind, req.SpeechVoices)
+	return kind, err
+}
+
 func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModelRequest) (*models.Model, error) {
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
@@ -623,6 +634,18 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 		Where(entmodel.Name(name), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if err == nil {
+		existingKind := models.ModelKind(existing.Kind)
+		if existingKind == "" {
+			existingKind = models.ModelKindChat
+		}
+		if existing.Deleted && existingKind != kind {
+			// Chats, personalities and settings may still name the deleted row; restoring it as
+			// another kind would hand them a model they can't run on.
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, fmt.Errorf("%w: a deleted %s model has this name; restore it as one or choose another name", models.ErrInvalidModelKind, existingKind)
+		}
 		if existing.Deleted {
 			restored, rerr := tx.Model.UpdateOneID(existing.ID).
 				SetDeleted(false).
@@ -818,7 +841,7 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 		update.SetBaseCreditsPerSlab(normalizeBaseCreditsPerSlab(*req.BaseCreditsPerSlab))
 	}
 	if req.SpeechVoices != nil {
-		voices, verr := models.NormalizeSpeechVoices(req.SpeechVoices)
+		voices, verr := models.CheckSpeechVoices(models.ModelProvider(current.Provider), current.Name, req.SpeechVoices)
 		// kind is NOT NULL with a chat default, so every row has one.
 		if verr == nil && current.Kind != entmodel.KindSpeech {
 			verr = models.ErrInvalidSpeechVoices

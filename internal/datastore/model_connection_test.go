@@ -251,6 +251,27 @@ func TestAdminCreateModel_SpeechModels(t *testing.T) {
 	})
 	require.ErrorIs(t, err, models.ErrInvalidSpeechVoices, "a chat model has no voices")
 
+	_, err = f.ds.AdminUpdateModel(ctx, gemini.ID, models.UpdateModelRequest{
+		SpeechVoices: []models.SpeechVoice{{ID: "Kore"}, {ID: "made-up"}},
+	})
+	require.ErrorIs(t, err, models.ErrInvalidSpeechVoices, "a known model's voices are narrowed, not invented")
+
+	// A deleted model comes back as what it was, or not at all: chats and personalities may still name it.
+	require.NoError(t, f.ds.AdminDeleteModel(ctx, gemini.ID))
+	_, err = f.ds.AdminCreateModel(ctx, models.CreateModelRequest{
+		Name: "gemini-3.8-flash-tts", DisplayName: "Gemini TTS", Provider: "openai", Kind: models.ModelKindChat,
+	})
+	require.ErrorIs(t, err, models.ErrInvalidModelKind)
+	restored, err := f.ds.AdminCreateModel(ctx, models.CreateModelRequest{
+		Name: "gemini-3.8-flash-tts", DisplayName: "Gemini TTS", Provider: "google",
+	})
+	require.NoError(t, err)
+	require.Equal(t, gemini.ID, restored.ID)
+
+	kind, err := AdminModelKind(models.CreateModelRequest{Name: "gpt-transcribe"})
+	require.NoError(t, err)
+	require.Equal(t, models.ModelKindTranscription, kind, "an empty provider is OpenAI's, as on create")
+
 	_, err = f.ds.AdminSetDefaultModel(ctx, gemini.ID)
 	require.ErrorIs(t, err, ErrModelNotFound, "a voice can't be the default chat model")
 }
