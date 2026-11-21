@@ -16,6 +16,7 @@ HTTP API for **LLM model configuration** — which models users/chats can select
 ## Non-obvious decisions
 
 - Model defaults and allowed IDs interact with `internal/models/model_defaults.go` — update both when adding models.
+- `ListModels` lists chat models only; `?kind=speech` or `?kind=transcription` lists the voice or dictation models the account can use instead (ADR 0x052), and nothing without an account.
 - `ListModels` omits `subscription_tier` unless a meter is linked (`metering.Linked`): without one, tiers have no effect, and the app shows no Tier tab or badges.
 
 ## Testing

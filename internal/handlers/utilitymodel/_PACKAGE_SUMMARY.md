@@ -7,6 +7,7 @@ Serves an account's choice of model for each utility role: the background work, 
 ## Responsibilities
 
 - `GET /utility-models` returns `models.UtilityModels`: every role in `models.UtilityRoles` order, with the account's choice and the deployment's (`models.UtilityChoice`: a model, or off); with neither, the role is not set.
+  The roles that run on audio models (`models.SpeechUtilityRoles`: `transcription`, dictation, ADR 0x052) are listed apart, in `speech_roles`, so nothing that asks for every background role asks for them.
 - `PUT /utility-models/{role}` chooses the account's model for a role (`model_id`) or switches it off (`off`), exactly one of the two, and answers with every role after the change.
   A model choice may carry a `reasoning_effort` and a `service_tier`; a tier goes only on a model on OpenAI's own Responses API (`offersServiceTier`), the only API that takes one, and Off takes neither.
   There is no clearing: where accounts choose, nothing stands behind their choice, so a cleared role would quietly stop running.
@@ -25,10 +26,12 @@ Serves an account's choice of model for each utility role: the background work, 
 - A catalog model whose provider the account holds no key for is refused as a 409 `provider_not_configured` naming the provider, since it would fail at every call; a connection model carries its connection's key.
   An experimental model the account hasn't opted into is a 403, and an account deleted while the request ran is a 401.
 - An unset choice is `null`, not missing, so a client can tell "not chosen" from an older server.
+- A role runs only on a model of its kind (`UtilityRole.ModelKind`): dictation on a transcription model, the rest on chat models.
+  A model of the wrong kind is a 400 `model_wrong_kind` saying why (the datastore refuses it too), and dictation takes no reasoning effort or service tier.
 
 ## Testing
 
-- `handler_test.go` — over a fake store: every role in order with both scopes, Off and not set, never another account's choice; choosing a model, then Off, and no clearing route; an effort and tier saved and reported, and refused when unknown, on Off, or (the tier) on a model whose API offers none; refusals (a model the account can't use, neither or both of a model and off, an unknown role, no signed-in account) that change nothing; a deployment that supplies the keys refusing account writes; a catalog model without a key refused as `provider_not_configured`; a deleted account answered 401; and a model that can't be read answered 500 before anything is saved.
+- `handler_test.go` — over a fake store: every role in order with both scopes, Off and not set, never another account's choice; choosing a model, then Off, and no clearing route; an effort and tier saved and reported, and refused when unknown, on Off, or (the tier) on a model whose API offers none; refusals (a model the account can't use, neither or both of a model and off, an unknown role, no signed-in account) that change nothing; a deployment that supplies the keys refusing account writes; a catalog model without a key refused as `provider_not_configured`; a deleted account answered 401; and a model that can't be read answered 500 before anything is saved; dictation listed in `speech_roles` only, the wrong kind refused both ways, and no tier on dictation.
 
 ## Related documentation
 

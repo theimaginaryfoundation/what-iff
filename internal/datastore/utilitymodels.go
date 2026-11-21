@@ -115,7 +115,7 @@ func setUtilityModelTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, s mode
 		// Off: no model to check.
 	case userID == uuid.Nil:
 		catalog, err := tx.Model.Query().
-			Where(entmodel.ID(*modelID), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+			Where(entmodel.ID(*modelID), entmodel.Deleted(false), entmodel.ConnectionIDIsNil(), entmodel.KindEQ(entmodel.Kind(role.ModelKind()))).
 			Exist(ctx)
 		if err != nil {
 			return fmt.Errorf("check utility model: %w", err)
@@ -124,7 +124,7 @@ func setUtilityModelTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, s mode
 			return ErrModelNotFound
 		}
 	default:
-		if err := assertUserCanUseModelTx(ctx, tx, userID, *modelID); err != nil {
+		if err := assertUserCanUseModelOfKindTx(ctx, tx, userID, *modelID, role.ModelKind()); err != nil {
 			return err
 		}
 	}

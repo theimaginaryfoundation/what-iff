@@ -2679,8 +2679,17 @@ paths:
   /model:
     get:
       summary: List available models
-      description: Returns a list of active AI models that users can select from
+      description: >-
+        Returns the active chat models the caller can select. With `kind=speech`
+        or `kind=transcription`, the voice or dictation models the account can
+        use instead (ADR 0x052); those need an account, and are empty without one.
       tags: [Model Management]
+      parameters:
+        - name: kind
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ModelKind'
       responses:
         '200':
           description: Models retrieved successfully
@@ -2698,6 +2707,127 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /speech/dictation:
+    get:
+      summary: Whether the account can dictate, and on what model
+      description: >-
+        The account's dictation model (the `transcription` utility role, ADR
+        0x052): the formats it takes and the longest clip, so the composer
+        records what it accepts. With none, `available` is false and `code`
+        says why; the composer then shows no microphone.
+      tags: [Speech]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The dictation model, or why there is none
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DictationModel'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /speech/transcriptions:
+    post:
+      summary: Transcribe a dictated clip
+      description: >-
+        Transcribes one clip on the account's dictation model, metered as one
+        `transcription`. The clip is never stored. A WAV's length is read from
+        its header; another format's is the browser's measure, never less than
+        its size allows.
+      tags: [Speech]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio, format]
+              properties:
+                audio:
+                  type: string
+                  format: binary
+                format:
+                  $ref: '#/components/schemas/AudioFormat'
+                duration_seconds:
+                  type: number
+                  description: The clip's length as the browser measured it.
+                chat_id:
+                  type: string
+                  format: uuid
+                  description: The chat the clip is for, for usage records.
+                language:
+                  type: string
+                  description: An optional BCP-47 hint, such as the account's locale.
+      responses:
+        '200':
+          description: The transcript
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [text]
+                properties:
+                  text:
+                    type: string
+        '400':
+          description: No clip, or no known format (`audio_format_unsupported`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Dictation isn't available on this account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >-
+            No dictation model can run (`utility_model_not_set`, `utility_role_off`,
+            `utility_model_unavailable`, or `provider_not_configured`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Longer or larger than the model takes (`clip_too_long`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: A format the dictation model doesn't take (`audio_format_unsupported`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Out of credits (`quota_exceeded`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: The provider couldn't transcribe it
           content:
             application/json:
               schema:
@@ -12522,9 +12652,11 @@ components:
           format: date-time
     UtilityRole:
       type: string
-      enum: [memory, memory_merge, simple, personality]
+      enum: [memory, memory_merge, simple, personality, transcription]
       description: >-
-        A group of background work that runs on one model. `memory`: memory
+        A group of background work that runs on one model. `transcription` is
+        dictation (ADR 0x052) and runs on a transcription model; the rest run on
+        chat models. `memory`: memory
         extraction, the scratchpad, checkpoint summaries, recall and thread
         rehydration. `memory_merge`: folding duplicate memories together; off,
         only exact duplicates are folded. `simple`: tasks straightforward
@@ -12595,6 +12727,14 @@ components:
             and not reported.
         roles:
           type: array
+          description: The roles background work needs, which onboarding asks for.
+          items:
+            $ref: '#/components/schemas/UtilityRoleModel'
+        speech_roles:
+          type: array
+          description: >-
+            The roles that run on audio models (ADR 0x052): `transcription`, for
+            dictation. Optional features, off until chosen, so they are listed apart.
           items:
             $ref: '#/components/schemas/UtilityRoleModel'
     SetUtilityModelRequest:
@@ -12721,6 +12861,35 @@ components:
         What a model does (ADR 0x052). Only chat models are offered for chat,
         subagents and the text utility roles; speech models are voices, and
         transcription models dictation.
+    AudioFormat:
+      type: string
+      enum: [mp3, wav, webm, mp4, ogg, flac]
+      description: >-
+        An audio container: `webm` is Opus in WebM (Chromium and Firefox
+        recordings), `mp4` is AAC in MP4 or M4A (Safari recordings).
+    DictationModel:
+      type: object
+      required: [available]
+      properties:
+        available:
+          type: boolean
+        code:
+          type: string
+          description: >-
+            Why dictation isn't available: `utility_model_not_set`,
+            `utility_role_off`, `utility_model_unavailable`, or `forbidden`.
+        model:
+          type: string
+        display_name:
+          type: string
+        formats:
+          type: array
+          description: The formats the model takes; the composer records WAV when it takes none the browser records.
+          items:
+            $ref: '#/components/schemas/AudioFormat'
+        max_seconds:
+          type: integer
+          description: The longest clip it takes, at most 300.
     SpeechVoice:
       type: object
       required: [id, name]
@@ -16146,6 +16315,9 @@ components:
         - utility_model_not_set
         - utility_role_off
         - utility_model_unavailable
+        - model_wrong_kind
+        - audio_format_unsupported
+        - clip_too_long
         - reauthentication_required
         - provider_unreachable
         - provider_key_rejected
@@ -16241,6 +16413,8 @@ tags:
     description: Stripe billing and coupon management
   - name: Model Management
     description: AI model information and configuration
+  - name: Speech
+    description: Voice replies and dictation (ADR 0x052)
   - name: Job Management
     description: Background job monitoring and management
   - name: Chat Management

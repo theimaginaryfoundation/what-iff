@@ -267,11 +267,17 @@ func (d *Datastore) ListAudioModelsForUser(ctx context.Context, userID uuid.UUID
 }
 
 func assertUserCanUseModelTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, modelID uuid.UUID) error {
+	return assertUserCanUseModelOfKindTx(ctx, tx, userID, modelID, models.ModelKindChat)
+}
+
+// assertUserCanUseModelOfKindTx is assertUserCanUseModelTx for a model of kind:
+// one of another kind does not exist to the check (ADR 0x052).
+func assertUserCanUseModelOfKindTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, modelID uuid.UUID, kind models.ModelKind) error {
 	if modelID == uuid.Nil {
 		return nil
 	}
 	dbModel, err := tx.Model.Query().
-		Where(entmodel.ID(modelID), entmodel.Deleted(false), entmodel.KindEQ(entmodel.KindChat)).
+		Where(entmodel.ID(modelID), entmodel.Deleted(false), entmodel.KindEQ(entmodel.Kind(kind))).
 		Only(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {

@@ -4722,11 +4722,13 @@ export interface paths {
         };
         /**
          * List available models
-         * @description Returns a list of active AI models that users can select from
+         * @description Returns the active chat models the caller can select. With `kind=speech` or `kind=transcription`, the voice or dictation models the account can use instead (ADR 0x052); those need an account, and are empty without one.
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    kind?: components["schemas"]["ModelKind"];
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -4764,6 +4766,184 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/speech/dictation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether the account can dictate, and on what model
+         * @description The account's dictation model (the `transcription` utility role, ADR 0x052): the formats it takes and the longest clip, so the composer records what it accepts. With none, `available` is false and `code` says why; the composer then shows no microphone.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The dictation model, or why there is none */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DictationModel"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/speech/transcriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transcribe a dictated clip
+         * @description Transcribes one clip on the account's dictation model, metered as one `transcription`. The clip is never stored. A WAV's length is read from its header; another format's is the browser's measure, never less than its size allows.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /** Format: binary */
+                        audio: string;
+                        format: components["schemas"]["AudioFormat"];
+                        /** @description The clip's length as the browser measured it. */
+                        duration_seconds?: number;
+                        /**
+                         * Format: uuid
+                         * @description The chat the clip is for, for usage records.
+                         */
+                        chat_id?: string;
+                        /** @description An optional BCP-47 hint, such as the account's locale. */
+                        language?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The transcript */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            text: string;
+                        };
+                    };
+                };
+                /** @description No clip, or no known format (`audio_format_unsupported`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Dictation isn't available on this account */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No dictation model can run (`utility_model_not_set`, `utility_role_off`, `utility_model_unavailable`, or `provider_not_configured`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Longer or larger than the model takes (`clip_too_long`) */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A format the dictation model doesn't take (`audio_format_unsupported`) */
+                415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Out of credits (`quota_exceeded`) */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The provider couldn't transcribe it */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -16638,10 +16818,10 @@ export interface components {
             updated_at: string;
         };
         /**
-         * @description A group of background work that runs on one model. `memory`: memory extraction, the scratchpad, checkpoint summaries, recall and thread rehydration. `memory_merge`: folding duplicate memories together; off, only exact duplicates are folded. `simple`: tasks straightforward enough for any model, such as chat naming, expression and mood selection, schedule parsing and memory queries. `personality`: generating a personality.
+         * @description A group of background work that runs on one model. `transcription` is dictation (ADR 0x052) and runs on a transcription model; the rest run on chat models. `memory`: memory extraction, the scratchpad, checkpoint summaries, recall and thread rehydration. `memory_merge`: folding duplicate memories together; off, only exact duplicates are folded. `simple`: tasks straightforward enough for any model, such as chat naming, expression and mood selection, schedule parsing and memory queries. `personality`: generating a personality.
          * @enum {string}
          */
-        UtilityRole: "memory" | "memory_merge" | "simple" | "personality";
+        UtilityRole: "memory" | "memory_merge" | "simple" | "personality" | "transcription";
         /** @description One scope's choice for a role. */
         UtilityChoice: {
             /** @description Whether the role is switched off; `model_id` is then null. */
@@ -16672,7 +16852,10 @@ export interface components {
         UtilityModels: {
             /** @description Whether an account may choose its own models: only where accounts bring their own keys, and so pay for their background work. Where the deployment supplies the keys, it chooses; account choices are refused and not reported. */
             accounts_choose: boolean;
+            /** @description The roles background work needs, which onboarding asks for. */
             roles: components["schemas"]["UtilityRoleModel"][];
+            /** @description The roles that run on audio models (ADR 0x052): `transcription`, for dictation. Optional features, off until chosen, so they are listed apart. */
+            speech_roles?: components["schemas"]["UtilityRoleModel"][];
         };
         /** @description Exactly one of `model_id` and `off`; a reasoning effort and service tier go with a model only. */
         SetUtilityModelRequest: {
@@ -16755,6 +16938,22 @@ export interface components {
          * @enum {string}
          */
         ModelKind: "chat" | "speech" | "transcription";
+        /**
+         * @description An audio container: `webm` is Opus in WebM (Chromium and Firefox recordings), `mp4` is AAC in MP4 or M4A (Safari recordings).
+         * @enum {string}
+         */
+        AudioFormat: "mp3" | "wav" | "webm" | "mp4" | "ogg" | "flac";
+        DictationModel: {
+            available: boolean;
+            /** @description Why dictation isn't available: `utility_model_not_set`, `utility_role_off`, `utility_model_unavailable`, or `forbidden`. */
+            code?: string;
+            model?: string;
+            display_name?: string;
+            /** @description The formats the model takes; the composer records WAV when it takes none the browser records. */
+            formats?: components["schemas"]["AudioFormat"][];
+            /** @description The longest clip it takes, at most 300. */
+            max_seconds?: number;
+        };
         SpeechVoice: {
             /** @description The voice id the provider takes. */
             id: string;
@@ -18733,7 +18932,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "utility_model_not_set" | "utility_role_off" | "utility_model_unavailable" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "connection_name_taken" | "model_name_taken" | "no_model_selected";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "utility_model_not_set" | "utility_role_off" | "utility_model_unavailable" | "model_wrong_kind" | "audio_format_unsupported" | "clip_too_long" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "connection_name_taken" | "model_name_taken" | "no_model_selected";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**

@@ -147,6 +147,9 @@ type Agent struct {
 	// imageGenerators are the image vendors this deployment can call, keyed by
 	// vendor; the user's preference picks one (imageGeneratorForUser).
 	imageGenerators map[models.ModelProvider]provider.ImageGenerator
+	// speechEndpoints are where each built-in provider's speech calls go (ADR 0x052),
+	// through the credentialed client; a connection model's go to its connection.
+	speechEndpoints map[models.ModelProvider]provider.SpeechEndpoint
 	// keyResolver answers which vendors the caller holds a key for; nil (an Agent
 	// built without NewAgent) treats every registered image generator as usable.
 	keyResolver providerkeys.Resolver
@@ -407,6 +410,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 	}
 
 	a.imageGenerators = buildImageGenerators(cfg, a)
+	a.speechEndpoints = buildSpeechEndpoints(cfg)
 	a.keyResolver = cfg.KeyResolver
 	a.connections = cfg.Connections
 	a.connectionClient = cfg.ConnectionHTTPClient

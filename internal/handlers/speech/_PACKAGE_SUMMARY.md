@@ -1,0 +1,35 @@
+# Package: `internal/handlers/speech`
+
+## Role
+
+Serves voice replies and dictation (ADR 0x052).
+So far, dictation: whether the account has a dictation model, and transcribing a clip the person recorded in the composer.
+
+## Responsibilities
+
+- `GET /speech/dictation` answers whether the composer has a microphone (`available`), and if so the dictation model's formats and longest clip, so the browser records what it takes.
+  With no dictation model (off, not set, or unusable) it answers 200 with `available: false` and the `utility_*` code saying why, since no microphone is not an error.
+- `POST /speech/transcriptions` takes one clip as multipart form data (`audio`, `format`, `duration_seconds`, optional `chat_id` and `language`) and answers its transcript.
+
+## Dependencies
+
+- **Inbound:** `internal/server` mounts it on the authenticated router, with the agent.
+- **Outbound:** `internal/agent` (`Dictation`, `Transcribe`, through the `Speech` interface), `internal/featuregate`, `internal/models`, `internal/handlers/handlerutils`.
+
+## Non-obvious decisions
+
+- Dictation is an entitlement-gated feature (`featuregate.IsEntitled`); the open-source build gates nothing.
+- A request is capped at 13 MB before parsing; a larger one is a 413 `clip_too_long`, as is a clip longer than the model takes.
+  A format the model doesn't take is a 415 `audio_format_unsupported` (the composer then records WAV), out of credits a 429 `quota_exceeded`, and no usable dictation model a 409 with the role's code.
+- A provider's failure is a 502 with a plain message; the provider's own error is logged, not shown.
+- A `chat_id` that isn't a UUID is dropped rather than trusted, and a negative duration read as none.
+- The clip is never stored: it is read into memory, passed on, and the multipart temp files removed.
+
+## Testing
+
+- `handler_test.go` — over a fake agent: the dictation model and why there is none; a transcript with every field passed on; a bad chat id and a negative duration dropped; each refusal's status and code (no clip, unknown format, out of credits, a format the model refuses, too long, no dictation model, a provider failure without its own error); an oversized upload.
+
+## Related documentation
+
+- [`internal/agent`](../../agent/_PACKAGE_SUMMARY.md) — `Transcribe`.
+- [ADR 0x052](../../../docs/adr/0x052-voice-replies-and-dictation.md)

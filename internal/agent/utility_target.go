@@ -41,6 +41,9 @@ type utilityTarget struct {
 	// model's and the API's defaults.
 	reasoningEffort models.ReasoningEffort
 	serviceTier     models.UtilityServiceTier
+	// kind is the model's kind (ADR 0x052): chat for the text roles, transcription for
+	// dictation.
+	kind models.ModelKind
 }
 
 // chatContext is the part of a chat context the provider helpers route on, for a call that
@@ -137,6 +140,11 @@ func (a *Agent) settingTarget(ctx context.Context, userID uuid.UUID, s models.Ut
 	if err != nil {
 		return utilityTarget{}, err
 	}
+	if m.EffectiveKind() != s.Role.ModelKind() {
+		// Chosen before the model's kind was known, or written around the checks: unusable,
+		// as a model turned off is.
+		return utilityTarget{}, fmt.Errorf("%w: %s is a %s model", ErrModelDisabled, m.Name, m.EffectiveKind())
+	}
 	conn, err := a.connectionFor(ctx, userID, m)
 	if err != nil {
 		return utilityTarget{}, err
@@ -147,7 +155,7 @@ func (a *Agent) settingTarget(ctx context.Context, userID uuid.UUID, s models.Ut
 		}
 	}
 	t := utilityTarget{name: m.Name, provider: m.Provider, connection: conn, reasoningSupport: m.ReasoningSupport,
-		reasoningEffort: s.ReasoningEffort, serviceTier: s.ServiceTier}
+		reasoningEffort: s.ReasoningEffort, serviceTier: s.ServiceTier, kind: m.EffectiveKind()}
 	if conn != nil {
 		t.provider = conn.Preset
 	}

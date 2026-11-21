@@ -113,6 +113,19 @@ var GenAIImagesDropped = Counter{"whatiff.gen_ai.images_dropped", "{image}", "Im
 // deployment; empty when the settings couldn't be read), reason (unavailable, unreadable).
 var UtilityModelFallbacks = Counter{"whatiff.utility.model_fallbacks", "{call}", "Utility calls that fell back past a chosen model."}
 
+// SpeechDuration is how long one speech call took (ADR 0x052): a transcription, or one
+// synthesised segment. Attributes: gen_ai.provider.name, gen_ai.request.model, operation
+// (transcription, synthesis).
+var SpeechDuration = Histogram{"whatiff.speech.duration", unitSeconds, "Duration of speech synthesis and transcription calls.", BucketsSlow}
+
+// SpeechClipDuration is the length of each dictated clip transcribed. Attributes:
+// gen_ai.provider.name, gen_ai.request.model.
+var SpeechClipDuration = Histogram{"whatiff.speech.clip.duration", unitSeconds, "Length of dictated clips transcribed.", BucketsSlow}
+
+// SpeechFailures counts speech calls that failed. Attributes: gen_ai.provider.name,
+// gen_ai.request.model, operation (transcription, synthesis).
+var SpeechFailures = Counter{"whatiff.speech.failures", "{call}", "Speech synthesis and transcription calls that failed."}
+
 // GenAIContextTokens is the estimated size of each context segment sent with a turn.
 // Attributes: segment, call_path.
 var GenAIContextTokens = Histogram{"whatiff.gen_ai.context.tokens", "{token}", "Estimated tokens per model context segment.", BucketsTokens}
