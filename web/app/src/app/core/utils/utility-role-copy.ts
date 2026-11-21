@@ -18,12 +18,18 @@ export const UTILITY_ROLE_COPY: Record<UtilityRole, { label: string; covers: str
   simple: {
     label: 'Simple tasks',
     covers: 'Names threads, picks expressions and moods, finds memories for replies and reads job schedules',
-    stops: "Threads aren't named, expressions and moods don't change on their own, replies don't draw on memories, and job schedules can't be read.",
+    stops:
+      "Threads aren't named, expressions and moods don't change on their own, replies don't draw on memories, and job schedules can't be read.",
   },
   personality: {
     label: 'Personality generation',
     covers: 'Writes a new personality from your answers',
     stops: "Personalities can't be generated; you can still write one yourself.",
+  },
+  transcription: {
+    label: 'Dictation',
+    covers: 'Turns what you say into text in the message box, for you to read and send',
+    stops: 'The message box has no microphone.',
   },
 };
 
@@ -41,7 +47,9 @@ export function utilityRoleUnavailableMessage(code: string | null | undefined, r
       : `This server hasn't chosen a model for ${label}.`;
   }
   if (code === 'utility_role_off') {
-    return accountsChoose ? `${label} is switched off. Choose a model for it in Settings, under Background models.` : `${label} is switched off on this server.`;
+    return accountsChoose
+      ? `${label} is switched off. Choose a model for it in Settings, under Background models.`
+      : `${label} is switched off on this server.`;
   }
   if (code === 'utility_model_unavailable') {
     return accountsChoose
