@@ -143,7 +143,7 @@ Each speech model in a picker, the preview button and the autoplay settings have
 
 ### 5. A personality's voice
 
-A personality gains an optional voice:
+A personality gains an optional voice, set and cleared on its own route (`PUT` and `DELETE /personality/{id}/voice`), so a personality save from an editor that knows nothing of voices never clears it:
 
 | Field | Meaning |
 | --- | --- |
@@ -194,14 +194,18 @@ Each **segment** records its sequence number, its text, its audio file in the fi
 
 A message has at most one track per `voice_key`: playing a reply again in the same voice replays the stored audio and calls no provider; playing it after the personality's voice changed makes a new track.
 Segment audio is kept for 30 days after the track was last played, then deleted, and a later play synthesises it again.
-Tracks and their audio go when their message or chat is deleted, and are not part of an account export (they can be made again from the text).
+Tracks and their audio also go when their message or chat is deleted: an hourly sweeper deletes the audio files and then the rows, rather than a database cascade that would drop the rows and strand the files.
+They are not part of an account export (they can be made again from the text).
 
 Synthesis runs on the server, one segment at a time, in a background worker per track, writing each segment as it finishes.
 The client never sends text to synthesise; it asks for a message's track:
 
-- `POST /chats/{chatId}/messages/{messageId}/speech`: the track for the personality's current voice, started if it does not exist.
-- `GET /speech-tracks/{id}`: its status and its segments so far, each with an audio URL and duration.
-- `GET /speech-tracks/{id}/segments/{seq}`: one segment's audio.
+- `POST /speech/messages/{id}`: the reply's track in its personality's current voice, started if it does not exist.
+- `GET /speech/tracks/{id}`: its status and its segments so far, each with its format and, where the container says, its duration.
+- `GET /speech/tracks/{id}/segments/{seq}`: one segment's audio, privately cacheable since it never changes.
+
+A worker holds a lease on the track, renewed per segment, so a track whose server went away mid-way is picked up by the next request for it.
+A track that failed, or stopped when the meter refused, is reopened when asked for again, keeping the segments it has.
 
 The client polls a track every second while it is `open`, and plays segments back to back as they arrive.
 
@@ -252,7 +256,7 @@ It does not depend on whether anyone is watching.
 
 **Playing it once.**
 A pending track is played at most once, by one client.
-The client claims it (`POST /speech-tracks/{id}/claim`), which moves it from `pending` to `played` atomically and refuses anything else, and plays only if the claim succeeds.
+The client claims it (`POST /speech/tracks/{id}/claim`), which moves it from `pending` to `played` atomically and refuses anything else, and plays only if the claim succeeds.
 A client claims only when it can play right then: the chat is open and in view, the tab is visible, audio is unlocked (below), dictation is not recording, and the person has not started another reply playing.
 It looks for a pending track when it opens a chat, when one appears in the open chat (a turn or job starting), and when its tab becomes visible again.
 
