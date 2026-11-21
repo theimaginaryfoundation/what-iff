@@ -2645,7 +2645,11 @@ func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, cha
 			zap.String("chat_id", chatID.String()),
 			zap.Error(err),
 		)
-		return []string{}, nil, true
+		// Lines the turn built before the failure (the user's name on a first message) still go.
+		if memories == nil {
+			memories = []string{}
+		}
+		return memories, nil, true
 	}
 	return memories, liveMemories, false
 }

@@ -44,7 +44,7 @@ import {
   type Ritual,
   type WebhookToken,
 } from '../sdk/client';
-import { deleteUser, giveProviderKey, newTestUserDetails, registerUser, type TestUser } from './api';
+import { deleteUser, giveBackgroundModels, giveProviderKey, newTestUserDetails, registerUser, type TestUser } from './api';
 import { signInAsStaticAccount, staticTestAccountConfigured } from './static-account';
 import { seedName, shortId, uniqueId } from './unique';
 
@@ -55,8 +55,12 @@ export type { TestUser };
  * callable form exists for tests that need a *second* user beyond the one
  * the fixture provides. Returns the user and its access token (from
  * registration) so the caller can clean it up itself.
+ *
+ * Like the fixture's account, it starts past the first-run prompt: `providerKey` and
+ * `backgroundModels` both default to true. Background models are given only with the key, the
+ * order an account sets them up in, so `providerKey: false` skips both.
  */
-export async function authenticateAsNewUser(options: { providerKey?: boolean } = {}): Promise<{
+export async function authenticateAsNewUser(options: { providerKey?: boolean; backgroundModels?: boolean } = {}): Promise<{
   user: TestUser;
   accessToken: string;
 }> {
@@ -66,6 +70,10 @@ export async function authenticateAsNewUser(options: { providerKey?: boolean } =
   // is about key setup itself.
   if (options.providerKey ?? true) {
     await giveProviderKey(accessToken, user.password);
+    // Likewise past choosing background models, unless the test is about that step.
+    if (options.backgroundModels ?? true) {
+      await giveBackgroundModels(accessToken);
+    }
   }
   return { user, accessToken };
 }

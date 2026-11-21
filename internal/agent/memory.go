@@ -225,7 +225,9 @@ func initialTurnContextLines(username string, hasUserMessages bool, sandboxed bo
 }
 
 // getMemories prefetches the memories relevant to userMessage for one turn. A sandboxed chat gets
-// only the memories created in it (scoped in the retrieval SQL) and no user-name line.
+// only the memories created in it (scoped in the retrieval SQL) and no user-name line. Once the
+// turn's own lines are built, a failed search returns them with the error, so a best-effort caller
+// can keep them.
 func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, error) {
 	chatUser, err := a.ds.GetUserByID(ctx, userID)
 	if err != nil {
@@ -247,22 +249,24 @@ func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.U
 		// as a failed memory load.
 		return memories, liveMemories, nil
 	}
+	// From here on a failure costs the turn its memories, not its own lines: they go back with
+	// the error, and the best-effort caller keeps them.
 	if err != nil {
 		a.logger.Error("failed to get memory query", zap.Error(err))
-		return nil, nil, err
+		return memories, nil, err
 	}
 
 	if memoryQuery.ShouldEnrich {
 		memoryQueryEmbedding, err := a.memoryTool.CreateEmbedding(ctx, memoryQuery.Query)
 		if err != nil {
 			a.logger.Error("failed to create memory query embedding", zap.Error(err))
-			return nil, nil, err
+			return memories, nil, err
 		}
 
 		dbMemories, err := a.ds.GetRelatedMemories(ctx, userID, chatID, memoryQueryEmbedding, personalityID, sandboxed)
 		if err != nil {
 			a.logger.Error("failed to get related memories", zap.Error(err))
-			return nil, nil, err
+			return memories, nil, err
 		}
 
 		liveMemories = dbMemories
