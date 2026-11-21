@@ -1,16 +1,30 @@
-import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  afterRenderEffect,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
+import { ModelKind, SpeechVoice } from '../../../core/models/model.model';
 import { ConnectionModel, ConnectionModelChoice, ProviderConnection } from '../../../core/models/provider-connection.model';
 import { ModelService } from '../../../core/services/model.service';
 import { ProviderConnectionsService } from '../../../core/services/provider-connections.service';
 import { UserPreferencesService } from '../../../core/services/user-preferences.service';
 import { apiErrorMessage, hasErrorCode } from '../../../core/utils/api-error.helpers';
 import { EditIconComponent } from '../../../shared/ui/icons/icons';
+import { RadioComponent } from '../../../shared/ui/radio/radio.component';
 import { ModalComponent } from '../../../shared/ui/modal/modal.component';
 
 /** What the list shows. */
-export type ModelFilter = 'all' | 'enabled' | 'tools' | 'images';
+export type ModelFilter = 'all' | 'enabled' | 'tools' | 'images' | 'voice';
 
 /** One of the connection's models while the account chooses. */
 export interface ChooserRow {
@@ -23,6 +37,12 @@ export interface ChooserRow {
   /** Whether it takes tools: confirmed, as reported, or undefined when nothing says. */
   tools: boolean | undefined;
   images: boolean | undefined;
+  /** Chat, or a voice or dictation model (ADR 0x052), which takes no tools or images. */
+  kind: ModelKind;
+  /** A voice model's voices. */
+  voices?: SpeechVoice[];
+  /** Added by id in this session (an open-ended connection's voice or dictation model). */
+  added?: boolean;
   /** As loaded, to send only what changed. */
   readonly initial: Readonly<{ name: string; enabled: boolean; tools: boolean | undefined; images: boolean | undefined }>;
 }
@@ -40,7 +60,7 @@ export interface ChooserRow {
 @Component({
   selector: 'app-model-chooser',
   standalone: true,
-  imports: [EditIconComponent, ModalComponent],
+  imports: [EditIconComponent, ModalComponent, RadioComponent],
   templateUrl: './model-chooser.component.html',
   styleUrl: './model-chooser.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -64,6 +84,7 @@ export class ModelChooserComponent {
     { id: 'enabled', label: 'Enabled' },
     { id: 'tools', label: 'Tools' },
     { id: 'images', label: 'Images' },
+    { id: 'voice', label: 'Voice & dictation' },
   ];
   readonly capabilities: { id: 'tools' | 'images'; label: string }[] = [
     { id: 'tools', label: 'Tools' },
@@ -97,13 +118,28 @@ export class ModelChooserComponent {
         (filter === 'all' ||
           (filter === 'enabled' && row.enabled) ||
           (filter === 'tools' && row.tools === true) ||
-          (filter === 'images' && row.images === true)),
+          (filter === 'images' && row.images === true) ||
+          (filter === 'voice' && row.kind !== 'chat')),
     );
   });
   readonly enabledCount = computed(() => this.rows().filter(row => row.enabled).length);
   readonly narrowed = computed(() => this.words().length > 0 || this.filter() !== 'all');
   /** Enabled models whose capabilities nothing reported and the account hasn't said. */
-  readonly unconfirmed = computed(() => this.rows().some(row => row.enabled && (row.tools === undefined || row.images === undefined)));
+  readonly unconfirmed = computed(() =>
+    this.rows().some(row => row.enabled && row.kind === 'chat' && (row.tools === undefined || row.images === undefined)),
+  );
+  /**
+   * Whether models can be added by id: OpenRouter, Ollama and Custom connections, whose servers
+   * seldom list their voice and dictation models (ADR 0x052 §2).
+   */
+  readonly canAddById = computed(() => this.connection()?.builtin === false);
+  /** Whether the voice filter has anything to show, or anything could be added to it. */
+  readonly hasAudio = computed(() => this.canAddById() || this.rows().some(row => row.kind !== 'chat'));
+  readonly addError = signal('');
+  /** The add-by-id form's fields. */
+  readonly addId = signal('');
+  readonly addKind = signal<ModelKind>('speech');
+  readonly addVoices = signal('');
   readonly changes = computed(() => choicesFrom(this.rows()));
 
   readonly emptyText = computed(() => {
@@ -242,6 +278,50 @@ export class ModelChooserComponent {
     this.patch(row.id, { [capability]: !(row[capability] ?? false) });
   }
 
+  /**
+   * Adds a voice or dictation model by id, enabled, to save with the rest. Voices are the ids the
+   * server takes, separated by commas; a voice model needs at least one.
+   */
+  addById(id: string, kind: ModelKind, voicesText: string): boolean {
+    const modelId = id.trim();
+    const voices = parseVoices(voicesText);
+    if (!modelId) {
+      this.addError.set('Enter the model id the server uses.');
+      return false;
+    }
+    if (this.rows().some(row => row.id === modelId)) {
+      this.addError.set(`${modelId} is already in the list.`);
+      return false;
+    }
+    if (kind === 'speech' && voices.length === 0) {
+      this.addError.set('Enter at least one voice id, separated by commas.');
+      return false;
+    }
+    this.addError.set('');
+    const row: ChooserRow = {
+      id: modelId,
+      name: modelId,
+      defaultName: modelId,
+      enabled: true,
+      tools: false,
+      images: false,
+      kind,
+      voices: kind === 'speech' ? voices : undefined,
+      added: true,
+      initial: { name: modelId, enabled: false, tools: false, images: false },
+    };
+    this.rows.update(rows => [row, ...rows]);
+    return true;
+  }
+
+  /** Adds what the form holds, and clears it when that worked. */
+  addFromForm(): void {
+    if (this.addById(this.addId(), this.addKind(), this.addVoices())) {
+      this.addId.set('');
+      this.addVoices.set('');
+    }
+  }
+
   async save(): Promise<void> {
     const connection = this.connection();
     const choices = this.changes();
@@ -286,6 +366,7 @@ const FILTER_LABELS: Record<ModelFilter, string> = {
   enabled: 'enabled',
   tools: 'with tools',
   images: 'that take images',
+  voice: 'for voice or dictation',
 };
 
 function toRow(model: ConnectionModel): ChooserRow {
@@ -296,6 +377,8 @@ function toRow(model: ConnectionModel): ChooserRow {
     enabled: model.enabled,
     tools: model.tool_support,
     images: model.vision_support,
+    kind: model.kind ?? 'chat',
+    voices: model.voices,
   };
   return { ...row, initial: { name: row.name, enabled: row.enabled, tools: row.tools, images: row.images } };
 }
@@ -336,7 +419,14 @@ export function choicesFrom(rows: ChooserRow[]): ConnectionModelChoice[] {
       continue;
     }
     const choice: ConnectionModelChoice = { id: row.id, enabled: row.enabled };
-    if (row.enabled) {
+    if (row.enabled && row.added) {
+      choice.kind = row.kind;
+      choice.voices = row.voices;
+    }
+    if (row.enabled && row.kind !== 'chat') {
+      // A voice or dictation model takes no tools or images.
+      choice.display_name = row.name;
+    } else if (row.enabled) {
       choice.display_name = row.name;
       if (row.tools !== undefined) {
         choice.tool_support = row.tools;
@@ -348,4 +438,17 @@ export function choicesFrom(rows: ChooserRow[]): ConnectionModelChoice[] {
     out.push(choice);
   }
   return out;
+}
+
+/** Voice ids typed separated by commas, trimmed, without blanks or repeats; each is named after its id. */
+export function parseVoices(text: string): SpeechVoice[] {
+  const ids = [
+    ...new Set(
+      text
+        .split(',')
+        .map(v => v.trim())
+        .filter(Boolean),
+    ),
+  ];
+  return ids.map(id => ({ id, name: id }));
 }
