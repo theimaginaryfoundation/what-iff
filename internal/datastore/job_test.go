@@ -1194,7 +1194,8 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 			bookmarked boolean NOT NULL DEFAULT false,
 			chat_messages uuid NOT NULL,
 			chat_message_generation_mood uuid,
-			chat_message_generation_expression uuid
+			chat_message_generation_expression uuid,
+			final_round_offset integer NOT NULL DEFAULT 0
 		)`,
 	} {
 		_, err := ds.sqlDB.Exec(statement)

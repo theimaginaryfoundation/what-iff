@@ -68,6 +68,18 @@ func (Personality) Fields() []ent.Field {
 		field.String("image_style").
 			Default("auto").
 			Comment("Preferred image generation style (e.g. 'auto', 'anime', 'none'). Used for portrait and expression grid generation."),
+		// The personality's voice (ADR 0x052 §5): a speech model, one of the voices it
+		// offers, and how the personality sounds. No model means no voice. Plain ids:
+		// a voice whose model went away is unusable, and the page says so.
+		field.UUID("voice_model_id", uuid.UUID{}).
+			Optional().
+			Nillable(),
+		field.String("voice").
+			Optional().
+			Default(""),
+		field.Text("voice_style").
+			Optional().
+			Default(""),
 	}, turnSettingFields("personality")...)
 }
 

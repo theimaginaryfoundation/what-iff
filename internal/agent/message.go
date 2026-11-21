@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
@@ -1352,8 +1353,9 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	if result == nil {
 		return nil, nil, fmt.Errorf("%s agent loop returned nil response with no error", opts.provider)
 	}
-	if streamed := strings.TrimSpace(draftBuffer.allText); streamed != "" {
+	if streamed, finalStart := draftBuffer.streamed(); streamed != "" {
 		result.Text = streamed
+		result.FinalRoundStart = finalStart
 	}
 	return a.finishGeneration(ctx, userID, chatMessage, chatCtx, adapter, opts, result, toolCalls, generatedAttachments)
 }
@@ -1723,8 +1725,9 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	if result == nil {
 		return nil, nil, fmt.Errorf("local model agent loop returned nil response with no error")
 	}
-	if streamed := strings.TrimSpace(draftBuffer.allText); streamed != "" {
+	if streamed, finalStart := draftBuffer.streamed(); streamed != "" {
 		result.Text = streamed
+		result.FinalRoundStart = finalStart
 	}
 	chatCtx.webSearchCount = a.turnWebSearchCount(adapter, toolCalls)
 
@@ -2102,6 +2105,10 @@ type jobDraftDeltaBuffer struct {
 	// breakBeforeNext is set at a tool-round boundary so the next round's text starts a new
 	// paragraph instead of running on from the previous round's ("…anything.Tool report").
 	breakBeforeNext bool
+	// finalRoundStart is where the latest round's text starts in allText, in bytes: the end of
+	// the text so far at each boundary, past the paragraph break once the next round writes.
+	// The reply's final round is read aloud from here (ADR 0x052 §6).
+	finalRoundStart int
 }
 
 func newJobDraftDeltaBuffer(
@@ -2187,7 +2194,9 @@ func (b *jobDraftDeltaBuffer) HandleDelta(delta string) {
 	b.mu.Lock()
 	if b.breakBeforeNext {
 		b.breakBeforeNext = false
-		delta = paragraphBreakBefore(b.allText, delta) + delta
+		brk := paragraphBreakBefore(b.allText, delta)
+		b.finalRoundStart = len(b.allText) + len(brk)
+		delta = brk + delta
 	}
 	b.pending += delta
 	b.allText += delta
@@ -2227,7 +2236,35 @@ func (b *jobDraftDeltaBuffer) MarkRoundBoundary() {
 	}
 	b.mu.Lock()
 	b.breakBeforeNext = b.allText != ""
+	b.finalRoundStart = len(b.allText)
 	b.mu.Unlock()
+}
+
+// streamed is the reply's text as streamed, trimmed as it is saved, and where its final
+// round starts in that text; "" when nothing streamed.
+func (b *jobDraftDeltaBuffer) streamed() (string, int) {
+	if b == nil {
+		return "", 0
+	}
+	b.mu.Lock()
+	all, start := b.allText, b.finalRoundStart
+	b.mu.Unlock()
+	return trimWithOffset(all, start)
+}
+
+// trimWithOffset trims text as strings.TrimSpace does and moves offset with it, kept
+// within the trimmed text.
+func trimWithOffset(text string, offset int) (string, int) {
+	lead := len(text) - len(strings.TrimLeftFunc(text, unicode.IsSpace))
+	trimmed := strings.TrimSpace(text)
+	offset -= lead
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(trimmed) {
+		offset = len(trimmed)
+	}
+	return trimmed, offset
 }
 
 // paragraphBreakBefore is the separator needed between prior text and next so they read as
@@ -2808,13 +2845,14 @@ func isTruncationStopReason(stopReason string) bool {
 // result.Reasoning).
 func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID, result *provider.GenerateResponse, toolCalls []*models.ToolCall, generatedAttachments []*models.FileAttachment, generationModel string, generationPersonality string, generationMoodID *uuid.UUID, agentRun *models.AgentRun) (*models.ChatMessage, error) {
 	agentMessage, err := a.ds.CreateChatMessage(ctx, userID, models.ChatMessage{
-		ChatID:         chatID,
-		Message:        result.Text,
-		Origin:         models.MessageOriginAssistant,
-		ResponseID:     &result.ID,
-		Tokens:         result.OutputTokens,
-		ModelReasoning: nonEmptyStringPtr(result.Reasoning),
-		AgentRun:       agentRun,
+		ChatID:           chatID,
+		Message:          result.Text,
+		FinalRoundOffset: result.FinalRoundStart,
+		Origin:           models.MessageOriginAssistant,
+		ResponseID:       &result.ID,
+		Tokens:           result.OutputTokens,
+		ModelReasoning:   nonEmptyStringPtr(result.Reasoning),
+		AgentRun:         agentRun,
 		// A scheduled run's reply records its job (ADR 0x040); nil on every other turn.
 		JobRun:                models.JobRunFromContext(ctx),
 		GenerationModel:       generationModel,

@@ -101,6 +101,9 @@ func toPersonalityModel(e *ent.Personality) *models.Personality {
 		CreatedAt:              e.CreatedAt,
 		UpdatedAt:              e.UpdatedAt,
 	}
+	if e.VoiceModelID != nil && e.Voice != "" {
+		m.Voice = &models.PersonalityVoice{ModelID: *e.VoiceModelID, Voice: e.Voice, Style: e.VoiceStyle}
+	}
 	if e.ThumbnailCircle != nil {
 		m.ThumbnailCircle = &models.PersonalityThumbnailCircle{
 			CX: e.ThumbnailCircle.CX,

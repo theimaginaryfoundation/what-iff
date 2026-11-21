@@ -14,6 +14,7 @@ type Store interface {
 	CreatePersonality(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
 	ListPersonalities(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.PersonalityFilters) (*models.PaginatedResponse, error)
 	GetPersonality(ctx context.Context, userID, id uuid.UUID) (*models.Personality, error)
+	SetPersonalityVoice(ctx context.Context, userID, personalityID uuid.UUID, voice *models.PersonalityVoice) (*models.Personality, error)
 	// GetPersonalityCard returns the imported character-card passthrough blob (nil when none).
 	GetPersonalityCard(ctx context.Context, userID, personalityID uuid.UUID) (*models.PersonalityCard, error)
 	// GetFileAttachment loads the cover image's record for PNG card export.

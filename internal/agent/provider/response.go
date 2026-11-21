@@ -19,6 +19,9 @@ type GenerateResponse struct {
 	// a timestamp. It can still be zero (a provider that omits it), so read it through CreatedTime.
 	CreatedAt int64
 	Text      string
+	// FinalRoundStart is where the final round's text starts in Text, in bytes, when Text
+	// joins the text of several tool rounds (ADR 0x052 §6); zero when it is one round's.
+	FinalRoundStart int
 	// StopReason is the provider's own account of why generation ended, verbatim and
 	// un-normalised ("end_turn", "max_tokens", "max_output_tokens", "refusal",
 	// "incomplete", …). Without it a turn that ends without usable text is

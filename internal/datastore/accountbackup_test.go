@@ -139,7 +139,8 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			comment_refs json,
 			chat_messages uuid NOT NULL,
 			chat_message_generation_mood uuid,
-			chat_message_generation_expression uuid
+			chat_message_generation_expression uuid,
+			final_round_offset integer NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE chat_message_context_items (
 			id uuid PRIMARY KEY,

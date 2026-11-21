@@ -382,6 +382,8 @@ func (s *Server) setupRoutes() {
 	modelHandler := model.NewHandler(dataStore, s.logger)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
 	speechHandler := speechhandler.NewHandler(agent, s.logger)
+	// Deletes the audio of replies nobody plays (ADR 0x052 §7).
+	go agent.SweepSpeech(s.lifecycleCtx, time.Hour)
 	chatHandler := chat.NewHandler(dataStore, s.logger, agent, chat.HandlerConfig{
 		RequireBilling: s.config.RequireBilling,
 	})

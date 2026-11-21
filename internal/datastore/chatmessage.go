@@ -64,6 +64,7 @@ func toChatMessageModel(e *ent.ChatMessage) *models.ChatMessage {
 		SentAt:                e.SentAt,
 		Tokens:                e.Tokens,
 		Bookmarked:            e.Bookmarked,
+		FinalRoundOffset:      e.FinalRoundOffset,
 	}
 
 	if e.Edges.GenerationMood != nil {
@@ -342,6 +343,9 @@ func (d *Datastore) CreateChatMessage(ctx context.Context, userID uuid.UUID, cha
 	}
 	if len(chatMessage.CommentRefs) > 0 {
 		create.SetCommentRefs(chatMessage.CommentRefs)
+	}
+	if off := chatMessage.FinalRoundOffset; off > 0 && off <= len(chatMessage.Message) {
+		create.SetFinalRoundOffset(off)
 	}
 	if chatMessage.ModelReasoning != nil {
 		if r := strings.TrimSpace(*chatMessage.ModelReasoning); r != "" {

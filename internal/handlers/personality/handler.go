@@ -76,6 +76,8 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	personalityRouter.HandleFunc("/{id}/prompt-changes", h.ListPersonalityPromptChanges).Methods("GET")
 	personalityRouter.HandleFunc("/{id}/prompt-changes/{change_id}/revert", h.RevertPersonalityPromptChange).Methods("POST")
 	personalityRouter.HandleFunc("/{id}", h.GetPersonality).Methods("GET")
+	personalityRouter.HandleFunc("/{id}/voice", h.SetVoice).Methods("PUT")
+	personalityRouter.HandleFunc("/{id}/voice", h.ClearVoice).Methods("DELETE")
 	personalityRouter.HandleFunc("/{id}", h.UpdatePersonalityWithPromptHistory).Methods("PUT")
 	personalityRouter.HandleFunc("/{id}", h.DeletePersonality).Methods("DELETE")
 }
