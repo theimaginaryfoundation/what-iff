@@ -11182,6 +11182,13 @@ components:
           description: >-
             That connection's name, as the account named it (e.g. "Desk Ollama"),
             in the account's model list; absent where connection_id is.
+        kind:
+          $ref: '#/components/schemas/ModelKind'
+        speech_voices:
+          type: array
+          description: The voices a speech model offers (ADR 0x052); absent for other kinds.
+          items:
+            $ref: '#/components/schemas/SpeechVoice'
       required:
         - id
         - name
@@ -12707,6 +12714,25 @@ components:
         keys_url:
           type: string
           description: Where to create a key, when known.
+    ModelKind:
+      type: string
+      enum: [chat, speech, transcription]
+      description: >-
+        What a model does (ADR 0x052). Only chat models are offered for chat,
+        subagents and the text utility roles; speech models are voices, and
+        transcription models dictation.
+    SpeechVoice:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          maxLength: 200
+          description: The voice id the provider takes.
+        name:
+          type: string
+          maxLength: 100
+          description: The name people see; defaults to the id.
     ListedModel:
       type: object
       description: A model a provider offers.
@@ -12723,6 +12749,20 @@ components:
         vision_support:
           type: boolean
           description: Whether it takes images, as the provider reports; absent when unknown.
+        kind:
+          allOf:
+            - $ref: '#/components/schemas/ModelKind'
+          description: >-
+            Set for a speech or transcription model: a built-in provider's known
+            speech models are listed beside its chat models. Absent for chat.
+        voices:
+          type: array
+          description: A speech model's voices.
+          items:
+            $ref: '#/components/schemas/SpeechVoice'
+        style:
+          type: boolean
+          description: Whether a speech model takes a free-text style instruction.
     ConnectionModel:
       description: One of a connection's models as the account sees it.
       allOf:
@@ -12763,6 +12803,23 @@ components:
               vision_support:
                 type: boolean
                 description: Left out, an enabled model keeps its value, and a new one starts off.
+              kind:
+                allOf:
+                  - $ref: '#/components/schemas/ModelKind'
+                description: >-
+                  For a model the known speech models table doesn't know, on an
+                  OpenRouter, Ollama or Custom connection: speech or transcription
+                  adds it by id without the listing. Ignored for a known model,
+                  which takes the table's kind; a kind, once set, stays.
+              voices:
+                type: array
+                maxItems: 200
+                description: >-
+                  A speech model's offered voices. Left out, an enabled model keeps
+                  its own and a new one takes the table's; a new model the table
+                  doesn't know needs at least one.
+                items:
+                  $ref: '#/components/schemas/SpeechVoice'
     ProviderConnected:
       type: object
       required: [connection, models]

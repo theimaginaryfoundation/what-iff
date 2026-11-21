@@ -51,10 +51,20 @@ func TestProviderEndpoints_FollowConfiguredBaseURLs(t *testing.T) {
 	require.Equal(t, provider.DefaultGeminiBaseURL, byProvider[appmodels.ModelProviderGoogle].baseURL, "unset base URLs fall back to the provider default")
 	require.Equal(t, provider.AnthropicAPIKey, byProvider[appmodels.ModelProviderZAI].style, "z.ai speaks the Anthropic Messages API")
 
-	require.Len(t, scoped, 1, "only Gemini's native API needs a path-scoped rule")
-	require.Equal(t, appmodels.ModelProviderGoogle, scoped[0].provider)
-	require.Equal(t, "https://generativelanguage.googleapis.com/v1beta/models", scoped[0].baseURL)
-	require.Equal(t, provider.GoogleAPIKey, scoped[0].style)
+	// Only Gemini's native API needs path-scoped rules: images under /models,
+	// and speech (ADR 0x052) under /interactions, /files and the Files API upload.
+	var paths []string
+	for _, e := range scoped {
+		require.Equal(t, appmodels.ModelProviderGoogle, e.provider)
+		require.Equal(t, provider.GoogleAPIKey, e.style)
+		paths = append(paths, e.baseURL)
+	}
+	require.Equal(t, []string{
+		"https://generativelanguage.googleapis.com/v1beta/models",
+		"https://generativelanguage.googleapis.com/v1beta/interactions",
+		"https://generativelanguage.googleapis.com/v1beta/files",
+		"https://generativelanguage.googleapis.com/upload/v1beta/files",
+	}, paths)
 }
 
 func TestProviderEndpoints_GeminiNativeFollowsConfiguredBaseURL(t *testing.T) {

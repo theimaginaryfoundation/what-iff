@@ -41,6 +41,8 @@ func toModelModel(e *ent.Model) *models.Model {
 		Deleted:            e.Deleted,
 		IsDefault:          e.IsDefault,
 		ConnectionID:       e.ConnectionID,
+		Kind:               models.ModelKind(e.Kind),
+		SpeechVoices:       e.SpeechVoices,
 	}
 	if conn := e.Edges.Connection; conn != nil {
 		m.ConnectionName = conn.Name
@@ -130,7 +132,7 @@ func (d *Datastore) ListModels(ctx context.Context) ([]*models.Model, error) {
 	// The deployment's own catalog only: models from an account's provider
 	// connections are that account's, and ListModelsForUser adds them.
 	dbModels, err := tx.Model.Query().
-		Where(entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+		Where(entmodel.Deleted(false), entmodel.ConnectionIDIsNil(), entmodel.KindEQ(entmodel.KindChat)).
 		All(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T1("query.failed", "Entity", "models"), zap.Error(err))
@@ -211,6 +213,7 @@ func (d *Datastore) connectionModels(ctx context.Context, userID uuid.UUID) ([]*
 		Where(
 			entmodel.Deleted(false),
 			entmodel.HasConnectionWith(providerconnection.UserID(userID)),
+			entmodel.KindEQ(entmodel.KindChat),
 		).
 		WithConnection().
 		Order(ent.Asc(entmodel.FieldDisplayName)).
@@ -226,12 +229,49 @@ func (d *Datastore) connectionModels(ctx context.Context, userID uuid.UUID) ([]*
 	return out, nil
 }
 
+// ListAudioModelsForUser returns the speech or transcription models (kind) an
+// account can use (ADR 0x052): the deployment's catalog ones, then those on the
+// account's own provider connections. Chat lists never include them.
+func (d *Datastore) ListAudioModelsForUser(ctx context.Context, userID uuid.UUID, kind models.ModelKind) ([]*models.Model, error) {
+	if !kind.IsAudio() {
+		return nil, models.ErrInvalidModelKind
+	}
+	rows, err := d.dbClient.Model.Query().
+		Where(
+			entmodel.Deleted(false),
+			entmodel.KindEQ(entmodel.Kind(kind)),
+			entmodel.Or(
+				entmodel.ConnectionIDIsNil(),
+				entmodel.HasConnectionWith(providerconnection.UserID(userID)),
+			),
+		).
+		WithConnection().
+		Order(ent.Asc(entmodel.FieldDisplayName)).
+		All(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T1("query.failed", "Entity", "models"), zap.Error(err))
+		return nil, err
+	}
+	out := make([]*models.Model, 0, len(rows))
+	for _, row := range rows {
+		if row.ConnectionID == nil {
+			out = append(out, toModelModel(row))
+		}
+	}
+	for _, row := range rows {
+		if row.ConnectionID != nil {
+			out = append(out, toModelModel(row))
+		}
+	}
+	return out, nil
+}
+
 func assertUserCanUseModelTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, modelID uuid.UUID) error {
 	if modelID == uuid.Nil {
 		return nil
 	}
 	dbModel, err := tx.Model.Query().
-		Where(entmodel.ID(modelID), entmodel.Deleted(false)).
+		Where(entmodel.ID(modelID), entmodel.Deleted(false), entmodel.KindEQ(entmodel.KindChat)).
 		Only(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
@@ -421,7 +461,7 @@ func (d *Datastore) GetModelByName(ctx context.Context, name string) (*models.Mo
 		return nil, ErrModelNotFound
 	}
 	dbModel, err := d.dbClient.Model.Query().
-		Where(entmodel.Name(name), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+		Where(entmodel.Name(name), entmodel.Deleted(false), entmodel.ConnectionIDIsNil(), entmodel.KindEQ(entmodel.KindChat)).
 		Only(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
@@ -551,6 +591,15 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 		return nil, err
 	}
 
+	kind, voices, err := models.ResolveSpeechModel(models.ModelProvider(providerValue), name, req.Kind, req.SpeechVoices)
+	if err != nil {
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return nil, err
+	}
+	audio := kind.IsAudio()
+
 	existing, err := tx.Model.Query().
 		Where(entmodel.Name(name), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
@@ -561,10 +610,12 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 				SetDisplayName(displayName).
 				SetDescription(req.Description).
 				SetProvider(providerValue).
-				SetToolSupport(req.ToolSupport).
-				SetVisionSupport(req.VisionSupport).
+				SetToolSupport(req.ToolSupport && !audio).
+				SetVisionSupport(req.VisionSupport && !audio).
 				SetBaseCreditsPerSlab(normalizeBaseCreditsPerSlab(req.BaseCreditsPerSlab)).
 				SetSubscriptionTier(subscriptionTier).
+				SetKind(entmodel.Kind(kind)).
+				SetSpeechVoices(voices).
 				Save(ctx)
 			if rerr != nil {
 				d.logger.Error(i18n.T1("update.failed", "Entity", "model"), zap.Error(rerr))
@@ -608,10 +659,12 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 		SetDisplayName(displayName).
 		SetDescription(req.Description).
 		SetProvider(providerValue).
-		SetToolSupport(req.ToolSupport).
-		SetVisionSupport(req.VisionSupport).
+		SetToolSupport(req.ToolSupport && !audio).
+		SetVisionSupport(req.VisionSupport && !audio).
 		SetBaseCreditsPerSlab(normalizeBaseCreditsPerSlab(req.BaseCreditsPerSlab)).
 		SetSubscriptionTier(subscriptionTier).
+		SetKind(entmodel.Kind(kind)).
+		SetSpeechVoices(voices).
 		SetDeleted(false).
 		Save(ctx)
 	if err != nil {
@@ -745,6 +798,19 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 	if req.BaseCreditsPerSlab != nil {
 		update.SetBaseCreditsPerSlab(normalizeBaseCreditsPerSlab(*req.BaseCreditsPerSlab))
 	}
+	if req.SpeechVoices != nil {
+		voices, verr := models.NormalizeSpeechVoices(req.SpeechVoices)
+		if verr == nil && current.Kind != entmodel.KindSpeech {
+			verr = models.ErrInvalidSpeechVoices
+		}
+		if verr != nil {
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, verr
+		}
+		update.SetSpeechVoices(voices)
+	}
 	if req.SubscriptionTier != nil {
 		subscriptionTier, err := normalizeModelSubscriptionTier(*req.SubscriptionTier)
 		if err != nil {
@@ -851,7 +917,7 @@ func (d *Datastore) AdminSetDefaultModel(ctx context.Context, id uuid.UUID) (*mo
 
 	// The target must exist and be active (soft-deleted models cannot be the default).
 	if _, err := tx.Model.Query().
-		Where(entmodel.ID(id), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+		Where(entmodel.ID(id), entmodel.Deleted(false), entmodel.ConnectionIDIsNil(), entmodel.KindEQ(entmodel.KindChat)).
 		Only(ctx); err != nil {
 		if ent.IsNotFound(err) {
 			if rerr := tx.Rollback(); rerr != nil {
@@ -911,7 +977,7 @@ func (d *Datastore) AdminSetDefaultModel(ctx context.Context, id uuid.UUID) (*mo
 // the default model" outside of a user-creation transaction.
 func (d *Datastore) ResolveDefaultModelName(ctx context.Context) string {
 	if m, err := d.dbClient.Model.Query().
-		Where(entmodel.IsDefault(true), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+		Where(entmodel.IsDefault(true), entmodel.Deleted(false), entmodel.ConnectionIDIsNil(), entmodel.KindEQ(entmodel.KindChat)).
 		First(ctx); err == nil && m != nil {
 		return m.Name
 	}
@@ -927,7 +993,7 @@ func (d *Datastore) ResolveDefaultModelName(ctx context.Context) string {
 // on one of its connections (ADR 0x027).
 func resolveDefaultModelTx(ctx context.Context, tx *ent.Tx) (*ent.Model, error) {
 	m, err := tx.Model.Query().
-		Where(entmodel.IsDefault(true), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+		Where(entmodel.IsDefault(true), entmodel.Deleted(false), entmodel.ConnectionIDIsNil(), entmodel.KindEQ(entmodel.KindChat)).
 		First(ctx)
 	switch {
 	case err == nil:
@@ -936,7 +1002,7 @@ func resolveDefaultModelTx(ctx context.Context, tx *ent.Tx) (*ent.Model, error) 
 		return nil, err
 	}
 	m, err = tx.Model.Query().
-		Where(entmodel.Name(getDefaultModelName()), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+		Where(entmodel.Name(getDefaultModelName()), entmodel.Deleted(false), entmodel.ConnectionIDIsNil(), entmodel.KindEQ(entmodel.KindChat)).
 		Only(ctx)
 	switch {
 	case err == nil:
@@ -945,6 +1011,6 @@ func resolveDefaultModelTx(ctx context.Context, tx *ent.Tx) (*ent.Model, error) 
 		return nil, err
 	}
 	return tx.Model.Query().
-		Where(entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+		Where(entmodel.Deleted(false), entmodel.ConnectionIDIsNil(), entmodel.KindEQ(entmodel.KindChat)).
 		First(ctx)
 }

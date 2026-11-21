@@ -9,7 +9,7 @@ import { ModelService } from '../../../core/services/model.service';
 import { ProviderConnectionsService } from '../../../core/services/provider-connections.service';
 import { UserPreferencesService } from '../../../core/services/user-preferences.service';
 import { resetBodyScrollLockForTests } from '../../../shared/ui';
-import { ChooserRow, ModelChooserComponent, choicesFrom, highlightParts, matchesWords } from './model-chooser.component';
+import { ChooserRow, ModelChooserComponent, choicesFrom, highlightParts, matchesWords, parseVoices } from './model-chooser.component';
 
 const OPENROUTER: ProviderConnection = {
   id: 'c-or',
@@ -25,13 +25,26 @@ const OPENROUTER: ProviderConnection = {
 const LISTED: ConnectionModel[] = [
   { id: 'anthropic/claude-sonnet-4.6', display_name: 'Claude Sonnet 4.6', tool_support: true, vision_support: true, enabled: true },
   { id: 'anthropic/claude-sonnet-5.5', display_name: 'Claude Sonnet 5.5', tool_support: true, vision_support: true, enabled: false },
-  { id: 'meta-llama/llama-5-70b-instruct', display_name: 'Llama 5 70B Instruct', tool_support: true, vision_support: false, enabled: false },
+  {
+    id: 'meta-llama/llama-5-70b-instruct',
+    display_name: 'Llama 5 70B Instruct',
+    tool_support: true,
+    vision_support: false,
+    enabled: false,
+  },
   { id: 'mystery-model', enabled: false },
 ];
 
 /** The account's model list: Sonnet 4.6 enabled on this connection, and the default. */
 const MODELS: Model[] = [
-  { id: 'row-sonnet', name: 'anthropic/claude-sonnet-4.6', display_name: 'Claude Sonnet 4.6', description: '', tool_support: true, connection_id: 'c-or' },
+  {
+    id: 'row-sonnet',
+    name: 'anthropic/claude-sonnet-4.6',
+    display_name: 'Claude Sonnet 4.6',
+    description: '',
+    tool_support: true,
+    connection_id: 'c-or',
+  },
 ];
 
 function apiError(status: number, code?: string): HttpErrorResponse {
@@ -123,8 +136,8 @@ describe('ModelChooserComponent', () => {
       await render();
       chooser.setQuery('son');
       fixture.detectChanges();
-      const names = [...fixture.nativeElement.ownerDocument.querySelectorAll('.chooser__name')].map(
-        (el: Element) => el.textContent?.replace(/\s+/g, ' ').trim(),
+      const names = [...fixture.nativeElement.ownerDocument.querySelectorAll('.chooser__name')].map((el: Element) =>
+        el.textContent?.replace(/\s+/g, ' ').trim(),
       );
       expect(names).toEqual(['Claude Sonnet 4.6, Default', 'Claude Sonnet 5.5']);
       const marks = [...fixture.nativeElement.ownerDocument.querySelectorAll('.chooser__name mark')].map((el: Element) => el.textContent);
@@ -177,7 +190,13 @@ describe('ModelChooserComponent', () => {
       await chooser.save();
 
       expect(connections.setModels).toHaveBeenCalledWith('c-or', [
-        { id: 'meta-llama/llama-5-70b-instruct', enabled: true, display_name: 'Llama 5 70B Instruct', tool_support: true, vision_support: false },
+        {
+          id: 'meta-llama/llama-5-70b-instruct',
+          enabled: true,
+          display_name: 'Llama 5 70B Instruct',
+          tool_support: true,
+          vision_support: false,
+        },
         { id: 'mystery-model', enabled: true, display_name: 'mystery-model', tool_support: true },
       ]);
       expect(fixture.componentInstance.saved.length).toBe(1);
@@ -319,6 +338,87 @@ describe('ModelChooserComponent', () => {
     expect(chooser.loading()).toBe(false);
   });
 
+  describe('voice and dictation models (ADR 0x052)', () => {
+    const WITH_SPEECH: ConnectionModel[] = [
+      ...LISTED,
+      {
+        id: 'google/gemini-3.8-flash-tts',
+        display_name: 'Gemini TTS',
+        kind: 'speech',
+        voices: [{ id: 'Kore', name: 'Kore' }],
+        tool_support: false,
+        vision_support: false,
+        enabled: false,
+      },
+      { id: 'openai/gpt-transcribe', kind: 'transcription', enabled: true, tool_support: false, vision_support: false },
+    ];
+
+    it('shows what a voice or dictation model is instead of what it takes', async () => {
+      connections.models.mockReturnValue(of(WITH_SPEECH));
+      await render();
+      fixture.detectChanges();
+      const kinds = Array.from(
+        fixture.nativeElement.ownerDocument.querySelectorAll('[data-testid="model-chooser-kind"]') as NodeListOf<HTMLElement>,
+      ).map(el => el.textContent?.replace(/\s+/g, ' ').trim());
+      expect(kinds).toEqual(['Voice · 1 voice', 'Dictation']);
+      chooser.setFilter('voice');
+      expect(chooser.shown().map(r => r.id)).toEqual(['google/gemini-3.8-flash-tts', 'openai/gpt-transcribe']);
+      chooser.toggle(row('google/gemini-3.8-flash-tts'), true);
+      expect(chooser.unconfirmed()).toBe(false);
+    });
+
+    it('sends a voice model without capabilities', async () => {
+      connections.models.mockReturnValue(of(WITH_SPEECH));
+      await render();
+      chooser.toggle(row('google/gemini-3.8-flash-tts'), true);
+      await chooser.save();
+      expect(connections.setModels).toHaveBeenCalledWith('c-or', [
+        { id: 'google/gemini-3.8-flash-tts', enabled: true, display_name: 'Gemini TTS' },
+      ]);
+    });
+
+    it('adds one by id on an open-ended connection, with its voices', async () => {
+      await render();
+      expect(chooser.canAddById()).toBe(true);
+      expect(chooser.addById('  ', 'speech', 'af_bella')).toBe(false);
+      expect(chooser.addById('kokoro', 'speech', ' , ')).toBe(false);
+      expect(chooser.addError()).toContain('voice id');
+      expect(chooser.addById('mystery-model', 'transcription', '')).toBe(false);
+      expect(chooser.addError()).toContain('already');
+
+      chooser.addId.set('kokoro');
+      chooser.addVoices.set('af_bella, am_adam, af_bella');
+      chooser.addFromForm();
+      expect(chooser.addId()).toBe('');
+      expect(chooser.addById('whisper-large', 'transcription', 'ignored')).toBe(true);
+      await chooser.save();
+      expect(connections.setModels).toHaveBeenCalledWith('c-or', [
+        { id: 'whisper-large', enabled: true, kind: 'transcription', voices: undefined, display_name: 'whisper-large' },
+        {
+          id: 'kokoro',
+          enabled: true,
+          kind: 'speech',
+          voices: [
+            { id: 'af_bella', name: 'af_bella' },
+            { id: 'am_adam', name: 'am_adam' },
+          ],
+          display_name: 'kokoro',
+        },
+      ]);
+    });
+
+    it("doesn't offer adding by id on a built-in provider's connection", async () => {
+      fixture = TestBed.createComponent(HostComponent);
+      fixture.componentInstance.connection.set({ ...OPENROUTER, preset: 'google', builtin: true });
+      fixture.detectChanges();
+      await fixture.whenStable();
+      chooser = fixture.debugElement.children[0].componentInstance as ModelChooserComponent;
+      expect(chooser.canAddById()).toBe(false);
+      expect(chooser.hasAudio()).toBe(false);
+      expect(fixture.nativeElement.ownerDocument.querySelector('[data-testid="model-chooser-add"]')).toBeNull();
+    });
+  });
+
   it("says when the provider can't be listed, and retries", async () => {
     connections.models.mockReturnValueOnce(throwError(() => apiError(422, 'provider_unreachable')));
     await render();
@@ -349,7 +449,7 @@ describe('model chooser helpers', () => {
   });
 
   it("sends an enabled model's new name, and nothing for one renamed back", () => {
-    const base = { id: 'm', defaultName: 'm', enabled: true, tools: true, images: false };
+    const base = { id: 'm', defaultName: 'm', enabled: true, tools: true, images: false, kind: 'chat' as const };
     const initial = { name: 'Old', enabled: true, tools: true, images: false };
     expect(choicesFrom([{ ...base, name: 'New', initial }])).toEqual([
       { id: 'm', enabled: true, display_name: 'New', tool_support: true, vision_support: false },
@@ -359,8 +459,28 @@ describe('model chooser helpers', () => {
 
   it('turning a model off sends no capabilities', () => {
     const rows: ChooserRow[] = [
-      { id: 'm', name: 'M', defaultName: 'M', enabled: false, tools: true, images: false, initial: { name: 'M', enabled: true, tools: true, images: false } },
+      {
+        id: 'm',
+        name: 'M',
+        defaultName: 'M',
+        enabled: false,
+        tools: true,
+        images: false,
+        kind: 'chat',
+        initial: { name: 'M', enabled: true, tools: true, images: false },
+      },
     ];
     expect(choicesFrom(rows)).toEqual([{ id: 'm', enabled: false }]);
+  });
+});
+
+describe('parseVoices', () => {
+  it('splits on commas, trims, and drops blanks and repeats', () => {
+    expect(parseVoices(' a , b,,a ,c ')).toEqual([
+      { id: 'a', name: 'a' },
+      { id: 'b', name: 'b' },
+      { id: 'c', name: 'c' },
+    ]);
+    expect(parseVoices('')).toEqual([]);
   });
 });

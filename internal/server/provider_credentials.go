@@ -32,7 +32,7 @@ func (c *Config) providerEndpoints() []providerEndpoint {
 		}
 		return fallback
 	}
-	return []providerEndpoint{
+	endpoints := []providerEndpoint{
 		{appmodels.ModelProviderOpenAI, provider.DefaultOpenAIBaseURL, provider.BearerAuthorization, false},
 		{appmodels.ModelProviderAnthropic, provider.DefaultAnthropicBaseURL, provider.AnthropicAPIKey, false},
 		// z.ai speaks the Anthropic Messages API, so it takes the Anthropic
@@ -43,11 +43,18 @@ func (c *Config) providerEndpoints() []providerEndpoint {
 		// Gemini's native API (image generation) shares the host but takes the key
 		// as x-goog-api-key, and refuses a request that also carries it as Bearer.
 		{appmodels.ModelProviderGoogle, provider.GeminiNativeBaseURL(c.GeminiBaseURL) + "/models", provider.GoogleAPIKey, true},
+	}
+	// Speech (ADR 0x052) uses more of Gemini's native API: the Interactions API,
+	// and the Files API for a dictated clip, whose upload is under /upload.
+	for _, path := range provider.GeminiSpeechCredentialPaths(c.GeminiBaseURL) {
+		endpoints = append(endpoints, providerEndpoint{appmodels.ModelProviderGoogle, path, provider.GoogleAPIKey, true})
+	}
+	return append(endpoints, []providerEndpoint{
 		{appmodels.ModelProviderMistral, orDefault(c.MistralBaseURL, provider.DefaultMistralBaseURL), provider.BearerAuthorization, false},
 		{appmodels.ModelProviderDeepSeek, orDefault(c.DeepSeekBaseURL, provider.DefaultDeepSeekBaseURL), provider.BearerAuthorization, false},
 		{appmodels.ModelProviderQwen, orDefault(c.QwenBaseURL, provider.DefaultQwenBaseURL), provider.BearerAuthorization, false},
 		{appmodels.ModelProviderXiaomi, orDefault(c.XiaomiBaseURL, provider.DefaultXiaomiBaseURL), provider.BearerAuthorization, false},
-	}
+	}...)
 }
 
 // builtinProviderURLs is the address each built-in provider is reached at,

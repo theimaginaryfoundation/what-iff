@@ -57,6 +57,7 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			subscription_tier text NOT NULL DEFAULT 'high',
 			deleted bool NOT NULL DEFAULT false,
 			is_default bool NOT NULL DEFAULT false,
+			kind text NOT NULL DEFAULT 'chat', speech_voices json NULL,
 			-- The provider connection serving the model (ADR 0x027); these tests
 			-- use only catalog models, so it stays NULL and needs no foreign key.
 			connection_id uuid NULL

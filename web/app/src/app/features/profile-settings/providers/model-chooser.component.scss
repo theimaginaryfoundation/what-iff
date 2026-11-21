@@ -1,4 +1,4 @@
-@use './providers-shared' as shared;
+@use "./providers-shared" as shared;
 
 .chooser__title {
   color: var(--text-primary);
@@ -161,13 +161,15 @@
   height: 1rem;
   margin: 0;
   place-content: center;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
   width: 1rem;
 
   &::before {
     box-shadow: inset 1rem 1rem #fff;
     clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0, 43% 62%);
-    content: '';
+    content: "";
     height: 0.45rem;
     transform: scale(0);
     transition: transform 100ms ease;
@@ -252,7 +254,7 @@ mark {
     color: var(--text-primary);
 
     &::before {
-      content: '●';
+      content: "●";
       font-size: 0.45rem;
       margin-right: 0.3rem;
       vertical-align: 0.15rem;
@@ -278,6 +280,68 @@ mark {
     border-style: dashed;
     color: #fbbf24;
   }
+}
+
+// A voice or dictation model (ADR 0x052) takes no tools or images; it says what it is instead.
+.chooser__kind {
+  @include shared.badge;
+  white-space: nowrap;
+}
+
+.chooser__add {
+  border: 1px dashed var(--border);
+  border-radius: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+
+  summary {
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  &[open] {
+    gap: 0.6rem;
+  }
+}
+
+.chooser__add-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+
+  .chooser__field {
+    flex: 1 1 10rem;
+  }
+}
+
+.chooser__field {
+  background: var(--bg-input, var(--bg-primary));
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.85rem;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+}
+
+.chooser__kinds {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+}
+
+.chooser__kind-choice {
+  align-items: center;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.8rem;
+  gap: 0.35rem;
 }
 
 .chooser__note {

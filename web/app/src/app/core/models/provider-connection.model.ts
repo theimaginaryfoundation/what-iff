@@ -1,3 +1,5 @@
+import { ModelKind, SpeechVoice } from './model.model';
+
 /** The API a connection speaks. */
 export type ProviderFlavor = 'openai' | 'anthropic';
 
@@ -47,6 +49,12 @@ export interface ListedModel {
   tool_support?: boolean;
   /** Whether it takes images, as the provider reports; absent when unknown. */
   vision_support?: boolean;
+  /** Set for a voice (speech) or dictation (transcription) model (ADR 0x052); absent for chat. */
+  kind?: ModelKind;
+  /** A speech model's voices. */
+  voices?: SpeechVoice[];
+  /** Whether a speech model takes a free-text style instruction. */
+  style?: boolean;
 }
 
 /**
@@ -68,6 +76,10 @@ export interface ConnectionModelChoice {
   /** Left out, an enabled model keeps its value and a new one starts off. */
   tool_support?: boolean;
   vision_support?: boolean;
+  /** For a voice or dictation model added by id on an open-ended connection; ignored for a known one. */
+  kind?: ModelKind;
+  /** A speech model's voices; left out, an enabled model keeps its own and a known one takes the table's. */
+  voices?: SpeechVoice[];
 }
 
 /** What adding or editing a connection answers with. */

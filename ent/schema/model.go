@@ -7,6 +7,8 @@ import (
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
 	"github.com/google/uuid"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 )
 
 // Model holds the schema definition for the Model entity.
@@ -56,6 +58,13 @@ func (Model) Fields() []ent.Field {
 			Values("low", "medium", "high", "ultra").
 			Default("high").
 			Comment("Billing grade a linked meter may use; it has no effect without one"),
+		field.Enum("kind").
+			Values("chat", "speech", "transcription").
+			Default("chat").
+			Comment("What the model does (ADR 0x052): chat, speech synthesis, or transcription. Only chat models are offered for chat, subagents and the text utility roles"),
+		field.JSON("speech_voices", []modeltypes.SpeechVoice{}).
+			Optional().
+			Comment("The voices a speech model offers (ADR 0x052 §2): the known table's by default, narrowed or relabelled by whoever configures voice. Empty for other kinds"),
 		field.Bool("deleted").
 			Default(false).
 			Comment("Whether the model is soft deleted"),

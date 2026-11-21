@@ -46,6 +46,12 @@ type ListedModel struct {
 	// both; most OpenAI-compatible servers report neither.
 	ToolSupport   *bool `json:"tool_support,omitempty"`
 	VisionSupport *bool `json:"vision_support,omitempty"`
+	// Kind is set for a speech or transcription model (ADR 0x052); empty is chat.
+	Kind models.ModelKind `json:"kind,omitempty"`
+	// Voices are a speech model's voices, and Style whether it takes a style
+	// instruction, from the known speech models table or the enabled row.
+	Voices []models.SpeechVoice `json:"voices,omitempty"`
+	Style  *bool                `json:"style,omitempty"`
 }
 
 // reportedCapabilities is the part of an OpenAI-compatible model entry that

@@ -498,7 +498,7 @@ func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
 		h.respondConnectError(w, preset.ID, err)
 		return
 	}
-	merged, err := h.store.withEnabled(r.Context(), row.ID, withKnownCapabilities(preset, flavor, listed))
+	merged, err := h.store.withEnabled(r.Context(), row.ID, withKnownSpeechModels(preset, withKnownCapabilities(preset, flavor, listed)))
 	if err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the connection's models", err)
 		return
@@ -556,7 +556,7 @@ func (h *Handler) handleSetModels(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, h.logger, "Send the models to enable or disable")
 		return
 	}
-	fresh, err := h.store.NewModelIDs(r.Context(), row.ID, req.Models)
+	fresh, err := h.store.NewModelIDs(r.Context(), row.ID, listedChoices(preset, req.Models))
 	if err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the connection's models", err)
 		return
@@ -568,7 +568,8 @@ func (h *Handler) handleSetModels(w http.ResponseWriter, r *http.Request) {
 	var unknown *UnknownModelError
 	var taken *ModelNameTakenError
 	switch {
-	case errors.Is(err, ErrInvalidModelID), errors.Is(err, ErrInvalidModelName), errors.Is(err, ErrTooManyModels), errors.As(err, &unknown):
+	case errors.Is(err, ErrInvalidModelID), errors.Is(err, ErrInvalidModelName), errors.Is(err, ErrTooManyModels),
+		errors.Is(err, ErrInvalidVoices), errors.Is(err, ErrInvalidModelKind), errors.As(err, &unknown):
 		badRequest(w, h.logger, err.Error())
 		return
 	case errors.As(err, &taken):

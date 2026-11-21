@@ -38,6 +38,10 @@ type Model struct {
 	ReasoningSupport ReasoningSupport `json:"reasoning_support"`
 	// ReasoningSupportOverride is the admin's override of ReasoningSupport; nil derives it.
 	ReasoningSupportOverride *ReasoningSupport `json:"reasoning_support_override,omitempty"`
+	// Kind is what the model does (ADR 0x052); empty reads as chat.
+	Kind ModelKind `json:"kind"`
+	// SpeechVoices are the voices a speech model offers; empty for other kinds.
+	SpeechVoices []SpeechVoice `json:"speech_voices,omitempty"`
 }
 
 type CreateModelRequest struct {
@@ -49,6 +53,11 @@ type CreateModelRequest struct {
 	VisionSupport      bool   `json:"vision_support"`
 	BaseCreditsPerSlab int64  `json:"base_credits_per_slab"`
 	SubscriptionTier   string `json:"subscription_tier"`
+	// Kind is chat (the default), speech or transcription (ADR 0x052). A model the
+	// known speech models table knows takes the table's kind.
+	Kind ModelKind `json:"kind,omitempty"`
+	// SpeechVoices are the voices a speech model offers; nil takes the table's.
+	SpeechVoices []SpeechVoice `json:"speech_voices,omitempty"`
 }
 
 type UpdateModelRequest struct {
@@ -63,4 +72,15 @@ type UpdateModelRequest struct {
 	// ReasoningSupportOverride sets the admin override ("none"|"optional"|"toggle"|"always");
 	// "" clears it (derive from the name again); nil leaves it.
 	ReasoningSupportOverride *string `json:"reasoning_support_override,omitempty"`
+	// SpeechVoices replaces a speech model's offered voices; nil leaves them. A
+	// model's kind does not change.
+	SpeechVoices []SpeechVoice `json:"speech_voices,omitempty"`
+}
+
+// EffectiveKind is the model's kind, reading an empty one as chat.
+func (m *Model) EffectiveKind() ModelKind {
+	if m == nil || m.Kind == "" {
+		return ModelKindChat
+	}
+	return m.Kind
 }
