@@ -245,9 +245,9 @@ An unclaimed track synthesises nothing while the turn runs; if it is claimed lat
 
 **Setting it.**
 A personality's `voice_autoplay` is the default for its chats.
-A chat can override it: `voice_autoplay` on the chat is empty (follow the personality), on, or off.
+A chat can override it: `voice_autoplay` on the chat is empty (follow the personality), on, or off, set on `PUT /speech/chats/{id}/autoplay` (a PATCH couldn't tell "empty" from "not sent").
 So a personality that never reads aloud can still have one thread that always does.
-The chat's control sits with its other turn settings in the composer ("Read replies aloud: Personality default (off) · On · Off"), shown only when the personality has a usable voice.
+The chat's control is a speaker button beside the microphone in the composer ("Read replies aloud: Personality default (off) · Always · Never"), shown only when the personality has a voice.
 
 **Which replies.**
 Whether a reply should be read aloud is decided once, on the server, when its turn starts: if autoplay resolves on for the chat and the voice is usable, the turn creates the reply's track with `autoplay: pending`.
@@ -258,7 +258,8 @@ It does not depend on whether anyone is watching.
 A pending track is played at most once, by one client.
 The client claims it (`POST /speech/tracks/{id}/claim`), which moves it from `pending` to `played` atomically and refuses anything else, and plays only if the claim succeeds.
 A client claims only when it can play right then: the chat is open and in view, the tab is visible, audio is unlocked (below), dictation is not recording, and the person has not started another reply playing.
-It looks for a pending track when it opens a chat, when one appears in the open chat (a turn or job starting), and when its tab becomes visible again.
+It looks for a pending track when it opens a chat (`GET /speech/chats/{id}/pending`, newest first), when one appears in the open chat (a turn or job starting, through the job's `speech_track_id`), and when its tab becomes visible again.
+A pending track it can't play now (the tab hidden, dictation recording, another reply playing) is left pending, to be looked for again.
 
 That gives:
 
