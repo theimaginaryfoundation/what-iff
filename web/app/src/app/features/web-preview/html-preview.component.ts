@@ -21,15 +21,18 @@ import { SiteFrameComponent } from './site-frame.component';
     @if (hasSite) {
       <app-site-frame [file]="file()" [html]="html()" (pageMessage)="pageMessage.emit($event)" (scriptServed)="scriptServed.emit($event)" />
     } @else {
-      <app-html-page-frame [file]="file()" [html]="html()" (pageMessage)="pageMessage.emit($event)" />
+      <app-html-page-frame [file]="file()" [html]="html() ?? ''" (pageMessage)="pageMessage.emit($event)" />
     }
   `,
 })
 export class HtmlPreviewComponent {
   readonly hasSite = !!inject(PREVIEW_URL);
   readonly file = input.required<FileAttachment>();
-  /** The page's text as it is now, an editor's unsaved text included. */
-  readonly html = input.required<string>();
+  /**
+   * The page's text as it is now, an editor's unsaved text included; null serves the stored page
+   * (where there is a preview site), so an edit to it shows as one to any other file does.
+   */
+  readonly html = input.required<string | null>();
   /** What the page's bridge script reports (ADR 0x050 §5). */
   readonly pageMessage = output<PageBridgeEvent>();
   /** The page loaded a project script it had not before (a project page only). */

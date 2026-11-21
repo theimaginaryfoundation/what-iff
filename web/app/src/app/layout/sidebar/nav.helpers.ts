@@ -5,6 +5,7 @@ import {
   ChatIconComponent,
   ClockIconComponent,
   ImageIconComponent,
+  LinkIconComponent,
   SmileIconComponent,
   UsersIconComponent,
   WrenchIconComponent,
@@ -46,17 +47,54 @@ export function navTooltip(label: string, hint: string, labelVisible: boolean): 
 }
 
 const APP_NAV_ITEMS: ReadonlyArray<NavItem> = [
-  { id: 'chat', label: 'Chat', hint: 'Your threads. Click again to open or close the Thread Manager', route: '/chat', icon: ChatIconComponent },
-  { id: 'personalities', label: 'Personalities', hint: 'The characters you talk to: prompt, portraits and notes', route: '/personality', icon: UsersIconComponent },
-  { id: 'gallery', label: 'Gallery', hint: "Images you've generated or imported, and expressions", route: '/gallery', icon: ImageIconComponent },
+  {
+    id: 'chat',
+    label: 'Chat',
+    hint: 'Your threads. Click again to open or close the Thread Manager',
+    route: '/chat',
+    icon: ChatIconComponent,
+  },
+  {
+    id: 'personalities',
+    label: 'Personalities',
+    hint: 'The characters you talk to: prompt, portraits and notes',
+    route: '/personality',
+    icon: UsersIconComponent,
+  },
+  {
+    id: 'gallery',
+    label: 'Gallery',
+    hint: "Images you've generated or imported, and expressions",
+    route: '/gallery',
+    icon: ImageIconComponent,
+  },
 ];
 
 const CONFIG_BASE_ITEMS: ReadonlyArray<NavItem> = [
-  { id: 'memories', label: 'Memories', hint: 'What your personalities remember across threads', route: '/memories', icon: BrainIconComponent },
-  { id: 'modes', label: 'Modes', hint: 'Sets of instructions, skills and a model a thread can switch into', route: '/mode', icon: SmileIconComponent },
+  {
+    id: 'memories',
+    label: 'Memories',
+    hint: 'What your personalities remember across threads',
+    route: '/memories',
+    icon: BrainIconComponent,
+  },
+  {
+    id: 'modes',
+    label: 'Modes',
+    hint: 'Sets of instructions, skills and a model a thread can switch into',
+    route: '/mode',
+    icon: SmileIconComponent,
+  },
   { id: 'skills', label: 'Skills', hint: "Saved instructions you add to a message with '/'", route: '/skills', icon: BoltIconComponent },
   { id: 'tools', label: 'Tools', hint: 'Connectors (MCP servers) and webhook tokens', route: '/integrations', icon: WrenchIconComponent },
   { id: 'jobs', label: 'Jobs', hint: 'Prompts your personalities run on a schedule', route: '/agent-jobs', icon: ClockIconComponent },
+  {
+    id: 'shared',
+    label: 'Shared',
+    hint: 'Files you shared with a link, to copy a link or stop sharing',
+    route: '/shared-links',
+    icon: LinkIconComponent,
+  },
 ];
 
 /**
@@ -105,6 +143,7 @@ function topSegment(route: string): string | undefined {
 
 const CONFIG_TOP_SEGMENTS: ReadonlySet<string> = new Set([
   'memories',
+  'shared-links',
   'memory',
   'mode',
   'skills',

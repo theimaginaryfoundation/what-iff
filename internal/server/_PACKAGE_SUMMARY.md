@@ -8,14 +8,14 @@ HTTP **API server**: Gorilla mux router, OpenTelemetry/metrics middleware, CORS 
 
 - **`Server`:** Holds config, logger, telemetry, Ent client, `sql.DB`, HTTP server, and optional **agent job scheduler** lifecycle.
 - **`NewServer`:** Builds router, middleware (`setupMiddleware`), routes (`setupRoutes`), timeouts from `Config`.
-- **`setupRoutes`:** Creates `datastore.Datastore`, `storage.FileStore`, a `metering.Meter` (production implementation when linked, otherwise no-op), `agent.Agent`, scheduler (`internal/agentjobs/scheduler` when enabled), then mounts handlers: health, chat, memory, account export/import, personality, ritual, job, file attachment, user, model, agent job, MCP, role, etc. — a linked plugin may register additional routes (see `internal/plugins`).
+- **`setupRoutes`:** Creates `datastore.Datastore`, `storage.FileStore`, a `metering.Meter` (production implementation when linked, otherwise no-op), `agent.Agent`, scheduler (`internal/agentjobs/scheduler` when enabled), then mounts handlers: health, share links (public `/api/shared/…` and the owner's `/api/share-links/…`), chat, memory, account export/import, personality, ritual, job, file attachment, user, model, agent job, MCP, role, etc. — a linked plugin may register additional routes (see `internal/plugins`).
   Plugins also get the server's lifecycle context (cancelled on `Shutdown`) and a `plugins.TurnStarter` (`plugin_turns.go`), which starts a turn as a user through `agent.HandleUserMessage`, the same path as the app and the webhook user mode.
   They also get a `plugins.AttachmentIngester` (`plugin_attachments.go`), which saves a file to a user's chat through the chat upload path (`handlerutils.ProcessUpload` then `StoreChatAttachment`), so a file a plugin brings in is checked, normalized, archived and chunked like one attached in the app.
   A file over `handlerutils.MaxUploadBytes` is refused (`plugins.ErrAttachmentTooLarge`) before anything buffers it.
   The ingester depends on small interfaces (`attachmentDatastore`, `attachmentProvider`), wired from the agent by `newAgentAttachmentIngester`.
   The attachment it returns goes on the plugin turn's message.
   Sub-routers use `/api` prefix; some routes use `/api/v1/...` (see `server.go` comments).
-- **`Config` (`config.go`):** Env-driven environment name (`ENV`, then `ENVIRONMENT`), host/port, CORS, OpenAI/Anthropic keys, S3, Stripe keys, **agent job scheduler** flags (in-process vs distributed lock), free-tier message limit, token encryption secret, and a `RequireBilling` feature flag — consumed by a private billing implementation when one is linked; a no-op otherwise.
+- **`Config` (`config.go`):** Env-driven environment name (`ENV`, then `ENVIRONMENT`), host/port, CORS, OpenAI/Anthropic keys, S3, Stripe keys, **agent job scheduler** flags (in-process vs distributed lock), free-tier message limit, token encryption secret, `ClientIPHeader` (`CLIENT_IP_HEADER`, the proxy-set header share-link unlock limits read the visitor's address from, ADR 0x051 §4) and `ClientIPProxySecret` (`CLIENT_IP_PROXY_SECRET`, which a request must carry for that header to count), and a `RequireBilling` feature flag — consumed by a private billing implementation when one is linked; a no-op otherwise.
 
 ## Key types and entry points
 

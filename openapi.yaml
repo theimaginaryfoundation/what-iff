@@ -9625,6 +9625,301 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /share-links:
+    get:
+      summary: The user's share links
+      description: Every share link of the user's, newest first, with their passcodes (ADR 0x051 §2).
+      tags: [Share Links]
+      responses:
+        '200':
+          description: The links
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  links:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ShareLink'
+        '401':
+          description: Unauthorized
+  /share-links/files/{fileId}:
+    parameters:
+      - name: fileId
+        in: path
+        required: true
+        description: The file (any row of it; a chat copy names its original)
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: A file's share link, and what sharing it shares
+      description: >-
+        The scope is worked out from the file's original, so a chat's copy of a page in a folder says
+        it shares the folder (ADR 0x051 §1); link is null when the file is not shared.
+      tags: [Share Links]
+      responses:
+        '200':
+          description: The scope and the link
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scope, link]
+                properties:
+                  scope:
+                    $ref: '#/components/schemas/ShareScope'
+                  link:
+                    nullable: true
+                    allOf:
+                      - $ref: '#/components/schemas/ShareLink'
+        '400':
+          description: A skill's file, which cannot be shared
+        '404':
+          description: Not the user's file
+    put:
+      summary: Share a file
+      description: >-
+        Makes the file's share link (ADR 0x051 §1), with a new passcode unless passcode_required is
+        false; a file shared already keeps its link (200). An HTML file in a gallery folder is shared
+        as a web app: the page and every file of its folder and the folders inside it. 409 when a
+        passcode is asked for and the server has no TOKEN_ENCRYPTION_SECRET to keep it with; 400 for
+        a skill's file.
+      tags: [Share Links]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                passcode_required:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: The file was shared already
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareLink'
+        '201':
+          description: The file is shared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareLink'
+        '400':
+          description: The file cannot be shared
+        '404':
+          description: Not the user's file
+        '409':
+          description: The server has no token key to keep passcodes with (it does not start without one)
+    patch:
+      summary: Change a share link's passcode
+      description: >-
+        passcode_required turns the passcode on (a new one) or off; new_passcode makes a new one. A
+        new passcode signs out every visitor who unlocked the link.
+      tags: [Share Links]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                passcode_required:
+                  type: boolean
+                new_passcode:
+                  type: boolean
+      responses:
+        '200':
+          description: The link
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareLink'
+        '400':
+          description: An invalid body, or a skill's file
+        '404':
+          description: Not the user's file, or not shared
+        '409':
+          description: The server has no token key to keep passcodes with (it does not start without one)
+    delete:
+      summary: Stop sharing a file
+      description: The link stops working; sharing again makes a new one.
+      tags: [Share Links]
+      responses:
+        '204':
+          description: The file is not shared (now, or already)
+        '400':
+          description: A skill's file
+        '404':
+          description: Not the user's file
+  /shared/{key}:
+    parameters:
+      - $ref: '#/components/parameters/ShareKey'
+    get:
+      summary: A shared item (public)
+      description: >-
+        What a share link opens, for the share site (ADR 0x051 §5), reached without signing in on the
+        share site's own origin. A link that needs its passcode is 401 until unlocked, saying nothing
+        about the item. Every answer here is private, no-store and Cross-Origin-Resource-Policy:
+        same-origin.
+      tags: [Share Links]
+      security: []
+      responses:
+        '200':
+          description: The item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedView'
+        '401':
+          description: Locked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  locked:
+                    type: boolean
+        '404':
+          description: No such link
+  /shared/{key}/unlock:
+    parameters:
+      - $ref: '#/components/parameters/ShareKey'
+    post:
+      summary: Unlock a shared item with its passcode (public)
+      description: >-
+        The right passcode is answered with the share's cookie (HttpOnly, Secure, SameSite=Strict,
+        scoped to /api/shared/{key}, 12 hours). Tries are limited per address (an IPv4 address or an
+        IPv6 /64) across all links: 10 a minute, and 5 wrong within 15 minutes ban the address for an
+        hour (a day for the next ban within a day), right passcode or not (ADR 0x051 §4). Only the share
+        site's own requests count: the body must be JSON, and a Sec-Fetch-Site other than same-origin
+        is refused (403) before the try is counted.
+      tags: [Share Links]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [passcode]
+              properties:
+                passcode:
+                  type: string
+      responses:
+        '204':
+          description: Unlocked (or the link needs no passcode)
+        '400':
+          description: An invalid body, or the visitor's address could not be read
+        '403':
+          description: Not the share site's own request (not JSON, or from another origin)
+        '401':
+          description: A wrong passcode
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  attempts_left:
+                    type: integer
+        '404':
+          description: No such link
+        '429':
+          description: Too many tries; Retry-After says when to try again
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  retry_after:
+                    type: integer
+  /shared/{key}/content:
+    parameters:
+      - $ref: '#/components/parameters/ShareKey'
+    get:
+      summary: A shared file's bytes (public)
+      description: >-
+        The file a link shares (a web app's page). Served as an attachment, nosniff, under a
+        `sandbox; default-src 'none'` policy, so it never renders as the share site's own page.
+      tags: [Share Links]
+      security: []
+      responses:
+        '200':
+          description: The bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Locked
+        '404':
+          description: No such link, or the file's stored bytes are gone
+  /shared/{key}/files:
+    parameters:
+      - $ref: '#/components/parameters/ShareKey'
+    get:
+      summary: A shared web app's files (public)
+      description: >-
+        The files of the page's folder and the folders inside it, by their paths in the project, and
+        nothing outside it (ADR 0x051 §7). 404 for a single-file link.
+      tags: [Share Links]
+      security: []
+      responses:
+        '200':
+          description: The files
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SharedFile'
+        '401':
+          description: Locked
+        '404':
+          description: No such link, or not a web app
+  /shared/{key}/files/{path}:
+    parameters:
+      - $ref: '#/components/parameters/ShareKey'
+      - name: path
+        in: path
+        required: true
+        description: >-
+          A relative path in the project, in / separated segments; an empty segment, ., .., a
+          backslash, a control character or a leading / is refused (400).
+        schema:
+          type: string
+    get:
+      summary: One file of a shared web app (public)
+      description: Served as /content is.
+      tags: [Share Links]
+      security: []
+      responses:
+        '200':
+          description: The bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Not a path in the project
+        '401':
+          description: Locked
+        '404':
+          description: Not in the project, or the file's stored bytes are gone
   /image-gallery:
     get:
       summary: List gallery files
@@ -10283,6 +10578,14 @@ paths:
 
 components:
   parameters:
+    ShareKey:
+      name: key
+      in: path
+      required: true
+      description: A share link's key (22 base64url characters)
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9_-]{22}$'
     DiscordBotID:
       name: id
       in: path
@@ -12981,6 +13284,89 @@ components:
           description: The first comment, then the replies.
           items:
             $ref: '#/components/schemas/FileComment'
+    ShareLink:
+      type: object
+      description: A public link to one of the user's files, as its owner sees it (ADR 0x051).
+      properties:
+        key:
+          type: string
+          description: The link's own part, the share site's /s/{key} (22 base64url characters)
+        file_id:
+          type: string
+          format: uuid
+        file_name:
+          type: string
+        folder:
+          type: string
+          description: The file's gallery folder; a web app's project root
+        file_type:
+          type: string
+        web_app:
+          type: boolean
+          description: The link shares the page's folder as a web app (an HTML file in a folder)
+        passcode_required:
+          type: boolean
+        passcode:
+          type: string
+          description: The 12-character passcode, when the link needs one
+        passcode_unreadable:
+          type: boolean
+          description: The stored passcode could not be decrypted (the token key changed); make a new one
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [key, file_id, file_name, file_type, web_app, passcode_required, created_at, updated_at]
+    ShareScope:
+      type: object
+      description: What sharing a file shares, from its original (ADR 0x051 §1).
+      properties:
+        file_name:
+          type: string
+        web_app:
+          type: boolean
+          description: The file is shared with its folder
+        folder:
+          type: string
+          description: That folder, for a web app
+      required: [file_name, web_app]
+    SharedView:
+      type: object
+      description: What a share link opens, as a visitor sees it.
+      properties:
+        name:
+          type: string
+        file_type:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        content_version:
+          type: integer
+        web_app:
+          type: boolean
+        page:
+          type: string
+          description: A web app's page, by its path in the project
+        project_name:
+          type: string
+          description: A web app's folder's own name
+      required: [name, file_type, content_version, web_app]
+    SharedFile:
+      type: object
+      properties:
+        path:
+          type: string
+        file_type:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        content_version:
+          type: integer
+      required: [path, file_type, content_version]
     CommentMessage:
       type: object
       description: >-
@@ -15889,6 +16275,8 @@ components:
 tags:
   - name: System
     description: System health and status endpoints
+  - name: Share Links
+    description: Public links to the user's files, and the share site's reads of them (ADR 0x051)
   - name: Provider Keys
     description: An account's own model-provider API keys. Served only when the server takes keys from accounts.
   - name: Provider Connections

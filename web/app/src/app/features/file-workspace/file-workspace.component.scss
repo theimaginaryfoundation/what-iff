@@ -113,6 +113,7 @@
   cursor: pointer;
   display: inline-flex;
   font-size: 0.8125rem;
+  gap: 0.3rem;
   justify-content: center;
 
   &:hover:not(:disabled) {

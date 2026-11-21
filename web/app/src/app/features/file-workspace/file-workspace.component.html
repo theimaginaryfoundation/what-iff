@@ -94,6 +94,18 @@
             Mark up
           </button>
         }
+        @if (canShare()) {
+          <button
+            type="button"
+            class="file-workspace__button"
+            uiTooltip="Make a link that people without an account can view this with"
+            placement="bottom"
+            (click)="shareOpen.set(true)"
+          >
+            <ui-link-icon [size]="14" />
+            Share
+          </button>
+        }
         @if (editable()) {
           <button type="button" class="file-workspace__button file-workspace__button--primary" (click)="startEdit()">Edit</button>
         }
@@ -274,4 +286,8 @@
       <button type="button" class="file-workspace__button file-workspace__button--primary" (click)="submitSaveAs()">Save</button>
     </div>
   </ui-modal>
+}
+
+@if (shareOpen()) {
+  <app-share-dialog [file]="file()" (closed)="shareOpen.set(false)" />
 }

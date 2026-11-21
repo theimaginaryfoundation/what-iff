@@ -4,6 +4,7 @@ import { MarkdownModule } from 'ngx-markdown';
 
 import { NotebookOutput } from './nbformat';
 import { NotebookInteractiveFrameComponent } from './notebook-interactive-frame.component';
+import { NOTEBOOK_INTERACTIVE_OUTPUT } from './notebook-run.config';
 import { MAX_OUTPUT_CHARS, OutputView, outputViews } from './notebook-outputs';
 
 interface ShownOutput {
@@ -59,11 +60,15 @@ interface ShownOutput {
           <p class="nb-output nb-output--note">Interactive output ({{ item.view.mime }}) cannot be shown here.</p>
         }
         @default {
-          <pre class="nb-output nb-output--text" [class.nb-output--stderr]="item.view.kind === 'text' && item.view.stderr">{{ item.text }}</pre>
+          <pre class="nb-output nb-output--text" [class.nb-output--stderr]="item.view.kind === 'text' && item.view.stderr">{{
+            item.text
+          }}</pre>
         }
       }
       @if (item.offer) {
-        <button type="button" class="nb-output__more" (click)="allow($event)">Show interactive output (runs this notebook's scripts)</button>
+        <button type="button" class="nb-output__more" (click)="allow($event)">
+          Show interactive output (runs this notebook's scripts)
+        </button>
       }
       @if (item.truncated) {
         <button type="button" class="nb-output__more" (click)="showAll.set(true)">Show all output</button>
@@ -132,28 +137,63 @@ interface ShownOutput {
         font-size: 0.75rem;
         padding: 0.15rem 0.5rem;
       }
-      .nb-ansi-black { color: #6b7280; }
-      .nb-ansi-red { color: #e5484d; }
-      .nb-ansi-green { color: #30a46c; }
-      .nb-ansi-yellow { color: #d4a017; }
-      .nb-ansi-blue { color: #3b82f6; }
-      .nb-ansi-magenta { color: #c026d3; }
-      .nb-ansi-cyan { color: #0ea5b7; }
-      .nb-ansi-white { color: var(--text-secondary); }
-      .nb-ansi-bg-black { background: #374151; }
-      .nb-ansi-bg-red { background: color-mix(in srgb, #e5484d 30%, transparent); }
-      .nb-ansi-bg-green { background: color-mix(in srgb, #30a46c 30%, transparent); }
-      .nb-ansi-bg-yellow { background: color-mix(in srgb, #d4a017 30%, transparent); }
-      .nb-ansi-bg-blue { background: color-mix(in srgb, #3b82f6 30%, transparent); }
-      .nb-ansi-bg-magenta { background: color-mix(in srgb, #c026d3 30%, transparent); }
-      .nb-ansi-bg-cyan { background: color-mix(in srgb, #0ea5b7 30%, transparent); }
-      .nb-ansi-bg-white { background: color-mix(in srgb, #9ca3af 30%, transparent); }
-      .nb-ansi-bold { font-weight: 700; }
+      .nb-ansi-black {
+        color: #6b7280;
+      }
+      .nb-ansi-red {
+        color: #e5484d;
+      }
+      .nb-ansi-green {
+        color: #30a46c;
+      }
+      .nb-ansi-yellow {
+        color: #d4a017;
+      }
+      .nb-ansi-blue {
+        color: #3b82f6;
+      }
+      .nb-ansi-magenta {
+        color: #c026d3;
+      }
+      .nb-ansi-cyan {
+        color: #0ea5b7;
+      }
+      .nb-ansi-white {
+        color: var(--text-secondary);
+      }
+      .nb-ansi-bg-black {
+        background: #374151;
+      }
+      .nb-ansi-bg-red {
+        background: color-mix(in srgb, #e5484d 30%, transparent);
+      }
+      .nb-ansi-bg-green {
+        background: color-mix(in srgb, #30a46c 30%, transparent);
+      }
+      .nb-ansi-bg-yellow {
+        background: color-mix(in srgb, #d4a017 30%, transparent);
+      }
+      .nb-ansi-bg-blue {
+        background: color-mix(in srgb, #3b82f6 30%, transparent);
+      }
+      .nb-ansi-bg-magenta {
+        background: color-mix(in srgb, #c026d3 30%, transparent);
+      }
+      .nb-ansi-bg-cyan {
+        background: color-mix(in srgb, #0ea5b7 30%, transparent);
+      }
+      .nb-ansi-bg-white {
+        background: color-mix(in srgb, #9ca3af 30%, transparent);
+      }
+      .nb-ansi-bold {
+        font-weight: 700;
+      }
     `,
   ],
 })
 export class NotebookOutputComponent {
   private readonly sanitizer = inject(DomSanitizer);
+  private readonly mayRun = inject(NOTEBOOK_INTERACTIVE_OUTPUT);
 
   readonly outputs = input.required<readonly NotebookOutput[]>();
   /** The notebook's library-loading outputs, included in each frame. */
@@ -172,6 +212,7 @@ export class NotebookOutputComponent {
 
   private show(view: OutputView): ShownOutput {
     if (view.kind === 'interactive') {
+      if (!this.mayRun) return view.fallback ? this.show(view.fallback) : { view: { kind: 'unsupported', mime: 'script-driven' } };
       if (this.interactive()) return { view, frame: view.document };
       return { ...(view.fallback ? this.show(view.fallback) : { view }), offer: true };
     }

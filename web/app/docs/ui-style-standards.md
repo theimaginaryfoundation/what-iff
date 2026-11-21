@@ -82,7 +82,7 @@ Render it only while the count is above 0 (both adopters do).
 
 | Need | Use |
 | --- | --- |
-| Button / icon-only button | `ui-button` (`variant`: primary, secondary, ghost, danger; `size`: md, sm, or xs for surfaces with many actions, such as cards and toolbars — it grows back to a 36px target on touch screens; `loading`) / `ui-icon-button` (`ariaLabel` required; `size`: md or xs) |
+| Button / icon-only button | `ui-button` (`variant`: primary, secondary, ghost, danger; `size`: md, sm, or xs for surfaces with many actions, such as cards and toolbars — it grows back to a 36px target on touch screens; `loading`; `ariaLabel` when the text alone does not say what it acts on, such as a "Copy" beside a link) / `ui-icon-button` (`ariaLabel` required; `size`: md or xs) |
 | Toggle chip / filter pill | `ui-tag` (`selected`, `(toggle)`) |
 | Status pill | `ui-badge` (`intent`: neutral, info, success, warning, danger) |
 | Surface | `ui-card` (`variant`: flat, elevated) |

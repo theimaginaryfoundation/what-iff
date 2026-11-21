@@ -17,5 +17,6 @@ export const environment = {
   diagramsUrl: '__DIAGRAMS_URL__',
   // The preview site that serves web projects (ADR 0x050 §3); empty leaves a lone .html file only.
   previewUrl: '__PREVIEW_URL__',
+  shareUrl: '__SHARE_URL__',
   jupyterliteUrl: '__JUPYTERLITE_URL__',
 };

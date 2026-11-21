@@ -128,6 +128,17 @@ describe('CodeEditorComponent', () => {
     expect(el.querySelector('.code-editor__preview')).toBeNull();
   });
 
+  it('shows only the code when asked to, as a share does: no preview, no comments', async () => {
+    fixture.componentRef.setInput('codeOnly', true);
+    fixture.componentRef.setInput('readOnly', true);
+    await open(file({ name: 'index.html', file_type: 'text/html' }), '<p>One</p>');
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('.code-editor__toolbar')).toBeNull();
+    expect(el.querySelector('.code-editor__preview')).toBeNull();
+    expect(el.querySelector('app-comments-panel')).toBeNull();
+    expect(el.querySelector('.code-editor__monaco')).not.toBeNull();
+  });
+
   it('renders an HTML page beside its source, rebuilt once typing pauses', async () => {
     await open(file({ name: 'index.html', file_type: 'text/html' }), '<p>One</p>');
     const el = fixture.nativeElement as HTMLElement;

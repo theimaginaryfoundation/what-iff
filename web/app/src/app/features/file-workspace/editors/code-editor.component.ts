@@ -74,7 +74,9 @@ export class CodeEditorComponent implements FileEditor {
   readonly isMarkdown = computed(() => rendersAsMarkdown(previewKindFor(this.file())));
   /** An HTML page: rendered beside its source in a sandboxed frame (ADR 0x050 §1). */
   readonly isHtml = computed(() => previewKindFor(this.file()) === 'html');
-  readonly hasPreview = computed(() => this.isMarkdown() || this.isHtml());
+  /** Only the code, as a read-only share shows it (ADR 0x051 §7): no preview beside it, no comments. */
+  readonly codeOnly = input(false);
+  readonly hasPreview = computed(() => !this.codeOnly() && (this.isMarkdown() || this.isHtml()));
   readonly showPreview = signal(true);
 
   // --- comments (ADR 0x045): kept beside the file, written once a save has stored the text ---------
@@ -116,7 +118,7 @@ export class CodeEditorComponent implements FileEditor {
   private readonly panel = inject(CommentsPanelState);
   /** The panel opens by itself on a file with open threads, until the user opens or closes it. */
   readonly openCount = computed(() => (this.isHtml() ? this.pageComments.openCount() : this.comments.openCount()));
-  readonly commentsOpen = computed(() => this.panel.open() ?? this.openCount() > 0);
+  readonly commentsOpen = computed(() => !this.codeOnly() && (this.panel.open() ?? this.openCount() > 0));
   /** Opens a thread's reply box in the panel (the right-click menu's "Reply to comment"). */
   readonly replyRequest = signal<{ threadId: string } | null>(null);
   /** Comments changed since they were last written. */
@@ -398,6 +400,8 @@ export class CodeEditorComponent implements FileEditor {
     this.previewText.set(text);
     this.state.set('ready');
     this.attachComments(monaco);
+    // Code only (a share) has no comments to show.
+    if (this.codeOnly()) return;
     try {
       await this.comments.load(file.id);
       this.hadComments = this.comments.threads().length > 0;

@@ -1,5 +1,17 @@
 import { DOCUMENT } from '@angular/common';
-import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  OnDestroy,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { lockBodyScroll, releaseBodyScroll, type BodyScrollLockHandle } from '../helpers/body-scroll-lock.helpers';
 import { createFocusTrap, releaseFocusTrap, type FocusTrapHandle } from '../helpers/focus-trap.helpers';
 import { isEscapeKey } from '../helpers/keyboard.helpers';
@@ -35,15 +47,25 @@ export class ModalComponent implements OnDestroy {
   readonly describedBy = input<string | null>(null);
   readonly dismissible = input(true);
   readonly size = input<ModalSize>('md');
+  /**
+   * Shows the dialog at the end of the page's body rather than where it is declared, for a dialog
+   * opened from inside a stacking context of its own (the docked file workspace), which would
+   * otherwise stay under whatever the page layers above that context.
+   */
+  readonly portal = input(false);
   readonly dismiss = output<ModalDismissReason>();
 
   readonly dialog = viewChild<ElementRef<HTMLElement>>('dialog');
 
   private readonly document = inject(DOCUMENT);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private focusTrap: FocusTrapHandle | null = null;
   private bodyLock: BodyScrollLockHandle | null = null;
 
   constructor() {
+    effect(() => {
+      if (this.portal() && this.open()) this.document.body.appendChild(this.host.nativeElement);
+    });
     effect(() => {
       if (this.open()) {
         this.lockBody();
@@ -58,6 +80,8 @@ export class ModalComponent implements OnDestroy {
   ngOnDestroy(): void {
     this.releaseFocusTrap();
     this.releaseBody();
+    // Angular takes the host out wherever it is; a dialog moved to the body is taken out of it too.
+    if (this.portal()) this.host.nativeElement.remove();
   }
 
   panelClass(): string {

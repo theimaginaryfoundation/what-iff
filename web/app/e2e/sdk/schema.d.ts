@@ -14270,6 +14270,618 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/share-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The user's share links
+         * @description Every share link of the user's, newest first, with their passcodes (ADR 0x051 §2).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The links */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            links?: components["schemas"]["ShareLink"][];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/share-links/files/{fileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The file (any row of it; a chat copy names its original) */
+                fileId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * A file's share link, and what sharing it shares
+         * @description The scope is worked out from the file's original, so a chat's copy of a page in a folder says it shares the folder (ADR 0x051 §1); link is null when the file is not shared.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The file (any row of it; a chat copy names its original) */
+                    fileId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The scope and the link */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            scope: components["schemas"]["ShareScope"];
+                            link: components["schemas"]["ShareLink"] | null;
+                        };
+                    };
+                };
+                /** @description A skill's file, which cannot be shared */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not the user's file */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        /**
+         * Share a file
+         * @description Makes the file's share link (ADR 0x051 §1), with a new passcode unless passcode_required is false; a file shared already keeps its link (200). An HTML file in a gallery folder is shared as a web app: the page and every file of its folder and the folders inside it. 409 when a passcode is asked for and the server has no TOKEN_ENCRYPTION_SECRET to keep it with; 400 for a skill's file.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The file (any row of it; a chat copy names its original) */
+                    fileId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @default true */
+                        passcode_required?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description The file was shared already */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ShareLink"];
+                    };
+                };
+                /** @description The file is shared */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ShareLink"];
+                    };
+                };
+                /** @description The file cannot be shared */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not the user's file */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The server has no token key to keep passcodes with (it does not start without one) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Stop sharing a file
+         * @description The link stops working; sharing again makes a new one.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The file (any row of it; a chat copy names its original) */
+                    fileId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The file is not shared (now, or already) */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A skill's file */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not the user's file */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Change a share link's passcode
+         * @description passcode_required turns the passcode on (a new one) or off; new_passcode makes a new one. A new passcode signs out every visitor who unlocked the link.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The file (any row of it; a chat copy names its original) */
+                    fileId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        passcode_required?: boolean;
+                        new_passcode?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description The link */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ShareLink"];
+                    };
+                };
+                /** @description An invalid body, or a skill's file */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not the user's file, or not shared */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The server has no token key to keep passcodes with (it does not start without one) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/shared/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A share link's key (22 base64url characters) */
+                key: components["parameters"]["ShareKey"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A shared item (public)
+         * @description What a share link opens, for the share site (ADR 0x051 §5), reached without signing in on the share site's own origin. A link that needs its passcode is 401 until unlocked, saying nothing about the item. Every answer here is private, no-store and Cross-Origin-Resource-Policy: same-origin.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description A share link's key (22 base64url characters) */
+                    key: components["parameters"]["ShareKey"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The item */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SharedView"];
+                    };
+                };
+                /** @description Locked */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            locked?: boolean;
+                        };
+                    };
+                };
+                /** @description No such link */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared/{key}/unlock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A share link's key (22 base64url characters) */
+                key: components["parameters"]["ShareKey"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unlock a shared item with its passcode (public)
+         * @description The right passcode is answered with the share's cookie (HttpOnly, Secure, SameSite=Strict, scoped to /api/shared/{key}, 12 hours). Tries are limited per address (an IPv4 address or an IPv6 /64) across all links: 10 a minute, and 5 wrong within 15 minutes ban the address for an hour (a day for the next ban within a day), right passcode or not (ADR 0x051 §4). Only the share site's own requests count: the body must be JSON, and a Sec-Fetch-Site other than same-origin is refused (403) before the try is counted.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description A share link's key (22 base64url characters) */
+                    key: components["parameters"]["ShareKey"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        passcode: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Unlocked (or the link needs no passcode) */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description An invalid body, or the visitor's address could not be read */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A wrong passcode */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error?: string;
+                            attempts_left?: number;
+                        };
+                    };
+                };
+                /** @description Not the share site's own request (not JSON, or from another origin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No such link */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Too many tries; Retry-After says when to try again */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error?: string;
+                            retry_after?: number;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared/{key}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A share link's key (22 base64url characters) */
+                key: components["parameters"]["ShareKey"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A shared file's bytes (public)
+         * @description The file a link shares (a web app's page). Served as an attachment, nosniff, under a `sandbox; default-src 'none'` policy, so it never renders as the share site's own page.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description A share link's key (22 base64url characters) */
+                    key: components["parameters"]["ShareKey"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The bytes */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/octet-stream": string;
+                    };
+                };
+                /** @description Locked */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No such link, or the file's stored bytes are gone */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared/{key}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A share link's key (22 base64url characters) */
+                key: components["parameters"]["ShareKey"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A shared web app's files (public)
+         * @description The files of the page's folder and the folders inside it, by their paths in the project, and nothing outside it (ADR 0x051 §7). 404 for a single-file link.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description A share link's key (22 base64url characters) */
+                    key: components["parameters"]["ShareKey"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The files */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            files?: components["schemas"]["SharedFile"][];
+                        };
+                    };
+                };
+                /** @description Locked */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No such link, or not a web app */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared/{key}/files/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A share link's key (22 base64url characters) */
+                key: components["parameters"]["ShareKey"];
+                /** @description A relative path in the project, in / separated segments; an empty segment, ., .., a backslash, a control character or a leading / is refused (400). */
+                path: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * One file of a shared web app (public)
+         * @description Served as /content is.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description A share link's key (22 base64url characters) */
+                    key: components["parameters"]["ShareKey"];
+                    /** @description A relative path in the project, in / separated segments; an empty segment, ., .., a backslash, a control character or a leading / is refused (400). */
+                    path: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The bytes */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/octet-stream": string;
+                    };
+                };
+                /** @description Not a path in the project */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Locked */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not in the project, or the file's stored bytes are gone */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/image-gallery": {
         parameters: {
             query?: never;
@@ -16734,6 +17346,56 @@ export interface components {
             /** @description The first comment, then the replies. */
             comments: components["schemas"]["FileComment"][];
         };
+        /** @description A public link to one of the user's files, as its owner sees it (ADR 0x051). */
+        ShareLink: {
+            /** @description The link's own part, the share site's /s/{key} (22 base64url characters) */
+            key: string;
+            /** Format: uuid */
+            file_id: string;
+            file_name: string;
+            /** @description The file's gallery folder; a web app's project root */
+            folder?: string;
+            file_type: string;
+            /** @description The link shares the page's folder as a web app (an HTML file in a folder) */
+            web_app: boolean;
+            passcode_required: boolean;
+            /** @description The 12-character passcode, when the link needs one */
+            passcode?: string;
+            /** @description The stored passcode could not be decrypted (the token key changed); make a new one */
+            passcode_unreadable?: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description What sharing a file shares, from its original (ADR 0x051 §1). */
+        ShareScope: {
+            file_name: string;
+            /** @description The file is shared with its folder */
+            web_app: boolean;
+            /** @description That folder, for a web app */
+            folder?: string;
+        };
+        /** @description What a share link opens, as a visitor sees it. */
+        SharedView: {
+            name: string;
+            file_type: string;
+            /** Format: int64 */
+            size_bytes?: number;
+            content_version: number;
+            web_app: boolean;
+            /** @description A web app's page, by its path in the project */
+            page?: string;
+            /** @description A web app's folder's own name */
+            project_name?: string;
+        };
+        SharedFile: {
+            path: string;
+            file_type: string;
+            /** Format: int64 */
+            size_bytes?: number;
+            content_version: number;
+        };
         /** @description The document comment a message is sent from (ADR 0x046): a comment that mentioned the agent, whose text is the message. The chat shows a link to the thread; what the thread is on and the thread before the comment reach the agent with the message but are not shown. 404 when the file is not the user's, 400 without a thread. */
         CommentMessage: {
             /** Format: uuid */
@@ -18593,6 +19255,8 @@ export interface components {
         };
     };
     parameters: {
+        /** @description A share link's key (22 base64url characters) */
+        ShareKey: string;
         DiscordBotID: string;
         DiscordChatID: string;
         BuzzID: string;

@@ -43,6 +43,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/ritual"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/role"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/search"
+	"github.com/theimaginaryfoundation/what-iff/internal/handlers/sharelink"
 	toolshandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/user"
 	versionhandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/version"
@@ -414,6 +415,13 @@ func (s *Server) setupRoutes() {
 	webhookRouter.Use(middleware.WebhookAuthMiddleware(dataStore, s.logger))
 	webhookHandler.RegisterWebhookRoutes(webhookRouter)
 	mcpServerHandler.RegisterPublicRoutes(apiRouter)
+	// Share links (ADR 0x051): the share site's visitors read shared files without signing in.
+	shareLinkHandler := sharelink.NewHandler(dataStore, agent.FileStore, s.logger, sharelink.Config{
+		Secret:         os.Getenv("JWT_SECRET"),
+		ClientIPHeader: s.config.ClientIPHeader,
+		ProxySecret:    s.config.ClientIPProxySecret,
+	})
+	shareLinkHandler.RegisterPublicRoutes(apiRouter)
 
 	// Protected routes
 	authRouter := apiRouter.NewRoute().Subrouter()
@@ -461,6 +469,7 @@ func (s *Server) setupRoutes() {
 	provideraccess.NewHandler(keyResolver, s.logger).RegisterRoutes(authRouter)
 	toolsHandler.RegisterRoutes(authRouter)
 	searchHandler.RegisterRoutes(authRouter)
+	shareLinkHandler.RegisterRoutes(authRouter)
 
 	// The /api/v1 surface. Authentication only — every route mounted here
 	// applies its own authorization.

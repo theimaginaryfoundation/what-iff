@@ -61,6 +61,27 @@ func createFileAttachmentTestSchema(t *testing.T, db *sql.DB) {
 			revision integer NOT NULL DEFAULT 1,
 			updated_at datetime NOT NULL
 		)`,
+		`CREATE TABLE share_links (
+			id uuid PRIMARY KEY,
+			key text NOT NULL UNIQUE,
+			file_attachment_id uuid NOT NULL UNIQUE REFERENCES file_attachments(id) ON DELETE CASCADE,
+			passcode_ciphertext text NOT NULL DEFAULT '',
+			passcode_generation integer NOT NULL DEFAULT 1,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL
+		)`,
+		`CREATE TABLE share_unlock_attempts (
+			id uuid PRIMARY KEY,
+			address_key text NOT NULL,
+			failed bool NOT NULL,
+			at datetime NOT NULL
+		)`,
+		`CREATE TABLE share_bans (
+			id uuid PRIMARY KEY,
+			address_key text NOT NULL UNIQUE,
+			until datetime NOT NULL,
+			strikes integer NOT NULL DEFAULT 1
+		)`,
 		`CREATE TABLE file_edit_grants (
 			id uuid PRIMARY KEY,
 			file_attachment_id uuid NOT NULL,

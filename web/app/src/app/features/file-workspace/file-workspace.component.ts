@@ -30,6 +30,7 @@ import {
   DownloadIconComponent,
   EditIconComponent,
   ExpandIconComponent,
+  LinkIconComponent,
   XIconComponent,
 } from '../../shared/ui/icons/icons';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
@@ -42,6 +43,9 @@ import { galleryDisplayBaseName, galleryFilenameFromBaseName } from '../gallery/
 import { FilePreviewKind, fileTypeLabel, previewKindFor } from '../gallery/helpers/file-preview.helpers';
 import { folderLabel, folderPathError, normalizeFolderPath } from '../gallery/helpers/gallery-folder.helpers';
 import { formatSource, sourceForImage } from '../gallery/helpers/image-source.helpers';
+import { ShareLinkService } from '../../core/services/share-link.service';
+import { ShareDialogComponent } from '../sharing/share-dialog.component';
+import { isShareable } from '../sharing/sharing.helpers';
 import { FolderFiles } from '../web-preview/folder-files.service';
 import { projectPageOf } from '../web-preview/project-page';
 import { FileWorkspaceService } from './file-workspace.service';
@@ -75,6 +79,8 @@ const MARKUP_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/web
     XIconComponent,
     ModalComponent,
     ImageMarkupComponent,
+    LinkIconComponent,
+    ShareDialogComponent,
   ],
   templateUrl: './file-workspace.component.html',
   styleUrl: './file-workspace.component.scss',
@@ -154,6 +160,14 @@ export class FileWorkspaceComponent implements CommentSaver, WorkspaceContext {
    * the page it builds; null while looking, or when there is none.
    */
   readonly projectPage = signal<FileAttachment | null>(null);
+  private readonly shareLinks = inject(ShareLinkService);
+  /**
+   * Whether the file can be shared (ADR 0x051): a build with a share site, and a kind the share
+   * site shows. Every file the workspace opens is the user's (the server checks again); a phone
+   * can share too, as sharing changes nothing in the file.
+   */
+  readonly canShare = computed(() => this.shareLinks.enabled && isShareable(this.file()));
+  readonly shareOpen = signal(false);
   private readonly folders = inject(FolderFiles);
 
   readonly state = signal<LoadState>('idle');

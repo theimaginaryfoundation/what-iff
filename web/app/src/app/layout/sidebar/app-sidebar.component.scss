@@ -13,11 +13,13 @@
   min-height: 0;
   background: var(--sidebar-gradient, var(--bg-elevated));
   border-right: 1px solid var(--border);
-  transition: width 220ms ease, min-width 220ms ease;
+  transition:
+    width 220ms ease,
+    min-width 220ms ease;
   --accent-mode: var(--accent-app, var(--accent));
   position: relative;
 
-  &[data-mode='config'] {
+  &[data-mode="config"] {
     --accent-mode: var(--accent-config, var(--accent));
   }
 }
@@ -37,8 +39,12 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.app-sidebar[data-mode='config'] .app-sidebar__tabs-scroll {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+// Config mode: the back button and every config section on one row, however many a build has
+// (a fixed count wrapped the row and pushed the panel down when a section was added).
+.app-sidebar[data-mode="config"] .app-sidebar__tabs-scroll {
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
 }
 
 .app-sidebar__tab {
@@ -298,8 +304,8 @@
   border-color: var(--accent-mode);
 }
 
-.app-sidebar[data-mode='config'] .app-sidebar__personality-search:focus,
-.app-sidebar[data-mode='config'] .app-sidebar__personality-search:focus-visible {
+.app-sidebar[data-mode="config"] .app-sidebar__personality-search:focus,
+.app-sidebar[data-mode="config"] .app-sidebar__personality-search:focus-visible {
   border-color: var(--accent-app, var(--accent));
 }
 

@@ -1,46 +1,48 @@
 <div class="code-editor" [class.code-editor--split]="hasPreview() && showPreview()">
-  <div class="code-editor__toolbar">
-    @if (hasPreview()) {
-      <button type="button" class="code-editor__toggle" [attr.aria-pressed]="showPreview()" (click)="togglePreview()">
-        {{ showPreview() ? "Hide preview" : "Show preview" }}
-      </button>
-    }
-    <span class="code-editor__end">
-      @if (canStartComment() && isHtml() && showPreview()) {
-        <button
-          type="button"
-          class="code-editor__toggle"
-          title="Pick an element of the page to comment on (Esc to stop)"
-          [attr.aria-pressed]="pageComments.picking()"
-          (click)="pageComments.togglePick()"
-        >
-          {{ pageComments.picking() ? "Picking… (Esc)" : "Pick on page" }}
+  @if (!codeOnly()) {
+    <div class="code-editor__toolbar">
+      @if (hasPreview()) {
+        <button type="button" class="code-editor__toggle" [attr.aria-pressed]="showPreview()" (click)="togglePreview()">
+          {{ showPreview() ? "Hide preview" : "Show preview" }}
         </button>
       }
-      @if (canStartComment()) {
-        <button
-          type="button"
-          class="code-editor__toggle"
-          title="Comment on the selected text or the word at the cursor (Ctrl+Alt+M)"
-          (mousedown)="$event.preventDefault()"
-          (click)="startComment()"
-        >
-          Comment
-        </button>
-      }
-      <button
-        type="button"
-        class="code-editor__toggle code-editor__comments-toggle"
-        [attr.aria-pressed]="commentsOpen()"
-        (click)="toggleComments()"
-      >
-        Comments
-        @if (openCount()) {
-          <span class="code-editor__count">{{ openCount() }}</span>
+      <span class="code-editor__end">
+        @if (canStartComment() && isHtml() && showPreview()) {
+          <button
+            type="button"
+            class="code-editor__toggle"
+            title="Pick an element of the page to comment on (Esc to stop)"
+            [attr.aria-pressed]="pageComments.picking()"
+            (click)="pageComments.togglePick()"
+          >
+            {{ pageComments.picking() ? "Picking… (Esc)" : "Pick on page" }}
+          </button>
         }
-      </button>
-    </span>
-  </div>
+        @if (canStartComment()) {
+          <button
+            type="button"
+            class="code-editor__toggle"
+            title="Comment on the selected text or the word at the cursor (Ctrl+Alt+M)"
+            (mousedown)="$event.preventDefault()"
+            (click)="startComment()"
+          >
+            Comment
+          </button>
+        }
+        <button
+          type="button"
+          class="code-editor__toggle code-editor__comments-toggle"
+          [attr.aria-pressed]="commentsOpen()"
+          (click)="toggleComments()"
+        >
+          Comments
+          @if (openCount()) {
+            <span class="code-editor__count">{{ openCount() }}</span>
+          }
+        </button>
+      </span>
+    </div>
+  }
   <div class="code-editor__panes">
     <div class="code-editor__pane">
       @if (state() === "error") {
@@ -50,7 +52,7 @@
       }
       <div #editor class="code-editor__monaco" [attr.aria-label]="'Editor for ' + file().name" [hidden]="state() !== 'ready'"></div>
     </div>
-    @if (isHtml() && showPreview()) {
+    @if (hasPreview() && isHtml() && showPreview()) {
       <div class="code-editor__pane code-editor__preview code-editor__preview--page" aria-label="Preview">
         <app-html-preview
           class="code-editor__page"
@@ -60,7 +62,7 @@
           (scriptServed)="pageComments.scriptsChanged()"
         />
       </div>
-    } @else if (isMarkdown() && showPreview()) {
+    } @else if (hasPreview() && isMarkdown() && showPreview()) {
       <div class="code-editor__pane code-editor__preview" aria-label="Preview">
         <markdown
           class="code-editor__markdown prose prose-sm max-w-none dark:prose-invert"
