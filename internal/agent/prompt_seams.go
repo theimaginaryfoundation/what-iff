@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -22,8 +23,11 @@ import (
 var baseSystemPromptNormsForChat func(ctx context.Context, a *Agent, chat *models.Chat) string
 
 // checkpointSummaryInstructionsForChat, when non-nil, replaces checkpointConversationSummaryInstructions
-// when a chat is compacted at a checkpoint. Imported threads (thread_rehydration.go) keep the default:
-// they are summarized once, at import, before any of the chat's own configuration applies.
+// wherever a chat's summary is written: when the chat is compacted at a checkpoint, and when an
+// imported or remote-synced thread is rehydrated (thread_rehydration.go), so a catch-up that folds
+// new messages into a summary the chat's checkpoints wrote keeps writing it the same way. In
+// rehydration it is the final summary's instructions; the section summaries of a long transcript's
+// map step keep rehydrationChunkInstructions.
 var checkpointSummaryInstructionsForChat func(ctx context.Context, a *Agent, chat *models.Chat) string
 
 // scratchpadUpdatePromptForChat, when non-nil, replaces the app's scratchpadUpdatePrompt as the
@@ -62,6 +66,21 @@ func (a *Agent) checkpointSummaryInstructionsFor(ctx context.Context, chat *mode
 		return s
 	}
 	return checkpointConversationSummaryInstructions
+}
+
+// checkpointSummaryInstructionsForChatID is checkpointSummaryInstructionsFor for a caller that holds
+// only the chat's ID (thread rehydration). The chat is loaded only when an override is installed, so
+// without one this costs nothing; an error is the datastore's (datastore.ErrChatNotFound when the
+// chat is gone).
+func (a *Agent) checkpointSummaryInstructionsForChatID(ctx context.Context, userID, chatID uuid.UUID) (string, error) {
+	if checkpointSummaryInstructionsForChat == nil {
+		return checkpointConversationSummaryInstructions, nil
+	}
+	chat, err := a.ds.GetChat(ctx, userID, chatID)
+	if err != nil {
+		return "", err
+	}
+	return a.checkpointSummaryInstructionsFor(ctx, chat), nil
 }
 
 // defaultScratchpadUpdatePromptFor is the scratchpad update prompt for a chat whose personality has
