@@ -312,6 +312,15 @@ Speech is metered through the existing `metering.Meter`, with two new action typ
 - **Record** comes after each, with the model, the provider, the characters synthesised or the audio duration transcribed, and the provider's token counts where it reports them (Gemini and Qwen do).
 - **Replaying stored audio is not a synthesis** and records nothing.
 
+**Prices.**
+A speech model is priced per 1,000 characters (`credits_per_1k_chars`) and a transcription model per minute (`credits_per_minute`), both on the model row beside `base_credits_per_slab` and, like it, meaningful only to a linked meter.
+
+Speech is deliberately not slab-priced.
+A slab is 15,000 tokens, rounded up per call, and synthesis is billed per segment: a sentence to a paragraph.
+Speech models emit about 1,500 audio tokens a minute, so one slab is roughly ten minutes of audio, and slab pricing would charge a 30-second reply as ten minutes; rounding over a whole track instead would need its own path through the slab code.
+Characters are also the one unit every speech route can count (OpenAI's audio route answers with audio and no usage, and Mistral bills per character), and the unit a cost can be shown in before anything is synthesised (decision 4's cost outlet).
+Per-character pricing tracks cost less exactly for providers that bill audio tokens, since a slow style makes more audio from the same text; the price is calibrated from the providers' reported usage.
+
 A refused check is the same `429 quota_exceeded` a chat turn gets.
 A track stops at the refused segment (`stopped`), keeping what it has.
 The client hands a refusal from any speech call to the gate the composer already consults, and while that gate reports the account blocked, Listen and the microphone are disabled and autoplay claims nothing.
