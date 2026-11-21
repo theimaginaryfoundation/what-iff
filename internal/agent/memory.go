@@ -207,25 +207,6 @@ func userNameContextLine(username string) string {
 	return userNameContextPrefix + username
 }
 
-// recognizeUserNameLine returns the turn's user-name line when memories starts with it, else "".
-// The line is built by the server from the user's profile, so it is recognised by being identical
-// to that line, never by a text prefix on whatever the memory loader returned: a memory line always
-// ends in a metadata block and can never equal it, whatever text the memory starts with. The
-// prefix check below only avoids a profile lookup on turns that have no such line.
-func (a *Agent) recognizeUserNameLine(ctx context.Context, userID uuid.UUID, memories []string) string {
-	if len(memories) == 0 || !strings.HasPrefix(memories[0], userNameContextPrefix) || a.ds == nil {
-		return ""
-	}
-	user, err := a.ds.GetUserByID(ctx, userID)
-	if err != nil || user == nil {
-		return ""
-	}
-	if line := userNameContextLine(user.Username); memories[0] == line {
-		return line
-	}
-	return ""
-}
-
 // initialTurnContextLines are the lines a turn's memory context starts with: the user-name line on
 // a chat's first request only (so it does not spam the context), and never in a sandboxed chat
 // (strangers may be talking in it; see userNameLineAllowed).
@@ -238,37 +219,46 @@ func initialTurnContextLines(username string, hasUserMessages bool, sandboxed bo
 
 // getMemories prefetches the memories relevant to userMessage for one turn. A sandboxed chat gets
 // only the memories created in it (scoped in the retrieval SQL) and no user-name line.
-func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, error) {
+//
+// userNameLine is the user-name line it put first in memories ("" when it added none). The caller
+// records exactly this line as chatContext.userNameLine instead of rebuilding it from the profile,
+// so the line the model saw is the one persisted as the user-name context item even if the name
+// changes meanwhile. It is never recognised by its text: a memory line always ends in a metadata
+// block, but a memory could still start with the same words.
+func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) (memories []string, liveMemories []*models.Memory, userNameLine string, err error) {
 	chatUser, err := a.ds.GetUserByID(ctx, userID)
 	if err != nil {
 		a.logger.Error("failed to get chat user", zap.Error(err))
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	hasUserMessages, err := a.ds.ChatHasMessages(ctx, userID, chatID, models.MessageOriginFilterUser)
 	if err != nil {
 		a.logger.Error("failed to check for user messages", zap.Error(err))
-		return nil, nil, err
+		return nil, nil, "", err
 	}
-	memories := initialTurnContextLines(chatUser.Username, hasUserMessages, sandboxed)
-	liveMemories := []*models.Memory{}
+	memories = initialTurnContextLines(a.contextUserName(ctx, chatUser), hasUserMessages, sandboxed)
+	if len(memories) > 0 {
+		userNameLine = memories[0]
+	}
+	liveMemories = []*models.Memory{}
 	prompt := MemoryQueryPrompt
 	memoryQuery, err := a.getMemoryQuery(ctx, userID, prompt, userMessage)
 	if err != nil {
 		a.logger.Error("failed to get memory query", zap.Error(err))
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 
 	if memoryQuery.ShouldEnrich {
 		memoryQueryEmbedding, err := a.memoryTool.CreateEmbedding(ctx, memoryQuery.Query)
 		if err != nil {
 			a.logger.Error("failed to create memory query embedding", zap.Error(err))
-			return nil, nil, err
+			return nil, nil, "", err
 		}
 
 		dbMemories, err := a.ds.GetRelatedMemories(ctx, userID, chatID, memoryQueryEmbedding, personalityID, sandboxed)
 		if err != nil {
 			a.logger.Error("failed to get related memories", zap.Error(err))
-			return nil, nil, err
+			return nil, nil, "", err
 		}
 
 		liveMemories = dbMemories
@@ -280,7 +270,7 @@ func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.U
 		}
 	}
 
-	return memories, liveMemories, nil
+	return memories, liveMemories, userNameLine, nil
 }
 
 func memoryWritePromptText() string {
