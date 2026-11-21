@@ -3,6 +3,7 @@ package models
 import (
 	"errors"
 	"fmt"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -20,6 +21,9 @@ type PersonalityVoice struct {
 	ModelID uuid.UUID `json:"model_id"`
 	Voice   string    `json:"voice"`
 	Style   string    `json:"style"`
+	// Autoplay is whether the personality's replies are read aloud as they arrive, by
+	// default; a chat can override it (ADR 0x052 §9).
+	Autoplay bool `json:"autoplay"`
 }
 
 // ErrInvalidPersonalityVoice is a voice that can't be set: not a speech model the
@@ -58,11 +62,31 @@ type SpeechTrack struct {
 	VoiceKey  string            `json:"-"`
 	Status    SpeechTrackStatus `json:"status"`
 	ErrorCode string            `json:"error_code,omitempty"`
-	Segments  []SpeechSegment   `json:"segments"`
+	// Autoplay is pending, played or skipped for a track its turn made to read aloud as it
+	// arrives; empty for one made by Listen.
+	Autoplay  SpeechAutoplay  `json:"autoplay,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+	Segments  []SpeechSegment `json:"segments"`
 }
+
+// SpeechAutoplay is where a track is in being read aloud as it arrived (ADR 0x052 §9).
+type SpeechAutoplay string
+
+const (
+	SpeechAutoplayPending SpeechAutoplay = "pending"
+	SpeechAutoplayPlayed  SpeechAutoplay = "played"
+	SpeechAutoplaySkipped SpeechAutoplay = "skipped"
+)
+
+// AutoplayMaxAge is how old a pending track can be and still be played: a reply from
+// more than a day ago isn't read out on arrival.
+const AutoplayMaxAge = 24 * time.Hour
 
 // SpeechSegment is one synthesised piece of a track.
 type SpeechSegment struct {
+	// ID tells a segment from one that replaced it at the same place: a round's segments
+	// are withdrawn when it turns out not to be the last (ADR 0x052 §8).
+	ID         uuid.UUID   `json:"id"`
 	Seq        int         `json:"seq"`
 	Text       string      `json:"-"`
 	FileKey    string      `json:"-"`

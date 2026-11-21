@@ -85,7 +85,7 @@ func newSpeechFixture(t *testing.T, reply string, finalRoundOffset int) *speechF
 		migrate.PersonalitiesTable, migrate.MoodsTable, migrate.PersonalityMoodsTable, migrate.FileAttachmentsTable,
 		migrate.PersonalityExpressionsTable, migrate.ChatMessagesTable, migrate.ToolCallsTable,
 		migrate.SpeechTracksTable, migrate.SpeechSegmentsTable, migrate.RitualsTable, migrate.ChatMessageRitualsTable,
-		migrate.ChatMessageContextItemsTable)...)
+		migrate.ChatMessageContextItemsTable, migrate.JobsTable)...)
 	schemaMu.Unlock()
 	require.NoError(t, err)
 

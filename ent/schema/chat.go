@@ -54,6 +54,11 @@ func (Chat) Fields() []ent.Field {
 			Optional().
 			Validate(modeltypes.ValidateChatTags).
 			Comment("User-defined labels for this chat thread; max 10 tags with max 10 characters per tag"),
+		// Whether this chat's replies are read aloud as they arrive (ADR 0x052 §9): NULL follows
+		// the personality's voice_autoplay.
+		field.Bool("voice_autoplay").
+			Optional().
+			Nillable(),
 		field.Bool("is_favorite").
 			Default(false).
 			Comment("Whether this thread is marked as a user favorite"),

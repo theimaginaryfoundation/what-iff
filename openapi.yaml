@@ -2936,6 +2936,127 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /speech/tracks/{id}/claim:
+    post:
+      summary: Claim a pending track to play aloud
+      description: >-
+        Moves a pending track to played for this client (ADR 0x052 §9). Only one client
+        gets it; the rest are answered `claimed: false` and play nothing. A track more
+        than a day old is skipped instead. Claimed after its turn, the track is made
+        from the saved reply; during its turn, it is read as the reply streams.
+      tags: [Speech]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The track, and whether this client got it
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [claimed, track]
+                properties:
+                  claimed:
+                    type: boolean
+                  track:
+                    $ref: '#/components/schemas/SpeechTrack'
+        '404':
+          description: Track not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /speech/tracks/{id}/skip:
+    post:
+      summary: Skip a pending track
+      description: It won't be read out on arrival, and keeps its Listen button.
+      tags: [Speech]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Skipped
+
+  /speech/chats/{id}/pending:
+    get:
+      summary: The chat's replies waiting to be read out on arrival
+      description: Newest first. The client plays the newest, and skips the rest.
+      tags: [Speech]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The pending tracks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SpeechTrack'
+
+  /speech/chats/{id}/autoplay:
+    put:
+      summary: Set whether a chat's replies are read aloud as they arrive
+      description: >-
+        Overrides the personality's default; null follows it again. When the chat no
+        longer reads replies aloud, its pending tracks are skipped.
+      tags: [Speech]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [autoplay]
+              properties:
+                autoplay:
+                  type: boolean
+                  nullable: true
+      responses:
+        '200':
+          description: The chat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Chat'
+        '404':
+          description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /speech/preview:
     post:
       summary: Try a voice
@@ -11422,6 +11543,12 @@ components:
     Job:
       type: object
       properties:
+        speech_track_id:
+          type: string
+          format: uuid
+          description: >-
+            The reply's speech track when the turn's chat reads replies aloud as they
+            arrive (ADR 0x052 §9): the client watching the turn claims and plays it.
         id:
           type: string
           format: uuid
@@ -11793,6 +11920,13 @@ components:
     Chat:
       type: object
       properties:
+        voice_autoplay:
+          type: boolean
+          nullable: true
+          description: >-
+            Whether this chat's replies are read aloud as they arrive, overriding its
+            personality's default (ADR 0x052 §9); null follows the personality. Set on
+            `/speech/chats/{id}/autoplay`.
         reasoning_effort:
           allOf:
             - $ref: '#/components/schemas/ReasoningEffort'
@@ -12870,6 +13004,11 @@ components:
           type: string
           maxLength: 500
           description: How the personality sounds, for models that take a style instruction.
+        autoplay:
+          type: boolean
+          description: >-
+            Whether the personality's replies are read aloud as they arrive, by default; a
+            chat can override it.
     SpeechTrack:
       type: object
       required: [id, chat_id, status, segments]
@@ -12891,12 +13030,27 @@ components:
             partway (asking again resumes it).
         error_code:
           type: string
+        autoplay:
+          type: string
+          enum: [pending, played, skipped]
+          description: >-
+            For a track its turn made to read aloud as it arrives: pending until one client
+            claims it (played), or skipped. Absent for a track made by Listen.
+        created_at:
+          type: string
+          format: date-time
         segments:
           type: array
           items:
             type: object
-            required: [seq, format, duration_ms, size_bytes]
+            required: [id, seq, format, duration_ms, size_bytes]
             properties:
+              id:
+                type: string
+                format: uuid
+                description: >-
+                  Tells a segment from one that replaced it at the same place: a round read
+                  as it streamed is withdrawn when it turns out not to be the last.
               seq:
                 type: integer
               format:

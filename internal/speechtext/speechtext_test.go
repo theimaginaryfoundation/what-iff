@@ -76,3 +76,28 @@ func TestSentences_Abbreviations(t *testing.T) {
 	require.Equal(t, []string{"Ask Dr. Lee, e.g. tomorrow.", "Then rest."}, sentences("Ask Dr. Lee, e.g. tomorrow. Then rest."))
 	require.Equal(t, []string{`He said "go!"`, "So we did."}, sentences(`He said "go!" So we did.`))
 }
+
+func TestNextSpeakable(t *testing.T) {
+	t.Parallel()
+	piece, n := NextSpeakable("It will rain on Tuesday. Take a co", true, 600)
+	require.Equal(t, "It will rain on Tuesday.", piece)
+	require.Equal(t, "Take a co", "It will rain on Tuesday. Take a co"[n:])
+
+	piece, _ = NextSpeakable("Take a coat", false, 600)
+	require.Empty(t, piece, "no sentence is complete yet")
+	piece, _ = NextSpeakable("Ends here.", false, 600)
+	require.Empty(t, piece, "complete only once space follows")
+
+	text := "One. Two.\n\nThree. Four"
+	piece, n = NextSpeakable(text, false, 600)
+	require.Equal(t, "One. Two.", piece, "to the end of a paragraph")
+	require.Equal(t, "Three. Four", text[n:])
+
+	long := strings.Repeat("A short sentence here. ", 30)
+	piece, _ = NextSpeakable(long, false, 300)
+	require.LessOrEqual(t, len([]rune(piece)), 300)
+	require.GreaterOrEqual(t, len([]rune(piece)), 100, "about a third of the limit within a long paragraph")
+
+	piece, _ = NextSpeakable("Ask Dr. Lee tomorrow", true, 600)
+	require.Empty(t, piece, "an abbreviation doesn't end a sentence")
+}

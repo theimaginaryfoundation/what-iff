@@ -5108,6 +5108,195 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/speech/tracks/{id}/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Claim a pending track to play aloud
+         * @description Moves a pending track to played for this client (ADR 0x052 §9). Only one client gets it; the rest are answered `claimed: false` and play nothing. A track more than a day old is skipped instead. Claimed after its turn, the track is made from the saved reply; during its turn, it is read as the reply streams.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The track, and whether this client got it */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            claimed: boolean;
+                            track: components["schemas"]["SpeechTrack"];
+                        };
+                    };
+                };
+                /** @description Track not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/speech/tracks/{id}/skip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Skip a pending track
+         * @description It won't be read out on arrival, and keeps its Listen button.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Skipped */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/speech/chats/{id}/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The chat's replies waiting to be read out on arrival
+         * @description Newest first. The client plays the newest, and skips the rest.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The pending tracks */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpeechTrack"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/speech/chats/{id}/autoplay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set whether a chat's replies are read aloud as they arrive
+         * @description Overrides the personality's default; null follows it again. When the chat no longer reads replies aloud, its pending tracks are skipped.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        autoplay: boolean | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description The chat */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Chat"];
+                    };
+                };
+                /** @description Chat not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/speech/preview": {
         parameters: {
             query?: never;
@@ -16173,6 +16362,11 @@ export interface components {
          *     }
          */
         Job: {
+            /**
+             * Format: uuid
+             * @description The reply's speech track when the turn's chat reads replies aloud as they arrive (ADR 0x052 §9): the client watching the turn claims and plays it.
+             */
+            speech_track_id?: string;
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
@@ -16390,6 +16584,8 @@ export interface components {
          *     }
          */
         Chat: {
+            /** @description Whether this chat's replies are read aloud as they arrive, overriding its personality's default (ADR 0x052 §9); null follows the personality. Set on `/speech/chats/{id}/autoplay`. */
+            voice_autoplay?: boolean | null;
             /** @description The thread's own reasoning effort. Null when the thread sets none; each turn then uses its personality's, then the account default (none of those in a sandboxed thread). An active mode's value overrides the thread's for a turn (not in a sandboxed thread), and an agent job's overrides everything. */
             reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
             /** @description The thread's own agent loop, resolved like reasoning_effort. Null when the thread sets none. */
@@ -16984,6 +17180,8 @@ export interface components {
             voice: string;
             /** @description How the personality sounds, for models that take a style instruction. */
             style?: string;
+            /** @description Whether the personality's replies are read aloud as they arrive, by default; a chat can override it. */
+            autoplay?: boolean;
         };
         SpeechTrack: {
             /** Format: uuid */
@@ -16998,7 +17196,19 @@ export interface components {
              */
             status: "open" | "complete" | "failed" | "stopped";
             error_code?: string;
+            /**
+             * @description For a track its turn made to read aloud as it arrives: pending until one client claims it (played), or skipped. Absent for a track made by Listen.
+             * @enum {string}
+             */
+            autoplay?: "pending" | "played" | "skipped";
+            /** Format: date-time */
+            created_at?: string;
             segments: {
+                /**
+                 * Format: uuid
+                 * @description Tells a segment from one that replaced it at the same place: a round read as it streamed is withdrawn when it turns out not to be the last.
+                 */
+                id: string;
                 seq: number;
                 format: components["schemas"]["AudioFormat"];
                 /** @description Zero where the container doesn't say; the player measures it. */

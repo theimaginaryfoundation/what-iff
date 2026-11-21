@@ -11,6 +11,8 @@ Turns a reply's markdown into the words to read aloud, and splits them into the 
   Paragraphs stay apart, and a heading or list item without closing punctuation gets a full stop so the voice pauses.
 - `Segment(text, maxChars)` puts the first sentence on its own, so speech starts quickly, then packs whole paragraphs up to `maxChars`; a longer paragraph splits between sentences, and a longer sentence between words.
 
+- `NextSpeakable` picks the next piece of streaming text to read now: only sentences followed by space (the rest may still change), one for a round's first piece, then to a paragraph's end or about a third of the limit.
+
 ## Dependencies
 
 - **Inbound:** `internal/agent` (voice replies and previews).

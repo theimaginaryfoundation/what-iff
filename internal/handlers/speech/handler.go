@@ -31,6 +31,10 @@ type Speech interface {
 	SpeechTrack(ctx context.Context, userID, trackID uuid.UUID) (*models.SpeechTrack, error)
 	SpeechSegmentAudio(ctx context.Context, userID, trackID uuid.UUID, seq int) ([]byte, models.AudioFormat, error)
 	PreviewVoice(ctx context.Context, userID uuid.UUID, voice models.PersonalityVoice, text string) (provider.SpeechAudio, error)
+	ClaimSpeech(ctx context.Context, userID, trackID uuid.UUID) (*models.SpeechTrack, bool, error)
+	SkipSpeech(ctx context.Context, userID, trackID uuid.UUID) error
+	PendingSpeech(ctx context.Context, userID, chatID uuid.UUID) ([]*models.SpeechTrack, error)
+	SetChatAutoplay(ctx context.Context, userID, chatID uuid.UUID, autoplay *bool) (*models.Chat, error)
 }
 
 // Handler serves the speech routes.
@@ -52,6 +56,10 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/speech/tracks/{id}", h.GetTrack).Methods(http.MethodGet)
 	router.HandleFunc("/speech/tracks/{id}/segments/{seq}", h.GetSegment).Methods(http.MethodGet)
 	router.HandleFunc("/speech/preview", h.Preview).Methods(http.MethodPost)
+	router.HandleFunc("/speech/tracks/{id}/claim", h.Claim).Methods(http.MethodPost)
+	router.HandleFunc("/speech/tracks/{id}/skip", h.Skip).Methods(http.MethodPost)
+	router.HandleFunc("/speech/chats/{id}/pending", h.Pending).Methods(http.MethodGet)
+	router.HandleFunc("/speech/chats/{id}/autoplay", h.SetAutoplay).Methods(http.MethodPut)
 }
 
 // maxUploadBytes bounds a transcription request, the clip and a few form fields:
@@ -314,5 +322,103 @@ func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, r.Context().Err()):
 	default:
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadGateway, models.ErrCodeBadGateway, "Couldn't make the preview. Try again.", err)
+	}
+}
+
+// Claimed is what claiming a track answers: the track, and whether this client got it.
+type Claimed struct {
+	Claimed bool                `json:"claimed"`
+	Track   *models.SpeechTrack `json:"track"`
+}
+
+// Claim claims a pending track for this client to play aloud (ADR 0x052 §9). Only one
+// client gets it; the rest are answered claimed: false, and play nothing.
+func (h *Handler) Claim(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.account(w, r)
+	if !ok {
+		return
+	}
+	trackID, ok := pathID(w, r, h)
+	if !ok {
+		return
+	}
+	track, claimed, err := h.speech.ClaimSpeech(r.Context(), userID, trackID)
+	switch {
+	case errors.Is(err, datastore.ErrSpeechTrackNotFound), errors.Is(err, datastore.ErrChatMessageNotFound):
+		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Track not found", nil)
+	case err != nil:
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to claim the track", err)
+	default:
+		handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, Claimed{Claimed: claimed, Track: track})
+	}
+}
+
+// Skip marks a pending track skipped: it won't be read out on arrival.
+func (h *Handler) Skip(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.account(w, r)
+	if !ok {
+		return
+	}
+	trackID, ok := pathID(w, r, h)
+	if !ok {
+		return
+	}
+	if err := h.speech.SkipSpeech(r.Context(), userID, trackID); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to skip the track", err)
+		return
+	}
+	handlerutils.RespondWithNoContent(w)
+}
+
+// Pending lists the chat's tracks waiting to be read out on arrival, newest first.
+func (h *Handler) Pending(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.account(w, r)
+	if !ok {
+		return
+	}
+	chatID, ok := pathID(w, r, h)
+	if !ok {
+		return
+	}
+	tracks, err := h.speech.PendingSpeech(r.Context(), userID, chatID)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to list pending speech", err)
+		return
+	}
+	if tracks == nil {
+		tracks = []*models.SpeechTrack{}
+	}
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, tracks)
+}
+
+// SetAutoplayRequest sets a chat's autoplay: true, false, or null to follow its personality.
+type SetAutoplayRequest struct {
+	Autoplay *bool `json:"autoplay"`
+}
+
+// SetAutoplay sets whether the chat's replies are read aloud as they arrive, overriding its
+// personality's default; null follows the personality again.
+func (h *Handler) SetAutoplay(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.account(w, r)
+	if !ok {
+		return
+	}
+	chatID, ok := pathID(w, r, h)
+	if !ok {
+		return
+	}
+	var req SetAutoplayRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&req); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Send autoplay: true, false or null", err)
+		return
+	}
+	chat, err := h.speech.SetChatAutoplay(r.Context(), userID, chatID, req.Autoplay)
+	switch {
+	case errors.Is(err, datastore.ErrChatNotFound):
+		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Chat not found", nil)
+	case err != nil:
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to save autoplay", err)
+	default:
+		handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, chat)
 	}
 }

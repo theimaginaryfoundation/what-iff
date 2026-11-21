@@ -991,7 +991,8 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			context_scope text NOT NULL DEFAULT 'account',
 			user_chats uuid NOT NULL,
 			reasoning_effort text,
-			agent_loop text
+			agent_loop text,
+			voice_autoplay bool NULL
 		)`,
 		`CREATE TABLE personalities (
 			id uuid PRIMARY KEY,
@@ -1013,7 +1014,8 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			user_personalities uuid NOT NULL,
 			reasoning_effort text,
 			agent_loop text,
-			voice_model_id uuid NULL, voice text NOT NULL DEFAULT '', voice_style text NOT NULL DEFAULT ''
+			voice_model_id uuid NULL, voice text NOT NULL DEFAULT '', voice_style text NOT NULL DEFAULT '',
+			voice_autoplay bool NOT NULL DEFAULT false
 		)`,
 		`CREATE TABLE memories (
 			id uuid PRIMARY KEY,

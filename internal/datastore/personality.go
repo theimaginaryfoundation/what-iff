@@ -102,7 +102,7 @@ func toPersonalityModel(e *ent.Personality) *models.Personality {
 		UpdatedAt:              e.UpdatedAt,
 	}
 	if e.VoiceModelID != nil && e.Voice != "" {
-		m.Voice = &models.PersonalityVoice{ModelID: *e.VoiceModelID, Voice: e.Voice, Style: e.VoiceStyle}
+		m.Voice = &models.PersonalityVoice{ModelID: *e.VoiceModelID, Voice: e.Voice, Style: e.VoiceStyle, Autoplay: e.VoiceAutoplay}
 	}
 	if e.ThumbnailCircle != nil {
 		m.ThumbnailCircle = &models.PersonalityThumbnailCircle{

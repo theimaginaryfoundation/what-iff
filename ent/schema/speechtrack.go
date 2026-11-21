@@ -48,6 +48,10 @@ func (SpeechTrack) Fields() []ent.Field {
 		// The synthesis worker's lease: past it, a track still open has no worker and a
 		// request for it starts one.
 		field.Time("worker_until").Optional().Nillable(),
+		// Autoplay (ADR 0x052 §9): pending from the turn that writes the reply when its chat
+		// reads replies aloud, then played by the one client that claims it, or skipped.
+		// NULL for a track made by Listen.
+		field.Enum("autoplay").Values("pending", "played", "skipped").Optional().Nillable(),
 		// When the track was last asked for; the sweeper deletes tracks unplayed for 30 days.
 		field.Time("last_played_at"),
 	}
@@ -70,6 +74,7 @@ func (SpeechTrack) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("message_id", "voice_key").Unique(),
 		index.Fields("job_id"),
+		index.Fields("chat_id", "autoplay"),
 		index.Fields("last_played_at"),
 	}
 }

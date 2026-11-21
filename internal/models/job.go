@@ -33,6 +33,9 @@ type Job struct {
 	// provider_not_configured), so clients can branch on it rather than on Error.
 	ErrorCode string     `json:"error_code,omitempty"`
 	ResultID  *uuid.UUID `json:"result_id,omitempty"`
+	// SpeechTrackID is the reply's speech track when the turn's chat reads replies aloud as
+	// they arrive (ADR 0x052 §9): the client watching the turn claims and plays it.
+	SpeechTrackID *uuid.UUID `json:"speech_track_id,omitempty"`
 	// DraftDeltas are incremental assistant text chunks emitted while inference is in progress.
 	DraftDeltas []string `json:"draft_deltas,omitempty"`
 	// DraftReasoning are incremental model reasoning chunks emitted while inference is in

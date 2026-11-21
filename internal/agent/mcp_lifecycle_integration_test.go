@@ -325,7 +325,8 @@ func newMCPLifecycleAgentFixture(t *testing.T, serverURL string) (*Agent, *chatC
 			context_scope text NOT NULL DEFAULT 'account',
 			user_chats uuid NOT NULL,
 			reasoning_effort text,
-			agent_loop text
+			agent_loop text,
+			voice_autoplay bool NULL
 		)`,
 		`CREATE TABLE mcp_servers (
 			id uuid PRIMARY KEY,

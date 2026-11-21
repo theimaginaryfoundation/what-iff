@@ -256,3 +256,72 @@ func abbreviation(s []rune) bool {
 	}
 	return false
 }
+
+// NextSpeakable is the next piece of streaming text that can be read aloud now (ADR 0x052
+// §8): only whole sentences, since the rest may still change. The first piece of a round
+// is one sentence, so speech starts quickly; later pieces run to the end of a paragraph,
+// or to about a third of maxChars within a long one. consumed is how many bytes of text
+// the piece covers, with the space after it. A sentence counts as complete once space
+// follows it.
+func NextSpeakable(text string, first bool, maxChars int) (piece string, consumed int) {
+	if maxChars <= 0 {
+		maxChars = 1000
+	}
+	end := 0      // where the pieces taken so far end, spaces after them included
+	pieceEnd := 0 // where the text of the pieces taken so far ends
+	runes := 0
+	for {
+		rest := text[end:]
+		i := sentenceEnd(rest)
+		if i < 0 {
+			break
+		}
+		sentence := strings.TrimSpace(rest[:i])
+		n := utf8.RuneCountInString(sentence)
+		if runes > 0 && runes+1+n > maxChars {
+			break
+		}
+		gap := rest[i:]
+		ws := len(gap) - len(strings.TrimLeftFunc(gap, unicode.IsSpace))
+		pieceEnd = end + i
+		end += i + ws
+		runes += n + 1
+		if first || strings.Contains(gap[:ws], "\n\n") || runes >= maxChars/3 {
+			break
+		}
+	}
+	if end == 0 {
+		return "", 0
+	}
+	return strings.TrimSpace(text[:pieceEnd]), end
+}
+
+// sentenceEnd is the byte index just past the first complete sentence in s (its closing
+// punctuation and quotes), or -1 when no sentence is complete yet: one is once space
+// follows it.
+func sentenceEnd(s string) int {
+	for i, r := range s {
+		if !strings.ContainsRune(".!?…", r) {
+			continue
+		}
+		j := i + utf8.RuneLen(r)
+		for j < len(s) {
+			c, size := utf8.DecodeRuneInString(s[j:])
+			if !strings.ContainsRune(".!?…\"'”’)]", c) {
+				break
+			}
+			j += size
+		}
+		if j < len(s) {
+			c, _ := utf8.DecodeRuneInString(s[j:])
+			if unicode.IsSpace(c) && !abbreviation([]rune(strings.TrimSpace(s[:j]))) {
+				return j
+			}
+		}
+	}
+	// A paragraph break ends a heading or list item without punctuation too.
+	if k := strings.Index(s, "\n\n"); k > 0 && strings.TrimSpace(s[:k]) != "" {
+		return k
+	}
+	return -1
+}
