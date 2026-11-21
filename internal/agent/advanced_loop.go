@@ -40,12 +40,20 @@ const (
 	advancedCompactMinGrowth   = 16_000
 )
 
-// advancedLoopInstructions are added (as developer context) to every Advanced turn.
-const advancedLoopInstructions = `You are working in extended mode: you can take many steps and tool calls to finish this request, so do the work thoroughly rather than stopping early.
+// advancedLoopInstructions are added (as developer context) to every Advanced turn. The checklist
+// paragraph is left out when update_plan is not offered (a build's allowlist leaves it out).
+func advancedLoopInstructions(planOffered bool) string {
+	if !planOffered {
+		return advancedLoopIntro + "\n\n" + advancedLoopFinalReply
+	}
+	return advancedLoopIntro + "\n\n" + advancedLoopPlan + "\n\n" + advancedLoopFinalReply
+}
 
-For work that takes several steps, keep a checklist with update_plan: write the steps, mark one in_progress while you work on it, and mark each completed or cancelled as you go. You will be asked to continue while any item is pending or in_progress.
-
-Text you write before your final reply is shown to the user as your working notes, not as the answer. When everything is done, write the final reply so it stands on its own (it is the only part kept as your answer) and call no more tools.`
+const (
+	advancedLoopIntro      = `You are working in extended mode: you can take many steps and tool calls to finish this request, so do the work thoroughly rather than stopping early.`
+	advancedLoopPlan       = `For work that takes several steps, keep a checklist with update_plan: write the steps, mark one in_progress while you work on it, and mark each completed or cancelled as you go. You will be asked to continue while any item is pending or in_progress.`
+	advancedLoopFinalReply = `Text you write before your final reply is shown to the user as your working notes, not as the answer. When everything is done, write the final reply so it stands on its own (it is the only part kept as your answer) and call no more tools.`
+)
 
 // advancedLoopConfig bounds an Advanced run. Read from the environment on each run so an
 // operator can tune it without a restart of the code path (tests set the fields directly).

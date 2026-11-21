@@ -76,9 +76,10 @@ func (d *Datastore) createToolCallsBulk(ctx context.Context, tx *ent.Tx, chatMes
 }
 
 // ChatToolNamesUsedSince returns the distinct names of the tools called by the chat's messages
-// sent at or after since (every message when since is nil). A call that failed still counts.
+// sent at or after since (every message when since is nil). A call that failed still counts; a
+// call by a superseded (taken-back) message does not.
 func (d *Datastore) ChatToolNamesUsedSince(ctx context.Context, userID, chatID uuid.UUID, since *time.Time) (map[string]struct{}, error) {
-	msgPreds := []predicate.ChatMessage{chatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID)))}
+	msgPreds := []predicate.ChatMessage{chatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))), chatmessage.SupersededAtIsNil()}
 	if since != nil {
 		msgPreds = append(msgPreds, chatmessage.SentAtGTE(*since))
 	}
@@ -98,10 +99,11 @@ func (d *Datastore) ChatToolNamesUsedSince(ctx context.Context, userID, chatID u
 }
 
 // ChatToolInputsSince returns the recorded inputs of every call to toolName by the chat's
-// messages sent at or after since (every message when since is nil), oldest first. The checkpoint
-// skill step reads load_skill calls this way to learn which skills the segment loaded.
+// messages sent at or after since (every message when since is nil), oldest first, leaving out
+// superseded (taken-back) messages. The checkpoint skill step reads load_skill calls this way to
+// learn which skills the segment loaded.
 func (d *Datastore) ChatToolInputsSince(ctx context.Context, userID, chatID uuid.UUID, since *time.Time, toolName string) ([]string, error) {
-	msgPreds := []predicate.ChatMessage{chatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID)))}
+	msgPreds := []predicate.ChatMessage{chatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))), chatmessage.SupersededAtIsNil()}
 	if since != nil {
 		msgPreds = append(msgPreds, chatmessage.SentAtGTE(*since))
 	}

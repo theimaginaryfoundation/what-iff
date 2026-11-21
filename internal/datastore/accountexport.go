@@ -122,8 +122,10 @@ func (d *Datastore) exportConversationInput(ctx context.Context, c *ent.Chat) (e
 	var lastMessageID uuid.UUID
 	hasCursor := false
 	for {
+		// Superseded messages (past versions) are left out: the archive has no field for them, so
+		// an import would bring them back as live messages.
 		query := d.dbClient.ChatMessage.Query().
-			Where(chatmessage.HasChatWith(entchat.ID(c.ID)))
+			Where(chatmessage.HasChatWith(entchat.ID(c.ID)), chatmessage.SupersededAtIsNil())
 		if hasCursor {
 			// sent_at alone is not unique, so retain the ID tie-breaker used by the
 			// chronological ordering. The schema requires sent_at to be non-null.

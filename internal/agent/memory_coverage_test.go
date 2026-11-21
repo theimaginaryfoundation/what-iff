@@ -197,7 +197,7 @@ func TestGetMemories_GetUserByIDErrorIsReturned(t *testing.T) {
 	mock.ExpectQuery("SELECT .*").WillReturnError(errCoverageTestSentinel)
 
 	a := newTestAgent(ds)
-	_, _, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", false)
+	_, _, _, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", false)
 	require.Error(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -221,10 +221,11 @@ func TestGetMemories_NoQueryModelKeepsTheTurnsOwnLines(t *testing.T) {
 	mock.ExpectQuery("FROM `utility_model_settings`").WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
 	a := newTestAgent(ds)
-	memories, live, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", false)
+	memories, live, userNameLine, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", false)
 	require.NoError(t, err, "not set is not a failed memory load")
 	require.Empty(t, live)
 	require.Equal(t, initialTurnContextLines("sam", false, false), memories)
+	require.Equal(t, memories[0], userNameLine)
 }
 
 // A memory query that fails is a failed memory load, but the turn's own lines go back with the
@@ -245,10 +246,11 @@ func TestGetMemories_FailedQueryKeepsTheTurnsOwnLines(t *testing.T) {
 	mock.ExpectQuery("FROM `utility_model_settings`").WillReturnError(errors.New("connection reset"))
 
 	a := newTestAgent(ds)
-	memories, live, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", false)
+	memories, live, userNameLine, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", false)
 	require.Error(t, err)
 	require.Empty(t, live)
 	require.Equal(t, initialTurnContextLines("sam", false, false), memories)
+	require.Equal(t, memories[0], userNameLine, "the name line goes back with the error too, so it's recorded as the one the model saw")
 }
 
 // --- compactMemoriesFromCheckpoint ---

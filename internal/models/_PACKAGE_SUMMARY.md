@@ -33,6 +33,13 @@
   The known speech models table (`KnownSpeechModels`, `LookupKnownSpeechModel`) gives what a provider's listing doesn't: each model's kind, `SpeechAdapter`, voices, style support, input limits and audio formats.
   It is kept by hand and has no OpenAI synthesis model, since those shut down 2027-01-06.
   `ResolveSpeechModel` decides a new model's kind and voices (the table's for a model it knows), and `NormalizeSpeechVoices` checks a voice list; both connection and catalog models go through them.
+- **Per-turn options (`turn_options.go`):** `TurnOptions` (pre/post context, a one-turn model id, an output cap) rides on `ChatMessage.TurnOptions`, which is request-only (`json:"-"`, no column) like `ChatMessage.Steer`.
+  Pre context is trusted as system instruction and post context as developer/user text, so an extension passes only text it vouches for; `HasContext` reports either, and `MinTurnMaxOutputTokens` is the cap's floor.
+  Nil on every ordinary message; the nil-safe accessors (`TurnPreContext` and the rest) let callers read it without a check.
+  `MemoryRecall` / `MemorySave` (`*bool`, nil = usual) switch memory recall and saving off for one turn; `RecallsMemory` / `SavesMemory` read them.
+  `ChatMessage.ExcludeFromMemory` is the one stored trace of a turn: set on both messages of a save-off turn (`chat_message.exclude_from_memory`, nullable), never in the API (`json:"-"`).
+- **Superseded messages:** `ChatMessage.SupersededAt` / `SupersededBy` (`json:"-"`) mark a message taken back and the reply that replaced it (agent `SupersedeTurn` / `RegenerateTurn`).
+  `ChatMessageFilters.IncludeSuperseded` (`json:"-"`) lists them too; off by default, so they are hidden wherever messages are listed.
 - **Utility roles (`utility.go`):** `UtilityRole` (`memory`, `memory_merge`, `simple`, `personality`) groups background work that runs on the same model (ADR 0x027 section 6).
   `UtilityRoleUnavailableError` is work that didn't run because its role is off (`ErrUtilityRoleOff`), has no model (`ErrUtilityRoleNotSet`) or has only models that can't be used (`ErrUtilityModelUnavailable`, wrapping the cause); the error codes `utility_model_not_set`, `utility_role_off` and `utility_model_unavailable` name them to clients.
   A `BackgroundStep` knows its role (`Role`), so notices can be shown by role.

@@ -58,7 +58,7 @@ func TestBuildUpdateScratchpadPromptUsesPersonalityOverride(t *testing.T) {
 		Scratchpad:             "existing",
 		ScratchpadUpdatePrompt: custom,
 	}
-	out := buildUpdateScratchpadPrompt(p)
+	out := buildUpdateScratchpadPrompt(p, "")
 	require.Contains(t, out, custom)
 	require.Contains(t, out, scratchpadUpdatePostamble)
 }
