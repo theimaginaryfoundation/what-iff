@@ -20,6 +20,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/ent/migrate"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -245,6 +246,53 @@ func TestJobModel(t *testing.T) {
 	got, err = f.a.jobModel(ctx, f.catalog.ID)
 	require.NoError(t, err)
 	require.Nil(t, got, "a retired catalog model keeps the old behaviour")
+}
+
+// A turn's model passes the check choosing a chat's model runs; unlike a job's, a model that fails
+// it fails the send (ErrTurnModelUnavailable) and never falls back to the chat's model.
+func TestTurnModel(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	ctx := context.Background()
+
+	got, err := f.a.turnModel(ctx, f.alice, f.catalog.ID)
+	require.NoError(t, err)
+	require.Equal(t, f.catalog.ID, got.ID)
+	got, err = f.a.turnModel(ctx, f.alice, f.aliceModel.ID)
+	require.NoError(t, err)
+	require.Equal(t, f.aliceModel.ID, got.ID, "the account's own connection model")
+
+	_, err = f.a.turnModel(ctx, f.alice, f.bobModel.ID)
+	require.ErrorIs(t, err, ErrTurnModelUnavailable, "another account's connection model")
+	require.ErrorIs(t, err, datastore.ErrModelNotFound)
+	_, err = f.a.turnModel(ctx, f.alice, uuid.New())
+	require.ErrorIs(t, err, ErrTurnModelUnavailable, "an unknown id")
+	_, err = f.a.turnModel(ctx, f.alice, uuid.Nil)
+	require.ErrorIs(t, err, ErrTurnModelUnavailable, "the nil id")
+
+	_, err = f.ent.Model.UpdateOneID(f.catalog.ID).SetDeleted(true).Save(ctx)
+	require.NoError(t, err)
+	_, err = f.a.turnModel(ctx, f.alice, f.catalog.ID)
+	require.ErrorIs(t, err, ErrTurnModelUnavailable, "a retired catalog model")
+	_, err = f.ent.Model.UpdateOneID(f.aliceModel.ID).SetDeleted(true).Save(ctx)
+	require.NoError(t, err)
+	_, err = f.a.turnModel(ctx, f.alice, f.aliceModel.ID)
+	require.ErrorIs(t, err, ErrTurnModelUnavailable, "a connection model the account turned off")
+}
+
+// HandleUserMessage refuses a turn whose model the sender cannot use before it stores anything
+// (the fixture has no message or job tables, so getting further would fail differently).
+func TestHandleUserMessage_RefusesUnavailableTurnModel(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	ctx := middleware.ContextWithUser(context.Background(), f.alice, "")
+	bobs := f.bobModel.ID
+	_, err := f.a.HandleUserMessage(ctx, models.ChatMessage{
+		ChatID:      uuid.New(),
+		Message:     "hi",
+		TurnOptions: &models.TurnOptions{ModelID: &bobs},
+	})
+	require.ErrorIs(t, err, ErrTurnModelUnavailable)
 }
 
 // A chat on a connection model the account turned off keeps that model, so the

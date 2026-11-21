@@ -196,9 +196,13 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - **Per-turn options** (`turn_options.go`, `models.TurnOptions`): an extension that starts a user turn with `ChatMessage.TurnOptions` set gets pre/post context, a one-turn model and an output cap for that turn only.
   `HandleUserMessage` carries the options to the job's goroutine in memory; nothing stores them (not the message, chat or job), and a retry of the message runs without them.
   `prepareUserTurnContext` runs the turn on the named model the way an agent job's model override does (`runChatOnModel`: the run's copy of the chat only).
+  The named model must pass the check choosing a chat's model runs (`turnModel` → `datastore.CheckUserCanUseModel`); `HandleUserMessage` refuses one that fails, before storing anything, with `ErrTurnModelUnavailable`, and the turn checks again when it runs.
+  Unlike a job's override, a retired model never falls back to the chat's.
   `messageContextBuilder.build` puts `pre_context` at the end of the system material (after the summary and scratchpad, cacheable) and `post_context` after the per-turn tail, immediately before the user message.
-  The `applyTurnOutputCap*` helpers put the cap, as-is, in each request's cap field after any reasoning effort raised it, on every request the turn builds (Advanced rebuilds too).
+  The `applyTurnOutputCap*` helpers put the cap (raised to `models.MinTurnMaxOutputTokens`) in each request's cap field after any reasoning effort raised it, on every request the turn's own model makes (Advanced rebuilds and z.ai's truncation retry too; not sub-agents or checkpoint calls).
+  On a Claude model that takes a thinking budget, `applyTurnOutputCapClaude` lowers the budget under the cap, or turns thinking off when the cap is at most the 1024-token minimum.
   `runUserChatPostInferencePhases` hands the expression pick and the checkpoint `ModelContext.WithoutTurnContext()`, so the caller's context never reaches a stored scratchpad, memory or summary.
+  A turn with pre/post context checkpoints from the DB on every model (`checkpointRebuildsFromDB`), since an OpenAI Responses chain off its response would carry the context; later turns chain safely, as no turn chains off an earlier one's response.
   Nil options (every ordinary turn) change nothing; `turn_options_test.go` pins that.
 - **Per-turn memory switches** (`turn_memory.go`, `TurnOptions.MemoryRecall` / `MemorySave`; nil or true is the usual behaviour).
   Recall off: `loadTurnMemoriesFor` skips retrieval (no memory-query model call, no embedding, no lookup) and keeps only the first message's user-name line, which is identity, not memory.
