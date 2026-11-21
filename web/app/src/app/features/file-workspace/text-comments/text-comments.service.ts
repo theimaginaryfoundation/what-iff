@@ -17,8 +17,21 @@ export interface DiagramCell {
   id: string;
   page?: string;
 }
-/** A thread on a range of the text, or the whole file; on a diagram, on one of its elements (`cell`, anchor null). */
-export type TextCommentThread = CommentThread<TextCommentAnchor> & { cell?: DiagramCell };
+/**
+ * The element of a rendered web page a thread is on (ADR 0x050 §5): the page (an HTML file's id), a
+ * selector for the element there, and what it looked like. The thread's element anchor, beside its
+ * code anchor (its range of the text, when it has one).
+ */
+export interface PageElement {
+  page: string;
+  selector: string;
+  fingerprint?: { tag: string; text?: string; attrs?: Record<string, string> };
+}
+/**
+ * A thread on a range of the text, or the whole file; on a diagram, on one of its elements (`cell`,
+ * anchor null); on a web page, on one of its elements (`element`), with or without a range.
+ */
+export type TextCommentThread = CommentThread<TextCommentAnchor> & { cell?: DiagramCell; element?: PageElement };
 
 export interface TextComments {
   threads: TextCommentThread[];
@@ -41,6 +54,7 @@ interface ApiThread {
   id: string;
   anchor: { start: number; end: number } | null;
   cell?: DiagramCell;
+  element?: PageElement;
   quote: string;
   resolved: boolean;
   comments: ApiComment[];
@@ -68,6 +82,7 @@ function fromApi(body: ApiComments): TextComments {
         }),
       };
       if (t.cell?.id) thread.cell = t.cell.page ? { id: t.cell.id, page: t.cell.page } : { id: t.cell.id };
+      if (t.element?.page && t.element.selector) thread.element = { ...t.element };
       if (t.resolved) thread.resolved = true;
       return thread;
     }),
@@ -79,6 +94,7 @@ function toApi(threads: readonly TextCommentThread[]): ApiThread[] {
     id: t.id,
     anchor: t.anchor,
     ...(t.cell ? { cell: t.cell } : {}),
+    ...(t.element ? { element: t.element } : {}),
     quote: t.quote ?? '',
     resolved: !!t.resolved,
     comments: t.comments.map(c => ({

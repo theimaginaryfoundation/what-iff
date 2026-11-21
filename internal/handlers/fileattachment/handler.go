@@ -18,6 +18,8 @@ import (
 
 type attachmentStore interface {
 	ListFileAttachments(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error)
+	// FileAttachmentVersions: many files' versions in one query (a page picture's sources).
+	FileAttachmentVersions(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*models.FileAttachment, error)
 	// Get, delete and the reference checks a delete needs (filedelete.Service.DeleteFile).
 	filedelete.Store
 	// The swap and re-index a content save needs (filesave.Service.Replace).

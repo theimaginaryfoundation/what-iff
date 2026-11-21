@@ -11,6 +11,7 @@ import {
   input,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 import { MarkdownModule } from 'ngx-markdown';
 
@@ -19,6 +20,11 @@ import { renderLatexMath } from '../../../core/utils/latex-math.helpers';
 import { asMermaidMarkdown, renderMermaid } from '../../../core/utils/mermaid.helpers';
 import { CheckboxComponent } from '../../../shared/ui/checkbox/checkbox.component';
 import { HtmlPreviewComponent } from '../../web-preview/html-preview.component';
+import { PageComments } from '../../web-preview/page-comments';
+import { PageBridgeEvent } from '../../web-preview/page-bridge';
+import { PageSnapshot } from '../../web-preview/page-snapshot';
+import { FileAttachmentService } from '../../../core/services/file-attachment.service';
+import { FilePreview } from '../file-preview';
 import { CommentAgentService } from '../../office/comments/comment-agent.service';
 import { CommentPeopleService } from '../../office/comments/comment-people.service';
 import { CommentsPanelComponent } from '../../office/comments/comments-panel.component';
@@ -41,6 +47,9 @@ import {
   previewKindFor,
   rendersAsMarkdown,
 } from '../../gallery/helpers/file-preview.helpers';
+
+/** How long a page that loaded is given to draw itself before its picture is taken. */
+const PAGE_PICTURE_DELAY_MS = 1500;
 
 /** Code longer than this is shown plain: tokenizing it would stall the viewer. */
 const MAX_HIGHLIGHT_CHARS = 200_000;
@@ -96,12 +105,17 @@ export class TextViewerComponent {
   // --- comments (ADR 0x045): on the text, kept beside the file, written as they are made --------
   private readonly saver = inject(COMMENT_SAVER, { optional: true });
   readonly me = inject(CommentPeopleService).me;
+  private readonly commentsApi = inject(TextCommentsService);
+  private readonly commentAgent = inject(CommentAgentService);
   readonly comments = new TextCommentsState(
-    inject(TextCommentsService),
+    this.commentsApi,
     this.me,
     () => this.comments.autosave(),
     () => this.saver?.showCurrentContent(),
-    inject(CommentAgentService).hooks(() => this.file()),
+    this.commentAgent.hooks(
+      () => this.file(),
+      () => this.pageFolder(),
+    ),
   );
   private readonly panel = inject(CommentsPanelState);
   /** Text, Markdown and HTML carry comments; a file shown only in part (over 1 MB) does not. */
@@ -113,7 +127,10 @@ export class TextViewerComponent {
   /** Comments are shown once they have loaded: the server keeps none for some files it is shown (over 4 MB). */
   readonly showsComments = computed(() => this.hasComments() && this.comments.available());
   readonly canComment = computed(() => this.showsComments() && !!this.saver?.canComment());
-  readonly commentsOpen = computed(() => this.showsComments() && (this.panel.open() ?? this.comments.openCount() > 0));
+  /** An HTML file shown as its page, whose comments are on its elements (ADR 0x050 §5). */
+  readonly pageMode = computed(() => this.showRendered() && this.isHtml());
+  readonly openCount = computed(() => (this.pageMode() ? this.pageComments.openCount() : this.comments.openCount()));
+  readonly commentsOpen = computed(() => this.showsComments() && (this.panel.open() ?? this.openCount() > 0));
   readonly replyRequest = signal<{ threadId: string } | null>(null);
   /** The right-click menu over the text: where it opened, and on what. */
   readonly contextMenu = signal<{
@@ -123,6 +140,36 @@ export class TextViewerComponent {
     range: { start: number; end: number } | null;
   } | null>(null);
   private surface: ViewerCommentSurface | null = null;
+  /** The rendered page, when an HTML file is shown as one. */
+  private readonly preview = viewChild(HtmlPreviewComponent);
+  /** Comments on the rendered page's elements (ADR 0x050 §5). */
+  readonly pageComments = new PageComments(
+    this.comments,
+    action => this.preview()?.sendToPage(action),
+    () => this.panel.open.set(true),
+    () => this.canComment(),
+    () => this.file(),
+    () => this.preview()?.pageProject() ?? null,
+    // A script's threads on the page's elements are kept with the script, saved as they change.
+    file => {
+      const state: TextCommentsState = new TextCommentsState(
+        this.commentsApi,
+        this.me,
+        () => state.autosave(),
+        // A save that finds the script changed since its comments were read reads it again.
+        () => void this.pageComments.reload(file.id),
+        this.commentAgent.hooks(
+          () => file,
+          () => this.pageFolder(),
+        ),
+      );
+      return state;
+    },
+  );
+  /** The folder of the page shown, whose files a mention on one of its elements grants the agent. */
+  private pageFolder(): string | null {
+    return this.preview()?.pageProject()?.folder ?? null;
+  }
   private map: CommentTextMap | null = null;
   /** A thread chosen while the text was shown formatted, to show once the raw text is. */
   private revealAfterRender: string | null = null;
@@ -158,7 +205,21 @@ export class TextViewerComponent {
       const state = this.comments.paintState();
       untracked(() => this.surface?.paint(state));
     });
-    inject(DestroyRef).onDestroy(() => this.surface?.dispose());
+    // The rendered page marks the threads' elements as they change.
+    effect(() => {
+      const marks = this.pageComments.marks();
+      if (!this.showRendered() || !this.isHtml()) return;
+      untracked(() => this.preview()?.sendToPage({ type: 'marks', marks }));
+    });
+    inject(DestroyRef).onDestroy(() => {
+      this.surface?.dispose();
+      if (this.pictureTimer) clearTimeout(this.pictureTimer);
+    });
+    // The viewer is reused from file to file: nothing of one page's comments carries over.
+    effect(() => {
+      this.file();
+      untracked(() => this.pageComments.reset());
+    });
     effect(() => {
       const blob = this.blob();
       const generation = ++this.generation;
@@ -254,6 +315,11 @@ export class TextViewerComponent {
    */
   startComment(range = this.selectedRange()): void {
     if (!this.canComment()) return;
+    // On a rendered page, a comment is on an element: pick it.
+    if (this.showRendered() && this.isHtml()) {
+      this.pageComments.togglePick();
+      return;
+    }
     this.panel.open.set(true);
     if (range) {
       this.comments.start(range);
@@ -264,6 +330,10 @@ export class TextViewerComponent {
 
   /** A thread chosen in the panel: shown where its words are, or in the raw text when the formatting hides them. */
   selectThread(threadId: string): void {
+    if (this.pageMode()) {
+      this.pageComments.select(threadId);
+      return;
+    }
     const at = this.comments.positions().get(threadId);
     if (this.showRendered() && at && !this.map?.range(at.start, at.end)) {
       this.revealAfterRender = threadId;
@@ -296,11 +366,52 @@ export class TextViewerComponent {
     if (menu?.range) this.startComment(menu.range);
   }
 
+  /** Pictures of the rendered page, stored as its preview for agents and the gallery (ADR 0x050 §8). */
+  private pictureTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly pageSnapshot = new PageSnapshot(action => this.preview()?.sendToPage(action));
+  private readonly pagePreview = new FilePreview(
+    inject(FileAttachmentService),
+    () => this.pageSnapshot.draw(),
+    // The files the page loaded besides itself, so a picture they left behind is known as such.
+    () => {
+      const page = this.file().id;
+      const served = this.preview()?.pageProject()?.servedFiles() ?? new Map();
+      return [...served.values()]
+        .filter(f => f.id !== page && !!f.content_version)
+        .map(f => ({ id: f.id, content_version: f.content_version! }))
+        .slice(0, 100); // as many as the server keeps (storage.MaxPreviewSources)
+    },
+  );
+
+  /** What the rendered page reports: its comments' events, a picture of it, and a mark's right-click menu. */
+  onPageMessage(event: PageBridgeEvent): void {
+    this.pageComments.handle(event);
+    this.pageSnapshot.handle(event);
+    // The stored page is shown: draw its preview if it has none of this version and of the files
+    // it loaded, once its scripts had a moment to draw. A page that reloads because a file it
+    // loads changed (an agent's edit) is drawn again the same way.
+    // Only of the page itself, not one the user followed a link to in its frame.
+    if (event.type === 'ready' && this.pageMode() && (event.path === null || event.path === this.file().name)) {
+      const file = this.file();
+      if (this.pictureTimer) clearTimeout(this.pictureTimer);
+      this.pictureTimer = setTimeout(() => {
+        this.pictureTimer = null;
+        if (this.file() === file && this.pageMode()) void this.pagePreview.shown(file);
+      }, PAGE_PICTURE_DELAY_MS);
+    }
+    if (event.type !== 'menu' || !this.canComment()) return;
+    const frame = this.host.nativeElement.querySelector('app-html-preview')?.getBoundingClientRect();
+    const box = this.host.nativeElement.getBoundingClientRect();
+    if (!frame) return;
+    this.contextMenu.set({ left: frame.left - box.left + event.x, top: frame.top - box.top + event.y, threadId: event.id, range: null });
+  }
+
   menuReply(): void {
     const threadId = this.contextMenu()?.threadId;
     this.contextMenu.set(null);
     if (!threadId) return;
-    this.comments.select(threadId);
+    if (this.pageMode()) this.pageComments.select(threadId);
+    else this.comments.select(threadId);
     this.panel.open.set(true);
     this.replyRequest.set({ threadId });
   }
@@ -308,7 +419,9 @@ export class TextViewerComponent {
   menuDelete(): void {
     const threadId = this.contextMenu()?.threadId;
     this.contextMenu.set(null);
-    if (threadId) this.comments.remove({ threadId, commentId: threadId });
+    if (!threadId) return;
+    if (this.pageMode()) this.pageComments.remove({ threadId, commentId: threadId });
+    else this.comments.remove({ threadId, commentId: threadId });
   }
 
   private offsetAt(event: MouseEvent): number | null {

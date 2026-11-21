@@ -7,7 +7,6 @@ import (
 	"path"
 	"strings"
 
-	"github.com/theimaginaryfoundation/what-iff/internal/drawio"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -43,6 +42,10 @@ func fileKeyForPreviewTag(objectKey string) string {
 func PutPreview(ctx context.Context, logger *zap.Logger, store FileStore, objectKey string, png, thumb []byte) error {
 	tagKey := fileKeyForPreviewTag(objectKey)
 	if err := store.DeleteFile(ctx, tagKey); err != nil {
+		return err
+	}
+	// The sources of the picture it replaces (ADR 0x050 §8) are not this one's.
+	if err := store.DeleteFile(ctx, fileKeyForPreviewSources(objectKey)); err != nil {
 		return err
 	}
 	if err := store.UploadFile(ctx, FileKeyForPreview(objectKey), png, "image/png"); err != nil {
@@ -85,14 +88,14 @@ func previewBase(objectKey string) string {
 	return path.Join("previews", name)
 }
 
-// DeletePreviews removes the preview, its thumbnail and its tag of the object at objectKey, after the object
+// DeletePreviews removes the preview, its thumbnail, its tag and its sources of the object at objectKey, after the object
 // itself was deleted. Best effort: a failure is logged and leaves an orphan, never an error.
 // Callers releasing objects of any kind ask mayHavePreview first.
 func DeletePreviews(ctx context.Context, logger *zap.Logger, store FileStore, objectKey string) {
 	if store == nil {
 		return
 	}
-	for _, key := range []string{fileKeyForPreviewTag(objectKey), FileKeyForPreview(objectKey), FileKeyForPreviewThumbnail(objectKey)} {
+	for _, key := range []string{fileKeyForPreviewTag(objectKey), fileKeyForPreviewSources(objectKey), FileKeyForPreview(objectKey), FileKeyForPreviewThumbnail(objectKey)} {
 		if err := store.DeleteFile(ctx, key); err != nil && logger != nil {
 			logger.Warn("preview cleanup: delete failed", zap.String("key", key), zap.Error(err))
 		}
@@ -100,18 +103,18 @@ func DeletePreviews(ctx context.Context, logger *zap.Logger, store FileStore, ob
 }
 
 // mayHavePreview reports whether the object at key, which rows point at, can have a preview. Only a
-// diagram (drawio.IsDiagramFile) is given one, and the rule is asked of the object's key, which ends
-// with the name the file had when the object was written, and of each row as it is now. Either
-// alone can miss: a file renamed to .drawio, or stored with draw.io's media type under another
-// name, keeps an object whose key is not a diagram's; one renamed away from .drawio keeps a key
-// that is. Asking both costs nothing, where deleting previews for every object released would cost
+// diagram or a web page (TakesPreview) is given one, and the rule is asked of the object's key,
+// which ends with the name the file had when the object was written, and of each row as it is now.
+// Either alone can miss: a file renamed to .drawio, or stored with draw.io's media type under
+// another name, keeps an object whose key is not a diagram's; one renamed away from .drawio keeps
+// a key that is. Asking both costs nothing, where deleting previews for every object released would cost
 // two storage calls each.
 func mayHavePreview(key string, rows ...*models.FileAttachment) bool {
-	if drawio.IsDiagramFile(strings.TrimSpace(key), "") {
+	if TakesPreview(strings.TrimSpace(key), "") {
 		return true
 	}
 	for _, row := range rows {
-		if row != nil && drawio.IsDiagramFile(row.Name, row.FileType) {
+		if row != nil && TakesPreview(row.Name, row.FileType) {
 			return true
 		}
 	}

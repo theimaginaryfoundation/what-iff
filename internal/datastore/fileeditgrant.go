@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
+	entfileattachment "github.com/theimaginaryfoundation/what-iff/ent/fileattachment"
 	"github.com/theimaginaryfoundation/what-iff/ent/fileeditgrant"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -170,4 +171,22 @@ func (d *Datastore) RevokeFileEdit(ctx context.Context, userID, chatID, fileID u
 		).
 		Exec(ctx)
 	return err
+}
+
+// FolderFileIDs is the user's gallery files in folder and the folders inside it (originals, not
+// chat copies, and no skill's files), at most limit+1 of them, so a caller can tell there are more
+// than limit. It is the project a page's comments can grant the agent (ADR 0x050 §5).
+func (d *Datastore) FolderFileIDs(ctx context.Context, userID uuid.UUID, folder string, limit int) ([]uuid.UUID, error) {
+	if folder == "" {
+		return nil, nil
+	}
+	return d.dbClient.FileAttachment.Query().
+		Where(galleryMutableFiles(userID, models.GalleryKindAll)...).
+		Where(entfileattachment.Or(
+			entfileattachment.FolderEQ(folder),
+			entfileattachment.FolderHasPrefix(folder+"/"),
+		)).
+		Order(ent.Asc(entfileattachment.FieldID)).
+		Limit(limit + 1).
+		IDs(ctx)
 }

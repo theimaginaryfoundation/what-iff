@@ -42,6 +42,8 @@ import { galleryDisplayBaseName, galleryFilenameFromBaseName } from '../gallery/
 import { FilePreviewKind, fileTypeLabel, previewKindFor } from '../gallery/helpers/file-preview.helpers';
 import { folderLabel, folderPathError, normalizeFolderPath } from '../gallery/helpers/gallery-folder.helpers';
 import { formatSource, sourceForImage } from '../gallery/helpers/image-source.helpers';
+import { FolderFiles } from '../web-preview/folder-files.service';
+import { projectPageOf } from '../web-preview/project-page';
 import { FileWorkspaceService } from './file-workspace.service';
 import { EDITOR_LOADER, VIEWER_LOADER, hasEditor, viewerFor } from './viewers/registry';
 
@@ -147,6 +149,13 @@ export class FileWorkspaceComponent implements CommentSaver, WorkspaceContext {
     return source === 'unknown' ? '' : formatSource(source);
   });
 
+  /**
+   * The page of the project this file is part of (ADR 0x050 §2), so a script or stylesheet opens
+   * the page it builds; null while looking, or when there is none.
+   */
+  readonly projectPage = signal<FileAttachment | null>(null);
+  private readonly folders = inject(FolderFiles);
+
   readonly state = signal<LoadState>('idle');
   readonly blob = signal<Blob | null>(null);
   readonly viewer = signal<Type<unknown> | null>(null);
@@ -235,6 +244,17 @@ export class FileWorkspaceComponent implements CommentSaver, WorkspaceContext {
         }),
       );
       onCleanup(() => subscription.unsubscribe());
+    });
+    effect(onCleanup => {
+      const file = this.file();
+      const chatId = this.chatId();
+      let current = true;
+      onCleanup(() => (current = false));
+      untracked(() => this.projectPage.set(null));
+      void projectPageOf(file, this.folders, chatId).then(
+        page => current && this.projectPage.set(page),
+        () => undefined,
+      );
     });
     // A new blob (after a save or a reload) or new metadata reaches the open editor.
     effect(() => {
@@ -513,6 +533,12 @@ export class FileWorkspaceComponent implements CommentSaver, WorkspaceContext {
   private readonly commentAgent = inject(CommentAgentService);
   /** Whether the agent of the chat the file is open in may change it (the user mentioned it in a comment on it there). */
   readonly agentMayEdit = signal(false);
+  /** Opens the project's page in place of this file. */
+  openProjectPage(): void {
+    const page = this.projectPage();
+    if (page) this.workspace.requestOpen(page.id);
+  }
+
   readonly agentName = computed(() => this.commentAgent.agent()?.name ?? 'The agent');
   private readonly loadAgentGrant = effect(onCleanup => {
     const chatId = this.chatId();

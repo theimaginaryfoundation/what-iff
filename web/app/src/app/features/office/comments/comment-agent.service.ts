@@ -172,14 +172,18 @@ export class CommentAgentService {
     };
   }
 
-  /** The hooks for the comments of a file (read when a comment is posted). */
-  hooks(file: () => { id: string; name: string }): CommentAgentHooks {
+  /**
+   * The hooks for the comments of a file (read when a comment is posted). `projectFolder` is the
+   * folder of the page the file's element threads are on, when it is shown as one (ADR 0x050 §5).
+   */
+  hooks(file: () => { id: string; name: string }, projectFolder?: () => string | null): CommentAgentHooks {
     const queue = new MentionQueue();
     return {
       people: people => this.withAgent(people),
       posted: (thread, commentId, quote) => {
         // Who the agent is and which file, as they are now; sent once the save lands.
-        const send = this.sender(file(), thread, commentId, quote);
+        const onPage = !!(thread as { element?: unknown }).element;
+        const send = this.sender(file(), thread, commentId, quote, (onPage && projectFolder?.()) || undefined);
         if (send) queue.add(send);
       },
       mark: () => queue.mark(),
@@ -210,6 +214,7 @@ export class CommentAgentService {
     thread: CommentThread<unknown>,
     commentId: string,
     quote: string,
+    projectFolder?: string,
   ): (() => Promise<boolean>) | null {
     const agent = this.agent();
     const host = this.host();
@@ -222,6 +227,7 @@ export class CommentAgentService {
       comment_id: comment.id,
       quote,
       earlier: thread.comments.slice(0, at).map(c => ({ author_name: c.authorName, text: c.text })),
+      ...(projectFolder ? { project_folder: projectFolder } : {}),
     };
     const ref: CommentRef = { file_id: file.id, file_name: file.name, thread_id: thread.id, comment_id: comment.id, quote };
     // The chat it is posted in: the mention waits for a save, and the chat shown may change meanwhile.

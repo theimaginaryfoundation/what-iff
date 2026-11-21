@@ -1,7 +1,21 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  ElementRef,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { DomSanitizer } from '@angular/platform-browser';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
+import { PageBridgeAction, PageBridgeEvent, readBridgeEvent } from './page-bridge';
 import { BuiltPage, PageFiles } from './page-files.service';
 
 /**
@@ -25,6 +39,7 @@ import { BuiltPage, PageFiles } from './page-files.service';
     }
     @if (built(); as page) {
       <iframe
+        #frame
         class="html-page__frame"
         [title]="'Page: ' + file().name"
         sandbox="allow-scripts"
@@ -76,6 +91,9 @@ export class HtmlPageFrameComponent {
   readonly file = input.required<FileAttachment>();
   /** The page's HTML, as it is now (an editor's unsaved text included). */
   readonly html = input.required<string>();
+  /** What the page's bridge script reports (ADR 0x050 §5). */
+  readonly pageMessage = output<PageBridgeEvent>();
+  private readonly frame = viewChild<ElementRef<HTMLIFrameElement>>('frame');
 
   readonly built = signal<BuiltPage | null>(null);
   readonly failed = signal(false);
@@ -100,7 +118,22 @@ export class HtmlPageFrameComponent {
       const generation = ++this.generation;
       untracked(() => void this.build(file, html, generation));
     });
-    inject(DestroyRef).onDestroy(() => this.generation++);
+    // The frame's origin is opaque, so its window is what identifies it.
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== this.frame()?.nativeElement.contentWindow) return;
+      const message = readBridgeEvent((event.data as { wiBridge?: unknown } | null)?.wiBridge);
+      if (message) this.pageMessage.emit(message);
+    };
+    window.addEventListener('message', onMessage);
+    inject(DestroyRef).onDestroy(() => {
+      this.generation++;
+      window.removeEventListener('message', onMessage);
+    });
+  }
+
+  /** Tells the page's bridge script something. */
+  sendToPage(action: PageBridgeAction): void {
+    this.frame()?.nativeElement.contentWindow?.postMessage({ wiApp: action }, '*');
   }
 
   private async build(file: FileAttachment, html: string, generation: number): Promise<void> {

@@ -216,6 +216,37 @@ var fileTypes = map[string]FileTypeInfo{
 		Extension:     ".zip",
 		VectorSupport: false,
 	},
+	// Web projects' sources, which the preview compiles in the browser (ADR 0x050 §4).
+	".jsx": {
+		ContentType:   "text/javascript",
+		Extension:     ".jsx",
+		VectorSupport: true,
+	},
+	".mjs": {
+		ContentType:   "text/javascript",
+		Extension:     ".mjs",
+		VectorSupport: true,
+	},
+	".mts": {
+		ContentType:   "application/typescript",
+		Extension:     ".mts",
+		VectorSupport: true,
+	},
+	".tsx": {
+		ContentType:   "application/typescript",
+		Extension:     ".tsx",
+		VectorSupport: true,
+	},
+	".scss": {
+		ContentType:   "text/x-scss",
+		Extension:     ".scss",
+		VectorSupport: true,
+	},
+	".sass": {
+		ContentType:   "text/x-sass",
+		Extension:     ".sass",
+		VectorSupport: true,
+	},
 }
 
 func GetFileType(fileName string) (FileTypeInfo, error) {

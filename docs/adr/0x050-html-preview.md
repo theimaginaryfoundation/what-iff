@@ -1,6 +1,6 @@
 # ADR 0x050: HTML files and web projects, rendered
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-14
 - **Deciders:** What Iff maintainers
 - **Issue:** none (raised in conversation)
@@ -35,76 +35,123 @@ And a thread is anchored on a range of the file's text, which the server carries
 
 - A project is a gallery folder: its files and those of the folders beneath it, with their paths relative to it (`index.html`, `css/app.css`, `img/logo.png`).
   Where the app has a preview site (§3), an `.html` file always opens this way, with its own folder as the project's root, so a page finds its other files as it would on a web server; Open as site, in a folder that has an `index.html`, opens that page.
+- **Any other file of a project opens its page.** A script, stylesheet or image whose folder, or a folder above it, has a page (its `index.html`, else its only `.html` file) shows Open page beside the file's name, so a thread kept with a script (§5), followed from the chat, is one click from the page it is on.
+  The gallery's top level is no project, so it is not looked in; a file with no folder of its own in a conversation is looked for by its path among the conversation's files.
 - Paths in the project are the gallery's: folder segments are lower case (the gallery normalizes them), file names keep their case.
   A reference whose folder case differs from the gallery's still resolves, as folder segments are matched without case, so `Assets/logo.png` finds `assets/logo.png`; a name must match exactly.
 - Files are found as the page asks for them, a folder at a time, so a project has no size limit of its own; a folder's listing is reused for a few seconds and each file version is downloaded once.
+- **A page at the top level of the gallery is not given the whole gallery.** Its project is the top level's own files (and, in a conversation, the conversation's), never the folders beneath it: a page can send what it reads anywhere (§3), so its project is no more than the folder it is in, and a project lives in a folder.
+- **A page has limits, as code the user or an agent wrote, careless or not.** A file over 50 MB is not served (413); a few hundred compiled files are kept; paths that were not there are remembered up to 500, and a project looks in up to 200 gallery folders, as each is a listing of the API and each is looked at again on every check for changes (§6); and the app reads at most 8 files at a time.
 - **A conversation is a project too.** A page opened in a conversation finds a path among that conversation's files (its context, ADR 0x043 §4, at their workspace paths, §7) before the gallery's: the conversation's project is what its agent's container holds, and a file of the same name elsewhere in the gallery does not stand in for it.
-  A path the conversation has no file at is looked for in the gallery folder, as outside a conversation.
+  A path the conversation has no file at is looked for in the gallery folder, as outside a conversation, and so is every path while the conversation's files cannot be listed.
 
-### 3. The preview site: an origin of its own, asking the app for each file
+### 3. The preview site: a domain of its own, asking the app for each file
 
 - The site is three small files of ours (`web/preview/site`: a host page, its script and a service worker), served as the diagrams site is (ADR 0x049 §1): locally by the app's dev server at `/preview/` on `127.0.0.1`, deployed on a host of its own, built by `make preview-site`.
-  The app's `previewUrl` names it; a URL on the app's own origin, or plain http off localhost, leaves projects off and an `.html` file renders on its own (§1).
+- **It is on a registrable domain of its own, not a host under the app's.** A page runs whatever the project holds, with script access to its own origin; a host under the app's domain is the same *site*, and a page there can read cookies the app keeps on its domain (a sign-in shared with another of the deployment's apps keeps the session in one) and set cookies the app reads.
+  A deployment puts it on a domain that holds nothing else of its, as `googleusercontent.com` is for Google.
+  The app's `previewUrl` names it; a URL on the app's site (the same last two labels of its host, which refuses a little more than the public suffix list would, never less), or plain http off localhost, leaves projects off and an `.html` file renders on its own (§1).
 - The app frames the host page with a random key (`index.html?t=<key>`), one per opening of a page.
   Once the host page's service worker is ready it says so; the app answers with a `MessagePort` and the entry path, and the host page opens the user's page in a frame of its own at `p/<key>/<path>`.
 - **Nothing is kept on the site.** Every request under `p/<key>/` reaches the worker, which asks the host page that owns the key, which asks the app over its port; the app finds the file (§2) and answers with its bytes and type, or a 404.
   A browser stops an idle worker and drops what it holds, so a worker given the files would lose them; asking each time keeps it stateless, and a request being answered keeps it alive.
-  The host page empties the origin's local and session storage when it starts, as the page it shows may be another project's.
+  The host page empties the origin's local and session storage, IndexedDB and cache storage when it starts, as the page it shows may be another project's; the origin is one for every project, so this also empties the storage of a preview open in another tab at the same time.
+  A request waits up to 60 seconds for its answer (504 after), long enough for the first TypeScript file of a session, which waits for the compiler (§4).
+  A request for one range of a file (a video seeking) is answered with that range (206).
 - The page is reloaded when the text being edited changes, and when a file it used changed elsewhere: while it is shown, the app lists the folders it served from every few seconds and compares each served file's content version; a file that was missing and now exists counts too (§6).
   The page's own state (scroll, typed input) is lost, which is accepted.
-- The user's page shares the host page's origin (a worker serves only same-origin documents); that origin holds nothing of the app's, and the app's frame has the sandbox the diagrams frame has.
+- The user's page shares the host page's origin (a worker serves only same-origin documents), so its frame's sandbox does not keep it from the host page: a page can reach the host page, its port to the app, and any other frame of the site in the same tab, another preview's included.
+  So nothing on the site is trusted: the app checks every request and every message it is sent (a pick names a file the page loaded, a picture must be a PNG, a path must be in the project), and a page that took over its host page gets no more than it could already fetch.
+  The key per opening tells the app's previews apart; it does not keep two previews in one tab from each other's files, which a host per project would.
+  That origin holds nothing of the app's; the app's frame and the page's frame allow scripts, forms, popups and downloads, but no modal dialogs, as an endless `alert()` would lock the app's tab.
 - The host page takes the app's first message only from its parent window, on an origin listed in its `config.js` (`PREVIEW_HOST_ORIGINS` at build time); the app takes messages only from that frame's window on the configured origin.
 - The site's response headers: `frame-ancestors` the app only; no caching of the host page or the worker, so a frame never runs an old worker against the app; and a content security policy.
   Scripts may come only from the site itself (inline and `eval` included) and the CDNs of §4, as scripts are where code comes from.
   Styles, images, fonts, media and `fetch` may come from any https host: pages agents build use remote images and public APIs, and the origin holds nothing but the project's own files.
   No plugins, `<base>` only to the site, forms only to the site.
 - The host's headers reach the host page only, so the worker reads the site's policy from the host page's headers and sends it on every page it serves, with `'self'` added to `frame-ancestors`, as the host page frames them.
-  Where the site sends no policy (local development), neither do its pages.
+  Where the site sends no policy (local development), neither do its pages; where its policy cannot be read, no page is served (503), so a page never runs without the policy the site meant it to have.
+  A page on its own (§1) carries the same rules in a `<meta>` policy of its own, first in its head.
 
 ### 4. Dependencies
 
-- **Bare imports load from esm.sh.** `import { h } from 'preact'` names a package, which a browser cannot resolve; as each module is served (a `.js` or `.mjs` file, or an inline `<script type="module">`), its bare imports are rewritten to `https://esm.sh/<name>@<version><path>`, with the version or range the project's root `package.json` asks for, else the latest.
+- **Bare imports load from esm.sh.** `import { h } from 'preact'` names a package, which a browser cannot resolve; as each module is served (a `.js` or `.mjs` file, or an inline `<script type="module">`), its bare imports are rewritten to `https://esm.sh/<name>@<version><path>`, with the version, range or tag the project's `package.json` asks for (at its root, the conversation's first, as any file; a change to it reloads the page), else the latest.
   Imports are found by `es-module-lexer`, so a string or a comment that looks like one is left alone, and a script that is not a module is served as it is.
-  A page that brings its own import map keeps it: the project's modules are then served unchanged.
+  A page that brings its own import map (a `<script type="importmap">` in it, as parsed) keeps it: the project's modules are then served unchanged while that page is shown.
   Rewriting each module as it is served needs no scan of the project first, which an import map in the page would.
   Nothing is installed; the site's policy allows `esm.sh` and `cdn.jsdelivr.net`.
   This needs the internet, as the notebook kernel's packages do, and is on by default.
-- **TypeScript, JSX and SCSS are compiled in the browser.** Where the page asks for `app.tsx` or `styles.scss`, the app compiles it with `esbuild-wasm` or `sass` in a web worker before answering; compiled files are cached by content.
-  This is a later step (see Later) and adds nothing to a project of plain HTML, CSS and JavaScript.
-- **Real toolchains run in the conversation's container.** A project with a `vite.config.*` or a build script is built where agents run commands, and its output folder is what the site serves; nothing of Node runs in the browser.
-  This is for deployments that run containers, as the diagram workshop is (ADR 0x049 §3), and a later step.
+- **TypeScript, JSX and SCSS are compiled in the browser.** Where the page asks for a `.ts`, `.mts`, `.tsx` or `.jsx` file, the app compiles it with `esbuild-wasm` before answering; a `.scss` or `.sass` file, with `sass`.
+  Each file is compiled on its own, as a dev server does, not bundled: its imports stay imports, which the page asks for in turn.
+  JSX uses the automatic runtime of `react`, or of `preact` when the project depends on Preact and not React, and the compiled module's bare imports are rewritten as any module's are.
+  Both run in a worker of the app's own (loaded from the app's origin, as the code editor's are), off the app's thread: a file that takes longer than 30 seconds (an endless `@while`) stops the worker, its error is served, and the next file starts a new one.
+  They load the first time a page needs them, and esbuild starts loading as soon as a page names a TypeScript or JSX script, so a project of plain HTML, CSS and JavaScript loads neither.
+  esbuild's WebAssembly is served with the app under its version (`assets/esbuild/<version>/`), as esbuild refuses a binary of another version and a browser may hold an old one under a fixed name.
+  Compiled files are kept by file version, a few hundred at most.
+  A stylesheet's `@use`, `@forward` and `@import` resolve inside the project as sass does on disk: partials, the extension left out, a folder's `index`.
+  The files it read, and those it looked for and did not find, count as served (§6): changing one, or adding one, reloads the page and compiles the stylesheet again.
+- **Imports resolve as a bundler's do.** A module import that finds nothing is answered with a redirect to the file a bundler would take, so that file's own imports resolve from where it is: for a name without an extension (`./App`, `./components`), the first of `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.mts` and then the folder's `index` of each that the project has; for `./util.js`, TypeScript's convention of naming the compiled file, `./util.ts` or `./util.tsx` (`.mjs` is `.mts`, `.jsx` is `.tsx`).
+  Each of those is remembered as missing, so adding it later reloads the page.
+  A script that imports a stylesheet, JSON or another file (`import './app.scss'`, `import data from './data.json'`) gets a module standing for it: the stylesheet (compiled, if it is SCSS) is added to the page, JSON is its value, anything else is its URL.
+  The service worker passes on what the page asked for a file as (`script`, `style`, ...), which is how the app tells a module import from a `<link>`.
+- **A compile error shows on the page.** A script that does not compile is served as one that logs the error, with its file, line and column, and throws it; a stylesheet, as one that puts the error at the top of the page.
+- **Uploads accept a web project's sources:** `.tsx`, `.mts`, `.jsx`, `.mjs`, `.scss` and `.sass`, as text, searchable like the rest of a project's code.
 
 ### 5. Comments on elements
 
-A page's comments are kept beside its files as a text file's are (ADR 0x045 §4), in the same panel; a thread on an element shows on the rendered page and in the source.
+A page's comments are kept with its HTML file as a text file's are (ADR 0x045 §4), in the same panel; a thread on an element shows on the rendered page, and in the source when it has a code anchor.
 An element thread has up to two anchors, each best effort, and falls to the whole file when both are lost:
 
 - **The code anchor is a range of the source, as every text thread has.** For an element written in the HTML, it is its opening tag.
-  The served page carries, on every element the HTML parser read, the tag's offsets in its file (`data-wi-src="<file>:<start>-<end>"`, added by the app as the file is sent, from a location-aware parse); a pick on the page reads them back, and the thread is made as a text thread on that tag, with the tag as its quote.
+  The served page carries, on every element the HTML parser read, the tag's offsets in its file (`data-wi-src="<file>:<start>-<end>"`, in the units comment anchors use), added by the app as the file is sent from a location-aware parse (parse5) and inserted into the text as it is, right after the tag's name (never at its end, where an unquoted value such as `href=/docs/` ends); scripts are left as they are, as widgets read their own script's data attributes as settings.
+  A pick on the page reads them back, and the thread is made as a text thread on that tag, with the tag as its quote, once the range is checked to still be that tag in the text shown (a page served before the editor's last change reached it, or one changed since it was opened, may have it elsewhere; the thread is then on the element alone).
   So it shows in the code editor at the tag, the server carries it across edits made anywhere, and `file_comments` reads and writes it with nothing new.
-- **The element anchor is a selector for the element on the page** (`element: { page, selector, fingerprint }`, beside `anchor` as `cell` is for diagrams), so a thread stays on the element when the code around it is reshaped, and so an element the page made with scripts, which has no tag in the HTML, can carry a thread at all.
-  The selector is chosen from the most stable thing the element has, in this order: an `id` that does not look generated; `data-testid`, `data-id`, `name` or `aria-label`; a class combination unique on the page that is not utility classes; last, a structural path with positions.
-  The fingerprint (tag, trimmed text, the attributes the selector used) travels with it: when the page is shown, the selector is checked against the fingerprint, and a selector that no longer points at the same thing is remade from the next strategy before the thread is given up.
-- **Finding the code that made a scripted element** is layered by what the app can know.
-  An element from the HTML has its tag.
-  A JSX, TSX or Vue component the app compiled (§4) has the element's source position added by that compile, the same attribute.
-  A scripted element the app did not compile gets, best effort, the first project file on the stack when it was created: the served page wraps `createElement`, `innerHTML` and `insertAdjacentHTML` to record it.
-  That finds hand-written DOM code and template libraries; it does not find the component behind a framework's own DOM building, which leaves such an element with only its element anchor.
-  A prebuilt bundle gives nothing better than its own call site.
-- A thread lives with the file its code anchor is in (the HTML, or the script that made the element), and names the page it shows on.
-  The rendered page shows the threads of every file in the project that name it; the panel shows the entry file's threads and switches to another file's when a pick lands there.
-- **Picking and marking.** Add comment on the rendered page enters a select mode: the element under the pointer is outlined with its tag and size, as a browser's element picker does, a click picks it, Esc leaves.
-  A small script of ours in the served page draws the markers of open threads on their elements (the active one more strongly), keeps them in place through scrolling, resizing and the page's own changes, and reports picks and clicks on markers to the app in messages under names of ours, as the draw.io plugin does (ADR 0x049 §6).
-  Right-clicking a marked element offers Reply and Delete, as every other format has.
-- Threads on CSS and script files that have no element stay where they are: in the code editor.
-- Agents comment with `file_comments` as on any text file, quoting the tag or the code; `list` says which page and element a thread is on when it has one.
-  An agent writing a thread on an element it cannot quote (one a framework made) gives its selector.
+  A thread made on a stretch of the source marks the element whose tag holds its start, or the first tag inside it; where several elements carry the same range (the rows a list renders from one tag, clones of a template), the one its selector or fingerprint names.
+- **JSX elements carry their code too.** A `.tsx` or `.jsx` file is compiled (§4) in JSX's development mode, which gives each element its file, line and column; the app turns that into the range of the element's opening tag in its file, and the project serves a small runtime of its own in place of the library's development one, which hands each intrinsic element (a `div`, not a component) that range as `data-wi-src` and otherwise calls the library's runtime.
+  React and Preact keep `data-*` props as attributes, so a JSX element is picked, marked and found as an HTML one is, with its thread in the component's file, on its tag.
+- **The element anchor is a selector for the element on the page** (`element: { page, selector, fingerprint }`, `page` the HTML file's id, beside `anchor` as `cell` is for diagrams), so a thread stays on the element when the code around it is reshaped, and so an element the page made with scripts, which has no tag in the HTML, can carry a thread at all.
+  The selector is chosen from the most stable thing the element has, in this order: an `id` that does not look generated; `data-testid`, `data-test`, `data-cy`, `data-id`, `name` or `aria-label`; one or two classes, unique on the page, that are neither utility classes nor hashed; last, a path of positions from the nearest ancestor with a stable id.
+  The fingerprint (tag, the start of its text, the attributes the selector used) travels with it: the page shows a thread on the element its selector finds when its tag and text still match, or whatever its text says now when the selector is an id or a stable attribute that names one element (its text changing is often what the thread was about), else on the element of that tag whose text is the fingerprint's.
+  Tags are as the page names them: lower case in HTML, as written in SVG (`foreignObject`).
+  A selector is at most 1000 characters; a path of positions is cut to its last steps to fit, and `file_comments` refuses a longer one, saying what to use instead.
+  The server only bounds the anchor; it does not depend on the text, so it is kept as it is across edits.
+- **The code behind a scripted element** is recorded, best effort, as the page runs: the bridge script wraps `createElement`, `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `cloneNode` and `importNode`, and keeps, for each element a call made (only the nodes it inserted, not their neighbours), the call's stack, which is read only when the element is picked, so a page that makes thousands of elements does not pay for it.
+  That finds hand-written DOM code and template libraries; a prebuilt bundle gives nothing better than its own call site.
+  The bridge keeps 100 stack frames rather than a browser's default 10, as a library that builds the DOM calls it deep in its own code.
+- **Preact and React elements made with `h()` / `createElement()`** (in plain JavaScript, without JSX) carry the place of that call.
+  The library makes the DOM element later, after the call has returned, so the DOM call's stack names only the library (or the line that rendered the whole app).
+  A project module's static import of the library's main entry (bare `preact` or `react`, or that entry on a CDN) is pointed, as the module is served, at a module the project serves under `__whatiff/factory/`, which is the library with its factory wrapped: each call keeps its stack by the element's props object, and the bridge finds the element's props again (Preact's `options.diffed` names the DOM element made from them; React keeps the current props on the DOM element).
+  Everything else is the library's own, from the same module, so the page has one copy of it; only the specifier's text changes, so no line moves.
+  An element a library added later with no project file on its stack (a re-render scheduled by the library) takes the place its nearest scripted ancestor was made, and one inside an element the HTML declares, the HTML's.
+  A call site in a compiled module (TypeScript, §4) is mapped to the line of the file the user wrote through the module's inline source map; one the map does not place leaves the thread on the element alone.
+  Frames in the page itself (the bridge, and the page's inline scripts) and in our own modules (the JSX runtime, the factory wrappers) are skipped, so the first project script on the stack is where the element was made.
+- **Picking and marking.** Comment, on the rendered page, enters a picker: the element under the pointer is outlined with its tag and size, as a browser's element picker does, a click picks it, Esc leaves.
+  While picking, the page's own handlers see no press (so a pick opens none of its menus and starts none of its drags), and its cursor is restored after.
+  A pick that finishes after a later one (it had a script to load first) is dropped.
+  A thread lives with the file its code anchor is in: a pick on an element the page's own file declares starts a thread there, on its tag and on the element; one on an element a project script made starts it in that script, on the JSX tag that made it, the head of the call that made it in a script served as written (`h('li'`, at the column the stack names), or else the line of the call (without its indentation), and on the element; any other pick starts one in the page's file on the element alone, labelled with its tag and the start of its text.
+  So the page shows its own file's threads and those of the project's scripts that name it, loaded as it loads them (scripts it imports later too), and the panel shows them together, a script's named after it (`js/main.js · …`); each thread's reply, edit, resolve and delete goes to the file it lives in, and a script's are written at once, as a viewer writes them.
+  A script that changed (an agent's edit, after which the page reloads) has its text and comments read again, as does one a save finds changed; the panel's save status is the worst of the page's and the scripts'.
+  On another page the user followed a link to in the frame, nothing is marked and nothing can be picked: the comments are the entry page's.
+  The bridge script (`page-bridge.ts`, first in every served page's head, in a layer of its own out of the page's styles, in the document only while it shows something) draws the marks of open threads on their elements, the active one more strongly, keeps them in place through scrolling, resizing and the page's own changes, and reports picks and clicks on marks to the app; the host page relays both ways.
+  Each mark's element is found once and kept until the page's structure, an element's text or what identifies it changes; anything else (a style animating) only moves the marks, which are reused rather than drawn anew, so they can be clicked on a page that never stops changing.
+  A click on a mark chooses its thread, and choosing one in the panel scrolls the page to it; right-clicking a marked element (or its mark) offers Reply and Delete, as every other format has.
+- The same works while editing: Pick on page, over the page beside the source, starts a thread from it; the page file's threads are written with the next save, a script's at once.
+- Threads on CSS and script files stay where they are: in the code editor.
+- **Mentioning the agent on a page's element grants it the page's project folder.** A mention lets the chat's agent change the file the thread is on (ADR 0x046); on a page, what the comment asks for may be in any of the files the page is made of (a stylesheet, another script), which the user may have uploaded rather than the agent made.
+  So a mention in a thread on an element sends the page's folder with the comment, and the server, once it has checked the commented file is in it, grants each file in that folder and the folders inside it (not a skill's files), as separate grants the user can revoke one by one, and tells the agent it may change them.
+  It grants the files there when the comment is sent; one added later is not granted (the agent's own new files are its own).
+  A folder of more than 200 files is not one page's project: only the commented file is granted, and the agent is told to ask.
+  A page at the top level has no project folder (§2), and grants only the commented file.
+- Agents comment with `file_comments` as on any text file, quoting the tag or the code; `add` takes `selector` (and `page`, the HTML file, when it is not `file`) for an element, alone or beside a quote, and `list` says which element of which page a thread is on.
 
 ### 6. Keeping the page current
 
 - New text in the editor (once typing pauses) is served in place of the stored page, which reloads.
 - While a preview is shown, the app lists the folders it served from every few seconds and reloads the page when a file it used has a new `content_version`, or a missing one appears, so an agent's edit shows without a click (§3).
+  A file it used includes a partial a stylesheet imported, and the project's `package.json` (§4); a compiled stylesheet is compiled again when one of its partials changed.
+  What the page used is recorded afresh each time a page loads, so a file the page no longer loads does not reload it.
   Gallery lists carry each file's content version for this, as diagram tiles need it for their preview (ADR 0x049 §8).
+  A conversation's files are listed without the container's status (`container=0`), which asks the container service.
   A change event from the server replaces the polling when there is one.
 
 ### 7. One path, everywhere
@@ -116,6 +163,23 @@ A file's path is the same in the agent's file tools, in the Files tab, in a proj
 - The file tools say it in one sentence, and nothing else about layout: a file's path is the same everywhere, and `/workspace/<path>` in the container.
 - A deployment that runs the workspace in a container must let commands write into folders its uploads created, or an agent cannot add a file to a folder the app put there; that is the deployment's to arrange before paths change.
 
+### 8. A picture of each page
+
+A page has a picture, as a diagram has (ADR 0x049 §8), so an agent can see what it built and the gallery can show it.
+
+- The page draws it: when a page is shown and has settled, the app asks the bridge script (§5) for a picture, and the bridge draws its document with `modern-screenshot` (MIT, loaded from jsDelivr when first asked) at the frame's width and up to 3000 pixels of its height.
+  Nothing outside the page sees into it, which keeps the preview site's origin of its own (§3) intact.
+- The app stores it as the file's preview, as for a diagram, with the files the page loaded besides its own (its stylesheets, scripts, a stylesheet's partials, images) at the versions it loaded: the picture's sources, at most 100, kept beside it.
+  The sources are kept with the tag of the picture they belong to, so a picture another browser stored meanwhile is never judged by them, and are checked in one query.
+  A picture is current while the page's file and every source are at those versions; asked for a current one (`current=1`), the server says there is none once a source has another version or is gone.
+  The app draws one when it shows a page that has no current picture, including when the page reloads because a file it loads changed (§6), and only of the page itself, never of another page the user followed a link to in its frame; a page that does not answer in 20 seconds, or cannot draw itself, has none, and is drawn when next shown.
+  The picture is at most 4096 pixels wide and 3000 high and within 8 megapixels, drawn at half size when the PNG would be over 8 MB, as the server stores no more.
+- `agent_file_read` shows an HTML file's picture with its text (a read of its start, or its outline; not a search for a heading), from the stored preview, and says which it is: current; out of date, naming the files that changed since it was drawn, still shown since the layout is often still useful; or none of this version yet.
+  The gallery's tile shows the picture it has.
+- Only a browser draws it here, and only one showing the page: the server has none, and a page's packages need the network, which a conversation's container need not have.
+  So a change an agent makes leaves the picture behind until someone opens the page, and the agent is told so in plain words, with the advice to ask the user to open the page, rather than shown an old picture as if it were current.
+  A page shown on its own (§1, where there is no preview site) records no sources, and its picture is dated by its own file alone.
+
 ## Alternatives considered
 
 - **Rendering in a `srcdoc` frame only**, with every reference rewritten to a `blob:` URL.
@@ -124,7 +188,8 @@ A file's path is the same in the agent's file tools, in the Files tab, in a proj
 - **The API serving the project** on a host of its own, with a short-lived cookie or a capability in the path.
   It would give previews a URL of their own, which nothing needs yet, at the price of a second way to be the user, a round trip per file on every change, and a server that assembles trees.
 - **A hostname per project**, as hosted sandboxes do.
-  Stronger isolation between projects than one site with a token per frame, for a wildcard certificate and a DNS entry per host; the per-frame token keeps projects apart in the one tab where they could meet, which is as far as the risk reaches.
+  Stronger isolation between projects than one site with a key per opening, for a wildcard certificate and a DNS entry per host: the key tells the app's previews apart, but a page shares its host page's origin (§3), so two previews open in one tab can reach each other's files.
+  Both are the user's own projects, on a domain that holds no session of the app's, which is where the risk stops; a host per project is the step if that changes.
 - **Node in the browser** (WebContainers, Nodebox).
   Both need a licence for production use in a product; neither is needed once a toolchain can run in the conversation's container.
   Sandpack's bundler is Apache-2.0 and self-hostable, and would shape the preview around a bundler for every project; its static server is the service-worker pattern of §3, read for its design.
@@ -137,12 +202,12 @@ A file's path is the same in the agent's file tools, in the Files tab, in a proj
 - Users see the pages agents build, as they are, and comment on the parts; agents see the same comments at the code.
 - The page runs on the preview site's origin with no credentials of the user's: a page that calls the API gets a 401, which is the point.
 - The app gains a small static site to build and host, as it has two already, and a service worker of its own, which has lifecycle to test: the first load before the worker controls the page, a frame closed with its tree, an update of the worker itself.
-- Projects that import from a CDN need the internet; the rest works without it.
+- Projects that import from a CDN need the internet, as does a page's picture (§8); the rest, compiling included, works without it.
 - Paths with folders in the container change what agents see at `/workspace`; existing containers take the new layout at their next hydration.
 
 ## Later
 
-- **Compiling in the browser** (§4): `esbuild-wasm` for TypeScript and JSX, `sass` for SCSS, on demand, in a worker; source positions added to compiled components for §5.
-- **Builds in the container** (§4), and a built project's output served as the site.
-- **A picture of the page for agents**, drawn where a browser runs beside the conversation, as diagrams have a preview (ADR 0x049 §8): the `diagram` tool's shape, for pages.
+- **Builds in the container**: a project with a `vite.config.*` or a build script built where agents run commands, and its output folder served as the site.
+  The container has no network and no Node today, so this waits on both; nothing of Node runs in the browser either way.
+- **A picture drawn without a viewer** (§8), so an agent sees a page it changed before anyone opens it: a browser beside the server, or in a conversation's container that has one and the network a page needs.
 - **Hosting**: the deployed site's bucket, distribution, response headers and the deploy workflow's build.

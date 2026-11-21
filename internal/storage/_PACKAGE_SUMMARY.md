@@ -10,12 +10,15 @@
 - **Attachment object cleanup** (`attachment_cleanup.go`):
   ent cascades delete attachment rows without touching the store, so callers read the affected rows first and release them after the delete.
   - `ReleaseAttachmentObjects` deletes a deleted row's object (its `s3_key`, or the legacy derived keys when empty) only when `AttachmentKeyRefs` reports no remaining row references it, plus the row's own thumbnail.
-  - Both release paths also delete a deleted object's preview (`DeletePreviews`) when the object may have one: its key, or a row pointing at it, is a diagram's (`drawio.IsDiagramFile`).
+  - Both release paths also delete a deleted object's preview (`DeletePreviews`) when the object may have one: its key, or a row pointing at it, is a diagram's or a web page's (`TakesPreview`, `takes_preview.go`).
     Asking both catches a file renamed to or from `.drawio`, or stored as a diagram by its media type, without two extra deletes for every object released.
     `ReleaseReplacedObject` takes the row whose object was replaced for this (nil for one that cannot be a diagram).
-- **Previews** (`preview.go`, ADR 0x049 §8): a picture of a diagram the browser drew, keyed by the stored object it shows (`FileKeyForPreview`, `FileKeyForPreviewThumbnail`: `users/{id}/previews/{hash of the object key}.png` and `.thumb.jpg`).
+- **Previews** (`preview.go`, ADR 0x049 §8, ADR 0x050 §8): a picture of a diagram or an HTML page the browser drew, keyed by the stored object it shows (`FileKeyForPreview`, `FileKeyForPreviewThumbnail`: `users/{id}/previews/{hash of the object key}.png` and `.thumb.jpg`).
   Keying by object means a preview matches the content it was drawn from, rows sharing the object share it, and a save (always a new object) leaves the file with none until it is drawn again.
   `PutPreview` stores the picture, its thumbnail and its tag (a hash of the picture, `.tag`); `PreviewTag` reads the tag, so a reader can tell whether a cached copy is current without downloading the picture.
+  A web page's picture also keeps its sources (`preview_sources.go`, ADR 0x050 §8): the other files it was drawn from at their versions (`PreviewSource`, at most `MaxPreviewSources`), as `.sources.json` beside it.
+  `PutPreview` removes the old sources, `PutPreviewSources` writes the new, `ParsePreviewSources` reads the endpoint's `id:version,…` form, and `ComparePreviewSources` says which changed or are gone, given a batch lookup (`FileVersions`), so the handler and the agent tools judge staleness one way.
+  The sources are kept with the tag of the picture they belong to (`PreviewSources` returns none for another picture's), so two browsers storing at once never pair one's picture with the other's sources.
   The tag is removed before the picture is replaced and written after, so it never names an older picture.
     It first confirms the rows are actually gone (`ExistingFileAttachmentIDs`), so a cascade that did not fire never strips a surviving row.
     Best effort: failures are logged and counted, never returned.

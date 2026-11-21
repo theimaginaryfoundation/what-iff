@@ -40,7 +40,8 @@ export class FolderFiles {
    */
   conversation(chatId: string, fresh = false): Promise<Map<string, FileAttachment>> {
     return this.listed(`\u0000chat:${chatId}`, fresh, async () => {
-      const response = await firstValueFrom(this.files.listChatContextFiles(chatId));
+      // Without the container's status, which costs a call to the container service per poll.
+      const response = await firstValueFrom(this.files.listChatContextFiles(chatId, { container: false }));
       const byPath = new Map<string, FileAttachment>();
       for (const f of response.files) if (!f.shadowed_by) byPath.set(f.workspace_path, f.file);
       return byPath;

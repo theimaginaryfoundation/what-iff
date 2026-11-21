@@ -56,6 +56,17 @@
         @if (showGalleryLink()) {
           <a class="file-workspace__link" [routerLink]="['/gallery']" [queryParams]="{ file: file().id }">Open in gallery</a>
         }
+        @if (projectPage(); as page) {
+          <button
+            type="button"
+            class="file-workspace__link"
+            [uiTooltip]="'Show ' + page.name + ', the page this file is part of'"
+            placement="bottom"
+            (click)="openProjectPage()"
+          >
+            Open page
+          </button>
+        }
       </p>
     </div>
 

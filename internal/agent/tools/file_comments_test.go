@@ -157,6 +157,49 @@ func TestFileCommentsTool_Diagrams(t *testing.T) {
 	require.Contains(t, res.Error, "not a draw.io diagram")
 }
 
+func TestFileCommentsTool_WebPageElements(t *testing.T) {
+	userID := uuid.New()
+	store := &fakeAgentFileStore{userID: userID, rows: map[uuid.UUID]*models.FileAttachment{}}
+	page, _ := store.CreateFileAttachment(context.Background(), userID, models.FileAttachment{Name: "index.html", Folder: "site", FileType: "text/html"})
+	script, _ := store.CreateFileAttachment(context.Background(), userID, models.FileAttachment{Name: "app.js", Folder: "site", FileType: "text/javascript"})
+	notes, _ := store.CreateFileAttachment(context.Background(), userID, models.FileAttachment{Name: "notes.md", FileType: "text/markdown"})
+	mem := &memComments{files: store, text: map[uuid.UUID]string{
+		page.ID:   `<main><button id="signup">Sign up</button></main>`,
+		script.ID: `list.append(item("Second"))`,
+		notes.ID:  "notes",
+	}, threads: map[uuid.UUID][]models.FileCommentThread{}}
+	tool := &FileCommentsTool{files: store, comments: mem, logger: zap.NewNop(), now: time.Now}
+	chat := &models.Chat{ID: uuid.New(), UserID: userID, PersonalityName: "Iris"}
+
+	// On the page's element and its tag: both anchors, the page defaulting to the file.
+	res := runComments(t, tool, chat, map[string]any{"action": "add", "file": page.ID.String(), "selector": "#signup", "quote": `<button id="signup">`, "text": "Bigger?"})
+	require.Empty(t, res.Error)
+	th := mem.threads[page.ID][0]
+	require.Equal(t, &models.FileCommentElement{Page: page.ID.String(), Selector: "#signup"}, th.Element)
+	require.NotNil(t, th.Anchor)
+
+	// On an element a script made, kept with the script, on the page by its path.
+	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": "site/app.js", "page": "site/index.html", "selector": "main li:nth-of-type(2)", "quote": `item("Second")`, "text": "Typo?"})
+	require.Empty(t, res.Error)
+	require.Equal(t, page.ID.String(), mem.threads[script.ID][0].Element.Page)
+
+	// An element alone: list says it is on an element of the page.
+	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": page.ID.String(), "selector": "main", "text": "Spacing"})
+	require.Empty(t, res.Error)
+	res = runComments(t, tool, chat, map[string]any{"action": "list", "file": page.ID.String()})
+	require.Equal(t, `element "#signup" on the page site/index.html`, res.Threads[0].Where, "the page by its path, as the agent addresses files")
+	require.Equal(t, "an element of the page", res.Threads[1].On)
+
+	// A selector needs a web page.
+	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": notes.ID.String(), "selector": "h1", "text": "?"})
+	require.Contains(t, res.Error, "page must be an HTML file")
+	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": page.ID.String(), "page": "nowhere.html", "selector": "h1", "text": "?"})
+	require.Contains(t, res.Error, "page:")
+	// A selector is bounded, and says how to make a shorter one.
+	res = runComments(t, tool, chat, map[string]any{"action": "add", "file": page.ID.String(), "selector": strings.Repeat("div > ", 200) + "p", "text": "?"})
+	require.Contains(t, res.Error, "selector can be at most")
+}
+
 func TestCommentRefsFromCalls(t *testing.T) {
 	fileID := uuid.New()
 	out := func(thread, comment string) string {

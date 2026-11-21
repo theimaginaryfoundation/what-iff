@@ -2,16 +2,24 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FileAttachment } from '../../core/models/file-attachment.model';
 import { FolderFiles } from './folder-files.service';
-import { SiteProject } from './site-project';
+import { factoryPath } from './factory-sites';
+import { MAX_SERVED_BYTES, SiteProject } from './site-project';
 
-type Tree = Record<string, Record<string, { text: string; version?: number; type?: string }>>;
+type Tree = Record<string, Record<string, { text: string; version?: number; type?: string; size?: number }>>;
 
 /** A FolderFiles over an in-memory tree of folders, whose files can be changed between calls. */
 function folders(tree: Tree) {
   const file = (folder: string, name: string) => {
     const entry = tree[folder]?.[name];
     return entry
-      ? ({ id: `${folder}/${name}`, name, folder, file_type: entry.type ?? '', content_version: entry.version ?? 1 } as FileAttachment)
+      ? ({
+          id: `${folder}/${name}`,
+          name,
+          folder,
+          file_type: entry.type ?? '',
+          content_version: entry.version ?? 1,
+          size_bytes: entry.size,
+        } as FileAttachment)
       : undefined;
   };
   const fake = {
@@ -49,15 +57,25 @@ describe('SiteProject', () => {
     const tree: Tree = {
       site: {
         'package.json': { text: JSON.stringify({ dependencies: { preact: '10.19.0' } }) },
-        'main.js': { text: `import { h } from 'preact'; import './util.js';` },
+        'main.js': { text: `import { h } from 'preact'; import { useState } from 'preact/hooks'; import './util.js';` },
       },
     };
-    const unsaved = new Map([['index.html', `<script type="module">import { marked } from 'marked';</script><p>draft</p>`]]);
+    const unsaved = new Map([
+      ['index.html', { text: `<script type="module">import { marked } from 'marked';</script><p>draft</p>`, file: 'page-id' }],
+    ]);
     const project = new SiteProject(folders(tree), 'site', unsaved, parse);
-    expect(text((await project.get('main.js')).body)).toBe(`import { h } from 'https://esm.sh/preact@10.19.0'; import './util.js';`);
+    // The library's main entry is the wrapper that keeps where its factory was called (§5).
+    const wrapper = factoryPath('preact', 'https://esm.sh/preact@10.19.0');
+    expect(text((await project.get('main.js')).body)).toBe(
+      `import { h } from './${wrapper}'; import { useState } from 'https://esm.sh/preact@10.19.0/hooks'; import './util.js';`,
+    );
+    const served = text((await project.get(wrapper, 'script')).body);
+    expect(served).toContain(`export * from "https://esm.sh/preact@10.19.0";`);
     const page = text((await project.get('index.html')).body);
     expect(page).toContain(`import { marked } from 'https://esm.sh/marked';`);
-    expect(page).toContain('<p>draft</p>');
+    // Its elements carry their source ranges in the unsaved text, and our bridge comes first.
+    expect(page).toMatch(/<p data-wi-src="page-id:\d+-\d+">draft<\/p>/);
+    expect(page.indexOf('__whatiffBridge')).toBeLessThan(page.indexOf('marked'));
   });
 
   it('leaves bare imports to a page that brings its own import map', async () => {
@@ -70,8 +88,29 @@ describe('SiteProject', () => {
       },
     };
     const project = new SiteProject(folders(tree), 'site', new Map(), parse);
-    await project.get('index.html');
-    expect(text((await project.get('main.js')).body)).toBe(`import { h } from 'preact';`);
+    await project.get('index.html', 'iframe');
+    // Still through the wrapper, which imports `preact` as the page's map says.
+    const wrapper = factoryPath('preact', 'preact');
+    expect(text((await project.get('main.js')).body)).toBe(`import { h } from './${wrapper}';`);
+    expect(text((await project.get(wrapper, 'script')).body)).toContain(`export * from "preact";`);
+  });
+
+  it('gives each page its own budget of folders, and does not read an oversized package.json', async () => {
+    const tree: Tree = { site: { 'index.html': { text: '<p>x</p>' }, 'package.json': { text: '{}', size: 5 * 1024 * 1024 } } };
+    for (let i = 0; i < 205; i++) tree[`site/f${i}`] = { 'a.txt': { text: 'a' } };
+    const files = folders(tree);
+    const project = new SiteProject(files, 'site', new Map(), parse);
+    await project.get('index.html', 'document');
+    let found = 0;
+    for (let i = 0; i < 205; i++) if ((await project.get(`f${i}/a.txt`)).status === 200) found++;
+    expect(found).toBeLessThan(205); // the budget holds within a page
+    await project.get('index.html', 'document');
+    expect((await project.get('f204/a.txt')).status).toBe(200); // a new page starts a new one
+    // Bare imports still resolve (to the latest), without downloading a 5 MB package.json.
+    tree['site']['main.js'] = { text: `import { h } from 'preact/hooks';` };
+    const main = new TextDecoder().decode((await project.get('main.js')).body as ArrayBuffer);
+    expect(main).toContain('https://esm.sh/preact/hooks');
+    expect(files.download).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'package.json' }));
   });
 
   it('says it changed when a served file has a new version, or a missing one appears', async () => {
@@ -94,36 +133,115 @@ describe('SiteProject', () => {
 
   it('does not count the page being edited as changed elsewhere', async () => {
     const tree: Tree = { site: { 'index.html': { text: 'stored' } } };
-    const unsaved = new Map([['index.html', 'typed']]);
+    const unsaved = new Map([['index.html', { text: 'typed', file: 'page-id' }]]);
     const project = new SiteProject(folders(tree), 'site', unsaved, parse);
-    expect(text((await project.get('index.html')).body)).toBe('typed');
+    expect(text((await project.get('index.html')).body)).toContain('typed');
     tree['site']['index.html'] = { text: 'saved', version: 2 };
     expect(await project.changed()).toBe(false);
   });
 
   it('finds a conversation’s files at their workspace paths before the gallery’s, and sees them change', async () => {
     const tree: Tree = {
-      '': { 'styles.css': { text: 'gallery copy' } },
-      css: { 'app.css': { text: 'gallery app.css' } },
+      site: { 'styles.css': { text: 'gallery copy' } },
+      'site/css': { 'app.css': { text: 'gallery app.css' } },
     };
     let conversation = new Map<string, FileAttachment>([
-      ['styles.css', { id: 'chat-styles', name: 'styles.css', folder: '', content_version: 1 } as FileAttachment],
+      ['site/styles.css', { id: 'chat-styles', name: 'styles.css', folder: 'site', content_version: 1 } as FileAttachment],
     ]);
     const files = folders(tree);
     files.download.mockImplementation(
       async (f: FileAttachment) => new Blob([f.id === 'chat-styles' ? 'chat copy' : tree[f.folder ?? '']![f.name]!.text]),
     );
     const listed: boolean[] = [];
-    const project = new SiteProject(files, '', new Map(), parse, async fresh => (listed.push(fresh), conversation));
+    const project = new SiteProject(files, 'site', new Map(), parse, async fresh => (listed.push(fresh), conversation));
     expect(text((await project.get('styles.css')).body)).toBe('chat copy');
     // Not in the conversation: the gallery folder's.
     expect(text((await project.get('css/app.css')).body)).toBe('gallery app.css');
     expect(listed).toEqual([false, false]);
 
     expect(await project.changed()).toBe(false);
-    conversation = new Map([['styles.css', { id: 'chat-styles', name: 'styles.css', folder: '', content_version: 2 } as FileAttachment]]);
+    conversation = new Map([
+      ['site/styles.css', { id: 'chat-styles', name: 'styles.css', folder: 'site', content_version: 2 } as FileAttachment],
+    ]);
     expect(await project.changed()).toBe(true);
     // One fresh listing of the conversation per check, however many paths it serves.
     expect(listed.slice(2)).toEqual([true, true]);
+  });
+
+  it('serves a page at the top level with the top level’s own files only, and says why', async () => {
+    const tree: Tree = { '': { 'index.html': { text: '<p>' }, 'a.css': { text: 'a{}' } }, private: { 'notes.md': { text: 'secret' } } };
+    const files = folders(tree);
+    const project = new SiteProject(files, '', new Map(), parse);
+    expect(text((await project.get('a.css')).body)).toBe('a{}');
+    const refused = await project.get('private/notes.md');
+    expect(refused).toMatchObject({ status: 404 });
+    expect(refused.message).toContain('Put the project in a folder');
+    expect(files.list).not.toHaveBeenCalledWith('private', expect.anything());
+  });
+
+  it('answers from the gallery when the conversation’s files cannot be listed', async () => {
+    const project = new SiteProject(folders({ site: { 'a.css': { text: 'a{}' } } }), 'site', new Map(), parse, async () => {
+      throw new Error('500');
+    });
+    expect(text((await project.get('a.css')).body)).toBe('a{}');
+  });
+
+  it('refuses a file larger than the preview serves, before downloading it', async () => {
+    const files = folders({ site: { 'movie.mp4': { text: '', size: MAX_SERVED_BYTES + 1 } } });
+    expect(await new SiteProject(files, 'site', new Map(), parse).get('movie.mp4')).toMatchObject({ status: 413 });
+    expect(files.download).not.toHaveBeenCalled();
+  });
+
+  it('remembers what an import could have meant, so adding it reloads the page; other requests probe nothing', async () => {
+    const tree: Tree = { site: { 'index.html': { text: '<p>' } } };
+    const project = new SiteProject(folders(tree), 'site', new Map(), parse);
+    expect(await project.get('App', 'script')).toMatchObject({ status: 404 });
+    tree['site']!['App.tsx'] = { text: 'export {}' };
+    expect(await project.changed()).toBe(true);
+    // A link or an image without an extension is not a module import.
+    expect(await project.get('about', 'document')).toMatchObject({ status: 404 });
+  });
+
+  it('starts its record again for each page loaded, so a page’s picture names only what it loaded', async () => {
+    const tree: Tree = { site: { 'a.html': { text: '<p>' }, 'b.html': { text: '<p>' }, 'a.css': { text: '' } } };
+    const project = new SiteProject(folders(tree), 'site', new Map(), parse);
+    await project.get('a.html', 'iframe');
+    await project.get('a.css', 'style');
+    expect([...project.servedFiles().keys()]).toEqual(['a.html', 'a.css']);
+    await project.get('b.html', 'iframe');
+    expect([...project.servedFiles().keys()]).toEqual(['b.html']);
+  });
+
+  it('reads package.json from the conversation first, and reloads when it changes', async () => {
+    const tree: Tree = {
+      site: { 'package.json': { text: '{"dependencies": {"marked": "1.0.0"}}' }, 'a.js': { text: 'import "marked";' } },
+    };
+    const files = folders(tree);
+    let version = 1;
+    const pkg = () => ({ id: 'chat-pkg', name: 'package.json', folder: 'site', content_version: version }) as FileAttachment;
+    files.download.mockImplementation(
+      async (f: FileAttachment) =>
+        new Blob([f.id === 'chat-pkg' ? '{"dependencies": {"marked": "9.9.9"}}' : tree[f.folder ?? '']![f.name]!.text]),
+    );
+    const project = new SiteProject(files, 'site', new Map(), parse, async () => new Map([['site/package.json', pkg()]]));
+    expect(text((await project.get('a.js', 'script')).body)).toContain('https://esm.sh/marked@9.9.9');
+    version = 2;
+    expect(await project.changed()).toBe(true);
+  });
+
+  it('decides on an import map per page, by its parsed scripts', async () => {
+    const tree: Tree = {
+      site: {
+        'map.html': { text: '<!-- <script type="importmap"> --><script type="importmap">{"imports":{}}</script>' },
+        'plain.html': { text: '<!-- <script type="importmap"> --><p>' },
+        'a.js': { text: 'import "marked";' },
+      },
+    };
+    const project = new SiteProject(folders(tree), 'site', new Map(), parse);
+    await project.get('map.html', 'iframe');
+    expect(text((await project.get('a.js', 'script')).body)).toBe('import "marked";');
+    // A comment that looks like an import map is not one.
+    await project.get('plain.html', 'iframe');
+    expect(text((await project.get('a.js', 'script')).body)).toContain('esm.sh/marked');
   });
 });

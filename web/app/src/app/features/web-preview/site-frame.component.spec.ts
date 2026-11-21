@@ -57,15 +57,16 @@ describe('SiteFrameComponent', () => {
 
   it('frames the site with a key of its own and introduces itself once the site is ready', () => {
     const iframe = fixture.nativeElement.querySelector('iframe') as HTMLIFrameElement;
-    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads');
+    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin allow-forms allow-popups allow-downloads');
     expect(token()).toMatch(/^[A-Za-z0-9_-]{24}$/);
     ready();
     expect(initMessages).toHaveLength(1);
     expect(initMessages[0].message).toEqual({ type: 'whatiff-preview-init', entry: 'index.html' });
     expect(initMessages[0].origin).toBe(ORIGIN);
-    // Once only.
+    // Ready again: the host page reloaded (its old port is dead), so it is introduced again, on a new port.
     ready();
-    expect(initMessages).toHaveLength(1);
+    expect(initMessages).toHaveLength(2);
+    expect(initMessages[1].message).toEqual({ type: 'whatiff-preview-init', entry: 'index.html' });
   });
 
   it('ignores messages from another origin, another window or with another key', () => {
@@ -82,7 +83,7 @@ describe('SiteFrameComponent', () => {
     const port = initMessages[0].port;
     const reply = await ask(port, { type: 'get', id: 7, path: 'index.html' });
     expect(reply).toMatchObject({ type: 'file', id: 7, status: 200, contentType: 'text/html; charset=utf-8' });
-    expect(new TextDecoder().decode(reply['body'] as ArrayBuffer)).toBe('<h1>typed</h1>');
+    expect(new TextDecoder().decode(reply['body'] as ArrayBuffer)).toContain('>typed</h1>');
     expect(await ask(port, { type: 'get', id: 8, path: 'missing.css' })).toMatchObject({ type: 'file', id: 8, status: 404 });
   });
 

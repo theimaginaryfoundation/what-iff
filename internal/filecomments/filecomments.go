@@ -92,12 +92,17 @@ func onWholeFile(threads []models.FileCommentThread) bool {
 }
 
 // unread is the threads of a file whose content cannot be read as text (too large, not UTF-8):
-// on the whole file, or a diagram's on the elements they name, unchecked.
+// on the whole file, or a diagram's on the elements they name, unchecked. A thread on a page's
+// element keeps it: it needs no text (ADR 0x050 §5).
 func unread(file *models.FileAttachment, threads []models.FileCommentThread) []models.FileCommentThread {
 	if isDiagram(file) {
 		return OnCells(threads, "")
 	}
-	return onFile(threads)
+	out := onFile(threads)
+	for i := range out {
+		out[i].Element = cleanElement(threads[i].Element)
+	}
+	return out
 }
 
 // onFile puts every thread on the whole file: an image's threads (see isImage).
@@ -109,6 +114,7 @@ func onFile(threads []models.FileCommentThread) []models.FileCommentThread {
 		}
 		t.Anchor = nil
 		t.Cell = nil
+		t.Element = nil
 		t.Quote = ""
 		out[i] = t
 	}
@@ -324,8 +330,9 @@ func Place(threads []models.FileCommentThread, text string) []models.FileComment
 		if t.Comments == nil {
 			t.Comments = []models.FileComment{}
 		}
-		// Only a diagram's threads are on elements.
+		// Only a diagram's threads are on cells; a page's element is checked, not placed (ADR 0x050 §5).
 		t.Cell = nil
+		t.Element = cleanElement(t.Element)
 		if a := t.Anchor; a != nil {
 			if a.Start < 0 || a.End > len(units) || a.Start >= a.End {
 				t.Anchor = nil

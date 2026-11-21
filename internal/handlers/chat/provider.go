@@ -40,6 +40,8 @@ type Store interface {
 	// and says what it changed, so a send that fails can put it back (UndoFileEditGrant).
 	GrantFileEdit(ctx context.Context, userID, chatID, fileID uuid.UUID) (models.FileEditGrantChange, error)
 	UndoFileEditGrant(ctx context.Context, userID uuid.UUID, change models.FileEditGrantChange) error
+	// FolderFileIDs is the files of a page's project folder, which a comment on the page grants (ADR 0x050 §5).
+	FolderFileIDs(ctx context.Context, userID uuid.UUID, folder string, limit int) ([]uuid.UUID, error)
 	ListFileEditGrants(ctx context.Context, userID, chatID uuid.UUID) ([]models.FileEditGrant, error)
 	HasFileEditGrant(ctx context.Context, userID, chatID, fileID uuid.UUID) (bool, error)
 	RevokeFileEdit(ctx context.Context, userID, chatID, fileID uuid.UUID) error

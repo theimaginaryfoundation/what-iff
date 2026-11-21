@@ -25,6 +25,9 @@ Keeps the comments on text, code and image files (ADR 0x045) and draw.io diagram
   No baseline text is kept, since nothing is carried; a diagram that cannot be read (too large, compressed, not XML) leaves the threads' elements unchecked.
   **`CellOn`** is the element an agent's new thread names, its page read by `drawio.FindPage` (`ErrCellNotFound`; `drawio.ErrNoPage`; `ErrDiagramUnreadable` wrapping why, such as `drawio.ErrCompressed`, so the agent is told to save it again); `Current.Diagram` tells an `Update` it is a diagram.
   Only a diagram's threads are on elements: `Place` drops a `cell` sent for any other file.
+- **A web page's elements** (`element.go`, ADR 0x050 §5): a thread on a text file may also carry `element` (the page's file id, a CSS selector and a fingerprint), its element anchor beside its code anchor.
+  The page resolves it; the server only bounds it (`cleanElement`: a page id, a selector of at most 1000 characters, a short fingerprint) and keeps it as it is across edits, as it does not depend on the text.
+  Images and diagrams drop it, a file too large to read as text keeps it, and a thread moved to the whole file loses it.
 - **Refusals:** `ErrNotText` for content that is neither an image nor UTF-8 text, or text over `MaxTextBytes` (4 MB).
   A read of a file that stopped being such text returns its threads on the whole file, unstored, so they stay readable; a text file over the limit also takes writes of threads on the whole file (`errTextTooLarge`).
   A row with no key (from before keys were recorded) reads a missing or empty object as empty text, as it always did.

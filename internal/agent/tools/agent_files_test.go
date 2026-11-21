@@ -86,6 +86,16 @@ func (f *fakeAgentFileStore) GetFileAttachment(_ context.Context, userID, id uui
 	c := *r
 	return &c, nil
 }
+func (f *fakeAgentFileStore) FileAttachmentVersions(_ context.Context, userID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*models.FileAttachment, error) {
+	out := map[uuid.UUID]*models.FileAttachment{}
+	for _, id := range ids {
+		if r, ok := f.rows[id]; ok && userID == f.userID {
+			c := *r
+			out[id] = &c
+		}
+	}
+	return out, nil
+}
 func (f *fakeAgentFileStore) FindFileAttachmentsAtPath(_ context.Context, userID uuid.UUID, folder, name string) ([]*models.FileAttachment, error) {
 	var out []*models.FileAttachment
 	for _, id := range f.order {

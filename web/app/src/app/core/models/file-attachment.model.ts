@@ -34,6 +34,12 @@ export interface FileAttachment {
   updated_at?: string;
 }
 
+/** A file a page's picture was drawn from, at the version it had (ADR 0x050 §8). */
+export interface PreviewSource {
+  id: string;
+  content_version: number;
+}
+
 export interface FileAttachmentPersonalityRef {
   id: string;
   name: string;
@@ -99,7 +105,6 @@ export interface FileAttachmentFilters {
   max_date?: string;
 }
 
-
 export function isImageAttachment(attachment: Pick<FileAttachment, 'file_type'>): boolean {
   return attachment.file_type?.toLowerCase().startsWith('image/') ?? false;
 }
@@ -114,13 +119,7 @@ export function isPendingImageAttachment(item: PendingFileAttachment): boolean {
 
 /** Why a file is in a thread's context (`GET /chat/{id}/context-files`). Unknown values are shown as is. */
 export type ChatContextReason =
-  | 'attached_recent'
-  | 'attached_since_checkpoint'
-  | 'recalled'
-  | 'produced_this_turn'
-  | 'agent_written'
-  | 'skill_bundle'
-  | (string & {});
+  'attached_recent' | 'attached_since_checkpoint' | 'recalled' | 'produced_this_turn' | 'agent_written' | 'skill_bundle' | (string & {});
 
 /** One file in a thread's context (ADR 0x043 §4). */
 export interface ChatContextFile {

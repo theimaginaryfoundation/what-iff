@@ -19,12 +19,22 @@ describe('bare specifiers', () => {
 describe('packageVersions', () => {
   it('takes registry versions from dependencies over devDependencies, and nothing from a bad file', () => {
     const json = JSON.stringify({
-      dependencies: { preact: '^10.19.0', local: 'file:../x', git: 'github:a/b' },
+      dependencies: {
+        preact: '^10.19.0',
+        local: 'file:../x',
+        git: 'github:a/b',
+        short: 'user/repo',
+        react: '19.0.0-rc.1',
+        next: 'latest',
+        alias: 'npm:foo@1',
+      },
       devDependencies: { preact: '9.0.0', vitest: '~4.1.0' },
     });
     expect([...packageVersions(json)]).toEqual([
       ['preact', '^10.19.0'],
       ['vitest', '~4.1.0'],
+      ['react', '19.0.0-rc.1'],
+      ['next', 'latest'],
     ]);
     expect(packageVersions('{not json').size).toBe(0);
     expect(packageVersions(null).size).toBe(0);

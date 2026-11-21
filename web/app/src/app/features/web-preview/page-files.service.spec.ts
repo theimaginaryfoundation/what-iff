@@ -6,11 +6,11 @@ import { FileAttachment } from '../../core/models/file-attachment.model';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { FolderFiles } from './folder-files.service';
-import { PageFiles } from './page-files.service';
+import { MAX_PAGE_BYTES, PageFiles } from './page-files.service';
 
 const page = { id: 'page', name: 'index.html', folder: 'site', file_type: 'text/html' } as FileAttachment;
 
-function setup(contents: Record<string, string>) {
+function setup(contents: Record<string, string>, sizes: Record<string, number> = {}) {
   const folder = Object.keys(contents).map(
     (name, i) =>
       ({
@@ -20,6 +20,7 @@ function setup(contents: Record<string, string>) {
         file_type: name.endsWith('.png') ? 'image/png' : '',
         content_version: 1,
         created_at: `2026-11-0${i + 1}`,
+        size_bytes: sizes[name],
       }) as FileAttachment,
   );
   const gallery = { listImages: vi.fn(() => of({ results: folder, total_count: folder.length, page: 1 })) };
@@ -43,11 +44,24 @@ function decoded(url: string): { type: string; text: string } {
 describe('PageFiles', () => {
   afterEach(() => TestBed.resetTestingModule());
 
-  it('returns a page that names no file as it is, without a request', async () => {
+  it('builds a page that names no file without a request: its elements’ source ranges and our bridge only', async () => {
     const { pages, gallery } = setup({});
     const html = '<p>Hello</p><script>document.body.append("hi")</script>';
-    await expect(pages.build(page, html)).resolves.toEqual({ html, missing: [], skipped: [] });
+    const built = await pages.build(page, html);
+    expect(built).toMatchObject({ missing: [], skipped: [] });
+    // Its policy first, ahead of every script.
+    expect(built.html).toMatch(
+      /^<meta http-equiv="Content-Security-Policy" content="default-src 'none'; [^"]*"><script>\(function \(\) \{/,
+    );
+    expect(built.html).toContain('<p data-wi-src="page:0-3">Hello</p>');
     expect(gallery.listImages).not.toHaveBeenCalled();
+  });
+
+  it('never downloads a file larger than a lone page may load, by its size in the listing', async () => {
+    const { pages, files } = setup({ 'movie.mp4': '', 'a.css': 'p{}' }, { 'movie.mp4': MAX_PAGE_BYTES + 1 });
+    const built = await pages.build(page, '<link rel="stylesheet" href="a.css"><video src="movie.mp4"></video>');
+    expect(built.skipped).toEqual(['movie.mp4']);
+    expect(files.downloadFileAttachment.mock.calls.map(c => c[0])).toEqual(['f-a.css']);
   });
 
   it('loads the files a page names in its folder, stylesheets with their own files, and says what is missing', async () => {
@@ -63,7 +77,7 @@ describe('PageFiles', () => {
     expect(built.html).toContain('src="gone.png"');
     // data: URLs, as an opaque-origin frame may not load the app's blob: URLs.
     const doc = new DOMParser().parseFromString(built.html, 'text/html');
-    expect(decoded(doc.querySelector('script')!.getAttribute('src')!)).toEqual({ type: 'text/javascript', text: 'console.log(1)' });
+    expect(decoded(doc.querySelector('script[src]')!.getAttribute('src')!)).toEqual({ type: 'text/javascript', text: 'console.log(1)' });
     const styles = decoded(doc.querySelector('link')!.getAttribute('href')!);
     expect(styles.type).toBe('text/css');
     // The stylesheet points at its own import's and image's URLs.

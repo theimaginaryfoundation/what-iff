@@ -55,5 +55,11 @@ func (h *Handler) ListChatContextFiles(w http.ResponseWriter, r *http.Request) {
 	if files == nil {
 		files = []agent.ContextFile{}
 	}
-	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, ContextFilesResponse{Files: files, Container: h.agent.ContainerStatusForChat(r.Context(), chat, files)})
+	// container=0 leaves out the container's status, which asks the container service: a caller
+	// that only needs the files (a preview polling for changes, ADR 0x050 §6) asks often.
+	var container *agent.ContainerStatus
+	if r.URL.Query().Get("container") != "0" {
+		container = h.agent.ContainerStatusForChat(r.Context(), chat, files)
+	}
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, ContextFilesResponse{Files: files, Container: container})
 }

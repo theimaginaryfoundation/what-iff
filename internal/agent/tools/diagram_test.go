@@ -230,3 +230,62 @@ func TestDiagram_ListOnePageKeepsItsNumber(t *testing.T) {
 	}
 	requireRefused(t, callJSON(t, tool.Run, chat, map[string]any{"action": "list", "file": "two.drawio", "page": "3"}), `the pages are "Flow", "Later"`)
 }
+
+func TestAgentFileRead_ShowsAWebPagesPicture(t *testing.T) {
+	fx, _ := newDiagramFixture()
+	chat := fx.chat(uuid.New())
+	page := fx.userUpload("site", "index.html", "<h1>Hi</h1>\n<p>Second line</p>")
+	read := func(args string) (map[string]any, []ResultImage) {
+		ctx, shown := WithResultImages(appTurn)
+		out, err := fx.tool.Read(ctx, chat, []byte(args))
+		require.NoError(t, err)
+		var res map[string]any
+		require.NoError(t, json.Unmarshal([]byte(out), &res))
+		return res, shown.Images()
+	}
+
+	res, images := read(`{"action":"read","file":"site/index.html"}`)
+	require.Contains(t, res["preview"], "No picture of this version of the page yet")
+	require.Contains(t, res["preview"], "ask the user to open it")
+	require.Empty(t, images)
+
+	var pic bytes.Buffer
+	require.NoError(t, png.Encode(&pic, image.NewRGBA(image.Rect(0, 0, 8, 6))))
+	require.NoError(t, storage.PutPreview(context.Background(), nil, fx.objects, page.S3Key, pic.Bytes(), nil))
+	res, images = read(`{"action":"read","file":"site/index.html"}`)
+	require.Contains(t, res["preview"], "as the user's browser drew this version")
+	require.Equal(t, []ResultImage{{Data: pic.Bytes(), MediaType: "image/png"}}, images)
+
+	// Drawn with the files the page loads (ADR 0x050 §8): current while they are, then out of date,
+	// naming what changed, once one has a new version or is gone.
+	css := fx.userUpload("site/css", "app.css", "h1{}")
+	js := fx.userUpload("site", "app.js", "")
+	fx.store.rows[css.ID].ContentVersion, fx.store.rows[js.ID].ContentVersion = 2, 1
+	require.NoError(t, storage.PutPreviewSources(context.Background(), fx.objects, page.S3Key, pic.Bytes(), []storage.PreviewSource{{ID: css.ID, ContentVersion: 2}, {ID: js.ID, ContentVersion: 1}}))
+	res, _ = read(`{"action":"read","file":"site/index.html"}`)
+	require.Contains(t, res["preview"], "with the current version of every file it loads")
+	fx.store.rows[css.ID].ContentVersion = 3
+	delete(fx.store.rows, js.ID)
+	res, images = read(`{"action":"read","file":"site/index.html"}`)
+	require.Contains(t, res["preview"], "OUT OF DATE")
+	require.Contains(t, res["preview"], "site/css/app.css changed and 1 file(s) it loaded were deleted")
+	require.Contains(t, res["preview"], "ask the user to open it")
+	require.Len(t, images, 1, "the old picture is still shown, marked as such")
+
+	// Sources stored with another picture (two browsers storing at once) are not this one's.
+	other := append([]byte(nil), pic.Bytes()...)
+	other = append(other, 0)
+	require.NoError(t, storage.PutPreviewSources(context.Background(), fx.objects, page.S3Key, other, []storage.PreviewSource{{ID: css.ID, ContentVersion: 1}}))
+	res, _ = read(`{"action":"read","file":"site/index.html"}`)
+	require.Contains(t, res["preview"], "as the user's browser drew this version", "judged by its own file alone")
+
+	// A search of a heading is not a read of the page: no picture again.
+	res, images = read(`{"action":"search","file":"site/index.html","heading":"Hi"}`)
+	require.Nil(t, res["preview"])
+	require.Empty(t, images)
+
+	// Once per read: not with a later stretch of the file, and never for other files.
+	res, images = read(`{"action":"read","file":"site/index.html","start_line":2}`)
+	require.Nil(t, res["preview"])
+	require.Empty(t, images)
+}

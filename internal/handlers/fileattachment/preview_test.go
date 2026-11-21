@@ -2,6 +2,7 @@ package fileattachment
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"image"
 	"image/png"
@@ -13,8 +14,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
+	"go.uber.org/zap"
 )
 
 func previewRequest(t *testing.T, h *Handler, method, url string, body []byte) *httptest.ResponseRecorder {
@@ -59,6 +62,56 @@ func TestPutFilePreview_StoresThePictureAndAThumbnailBesideTheObject(t *testing.
 	rr = previewRequest(t, h, http.MethodGet, "/file-attachment/"+row.ID.String()+"/preview?size=thumbnail", nil)
 	require.Equal(t, http.StatusOK, rr.Code)
 	require.Equal(t, "image/jpeg", rr.Header().Get("Content-Type"))
+}
+
+func TestPutFilePreview_AWebPageTakesOne(t *testing.T) {
+	row := &models.FileAttachment{ID: uuid.New(), Name: "index.html", FileType: "text/html", S3Key: "users/u/files/index.html", ContentVersion: 2}
+	h, files := contentHandler(row, true)
+	pic := pngOf(t, 64, 40)
+	rr := previewRequest(t, h, http.MethodPut, "/file-attachment/"+row.ID.String()+"/preview?version=2", pic)
+	require.Equal(t, http.StatusNoContent, rr.Code, rr.Body.String())
+	require.Equal(t, pic, files.uploaded[storage.FileKeyForPreview(row.S3Key)])
+}
+
+// TestFilePreview_APagesPictureIsNotCurrentOnceAFileItLoadedChanged: a page's picture keeps the
+// files it was drawn from (ADR 0x050 §8), and asking for a current one says there is none once one
+// of them has a new version or is gone, as when an agent changed the page's stylesheet.
+func TestFilePreview_APagesPictureIsNotCurrentOnceAFileItLoadedChanged(t *testing.T) {
+	page := &models.FileAttachment{ID: uuid.New(), Name: "index.html", FileType: "text/html", S3Key: "users/u/files/index.html", ContentVersion: 2}
+	css := &models.FileAttachment{ID: uuid.New(), Name: "app.css", Folder: "site/css", ContentVersion: 4}
+	js := &models.FileAttachment{ID: uuid.New(), Name: "app.js", Folder: "site", ContentVersion: 1}
+	rows := map[uuid.UUID]*models.FileAttachment{page.ID: page, css.ID: css, js.ID: js}
+	files := &stubFileStore{contentByKey: map[string][]byte{}}
+	h := &Handler{ds: stubStore{getFn: func(_ context.Context, _, id uuid.UUID) (*models.FileAttachment, error) {
+		if r, ok := rows[id]; ok {
+			cp := *r
+			return &cp, nil
+		}
+		return nil, datastore.ErrFileAttachmentNotFound
+	}}, logger: zap.NewNop(), agent: &stubAgent{store: files}}
+	url := "/file-attachment/" + page.ID.String() + "/preview"
+
+	rr := previewRequest(t, h, http.MethodPut, url+"?version=2&sources="+css.ID.String()+":4,"+js.ID.String()+":1", pngOf(t, 8, 8))
+	require.Equal(t, http.StatusNoContent, rr.Code, rr.Body.String())
+	files.contentByKey = files.uploaded
+
+	require.Equal(t, http.StatusOK, previewRequest(t, h, http.MethodGet, url+"?size=thumbnail&current=1", nil).Code)
+	css.ContentVersion = 5
+	require.Equal(t, http.StatusNotFound, previewRequest(t, h, http.MethodGet, url+"?size=thumbnail&current=1", nil).Code)
+	// The gallery still shows the picture it has.
+	require.Equal(t, http.StatusOK, previewRequest(t, h, http.MethodGet, url+"?size=thumbnail", nil).Code)
+	css.ContentVersion = 4
+	delete(rows, js.ID)
+	require.Equal(t, http.StatusNotFound, previewRequest(t, h, http.MethodGet, url+"?current=1", nil).Code)
+
+	// A new picture without sources replaces them.
+	rr = previewRequest(t, h, http.MethodPut, url+"?version=2", pngOf(t, 8, 8))
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	files.contentByKey = files.uploaded
+	require.Equal(t, http.StatusOK, previewRequest(t, h, http.MethodGet, url+"?current=1", nil).Code)
+
+	rr = previewRequest(t, h, http.MethodPut, url+"?version=2&sources=nope", pngOf(t, 8, 8))
+	require.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestPutFilePreview_RefusesAnOldVersionNonDiagramsAndNonPNGs(t *testing.T) {

@@ -22,6 +22,7 @@ import (
 func boolPtr(b bool) *bool { return &b }
 
 type fakeStore struct {
+	folderFiles               map[string][]uuid.UUID
 	getChatFn                 func(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error)
 	getChatContextFn          func(ctx context.Context, userID, chatID uuid.UUID) (*models.ChatContext, error)
 	updateScratchpadFn        func(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
@@ -126,6 +127,13 @@ func (f *fakeStore) UndoFileEditGrant(ctx context.Context, userID uuid.UUID, cha
 		return f.RevokeFileEdit(ctx, userID, change.ChatID, change.FileID)
 	}
 	return nil
+}
+func (f *fakeStore) FolderFileIDs(_ context.Context, _ uuid.UUID, folder string, limit int) ([]uuid.UUID, error) {
+	ids := f.folderFiles[folder]
+	if len(ids) > limit+1 {
+		ids = ids[:limit+1]
+	}
+	return ids, nil
 }
 func (f *fakeStore) ListFileEditGrants(_ context.Context, _, chatID uuid.UUID) ([]models.FileEditGrant, error) {
 	var out []models.FileEditGrant

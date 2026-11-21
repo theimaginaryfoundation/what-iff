@@ -32,11 +32,14 @@
     <!--
       The user's page, served by the site's service worker. Same origin as this page, as a worker
       controls only same-origin documents; this origin holds nothing of the app's (ADR 0x050 §3).
+      Being same-origin, the page can reach this page and its port to the app, so nothing here
+      trusts it: the app checks every answer it is asked for. No modal dialogs: a page could lock
+      the app's tab with an endless alert().
     -->
     <iframe
       id="page"
       title="Page"
-      sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
     ></iframe>
     <script src="config.js"></script>
     <script src="host.js"></script>

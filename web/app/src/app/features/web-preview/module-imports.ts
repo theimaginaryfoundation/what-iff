@@ -39,8 +39,9 @@ export function packageVersions(packageJson: string | null): Map<string, string>
     const parsed = JSON.parse(packageJson) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> };
     for (const deps of [parsed.devDependencies, parsed.dependencies]) {
       for (const [name, version] of Object.entries(deps ?? {})) {
-        // Only registry versions: a file:, git or workspace dependency has no CDN equivalent.
-        if (typeof version === 'string' && /^[\^~<>=*\dxX.\s|-]+$/.test(version.trim())) versions.set(name, version.trim());
+        // Registry versions, ranges and tags (`19.0.0-rc.1`, `^5.0.0 || ^6`, `latest`): a file:, git,
+        // workspace or URL dependency (a ':' or a '/') has no CDN equivalent.
+        if (typeof version === 'string' && /^[\w^~<>=*.\s|+-]+$/.test(version.trim())) versions.set(name, version.trim());
       }
     }
   } catch {

@@ -896,3 +896,24 @@ func listingUnderSkillsFolder(filters models.FileAttachmentFilters) bool {
 	}
 	return filters.FolderPrefix != nil && models.IsReservedFolder(*filters.FolderPrefix)
 }
+
+// FileAttachmentVersions are the user's files among ids, with only their id, name, folder and
+// content version: what a check of many files' versions needs (a page picture's sources, ADR 0x050
+// §8), in one query. An id that is not one of the user's files is absent from the result.
+func (d *Datastore) FileAttachmentVersions(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*models.FileAttachment, error) {
+	out := make(map[uuid.UUID]*models.FileAttachment, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := d.dbClient.FileAttachment.Query().
+		Where(entfileattachment.IDIn(ids...), entfileattachment.HasOwnerWith(user.ID(userID))).
+		Select(entfileattachment.FieldID, entfileattachment.FieldName, entfileattachment.FieldFolder, entfileattachment.FieldContentVersion).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.ID] = &models.FileAttachment{ID: r.ID, Name: r.Name, Folder: r.Folder, ContentVersion: r.ContentVersion}
+	}
+	return out, nil
+}

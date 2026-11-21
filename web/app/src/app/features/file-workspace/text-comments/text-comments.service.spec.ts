@@ -134,4 +134,22 @@ describe('TextCommentsService', () => {
     req.flush({ content_version: 3, revision: 3, threads: [] });
     expect((await got).revision).toBe(3);
   });
+
+  it('reads and writes a thread on a web page’s element (ADR 0x050 §5)', async () => {
+    const element = { page: 'page-1', selector: '#title', fingerprint: { tag: 'h1', text: 'Hello', attrs: { id: 'title' } } };
+    const read = firstValueFrom(service.get('f1'));
+    http.expectOne(url).flush({
+      content_version: 1,
+      revision: 1,
+      threads: [{ id: 't1', anchor: null, element, quote: 'h1', resolved: false, comments: [] }],
+    });
+    const thread = (await read).threads[0];
+    expect(thread.element).toEqual(element);
+
+    const write = firstValueFrom(service.put('f1', [thread], 1, 1));
+    const req = http.expectOne({ method: 'PUT', url });
+    expect(req.request.body.threads[0].element).toEqual(element);
+    req.flush({ content_version: 1, revision: 2, threads: [] });
+    await write;
+  });
 });

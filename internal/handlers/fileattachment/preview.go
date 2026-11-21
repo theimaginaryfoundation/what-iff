@@ -2,6 +2,7 @@ package fileattachment
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"image/png"
@@ -13,16 +14,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
-	"github.com/theimaginaryfoundation/what-iff/internal/drawio"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
+	"go.uber.org/zap"
 )
 
-// Previews (ADR 0x049 §8): a picture of a file the server cannot draw, a draw.io diagram, sent by
-// the browser that drew it and kept beside the stored object it shows (storage.FileKeyForPreview).
+// Previews (ADR 0x049 §8, ADR 0x050): a picture of a file the server cannot draw, a draw.io diagram
+// or a web page, sent by the browser that drew it and kept beside the stored object it shows
+// (storage.FileKeyForPreview).
 
 const (
 	// maxPreviewBytes caps an uploaded preview.
@@ -36,14 +38,14 @@ const (
 
 // PutFilePreview handles PUT /file-attachment/{id}/preview?version=N: the body is a PNG of the file
 // as it is at content_version N, stored with a JPEG thumbnail. A version that is no longer the
-// file's is a 409 whose details say the current one. Only diagrams take a preview.
+// file's is a 409 whose details say the current one. Only diagrams and web pages take a preview.
 func (h *Handler) PutFilePreview(w http.ResponseWriter, r *http.Request) {
 	userID, att, ok := h.previewFile(w, r)
 	if !ok {
 		return
 	}
-	if !drawio.IsDiagramFile(att.Name, att.FileType) {
-		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Only diagrams have a preview", nil)
+	if !storage.TakesPreview(att.Name, att.FileType) {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Only diagrams and web pages have a preview", nil)
 		return
 	}
 	version, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("version")))
@@ -53,6 +55,12 @@ func (h *Handler) PutFilePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	if version != att.ContentVersion {
 		h.previewConflict(w, att.ContentVersion)
+		return
+	}
+	// The other files a page's picture shows, at the versions it shows them (ADR 0x050 §8).
+	sources, err := storage.ParsePreviewSources(r.URL.Query().Get("sources"))
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "sources must be id:version pairs separated by commas", err)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxPreviewBytes)
@@ -87,6 +95,10 @@ func (h *Handler) PutFilePreview(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to store the preview", err)
 		return
 	}
+	if err := storage.PutPreviewSources(r.Context(), store, object, body, sources); err != nil {
+		// The picture stands; without its sources it is checked by its own file alone.
+		h.logger.Warn("preview: sources upload failed", zap.Error(err))
+	}
 	// A save that landed meanwhile moved the file to a new object: this picture is of the old one,
 	// which the save releases, so it is dropped now rather than left for that.
 	if cur, err := h.ds.GetFileAttachment(r.Context(), userID, att.ID); err == nil && cur.S3Key != object {
@@ -105,7 +117,7 @@ func (h *Handler) PutFilePreview(w http.ResponseWriter, r *http.Request) {
 // and a current copy is answered 304 from the tag alone, without downloading the picture. A
 // preview stored without a tag is downloaded and hashed instead.
 func (h *Handler) GetFilePreview(w http.ResponseWriter, r *http.Request) {
-	_, att, ok := h.previewFile(w, r)
+	userID, att, ok := h.previewFile(w, r)
 	if !ok {
 		return
 	}
@@ -122,6 +134,10 @@ func (h *Handler) GetFilePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	store := h.agent.FileStore()
 	if store == nil || att.S3Key == "" {
+		h.noPreview(w)
+		return
+	}
+	if r.URL.Query().Get("current") == "1" && h.previewIsStale(r.Context(), userID, store, att) {
 		h.noPreview(w)
 		return
 	}
@@ -149,6 +165,18 @@ func (h *Handler) GetFilePreview(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+// previewIsStale reports whether a file the preview was drawn from has changed since (ADR 0x050 §8).
+// A preview whose sources cannot be read is taken as it is.
+func (h *Handler) previewIsStale(ctx context.Context, userID uuid.UUID, store storage.FileStore, att *models.FileAttachment) bool {
+	sources, err := storage.PreviewSources(ctx, store, att.S3Key)
+	if err != nil || len(sources) == 0 {
+		return false
+	}
+	return storage.ComparePreviewSources(ctx, sources, func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*models.FileAttachment, error) {
+		return h.ds.FileAttachmentVersions(ctx, userID, ids)
+	}).Stale()
 }
 
 // notModified sets the preview's ETag and caching, and answers 304 when the caller's copy is it.

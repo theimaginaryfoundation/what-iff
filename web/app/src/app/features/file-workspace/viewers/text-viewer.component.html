@@ -20,20 +20,32 @@
       @if (showsComments()) {
         <span class="text-viewer__comment-tools">
           @if (canComment()) {
-            <button
-              type="button"
-              class="text-viewer__comment-tool"
-              title="Comment on the selected text or the word at the cursor"
-              (mousedown)="$event.preventDefault()"
-              (click)="startComment()"
-            >
-              Comment
-            </button>
+            @if (showRendered() && isHtml()) {
+              <button
+                type="button"
+                class="text-viewer__comment-tool"
+                title="Pick an element of the page to comment on (Esc to stop)"
+                [attr.aria-pressed]="pageComments.picking()"
+                (click)="startComment()"
+              >
+                {{ pageComments.picking() ? "Picking… (Esc)" : "Comment" }}
+              </button>
+            } @else {
+              <button
+                type="button"
+                class="text-viewer__comment-tool"
+                title="Comment on the selected text or the word at the cursor"
+                (mousedown)="$event.preventDefault()"
+                (click)="startComment()"
+              >
+                Comment
+              </button>
+            }
           }
           <button type="button" class="text-viewer__comment-tool" [attr.aria-pressed]="commentsOpen()" (click)="toggleComments()">
             Comments
-            @if (comments.openCount()) {
-              <span class="text-viewer__count">{{ comments.openCount() }}</span>
+            @if (openCount()) {
+              <span class="text-viewer__count">{{ openCount() }}</span>
             }
           </button>
         </span>
@@ -52,7 +64,13 @@
     <div class="text-viewer__main">
       <div class="text-viewer__body" [class.text-viewer__body--page]="showRendered() && isHtml()">
         @if (showRendered() && isHtml()) {
-          <app-html-preview class="text-viewer__page" [file]="file()" [html]="text()" />
+          <app-html-preview
+            class="text-viewer__page"
+            [file]="file()"
+            [html]="text()"
+            (pageMessage)="onPageMessage($event)"
+            (scriptServed)="pageComments.scriptsChanged()"
+          />
         } @else if (showRendered() && asMarkdown()) {
           <markdown
             class="text-viewer__markdown prose prose-sm max-w-none dark:prose-invert"
@@ -107,22 +125,26 @@
       @if (commentsOpen()) {
         <app-comments-panel
           class="text-viewer__comments"
-          [threads]="comments.shown()"
-          [activeId]="comments.activeId()"
-          [draftQuote]="comments.draft()?.quote"
+          [threads]="pageMode() ? pageComments.shown() : comments.shown()"
+          [activeId]="pageMode() ? pageComments.activeId() : comments.activeId()"
+          [draftQuote]="pageMode() ? pageComments.draftQuote() : comments.draft()?.quote"
           [me]="me()"
-          [people]="comments.people()"
+          [people]="pageMode() ? pageComments.people() : comments.people()"
           [readOnly]="!canComment()"
-          [saveStatus]="comments.status()"
+          [saveStatus]="pageMode() ? pageComments.status() : comments.status()"
           [replyRequest]="replyRequest()"
-          emptyHint="Select text, or put the cursor in a word, and choose Comment to start a thread."
+          [emptyHint]="
+            showRendered() && isHtml()
+              ? 'Choose Comment, then click an element of the page to start a thread on it.'
+              : 'Select text, or put the cursor in a word, and choose Comment to start a thread.'
+          "
           (select)="selectThread($event)"
-          (create)="comments.create($event)"
-          (cancelDraft)="comments.cancelDraft()"
-          (reply)="comments.reply($event)"
-          (edit)="comments.edit($event)"
-          (remove)="comments.remove($event)"
-          (resolve)="comments.resolve($event)"
+          (create)="pageMode() ? pageComments.create($event) : comments.create($event)"
+          (cancelDraft)="pageMode() ? pageComments.cancelDraft() : comments.cancelDraft()"
+          (reply)="pageMode() ? pageComments.reply($event) : comments.reply($event)"
+          (edit)="pageMode() ? pageComments.edit($event) : comments.edit($event)"
+          (remove)="pageMode() ? pageComments.remove($event) : comments.remove($event)"
+          (resolve)="pageMode() ? pageComments.resolve($event) : comments.resolve($event)"
           (closed)="closeComments()"
         />
       }

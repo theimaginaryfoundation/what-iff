@@ -6,6 +6,17 @@
       </button>
     }
     <span class="code-editor__end">
+      @if (canStartComment() && isHtml() && showPreview()) {
+        <button
+          type="button"
+          class="code-editor__toggle"
+          title="Pick an element of the page to comment on (Esc to stop)"
+          [attr.aria-pressed]="pageComments.picking()"
+          (click)="pageComments.togglePick()"
+        >
+          {{ pageComments.picking() ? "Picking… (Esc)" : "Pick on page" }}
+        </button>
+      }
       @if (canStartComment()) {
         <button
           type="button"
@@ -24,8 +35,8 @@
         (click)="toggleComments()"
       >
         Comments
-        @if (comments.openCount()) {
-          <span class="code-editor__count">{{ comments.openCount() }}</span>
+        @if (openCount()) {
+          <span class="code-editor__count">{{ openCount() }}</span>
         }
       </button>
     </span>
@@ -41,7 +52,13 @@
     </div>
     @if (isHtml() && showPreview()) {
       <div class="code-editor__pane code-editor__preview code-editor__preview--page" aria-label="Preview">
-        <app-html-preview class="code-editor__page" [file]="file()" [html]="previewText()" />
+        <app-html-preview
+          class="code-editor__page"
+          [file]="file()"
+          [html]="previewText()"
+          (pageMessage)="onPageMessage($event)"
+          (scriptServed)="pageComments.scriptsChanged()"
+        />
       </div>
     } @else if (isMarkdown() && showPreview()) {
       <div class="code-editor__pane code-editor__preview" aria-label="Preview">
@@ -56,20 +73,20 @@
     @if (commentsOpen() && state() === "ready") {
       <app-comments-panel
         class="code-editor__comments"
-        [threads]="comments.shown()"
-        [activeId]="comments.activeId()"
-        [draftQuote]="comments.draft()?.quote"
+        [threads]="isHtml() ? pageComments.shown() : comments.shown()"
+        [activeId]="isHtml() ? pageComments.activeId() : comments.activeId()"
+        [draftQuote]="isHtml() ? pageComments.draftQuote() : comments.draft()?.quote"
         [me]="me()"
-        [people]="comments.people()"
+        [people]="isHtml() ? pageComments.people() : comments.people()"
         [replyRequest]="replyRequest()"
         emptyHint="Select text, or put the cursor in a word, and choose Comment to start a thread."
         (select)="selectThread($event)"
-        (create)="comments.create($event)"
-        (cancelDraft)="comments.cancelDraft()"
-        (reply)="comments.reply($event)"
-        (edit)="comments.edit($event)"
-        (remove)="comments.remove($event)"
-        (resolve)="comments.resolve($event)"
+        (create)="isHtml() ? pageComments.create($event) : comments.create($event)"
+        (cancelDraft)="isHtml() ? pageComments.cancelDraft() : comments.cancelDraft()"
+        (reply)="isHtml() ? pageComments.reply($event) : comments.reply($event)"
+        (edit)="isHtml() ? pageComments.edit($event) : comments.edit($event)"
+        (remove)="isHtml() ? pageComments.remove($event) : comments.remove($event)"
+        (resolve)="isHtml() ? pageComments.resolve($event) : comments.resolve($event)"
         (closed)="closeComments()"
       />
     }

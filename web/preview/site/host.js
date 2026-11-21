@@ -6,8 +6,9 @@
  *
  * Messages from the app:   { type: 'file', id, status, contentType?, body?, message? }  (an answer)
  *                          { type: 'reload' } | { type: 'navigate', entry }
- * Messages to the app:     { type: 'ready' } | { type: 'get', id, path } | { type: 'loaded', path }
- *                          | { type: 'failed', message }
+ *                          { type: 'bridge', data }  (for the page's bridge script, ADR 0x050 §5)
+ * Messages to the app:     { type: 'ready' } | { type: 'get', id, path, destination } | { type: 'loaded', path }
+ *                          | { type: 'failed', message } | { type: 'bridge', data }  (from the bridge)
  */
 'use strict';
 
@@ -21,8 +22,9 @@
   let entry = null;
   let workerReady = false;
   let nextId = 1;
-  /** Requests from the worker waiting for the app, by id. */
+  /** Requests from the worker waiting for the app, by id; dropped once the worker has stopped waiting. */
   const pending = new Map();
+  const PENDING_MS = 65000;
 
   function say(text) {
     status.textContent = text;
@@ -38,13 +40,20 @@
     return;
   }
 
-  // Nothing carries over between previews: each starts with the origin's storage empty, as the page
-  // it shows may be another project's.
+  // Nothing a page stored carries over to the next preview opened: each starts with the origin's
+  // storage empty, as the page it shows may be another project's. The origin is one for every
+  // project, so this also empties the storage of a preview open in another tab at the same time.
   try {
     localStorage.clear();
     sessionStorage.clear();
   } catch {
     // Storage may be blocked; the page then simply has none.
+  }
+  if (self.indexedDB && indexedDB.databases) {
+    indexedDB.databases().then(dbs => dbs.forEach(db => db.name && indexedDB.deleteDatabase(db.name)), () => undefined);
+  }
+  if (self.caches) {
+    caches.keys().then(keys => keys.forEach(key => caches.delete(key)), () => undefined);
   }
 
   navigator.serviceWorker.onmessage = event => {
@@ -56,11 +65,16 @@
       return;
     }
     const id = nextId++;
-    pending.set(id, reply);
-    app.postMessage({ type: 'get', id, path: data.path });
+    pending.set(id, { reply, timer: setTimeout(() => pending.delete(id), PENDING_MS) });
+    app.postMessage({ type: 'get', id, path: data.path, destination: data.destination || '' });
   };
 
   window.addEventListener('message', event => {
+    // The page's bridge script, relayed to the app as it is.
+    if (event.source === frame.contentWindow && event.origin === location.origin) {
+      if (app && event.data && event.data.wiBridge) app.postMessage({ type: 'bridge', data: event.data.wiBridge });
+      return;
+    }
     if (event.source !== window.parent || !originAllowed(event.origin)) return;
     const data = event.data || {};
     if (data.type !== 'whatiff-preview-init' || app || !event.ports || !event.ports[0]) return;
@@ -77,13 +91,21 @@
   function fromApp(event) {
     const data = event.data || {};
     if (data.type === 'file') {
-      const reply = pending.get(data.id);
-      if (!reply) return;
+      const waiting = pending.get(data.id);
+      if (!waiting) return;
       pending.delete(data.id);
+      clearTimeout(waiting.timer);
+      const reply = waiting.reply;
       const body = data.body instanceof ArrayBuffer ? data.body : null;
-      reply.postMessage({ status: data.status, contentType: data.contentType, body, message: data.message }, body ? [body] : []);
+      reply.postMessage({ status: data.status, contentType: data.contentType, body, message: data.message, location: data.location }, body ? [body] : []);
     } else if (data.type === 'reload') {
       reload();
+    } else if (data.type === 'bridge' && data.data) {
+      try {
+        frame.contentWindow.postMessage({ wiApp: data.data }, location.origin);
+      } catch {
+        // A page that navigated off the site has no bridge of ours.
+      }
     } else if (data.type === 'navigate' && typeof data.entry === 'string') {
       entry = data.entry;
       start();

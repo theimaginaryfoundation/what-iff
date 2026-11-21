@@ -8979,6 +8979,16 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: container
+          in: query
+          required: false
+          description: >-
+            `0` leaves out `container` (the thread's container status), which asks the container
+            service; for a caller that only needs the files and asks often, as a preview polling
+            for changes does (ADR 0x050 §6).
+          schema:
+            type: string
+            enum: ['0']
       responses:
         '200':
           description: The thread's files
@@ -9378,10 +9388,10 @@ paths:
                 $ref: '#/components/schemas/Error'
   /file-attachment/{id}/preview:
     get:
-      summary: Get a diagram's preview
+      summary: Get a diagram's or web page's preview
       description: >-
-        A picture of the file as it is now (ADR 0x049 §8): the PNG the browser drew of a draw.io
-        diagram, or its JPEG thumbnail (`size=thumbnail`). 404 when there is none of the current
+        A picture of the file as it is now (ADR 0x049 §8, ADR 0x050 §8): the PNG the browser drew
+        of a draw.io diagram or an HTML page, or its JPEG thumbnail (`size=thumbnail`). 404 when there is none of the current
         version: every save leaves the file without one until it is drawn again. The ETag changes
         whenever the picture is replaced, also at the same content_version; send it back as
         If-None-Match for a 304.
@@ -9400,6 +9410,15 @@ paths:
           schema:
             type: string
             enum: [full, thumbnail]
+        - name: current
+          in: query
+          required: false
+          description: >-
+            `1`: answer 404 also when a file a web page's picture was drawn from (its `sources`)
+            has changed or been deleted since, so the caller draws a new one (ADR 0x050 §8).
+          schema:
+            type: string
+            enum: ['1']
       responses:
         '200':
           description: The preview
@@ -9427,11 +9446,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     put:
-      summary: Store a diagram's preview
+      summary: Store a diagram's or web page's preview
       description: >-
-        Stores a PNG of a draw.io diagram as it is at `version` (its content_version), with a
-        thumbnail, beside the stored file (ADR 0x049 §8). The browser that drew the diagram sends
-        it, after opening or saving it. At most 8 MB, 4096 pixels a side and 8 megapixels
+        Stores a PNG of a draw.io diagram or an HTML page as it is at `version` (its
+        content_version), with a thumbnail, beside the stored file (ADR 0x049 §8, ADR 0x050 §8).
+        The browser that drew it sends it: a diagram after opening or saving it, a page once it
+        has been shown and settled. At most 8 MB, 4096 pixels a side and 8 megapixels
         (8,388,608 pixels).
       tags: [File Attachments]
       parameters:
@@ -9448,6 +9468,15 @@ paths:
           schema:
             type: integer
             minimum: 1
+        - name: sources
+          in: query
+          required: false
+          description: >-
+            For a web page: the other files the picture shows (its stylesheets, scripts, images),
+            as `id:content_version` pairs separated by commas, at most 100 kept. A later read with
+            `current=1` says there is no current picture once one of them changed.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -9459,7 +9488,7 @@ paths:
         '204':
           description: Stored
         '400':
-          description: Not a diagram, no version, or not a PNG of an allowed size
+          description: Not a diagram or web page, no version, or not a PNG of an allowed size
           content:
             application/json:
               schema:
@@ -12891,6 +12920,40 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FileCommentMention'
+    FileCommentElement:
+      type: object
+      description: >-
+        The element of a rendered page a thread is on (ADR 0x050 §5): its element anchor, beside
+        the thread's code anchor (its range of the text, when it has one). Best effort: a page shows
+        the thread on the element its selector finds when that still matches the fingerprint, and
+        a thread with neither anchor is on the whole file.
+      required: [page, selector]
+      properties:
+        page:
+          type: string
+          format: uuid
+          description: The HTML file the element is on
+        selector:
+          type: string
+          maxLength: 1000
+          description: A CSS selector for the element on that page
+        fingerprint:
+          type: object
+          description: What the element looked like when the thread was made
+          required: [tag]
+          properties:
+            tag:
+              type: string
+            text:
+              type: string
+              maxLength: 200
+              description: The start of its text
+            attrs:
+              type: object
+              maxProperties: 8
+              additionalProperties:
+                type: string
+              description: The attributes its selector used
     FileCommentThread:
       type: object
       required: [id, anchor, quote, resolved, comments]
@@ -12904,6 +12967,8 @@ components:
             - $ref: '#/components/schemas/FileCommentRange'
         cell:
           $ref: '#/components/schemas/FileCommentCell'
+        element:
+          $ref: '#/components/schemas/FileCommentElement'
         quote:
           type: string
           description: >-
@@ -12943,6 +13008,13 @@ components:
             properties:
               author_name: {type: string}
               text: {type: string}
+        project_folder:
+          type: string
+          description: >-
+            For a thread on an element of a page shown as a site (ADR 0x050 §5), the gallery folder
+            the page is in. The commented file must be in it (400 otherwise). Mentioning the agent
+            then also lets it change every file in the folder and the folders inside it, up to 200
+            files; a larger folder grants only the commented file. The top level grants nothing more.
       required: [file_id, thread_id]
     CommentRef:
       type: object

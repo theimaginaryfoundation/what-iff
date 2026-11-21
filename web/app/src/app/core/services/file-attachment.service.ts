@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable, catchError, map, of, switchMap } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { FileAttachment, FileAttachmentFilters, ChatContextFilesResponse } from '../models/file-attachment.model';
+import { FileAttachment, FileAttachmentFilters, ChatContextFilesResponse, PreviewSource } from '../models/file-attachment.model';
 import { PaginatedResponse } from '../models/common.model';
 import { DiagramUploads, titleFor } from '../../features/diagrams/diagram-uploads';
 
@@ -67,17 +67,23 @@ export class FileAttachmentService {
     return `${this.apiUrl}/file-attachment/${attachmentId}/preview?size=${size}`;
   }
 
-  /** Whether the file has a preview of its current version. */
-  hasPreview(attachmentId: string): Observable<boolean> {
-    return this.http.get(this.previewUrl(attachmentId, 'thumbnail'), { responseType: 'blob' }).pipe(
+  /** Whether the file has a preview of its current version (and, with `current`, of the files it was drawn from). */
+  hasPreview(attachmentId: string, current = false): Observable<boolean> {
+    // current: none counts when a file the picture was drawn from changed since (ADR 0x050 §8).
+    const url = this.previewUrl(attachmentId, 'thumbnail') + (current ? '&current=1' : '');
+    return this.http.get(url, { responseType: 'blob' }).pipe(
       map(() => true),
       catchError(() => of(false)),
     );
   }
 
-  /** Stores a PNG of a diagram as it is at content_version `version`; a 409 means it changed since. */
-  putPreview(attachmentId: string, version: number, png: Blob): Observable<void> {
-    const params = new HttpParams().set('version', String(version));
+  /**
+   * Stores a PNG of a diagram or web page as it is at content_version `version`; a 409 means it
+   * changed since. `sources` are the other files a page's picture shows, at their versions.
+   */
+  putPreview(attachmentId: string, version: number, png: Blob, sources: readonly PreviewSource[] = []): Observable<void> {
+    let params = new HttpParams().set('version', String(version));
+    if (sources.length) params = params.set('sources', sources.map(s => `${s.id}:${s.content_version}`).join(','));
     const headers = new HttpHeaders({ 'Content-Type': 'image/png' });
     return this.http.put<void>(`${this.apiUrl}/file-attachment/${attachmentId}/preview`, png, { headers, params });
   }
@@ -171,8 +177,10 @@ export class FileAttachmentService {
   }
 
   /** The files in a thread's context (ADR 0x043 §4), newest first, with why each is there. */
-  listChatContextFiles(chatId: string): Observable<ChatContextFilesResponse> {
-    return this.http.get<ChatContextFilesResponse>(`${this.apiUrl}/chat/${chatId}/context-files`);
+  /** `container: false` leaves out the container's status, which costs a call to the container service (for frequent polls). */
+  listChatContextFiles(chatId: string, options: { container?: boolean } = {}): Observable<ChatContextFilesResponse> {
+    const query = options.container === false ? '?container=0' : '';
+    return this.http.get<ChatContextFilesResponse>(`${this.apiUrl}/chat/${chatId}/context-files${query}`);
   }
 
   /** Whether the chat's agent may change the file, because the user mentioned it in a comment on it there (ADR 0x046). */

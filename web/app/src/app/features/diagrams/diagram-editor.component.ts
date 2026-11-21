@@ -28,7 +28,7 @@ import { CommentsPanelComponent } from '../office/comments/comments-panel.compon
 import { CommentsPanelState } from '../office/comments/comments-panel-state.service';
 import { DiagramComments } from './diagram-comments';
 import { DIAGRAMS_URL } from './diagram-site.config';
-import { DiagramPreview } from './diagram-preview';
+import { FilePreview } from '../file-workspace/file-preview';
 import { BridgeEvent, DrawioAction, dataUrlToBlob, drawioUrl, exportName, readDrawioMessage } from './drawio-frame';
 
 const DIAGRAM_MIME = 'application/vnd.jgraph.mxfile';
@@ -137,7 +137,7 @@ export class DiagramEditorComponent implements FileEditor {
   private readonly handedOutComments = new WeakMap<Blob, { threads: TextCommentThread[]; mentions: number }>();
 
   /** The picture of the diagram kept for the gallery and agents (ADR 0x049 §8). */
-  private readonly preview = new DiagramPreview(inject(FileAttachmentService), () =>
+  private readonly preview = new FilePreview(inject(FileAttachmentService), () =>
     this.requestExport({ format: 'png', scale: 1, background: '#ffffff' }),
   );
 

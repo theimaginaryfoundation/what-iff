@@ -1,6 +1,7 @@
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MARKED_EXTENSIONS, provideMarkdown } from 'ngx-markdown';
+import { of } from 'rxjs';
 import { CommentPeopleService } from '../../office/comments/comment-people.service';
 import { TextCommentsService } from '../text-comments/text-comments.service';
 import { COMMENT_SAVER, CommentSaver } from '../editors/file-editor';
@@ -14,6 +15,7 @@ import { fakeMonaco } from '../editors/fake-monaco.spec-helper';
 import { MONACO_LOADER } from '../editors/monaco/monaco-loader';
 import { PageFiles } from '../../web-preview/page-files.service';
 import { PREVIEW_URL } from '../../web-preview/preview-site.config';
+import { FileAttachmentService } from '../../../core/services/file-attachment.service';
 import { TextViewerComponent } from './text-viewer.component';
 
 function file(overrides: Partial<FileAttachment> = {}): FileAttachment {
@@ -28,7 +30,10 @@ describe('TextViewerComponent', () => {
   let fixture: ComponentFixture<TextViewerComponent>;
   let fake: ReturnType<typeof fakeMonaco>;
 
+  let files: { hasPreview: ReturnType<typeof vi.fn>; putPreview: ReturnType<typeof vi.fn> };
+
   beforeEach(async () => {
+    files = { hasPreview: vi.fn(() => of(true)), putPreview: vi.fn(() => of(undefined)) };
     textComments = fakeTextComments();
     saver.canComment.set(false);
     fake = fakeMonaco();
@@ -46,6 +51,7 @@ describe('TextViewerComponent', () => {
         { provide: CommentPeopleService, useValue: { me: signal({ id: 'user:u-1', name: 'Pat Lee' }) } },
         { provide: TextCommentsService, useValue: textComments },
         { provide: COMMENT_SAVER, useValue: saver },
+        { provide: FileAttachmentService, useValue: files },
         // No preview site: an .html file renders on its own (ADR 0x050 §1).
         { provide: PREVIEW_URL, useValue: null },
         {
@@ -200,6 +206,54 @@ describe('TextViewerComponent', () => {
       expect(textComments.state.puts[0]).toEqual(
         expect.objectContaining({ contentVersion: 1, threads: [expect.objectContaining({ anchor: { start: 11, end: 25 } })] }),
       );
+    });
+  });
+  describe('a rendered page', () => {
+    const page = () => file({ name: 'index.html', file_type: 'text/html', content_version: 3 });
+
+    it('checks for its picture once it is ready, only for the page itself', async () => {
+      const viewer = fixture.componentInstance;
+      await show(page(), '<p>hi</p>');
+      viewer.onPageMessage({ type: 'ready', path: 'about.html' });
+      viewer.onPageMessage({ type: 'ready', path: null });
+      await vi.waitFor(() => expect(files.hasPreview).toHaveBeenCalledTimes(1), { timeout: 3000 });
+      expect(files.hasPreview.mock.calls[0]![0]).toBe('f-1');
+    });
+
+    it('opens the menu of a mark it is right-clicked on, and replies or deletes there', async () => {
+      saver.canComment.set(true);
+      const viewer = fixture.componentInstance;
+      await show(page(), '<p>hi</p>');
+      const select = vi.spyOn(viewer.pageComments, 'select').mockImplementation(() => undefined);
+      const remove = vi.spyOn(viewer.pageComments, 'remove').mockImplementation(() => undefined);
+
+      viewer.onPageMessage({ type: 'menu', id: 't1', x: 10, y: 20 });
+      expect(viewer.contextMenu()).toMatchObject({ threadId: 't1', range: null });
+      viewer.menuReply();
+      expect(select).toHaveBeenCalledWith('t1');
+      expect(viewer.replyRequest()).toEqual({ threadId: 't1' });
+      expect(viewer.contextMenu()).toBeNull();
+
+      viewer.onPageMessage({ type: 'menu', id: 't2', x: 0, y: 0 });
+      viewer.menuDelete();
+      expect(remove).toHaveBeenCalledWith({ threadId: 't2', commentId: 't2' });
+
+      // Without a way to write comments, there is no menu.
+      saver.canComment.set(false);
+      viewer.onPageMessage({ type: 'menu', id: 't3', x: 0, y: 0 });
+      expect(viewer.contextMenu()).toBeNull();
+    });
+
+    it('comments on an element by picking it, and shows a chosen thread on the page', async () => {
+      saver.canComment.set(true);
+      const viewer = fixture.componentInstance;
+      await show(page(), '<p>hi</p>');
+      const pick = vi.spyOn(viewer.pageComments, 'togglePick').mockImplementation(() => undefined);
+      const select = vi.spyOn(viewer.pageComments, 'select').mockImplementation(() => undefined);
+      viewer.startComment();
+      expect(pick).toHaveBeenCalled();
+      viewer.selectThread('t9');
+      expect(select).toHaveBeenCalledWith('t9');
     });
   });
 });

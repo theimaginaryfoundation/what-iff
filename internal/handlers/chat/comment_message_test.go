@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -127,4 +128,70 @@ func TestFileEditGrants_ListAndRevoke(t *testing.T) {
 
 	rec = call(http.MethodDelete, "/chat/x/file-edit-grants/y", map[string]string{"chatId": chatID.String(), "fileId": "nope"}, h.RevokeFileEditGrant)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestCreateChatMessage_ACommentOnAPageGrantsItsProjectFolder(t *testing.T) {
+	userID, chatID := uuid.New(), uuid.New()
+	page, script, style := uuid.New(), uuid.New(), uuid.New()
+	files := map[uuid.UUID]*models.FileAttachment{
+		page:   {ID: page, Name: "index.html", Folder: "site"},
+		script: {ID: script, Name: "app.js", Folder: "site/src"},
+	}
+	store := &fakeStore{
+		getFileAttachmentFn: func(_ context.Context, _, id uuid.UUID) (*models.FileAttachment, error) {
+			if f := files[id]; f != nil {
+				return f, nil
+			}
+			return nil, datastore.ErrFileAttachmentNotFound
+		},
+		folderFiles: map[string][]uuid.UUID{"site": {page, script, style}},
+	}
+	ag := &capturingAgent{}
+	h := &Handler{ds: store, logger: zap.NewNop(), messageAgent: ag}
+	comment := func(fileID uuid.UUID, folder string) string {
+		return fmt.Sprintf(`{"message":"@Iris make it blue","origin":"user","comment":{"file_id":%q,"thread_id":"t1","project_folder":%q}}`, fileID, folder)
+	}
+
+	// A thread kept with the script that made the element grants the script, then the rest of the folder.
+	rec := postMessage(t, h, userID, chatID, comment(script, "Site"))
+	require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+	require.Equal(t, [][2]uuid.UUID{{chatID, script}, {chatID, page}, {chatID, style}}, store.grants)
+	require.Contains(t, ag.got.AdditionalContext[0].Content, `you may change any file in that folder`)
+
+	// A folder the file is not in, the top level's whole gallery, or the skills folder is refused or grants no more.
+	store.grants = nil
+	rec = postMessage(t, h, userID, chatID, comment(page, "other"))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Empty(t, store.grants, "a refused comment grants nothing")
+	rec = postMessage(t, h, userID, chatID, comment(page, "skills/x"))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	rec = postMessage(t, h, userID, chatID, comment(page, "/"))
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	require.Equal(t, [][2]uuid.UUID{{chatID, page}}, store.grants)
+
+	// A folder too big to be one page's project grants only the file, and says so.
+	store.grants = nil
+	big := make([]uuid.UUID, maxProjectGrant+1)
+	for i := range big {
+		big[i] = uuid.New()
+	}
+	store.folderFiles["site"] = big
+	rec = postMessage(t, h, userID, chatID, comment(page, "site"))
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	require.Equal(t, [][2]uuid.UUID{{chatID, page}}, store.grants)
+	require.Contains(t, ag.got.AdditionalContext[0].Content, "only the commented file may be changed")
+}
+
+func TestCreateChatMessage_APageCommentThatFailsToSendGrantsNothing(t *testing.T) {
+	userID, chatID, page, style := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	store := &fakeStore{
+		getFileAttachmentFn: func(context.Context, uuid.UUID, uuid.UUID) (*models.FileAttachment, error) {
+			return &models.FileAttachment{ID: page, Name: "index.html", Folder: "site"}, nil
+		},
+		folderFiles: map[string][]uuid.UUID{"site": {page, style}},
+	}
+	h := &Handler{ds: store, logger: zap.NewNop(), messageAgent: &failingAgent{}}
+	rec := postMessage(t, h, userID, chatID, `{"message":"@Iris fix it","origin":"user","comment":{"file_id":"`+page.String()+`","thread_id":"t1","project_folder":"site"}}`)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	require.Empty(t, store.grants, "every grant made for the send is taken back")
 }

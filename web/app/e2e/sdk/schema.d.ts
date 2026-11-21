@@ -13410,7 +13410,10 @@ export interface paths {
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description `0` leaves out `container` (the thread's container status), which asks the container service; for a caller that only needs the files and asks often, as a preview polling for changes does (ADR 0x050 §6). */
+                    container?: "0";
+                };
                 header?: never;
                 path: {
                     chatId: string;
@@ -13991,14 +13994,16 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get a diagram's preview
-         * @description A picture of the file as it is now (ADR 0x049 §8): the PNG the browser drew of a draw.io diagram, or its JPEG thumbnail (`size=thumbnail`). 404 when there is none of the current version: every save leaves the file without one until it is drawn again. The ETag changes whenever the picture is replaced, also at the same content_version; send it back as If-None-Match for a 304.
+         * Get a diagram's or web page's preview
+         * @description A picture of the file as it is now (ADR 0x049 §8, ADR 0x050 §8): the PNG the browser drew of a draw.io diagram or an HTML page, or its JPEG thumbnail (`size=thumbnail`). 404 when there is none of the current version: every save leaves the file without one until it is drawn again. The ETag changes whenever the picture is replaced, also at the same content_version; send it back as If-None-Match for a 304.
          */
         get: {
             parameters: {
                 query?: {
                     /** @description `full` (the default, PNG) or `thumbnail` (JPEG). */
                     size?: "full" | "thumbnail";
+                    /** @description `1`: answer 404 also when a file a web page's picture was drawn from (its `sources`) has changed or been deleted since, so the caller draws a new one (ADR 0x050 §8). */
+                    current?: "1";
                 };
                 header?: never;
                 path: {
@@ -14046,14 +14051,16 @@ export interface paths {
             };
         };
         /**
-         * Store a diagram's preview
-         * @description Stores a PNG of a draw.io diagram as it is at `version` (its content_version), with a thumbnail, beside the stored file (ADR 0x049 §8). The browser that drew the diagram sends it, after opening or saving it. At most 8 MB, 4096 pixels a side and 8 megapixels (8,388,608 pixels).
+         * Store a diagram's or web page's preview
+         * @description Stores a PNG of a draw.io diagram or an HTML page as it is at `version` (its content_version), with a thumbnail, beside the stored file (ADR 0x049 §8, ADR 0x050 §8). The browser that drew it sends it: a diagram after opening or saving it, a page once it has been shown and settled. At most 8 MB, 4096 pixels a side and 8 megapixels (8,388,608 pixels).
          */
         put: {
             parameters: {
                 query: {
                     /** @description The content_version the picture shows. */
                     version: number;
+                    /** @description For a web page: the other files the picture shows (its stylesheets, scripts, images), as `id:content_version` pairs separated by commas, at most 100 kept. A later read with `current=1` says there is no current picture once one of them changed. */
+                    sources?: string;
                 };
                 header?: never;
                 path: {
@@ -14074,7 +14081,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Not a diagram, no version, or not a PNG of an allowed size */
+                /** @description Not a diagram or web page, no version, or not a PNG of an allowed size */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -16695,11 +16702,32 @@ export interface components {
             text: string;
             mentions?: components["schemas"]["FileCommentMention"][];
         };
+        /** @description The element of a rendered page a thread is on (ADR 0x050 §5): its element anchor, beside the thread's code anchor (its range of the text, when it has one). Best effort: a page shows the thread on the element its selector finds when that still matches the fingerprint, and a thread with neither anchor is on the whole file. */
+        FileCommentElement: {
+            /**
+             * Format: uuid
+             * @description The HTML file the element is on
+             */
+            page: string;
+            /** @description A CSS selector for the element on that page */
+            selector: string;
+            /** @description What the element looked like when the thread was made */
+            fingerprint?: {
+                tag: string;
+                /** @description The start of its text */
+                text?: string;
+                /** @description The attributes its selector used */
+                attrs?: {
+                    [key: string]: string;
+                };
+            };
+        };
         FileCommentThread: {
             id: string;
             /** @description The range the thread is on, or null when it is on the whole file. */
             anchor: components["schemas"]["FileCommentRange"] | null;
             cell?: components["schemas"]["FileCommentCell"];
+            element?: components["schemas"]["FileCommentElement"];
             /** @description The text the thread is on (or was on, for a thread on the whole file); on a diagram, the label of the element it is on. */
             quote: string;
             resolved: boolean;
@@ -16720,6 +16748,8 @@ export interface components {
                 author_name?: string;
                 text?: string;
             }[];
+            /** @description For a thread on an element of a page shown as a site (ADR 0x050 §5), the gallery folder the page is in. The commented file must be in it (400 otherwise). Mentioning the agent then also lets it change every file in the folder and the folders inside it, up to 200 files; a larger folder grants only the commented file. The top level grants nothing more. */
+            project_folder?: string;
         };
         /** @description A document comment a chat message is about (ADR 0x046), shown as a link that opens the file at the thread. */
         CommentRef: {
