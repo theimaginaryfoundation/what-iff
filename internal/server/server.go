@@ -45,6 +45,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/search"
 	toolshandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/user"
+	"github.com/theimaginaryfoundation/what-iff/internal/handlers/utilitymodel"
 	versionhandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/version"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/webhook"
 	"github.com/theimaginaryfoundation/what-iff/internal/mcpoauth"
@@ -459,6 +460,7 @@ func (s *Server) setupRoutes() {
 	)
 	mountAccountKeyRoutes(authRouter, keyResolver, accountKeys, connectionsHandler)
 	provideraccess.NewHandler(keyResolver, s.logger).RegisterRoutes(authRouter)
+	utilitymodel.NewHandler(dataStore, keyResolver, s.logger).RegisterRoutes(authRouter)
 	toolsHandler.RegisterRoutes(authRouter)
 	searchHandler.RegisterRoutes(authRouter)
 

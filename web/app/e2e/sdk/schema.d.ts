@@ -3198,6 +3198,146 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/utility-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The models the account's background work runs on
+         * @description For each utility role (background work that isn't the assistant talking: memory and summaries, memory merging, simple tasks such as chat naming, personality generation), the account's choice and the deployment's: a model, or off. The account's choice wins, then the deployment's. A role neither chose is not set, and its work doesn't run until one is.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Every role, in display order */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UtilityModels"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/utility-models/{role}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role: components["schemas"]["UtilityRole"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Choose the account's model for a utility role, or switch it off
+         * @description Send either a model or `off`. The model must be one the account can use: a catalog model whose provider it holds a key for, or one enabled on its own provider connections. A choice that can't be used later (turned off, its connection gone or unreachable, its provider's key removed, or an experimental model after the account turns experimental models off) is passed over for the deployment's choice, logged and counted; with none, the role's work doesn't run. A role switched off doesn't run either, by the account's choice. A choice can be replaced but not cleared: where accounts choose, nothing stands behind it.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    role: components["schemas"]["UtilityRole"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SetUtilityModelRequest"];
+                };
+            };
+            responses: {
+                /** @description Every role after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UtilityModels"];
+                    };
+                };
+                /** @description Neither a model nor `off`, both, a model the account can't use, an unknown effort or tier, an effort or tier with `off`, or a tier on a model whose API offers none */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The deployment supplies the keys, so it chooses the models; or the model is experimental and the account hasn't turned experimental models on */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not a utility role */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A catalog model whose provider the account holds no key for (`provider_not_configured`, with the provider in `details`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/provider-keys": {
         parameters: {
             query?: never;
@@ -16333,6 +16473,57 @@ export interface components {
             message_id?: string;
             /** @description The agent job a scheduled run is for (ADR 0x040). Set by GET /chat/{chatId}/active-job for a scheduled run only: a webhook background run or the onboarding welcome is an agent_job_run with no message_id too, but has none. */
             job_run?: components["schemas"]["JobRun"];
+        };
+        /**
+         * @description A group of background work that runs on one model. `memory`: memory extraction, the scratchpad, checkpoint summaries, recall and thread rehydration. `memory_merge`: folding duplicate memories together; off, only exact duplicates are folded. `simple`: tasks straightforward enough for any model, such as chat naming, expression and mood selection, schedule parsing and memory queries. `personality`: generating a personality.
+         * @enum {string}
+         */
+        UtilityRole: "memory" | "memory_merge" | "simple" | "personality";
+        /** @description One scope's choice for a role. */
+        UtilityChoice: {
+            /** @description Whether the role is switched off; `model_id` is then null. */
+            off: boolean;
+            /**
+             * Format: uuid
+             * @description The chosen model, or null when the role is off.
+             */
+            model_id: string | null;
+            /** @description The reasoning effort the role's calls ask for (ADR 0x026), limited to what the model supports; null leaves the model's own default. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description The service tier the role's calls ask for; null leaves the API's default. */
+            service_tier?: components["schemas"]["UtilityServiceTier"] | null;
+        };
+        /**
+         * @description How fast, and at what price, a call asks to be processed: `priority` is faster and pricier, `flex` slower and cheaper. Only models on OpenAI's own Responses API offer a tier.
+         * @enum {string}
+         */
+        UtilityServiceTier: "priority" | "flex";
+        /** @description A role's choices. With neither, the role is not set, and its work doesn't run. */
+        UtilityRoleModel: {
+            role: components["schemas"]["UtilityRole"];
+            /** @description The account's choice, or null. */
+            account: components["schemas"]["UtilityChoice"] | null;
+            /** @description The deployment's choice, or null. */
+            deployment: components["schemas"]["UtilityChoice"] | null;
+        };
+        UtilityModels: {
+            /** @description Whether an account may choose its own models: only where accounts bring their own keys, and so pay for their background work. Where the deployment supplies the keys, it chooses; account choices are refused and not reported. */
+            accounts_choose: boolean;
+            roles: components["schemas"]["UtilityRoleModel"][];
+        };
+        /** @description Exactly one of `model_id` and `off`; a reasoning effort and service tier go with a model only. */
+        SetUtilityModelRequest: {
+            /**
+             * Format: uuid
+             * @description The model to choose.
+             */
+            model_id?: string;
+            /** @description True switches the role off. */
+            off?: boolean;
+            /** @description With a model only. Null or missing leaves the model's own default. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description With a model on OpenAI's Responses API only. Null or missing leaves the API's default. */
+            service_tier?: components["schemas"]["UtilityServiceTier"] | null;
         };
         /**
          * @description A model provider.

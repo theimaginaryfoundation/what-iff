@@ -17,7 +17,7 @@ import (
 
 // memoryMergeGroupingPrompt is the TASK instruction for the merge/link pass. It is sent
 // as a developer message on top of the agent's own persona system prompt (see
-// inferMemoryMergeGroupsOpenAI) so the same point of view that formed these memories decides
+// inferMemoryMergeGroupsOnModel) so the same point of view that formed these memories decides
 // how they fold — memory judgments made from a foreign POV misfire.
 //
 // Design priors baked in here (from the dedup design work):
@@ -251,10 +251,7 @@ func formatMemoryMergeCandidateList(candidates []memoryMergeCandidate) string {
 	return strings.TrimSpace(b.String())
 }
 
-func (a *Agent) inferMemoryMergeGroupsOpenAI(ctx context.Context, userID uuid.UUID, personaInstructions string, candidates []memoryMergeCandidate) ([]models.MemoryMergeGroupProposal, error) {
-	if a.OpenAIProvider == nil {
-		return nil, fmt.Errorf("OpenAIProvider is nil")
-	}
+func (a *Agent) inferMemoryMergeGroupsOnModel(ctx context.Context, userID uuid.UUID, personaInstructions string, candidates []memoryMergeCandidate) ([]models.MemoryMergeGroupProposal, error) {
 	// POV consistency: the agent's own persona system prompt is the top-level instruction, so
 	// the same self that formed these memories judges how they fold. The merge task rides as a
 	// developer message. When no persona is available we fall back to the task prompt alone.
@@ -266,14 +263,13 @@ func (a *Agent) inferMemoryMergeGroupsOpenAI(ctx context.Context, userID uuid.UU
 		history = []provider.UtilityMessage{{Role: provider.UtilityMessageDeveloper, Text: memoryMergeGroupingPrompt}}
 	}
 	text, err := a.CallUtility(ctx, provider.UtilityRequest{
-		Role:            provider.UtilityRoleMemory,
+		Role:            provider.UtilityRoleMemoryMerge,
 		CallPath:        telemetry.CallPathMemory,
 		Instructions:    instructions,
 		History:         history,
 		Input:           formatMemoryMergeCandidateList(candidates),
 		MaxOutputTokens: memoryMergeMaxOutputTokens,
 		SafetyUserID:    userID.String(),
-		ServiceTier:     provider.UtilityServiceTierFlex,
 		Schema: &provider.UtilitySchema{
 			Name:        "MemoryMergeGrouping",
 			Description: "Memory merge grouping JSON",
@@ -329,7 +325,7 @@ func (a *Agent) inferMemoryMergeGroups(ctx context.Context, userID uuid.UUID, pe
 	if len(candidates) <= 1 {
 		return fallbackExactMergeGroups(candidates)
 	}
-	groups, err := a.inferMemoryMergeGroupsOpenAI(ctx, userID, personaInstructions, candidates)
+	groups, err := a.inferMemoryMergeGroupsOnModel(ctx, userID, personaInstructions, candidates)
 	if err != nil {
 		a.logger.Warn("memory merge grouping inference failed; falling back to exact match", zap.Error(err))
 		return fallbackExactMergeGroups(candidates)

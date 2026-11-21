@@ -20,6 +20,7 @@ type UtilityRole = models.UtilityRole
 
 const (
 	UtilityRoleMemory      = models.UtilityRoleMemory
+	UtilityRoleMemoryMerge = models.UtilityRoleMemoryMerge
 	UtilityRoleSimple      = models.UtilityRoleSimple
 	UtilityRolePersonality = models.UtilityRolePersonality
 )
@@ -40,22 +41,14 @@ func (r UtilityMessageRole) Valid() bool {
 }
 
 // UtilityServiceTier is how fast, and at what price, a call asks to be processed, where an
-// API offers a choice.
-type UtilityServiceTier string
+// API offers a choice (models.UtilityServiceTier).
+type UtilityServiceTier = models.UtilityServiceTier
 
 const (
-	// UtilityServiceTierDefault leaves the API's default.
-	UtilityServiceTierDefault UtilityServiceTier = ""
-	// UtilityServiceTierPriority asks for faster, pricier processing.
-	UtilityServiceTierPriority UtilityServiceTier = "priority"
-	// UtilityServiceTierFlex asks for slower, cheaper processing.
-	UtilityServiceTierFlex UtilityServiceTier = "flex"
+	UtilityServiceTierDefault  = models.UtilityServiceTierDefault
+	UtilityServiceTierPriority = models.UtilityServiceTierPriority
+	UtilityServiceTierFlex     = models.UtilityServiceTierFlex
 )
-
-// Valid reports whether t is a known tier.
-func (t UtilityServiceTier) Valid() bool {
-	return t == UtilityServiceTierDefault || t == UtilityServiceTierPriority || t == UtilityServiceTierFlex
-}
 
 // UtilityMessage is one turn of a call's History.
 type UtilityMessage struct {
@@ -100,7 +93,9 @@ type UtilityRequest struct {
 	MaxOutputTokens int64
 	// SafetyUserID identifies the account to APIs that take one.
 	SafetyUserID string
-	ServiceTier  UtilityServiceTier
+	// ServiceTier is the tier the call asks for, where its API offers one. It comes from the
+	// role's choice, which the agent sets on dispatch; call sites leave it.
+	ServiceTier UtilityServiceTier
 }
 
 // ErrInvalidUtilityRequest is a utility request that breaks UtilityRequest's rules: a bug at
