@@ -148,8 +148,9 @@ export class PersonaPickerDialogComponent {
     effect(() => {
       if (!this.open()) return;
       untracked(() => {
-        // A form reopens fresh: no stale pick or title from the last time it was cancelled.
+        // A form reopens fresh: no stale pick, title or privacy choice from the last time it was cancelled.
         this.chosen.set(null);
+        this.sandboxed.set(false);
         this.threadTitle.set(this.threadForm() ? DEFAULT_THREAD_NAME : '');
         this.load();
       });

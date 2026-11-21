@@ -227,10 +227,11 @@ describe('PersonaPickerDialogComponent', () => {
             expect(component.sandboxed()).toBe(true);
         });
 
-        it('reopens fresh: no last pick, and the title back to the default name', () => {
+        it('reopens fresh: no last pick, the title back to the default name, and Private unticked', () => {
             openForm();
             component.chosen.set(vera);
             component.threadTitle.set('Old title');
+            component.sandboxed.set(true);
             setOpen(false);
 
             setOpen(true);
@@ -238,6 +239,7 @@ describe('PersonaPickerDialogComponent', () => {
 
             expect(component.chosen()).toBeNull();
             expect(component.threadTitle()).toBe('New thread');
+            expect(component.sandboxed()).toBe(false);
         });
 
         it('keeps the one-click pick for every other caller', () => {
