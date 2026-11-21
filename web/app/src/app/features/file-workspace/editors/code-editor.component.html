@@ -1,6 +1,6 @@
-<div class="code-editor" [class.code-editor--split]="isMarkdown() && showPreview()">
+<div class="code-editor" [class.code-editor--split]="hasPreview() && showPreview()">
   <div class="code-editor__toolbar">
-    @if (isMarkdown()) {
+    @if (hasPreview()) {
       <button type="button" class="code-editor__toggle" [attr.aria-pressed]="showPreview()" (click)="togglePreview()">
         {{ showPreview() ? "Hide preview" : "Show preview" }}
       </button>
@@ -39,7 +39,11 @@
       }
       <div #editor class="code-editor__monaco" [attr.aria-label]="'Editor for ' + file().name" [hidden]="state() !== 'ready'"></div>
     </div>
-    @if (isMarkdown() && showPreview()) {
+    @if (isHtml() && showPreview()) {
+      <div class="code-editor__pane code-editor__preview code-editor__preview--page" aria-label="Preview">
+        <app-html-page-frame class="code-editor__page" [file]="file()" [html]="previewText()" />
+      </div>
+    } @else if (isMarkdown() && showPreview()) {
       <div class="code-editor__pane code-editor__preview" aria-label="Preview">
         <markdown
           class="code-editor__markdown prose prose-sm max-w-none dark:prose-invert"

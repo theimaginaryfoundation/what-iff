@@ -31,8 +31,11 @@ import { TextCommentsState } from '../text-comments/text-comments-state';
 import { TextCommentThread, TextCommentsService } from '../text-comments/text-comments.service';
 import { MONACO_LOADER, type Monaco, monacoLanguageFor, vfsUriFor } from './monaco/monaco-loader';
 import { appTheme, followAppTheme, monacoThemeFor } from './monaco/monaco-themes';
+import { HtmlPageFrameComponent } from '../../web-preview/html-page-frame.component';
 
 const PREVIEW_DEBOUNCE_MS = 250;
+/** A page is rebuilt after a longer pause: each rebuild runs its scripts again. */
+const PAGE_PREVIEW_DEBOUNCE_MS = 800;
 
 /**
  * The code and Markdown editor (ADR 0x043 §2): Monaco over the file's text, with the language
@@ -42,7 +45,7 @@ const PREVIEW_DEBOUNCE_MS = 250;
 @Component({
   selector: 'app-code-editor',
   standalone: true,
-  imports: [MarkdownModule, CommentsPanelComponent],
+  imports: [MarkdownModule, CommentsPanelComponent, HtmlPageFrameComponent],
   templateUrl: './code-editor.component.html',
   styleUrl: './code-editor.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -67,6 +70,9 @@ export class CodeEditorComponent implements FileEditor {
   readonly language = signal('plaintext');
   /** Markdown, or a Mermaid file (drawn as a ```mermaid fence): both have a live preview. */
   readonly isMarkdown = computed(() => rendersAsMarkdown(previewKindFor(this.file())));
+  /** An HTML page: rendered beside its source in a sandboxed frame (ADR 0x050 §1). */
+  readonly isHtml = computed(() => previewKindFor(this.file()) === 'html');
+  readonly hasPreview = computed(() => this.isMarkdown() || this.isHtml());
   readonly showPreview = signal(true);
 
   // --- comments (ADR 0x045): kept beside the file, written once a save has stored the text ---------
@@ -352,9 +358,9 @@ export class CodeEditorComponent implements FileEditor {
     // Where the threads are is read once typing pauses.
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = setTimeout(() => this.comments.refresh(), 150);
-    if (this.isMarkdown()) {
+    if (this.hasPreview()) {
       if (this.previewTimer) clearTimeout(this.previewTimer);
-      this.previewTimer = setTimeout(() => this.previewText.set(value), PREVIEW_DEBOUNCE_MS);
+      this.previewTimer = setTimeout(() => this.previewText.set(value), this.isHtml() ? PAGE_PREVIEW_DEBOUNCE_MS : PREVIEW_DEBOUNCE_MS);
     }
   }
 

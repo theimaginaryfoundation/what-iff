@@ -21,11 +21,13 @@ And a thread is anchored on a range of the file's text, which the server carries
 
 ### 1. `.html` files open rendered, beside their source
 
-- `.html` and `.htm` (`text/html`, `application/xhtml+xml`) are the `html` file kind: viewed, the page is shown rendered with a toggle to the source, as Markdown is; edited, the source is in the code editor with the rendering beside it, updated on save.
+- `.html` and `.htm` (`text/html`, `application/xhtml+xml`) are the `html` file kind: viewed, the page is shown rendered with a toggle to the source, as Markdown is; edited, the source is in the code editor with the rendering beside it, rebuilt once typing pauses (longer than Markdown's pause, as each rebuild runs the page's scripts again).
   Phones view only, as for every editor.
 - A page is rendered in an iframe that is never same-origin with the app.
   A file opened on its own, with no project (§2), renders in a frame with `sandbox="allow-scripts"` and nothing else, which gives it an opaque origin, as a notebook's script-driven outputs have: it can reach no cookie, storage or page of the app, open no popup and navigate nothing but itself.
-  Its relative references are rewritten to `blob:` URLs of the files beside it (same folder), so a stylesheet or a script next to the page still loads; this is the whole of what a page gets without a site (§3), and it needs nothing configured.
+  The files it names beside it in its folder (stylesheets and what they name, scripts, images, media, fonts) are inlined as `data:` URLs, so a stylesheet or a script next to the page still loads.
+  Not `blob:` URLs: the browser refuses an opaque-origin frame another origin's blobs.
+  This is the whole of what a page gets without a site (§3), and it needs nothing configured: a reference into another folder, a relative import inside a module, or a request the page makes at run time is not resolved, and the page says which names it could not find.
 - The rendered page is what the browser makes of the file: no sanitizing, no stripped scripts.
   The frame's isolation is what keeps the app safe, not the page's content.
 
