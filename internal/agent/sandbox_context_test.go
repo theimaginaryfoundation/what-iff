@@ -243,7 +243,7 @@ func TestSubagentScratchpad_SandboxedChatSendsNone(t *testing.T) {
 	require.Equal(t, "notes", subagentScratchpad(&models.Chat{}, "notes"))
 	require.Empty(t, subagentScratchpad(&models.Chat{ContextScope: models.ContextScopeSandbox}, "notes"))
 	// The context built from it then carries no scratchpad segment.
-	mc := buildSubagentModelContext("prompt", subagentScratchpad(&models.Chat{ContextScope: models.ContextScopeSandbox}, "notes"), "task")
+	mc := buildSubagentModelContext("", "prompt", subagentScratchpad(&models.Chat{ContextScope: models.ContextScopeSandbox}, "notes"), "task")
 	require.Empty(t, segmentText(mc, provider.SegmentKindScratchpad))
 }
 

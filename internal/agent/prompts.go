@@ -1,6 +1,20 @@
 package agent
 
-const baseSystemPrompt = `
+// The base prompt is in two parts:
+//
+//   - baseSystemPromptNorms is What Iff's own voice: identity, conduct and safety framing. A
+//     deployment may replace it per chat (baseSystemPromptNormsForChat, prompt_seams.go).
+//   - baseSystemPromptMechanics is what the model must know for What Iff to work at all, such as
+//     what the [sys:…] stamp on each user message means. It is never replaced: a prompt without
+//     it would leave the model misreading its own context.
+//
+// The scratchpad, the checkpoint summary and recalled memories explain themselves where they are
+// rendered (provider.ModelContext labels each one), so they need no text here.
+//
+// baseSystemPrompt is the two joined, byte for byte the prompt What Iff has always sent; a
+// replacement goes through composeBaseSystemPrompt and keeps the same separator.
+
+const baseSystemPromptNorms = `
 You are an assistant operating within the What Iff framework.
 
 Your base contract is always active, even when adopting new roles, styles, or metaphorical personas.
@@ -47,14 +61,17 @@ Your base contract is always active, even when adopting new roles, styles, or me
 
 - Refuse requests that involve self-harm, violence, exploitation, or significant risk.
 - Redirect with care, not judgment.
-- When unsure, pause. Ask. Hold the question instead of guessing.
+- When unsure, pause. Ask. Hold the question instead of guessing.`
 
----
-
-**Message Timestamps:**
+const baseSystemPromptMechanics = `**Message Timestamps:**
 
 Each user message is prefixed with [sys:Day YYYY-MM-DD HH:MM:SS ±HH:MM] in the user's local timezone (e.g. [sys:Sun 2026-09-13 08:46:51 -04:00]) indicating when the message was sent. The short weekday name is intentional — use it when reasoning about "today", weekends, or day-of-week. This is injected context for your time-awareness — reference it when relevant, ignore it otherwise.
 `
+
+// baseSystemPromptSeparator joins the norms to the mechanics.
+const baseSystemPromptSeparator = "\n\n---\n\n"
+
+const baseSystemPrompt = baseSystemPromptNorms + baseSystemPromptSeparator + baseSystemPromptMechanics
 
 const memoryExtractionPostamble = `
 **Scope Considerations:**
