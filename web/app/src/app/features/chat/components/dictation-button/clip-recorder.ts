@@ -114,8 +114,8 @@ export class ClipRecorder {
       throw new RecordingCancelled();
     }
     this.stream = stream;
-    this.context = this.deps.createAudioContext({ sampleRate: WAV_SAMPLE_RATE });
-    const source = this.context.createMediaStreamSource(this.stream);
+    const { context, source } = this.connectSource(stream);
+    this.context = context;
     this.source = source;
     this.analyser = this.context.createAnalyser();
     this.analyser.fftSize = 512;
@@ -133,6 +133,22 @@ export class ClipRecorder {
     source.connect(this.processor);
     this.processor.connect(this.context.destination); // Chromium only processes a connected node
     this.startedAt = this.deps.now();
+  }
+
+  /**
+   * A context for the microphone and its source node. It asks for WAV_SAMPLE_RATE, so there is
+   * nothing to resample; a browser that won't connect a stream to a context at another rate than
+   * the device's (Firefox has refused) gets one at its own rate, and stop() resamples.
+   */
+  private connectSource(stream: MediaStream): { context: AudioContext; source: MediaStreamAudioSourceNode } {
+    const context = this.deps.createAudioContext({ sampleRate: WAV_SAMPLE_RATE });
+    try {
+      return { context, source: context.createMediaStreamSource(stream) };
+    } catch {
+      void context.close().catch(() => undefined);
+      const native = this.deps.createAudioContext();
+      return { context: native, source: native.createMediaStreamSource(stream) };
+    }
   }
 
   /** Seconds since recording started. */

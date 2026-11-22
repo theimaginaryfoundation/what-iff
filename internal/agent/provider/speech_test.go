@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -249,6 +250,24 @@ func TestGemini_Transcribe(t *testing.T) {
 	for _, r := range seen {
 		require.Equal(t, "g-key", r.header.Get("x-goog-api-key"), r.path)
 	}
+}
+
+// An upload URL on another host is refused: the key would go with the clip.
+func TestGemini_TranscribeRefusesUploadURLOnAnotherHost(t *testing.T) {
+	var elsewhere atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		elsewhere.Add(1)
+	}))
+	defer other.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Goog-Upload-URL", other.URL+"/upload/v1beta/files?upload_id=u1")
+	}))
+	defer srv.Close()
+	c := newSpeechClient(t, models.SpeechAdapterGemini, SpeechEndpoint{Provider: models.ModelProviderGoogle, BaseURL: srv.URL + "/v1beta/openai/", Key: "g-key", HTTP: srv.Client()})
+
+	_, _, err := c.Transcribe(context.Background(), TranscriptionRequest{Model: "gemini-3.5-transcribe", Audio: []byte("clip-bytes"), Format: models.AudioFormatWebM})
+	require.Error(t, err)
+	require.Zero(t, elsewhere.Load(), "nothing is sent to the other host")
 }
 
 func TestGeminiSpeechCredentialPaths(t *testing.T) {
