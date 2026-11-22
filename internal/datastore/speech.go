@@ -306,13 +306,15 @@ type SpeechTrackFiles struct {
 	Files []string
 }
 
-// messageGone is a track whose message was deleted.
+// messageGone is a track whose message was deleted: a correlated NOT EXISTS, which looks up
+// each track's message by key, rather than NOT IN over the whole messages table.
 func messageGone() predicate.SpeechTrack {
 	return predicate.SpeechTrack(func(sel *sql.Selector) {
 		msgs := sql.Table(chatmessage.Table)
 		sel.Where(sql.And(
 			sql.NotNull(sel.C(speechtrack.FieldMessageID)),
-			sql.NotIn(sel.C(speechtrack.FieldMessageID), sql.Select(msgs.C(chatmessage.FieldID)).From(msgs)),
+			sql.NotExists(sql.Select(msgs.C(chatmessage.FieldID)).From(msgs).
+				Where(sql.ColumnsEQ(msgs.C(chatmessage.FieldID), sel.C(speechtrack.FieldMessageID)))),
 		))
 	})
 }
