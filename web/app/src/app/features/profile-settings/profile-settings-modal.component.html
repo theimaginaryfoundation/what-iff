@@ -18,7 +18,7 @@
           (click)="setTab(tab.id)"
         >
           @switch (tab.icon) {
-            @case ('providers') {
+            @case ("providers") {
               <ui-shield-icon [size]="13" />
             }
             @default {
@@ -38,199 +38,206 @@
   }
 
   <div class="profile-settings__body">
-    @if (modal.activeTab() === 'providers' && tabs().length > 1) {
+    @if (modal.activeTab() === "providers" && tabs().length > 1) {
       <app-providers-section />
     } @else {
-    <section class="profile-settings__section">
-      @if (loadingProfile()) {
-        <div class="profile-settings__empty">Loading profile...</div>
-      } @else {
-        <div class="profile-settings__identity-card">
-          <div class="profile-settings__identity-main">
-            <div class="profile-settings__avatar">{{ userInitials() }}</div>
-            <div>
-              <div class="profile-settings__identity-name">{{ displayName() }}</div>
-              <div class="profile-settings__identity-meta">
-                {{ currentUser()?.email }} · Member since {{ formatDate(currentUser()?.created_at) }}
+      <section class="profile-settings__section">
+        @if (loadingProfile()) {
+          <div class="profile-settings__empty">Loading profile...</div>
+        } @else {
+          <div class="profile-settings__identity-card">
+            <div class="profile-settings__identity-main">
+              <div class="profile-settings__avatar">{{ userInitials() }}</div>
+              <div>
+                <div class="profile-settings__identity-name">{{ displayName() }}</div>
+                <div class="profile-settings__identity-meta">
+                  {{ currentUser()?.email }} · Member since {{ formatDate(currentUser()?.created_at) }}
+                </div>
               </div>
             </div>
+            <button
+              class="profile-settings__button profile-settings__button--danger profile-settings__logout-button"
+              type="button"
+              (click)="logout()"
+            >
+              Log Out
+            </button>
           </div>
-          <button
-            class="profile-settings__button profile-settings__button--danger profile-settings__logout-button"
-            type="button"
-            (click)="logout()"
-          >
-            Log Out
-          </button>
-        </div>
 
-        <form class="profile-settings__form" [formGroup]="profileForm" (ngSubmit)="saveProfile()">
-          <label class="profile-settings__field">
-            <span>Email</span>
-            <input type="email" formControlName="email" autocomplete="email" />
-          </label>
-          <label class="profile-settings__field">
-            <span>First Name</span>
-            <input type="text" formControlName="first_name" autocomplete="given-name" />
-          </label>
-          <label class="profile-settings__field">
-            <span>Last Name</span>
-            <input type="text" formControlName="last_name" autocomplete="family-name" />
-          </label>
-          <label class="profile-settings__field">
-            <span>Timezone</span>
-            <select formControlName="timezone" aria-describedby="profile-settings-timezone-help">
-              <option value="">Select a timezone</option>
-              @for (tz of timezones(); track tz) {
-                <option [value]="tz">{{ tz }}</option>
-              }
-            </select>
-            <small id="profile-settings-timezone-help"> Scheduled jobs read times like "every weekday at 8" in this timezone. </small>
-            @if (profileForm.controls.timezone.invalid && profileForm.controls.timezone.touched) {
-              <small class="profile-settings__timezone-error" role="alert">
-                @if (profileForm.controls.timezone.hasError("timezone")) {
-                  Enter a valid IANA timezone, e.g. Europe/London.
-                } @else {
-                  Timezone must be no more than 64 characters.
+          <form class="profile-settings__form" [formGroup]="profileForm" (ngSubmit)="saveProfile()">
+            <label class="profile-settings__field">
+              <span>Email</span>
+              <input type="email" formControlName="email" autocomplete="email" />
+            </label>
+            <label class="profile-settings__field">
+              <span>First Name</span>
+              <input type="text" formControlName="first_name" autocomplete="given-name" />
+            </label>
+            <label class="profile-settings__field">
+              <span>Last Name</span>
+              <input type="text" formControlName="last_name" autocomplete="family-name" />
+            </label>
+            <label class="profile-settings__field">
+              <span>Timezone</span>
+              <select formControlName="timezone" aria-describedby="profile-settings-timezone-help">
+                <option value="">Select a timezone</option>
+                @for (tz of timezones(); track tz) {
+                  <option [value]="tz">{{ tz }}</option>
                 }
-              </small>
+              </select>
+              <small id="profile-settings-timezone-help"> Scheduled jobs read times like "every weekday at 8" in this timezone. </small>
+              @if (profileForm.controls.timezone.invalid && profileForm.controls.timezone.touched) {
+                <small class="profile-settings__timezone-error" role="alert">
+                  @if (profileForm.controls.timezone.hasError("timezone")) {
+                    Enter a valid IANA timezone, e.g. Europe/London.
+                  } @else {
+                    Timezone must be no more than 64 characters.
+                  }
+                </small>
+              }
+            </label>
+            @if (timezoneOffer(); as offer) {
+              <div class="profile-settings__timezone-offer" data-testid="timezone-offer">
+                <small>Your browser is set to {{ offer }}.</small>
+                <button class="profile-settings__button" type="button" (click)="useBrowserTimezone()">Use {{ offer }}</button>
+              </div>
             }
-          </label>
-          @if (timezoneOffer(); as offer) {
-            <div class="profile-settings__timezone-offer" data-testid="timezone-offer">
-              <small>Your browser is set to {{ offer }}.</small>
-              <button class="profile-settings__button" type="button" (click)="useBrowserTimezone()">Use {{ offer }}</button>
-            </div>
-          }
-          <label class="profile-settings__field">
-            <span>Theme</span>
-            <select [value]="themeMode()" [disabled]="loadingAction()" (change)="onThemeModeChange($any($event.target).value)">
-              <option value="system">Use system setting</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select>
-          </label>
+            <label class="profile-settings__field">
+              <span>Theme</span>
+              <select [value]="themeMode()" [disabled]="loadingAction()" (change)="onThemeModeChange($any($event.target).value)">
+                <option value="system">Use system setting</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
 
-          <button class="profile-settings__button profile-settings__button--primary" type="submit" [disabled]="loadingAction()">
-            Save Changes
-          </button>
-        </form>
+            <button class="profile-settings__button profile-settings__button--primary" type="submit" [disabled]="loadingAction()">
+              Save Changes
+            </button>
+          </form>
 
-        <fieldset class="profile-settings__callout profile-settings__form" data-testid="chat-defaults">
-          <legend>Thread defaults</legend>
-          <small>Choose what new threads start with. Changes save immediately; you can leave personality unset.</small>
-
-          <label class="profile-settings__field">
-            <span>Default model</span>
-            <select
-              data-testid="default-model-select"
-              [disabled]="loadingAction()"
-              uiTooltip="Model new threads start with; you can switch it in any thread"
-              (change)="onDefaultModelChange($any($event.target).value)"
-            >
-              @if (!hasDefaultModel()) {
-                <option value="" disabled selected>None yet</option>
-              } @else if (defaultModelUnlisted()) {
-                <option value="" disabled selected>Current default is unavailable</option>
-              }
-              @for (model of models(); track model.id) {
-                <option [value]="model.id" [selected]="model.id === preferences()?.default_model_id">{{ modelOptionLabel(model) }}</option>
-              }
-            </select>
-            @if (!hasDefaultModel() && models().length === 0) {
-              <small data-testid="default-model-none">
-                Choose models from a provider first.
-                <button type="button" class="profile-settings__inline-link" (click)="setTab('providers')">Go to Providers</button>
-              </small>
-            }
-          </label>
-          <label class="profile-settings__field">
-            <span>Default personality</span>
-            <select
-              data-testid="default-personality-select"
-              [disabled]="loadingAction()"
-              uiTooltip="Personality new threads start with unless you pick another"
-              (change)="onDefaultPersonalityChange($any($event.target).value)"
-            >
-              <option value="">No default personality</option>
-              @for (personality of personalities(); track personality.id) {
-                <option [value]="personality.id" [selected]="personality.id === preferences()?.default_personality_id">{{ personality.name }}</option>
-              }
-            </select>
-          </label>
-          <label class="profile-settings__field">
-            <span>Reasoning effort</span>
-            <select
-              data-testid="default-reasoning-effort-select"
-              [disabled]="loadingAction()"
-              [uiTooltip]="reasoningEffortDescription"
-              (change)="onDefaultReasoningEffortChange($any($event.target).value)"
-            >
-              <option value="" [selected]="!preferences()?.reasoning_effort">Model default</option>
-              @for (option of reasoningEffortOptions; track option.value) {
-                <option [value]="option.value" [selected]="option.value === preferences()?.reasoning_effort">{{ option.label }}</option>
-              }
-            </select>
-          </label>
-          <label class="profile-settings__field">
-            <span>Agent loop</span>
-            <select
-              data-testid="default-agent-loop-select"
-              [disabled]="loadingAction()"
-              [uiTooltip]="agentLoopDescriptions.advanced"
-              (change)="onDefaultAgentLoopChange($any($event.target).value)"
-            >
-              <option value="" [selected]="!preferences()?.agent_loop">Standard (default)</option>
-              <option value="advanced" [selected]="preferences()?.agent_loop === 'advanced'">{{ agentLoopLabels.advanced }}</option>
-            </select>
-          </label>
-          <small>Reasoning effort and agent loop apply to every thread that doesn't set its own, unless its personality does. Changes reach existing threads too; sandboxed threads don't use them.</small>
-        </fieldset>
-
-        <app-background-models />
-
-        @if (imageGenerationProviders().length > 1) {
-          <fieldset class="profile-settings__callout profile-settings__form" data-testid="image-generation">
-            <legend>Image generation</legend>
-            <small>Which provider draws images when you or a personality ask for one. Changes save immediately.</small>
+          <fieldset class="profile-settings__callout profile-settings__form" data-testid="chat-defaults">
+            <legend>Thread defaults</legend>
+            <small>Choose what new threads start with. Changes save immediately; you can leave personality unset.</small>
 
             <label class="profile-settings__field">
-              <span>Image provider</span>
+              <span>Default model</span>
               <select
+                data-testid="default-model-select"
                 [disabled]="loadingAction()"
-                uiTooltip="Used for every generated image; portraits and expressions still use OpenAI"
-                (change)="onImageGenerationProviderChange($any($event.target).value)"
+                uiTooltip="Model new threads start with; you can switch it in any thread"
+                (change)="onDefaultModelChange($any($event.target).value)"
               >
-                @for (provider of imageGenerationProviders(); track provider.id) {
-                  <option [value]="provider.id" [selected]="provider.id === imageGenerationProvider()">{{ provider.label }}</option>
+                @if (!hasDefaultModel()) {
+                  <option value="" disabled selected>None yet</option>
+                } @else if (defaultModelUnlisted()) {
+                  <option value="" disabled selected>Current default is unavailable</option>
+                }
+                @for (model of models(); track model.id) {
+                  <option [value]="model.id" [selected]="model.id === preferences()?.default_model_id">
+                    {{ modelOptionLabel(model) }}
+                  </option>
+                }
+              </select>
+              @if (!hasDefaultModel() && models().length === 0) {
+                <small data-testid="default-model-none">
+                  Choose models from a provider first.
+                  <button type="button" class="profile-settings__inline-link" (click)="setTab('providers')">Go to Providers</button>
+                </small>
+              }
+            </label>
+            <label class="profile-settings__field">
+              <span>Default personality</span>
+              <select
+                data-testid="default-personality-select"
+                [disabled]="loadingAction()"
+                uiTooltip="Personality new threads start with unless you pick another"
+                (change)="onDefaultPersonalityChange($any($event.target).value)"
+              >
+                <option value="">No default personality</option>
+                @for (personality of personalities(); track personality.id) {
+                  <option [value]="personality.id" [selected]="personality.id === preferences()?.default_personality_id">
+                    {{ personality.name }}
+                  </option>
                 }
               </select>
             </label>
+            <label class="profile-settings__field">
+              <span>Reasoning effort</span>
+              <select
+                data-testid="default-reasoning-effort-select"
+                [disabled]="loadingAction()"
+                [uiTooltip]="reasoningEffortDescription"
+                (change)="onDefaultReasoningEffortChange($any($event.target).value)"
+              >
+                <option value="" [selected]="!preferences()?.reasoning_effort">Model default</option>
+                @for (option of reasoningEffortOptions; track option.value) {
+                  <option [value]="option.value" [selected]="option.value === preferences()?.reasoning_effort">{{ option.label }}</option>
+                }
+              </select>
+            </label>
+            <label class="profile-settings__field">
+              <span>Agent loop</span>
+              <select
+                data-testid="default-agent-loop-select"
+                [disabled]="loadingAction()"
+                [uiTooltip]="agentLoopDescriptions.advanced"
+                (change)="onDefaultAgentLoopChange($any($event.target).value)"
+              >
+                <option value="" [selected]="!preferences()?.agent_loop">Standard (default)</option>
+                <option value="advanced" [selected]="preferences()?.agent_loop === 'advanced'">{{ agentLoopLabels.advanced }}</option>
+              </select>
+            </label>
+            <small
+              >Reasoning effort and agent loop apply to every thread that doesn't set its own, unless its personality does. Changes reach
+              existing threads too; sandboxed threads don't use them.</small
+            >
           </fieldset>
+
+          <app-background-models />
+
+          @if (imageGenerationProviders().length > 1) {
+            <fieldset class="profile-settings__callout profile-settings__form" data-testid="image-generation">
+              <legend>Image generation</legend>
+              <small>Which provider draws images when you or a personality ask for one. Changes save immediately.</small>
+
+              <label class="profile-settings__field">
+                <span>Image provider</span>
+                <select
+                  [disabled]="loadingAction()"
+                  uiTooltip="Used for every generated image; portraits and expressions still use OpenAI"
+                  (change)="onImageGenerationProviderChange($any($event.target).value)"
+                >
+                  @for (provider of imageGenerationProviders(); track provider.id) {
+                    <option [value]="provider.id" [selected]="provider.id === imageGenerationProvider()">{{ provider.label }}</option>
+                  }
+                </select>
+              </label>
+            </fieldset>
+          }
+
+          <form class="profile-settings__form profile-settings__password-form" [formGroup]="passwordForm" (ngSubmit)="savePassword()">
+            <label class="profile-settings__field">
+              <span>Change Password</span>
+              <input type="password" formControlName="current_password" placeholder="Current Password" autocomplete="current-password" />
+            </label>
+            <label class="profile-settings__field">
+              <span class="profile-settings__sr-only">New Password</span>
+              <input type="password" formControlName="new_password" placeholder="New Password" autocomplete="new-password" />
+            </label>
+            <label class="profile-settings__field">
+              <span class="profile-settings__sr-only">Confirm New Password</span>
+              <input type="password" formControlName="confirm_password" placeholder="Confirm New Password" autocomplete="new-password" />
+            </label>
+            <button class="profile-settings__button" type="submit" [disabled]="loadingAction()">Update Password</button>
+          </form>
+
+          <div class="profile-settings__action-row profile-settings__data-action">
+            <strong>Export Data</strong>
+            <button class="profile-settings__button" type="button" (click)="goToData()">Export</button>
+          </div>
         }
-
-        <form class="profile-settings__form profile-settings__password-form" [formGroup]="passwordForm" (ngSubmit)="savePassword()">
-          <label class="profile-settings__field">
-            <span>Change Password</span>
-            <input type="password" formControlName="current_password" placeholder="Current Password" autocomplete="current-password" />
-          </label>
-          <label class="profile-settings__field">
-            <span class="profile-settings__sr-only">New Password</span>
-            <input type="password" formControlName="new_password" placeholder="New Password" autocomplete="new-password" />
-          </label>
-          <label class="profile-settings__field">
-            <span class="profile-settings__sr-only">Confirm New Password</span>
-            <input type="password" formControlName="confirm_password" placeholder="Confirm New Password" autocomplete="new-password" />
-          </label>
-          <button class="profile-settings__button" type="submit" [disabled]="loadingAction()">Update Password</button>
-        </form>
-
-        <div class="profile-settings__action-row profile-settings__data-action">
-          <strong>Export Data</strong>
-          <button class="profile-settings__button" type="button" (click)="goToData()">Export</button>
-        </div>
-      }
-    </section>
+      </section>
     }
   </div>
 </ui-modal>
