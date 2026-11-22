@@ -124,6 +124,12 @@ func TestResolveModelByReference_ConnectionModelsAreTheOwners(t *testing.T) {
 	require.Error(t, err, "nor by ID")
 	_, err = f.a.resolveModelByReference(ctx, f.aliceModel.ID.String(), modelResolverOptions{})
 	require.Error(t, err, "without an account, no connection model is found")
+
+	voice, err := f.ent.Model.Create().SetName("catalog-voice").SetDisplayName("Voice").SetDescription("").
+		SetProvider("openai").SetKind("speech").SetSpeechVoices([]models.SpeechVoice{{ID: "v", Name: "V"}}).Save(ctx)
+	require.NoError(t, err)
+	_, err = f.a.resolveModelByReference(ctx, voice.ID.String(), byName)
+	require.Error(t, err, "a voice's id names no chat model")
 }
 
 func TestSubagentCapabilitiesFor_ConnectionModels(t *testing.T) {

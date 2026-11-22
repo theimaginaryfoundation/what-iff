@@ -29,6 +29,10 @@
   The total uses vendor-reported input usage when available; named context/tool estimates are cl100k and `vendor_prompt_other` reconciles vendor framing, image input, and other un-attributable usage.
 - **Webhook surface (`webhook_token.go`, `webhook_message.go`):** `WebhookScope` (`messages:write`, `chat:read`) with `NormalizeWebhookScopes` (validates a request; empty means the write-only default) and `EffectiveWebhookScopes` (a token stored with no scopes, i.e. created before scopes existed, is write-only).
   `WebhookMessage` and `WebhookPersonality` are the allow-listed shapes the webhook read routes return, built by `NewWebhookMessage` and `NewWebhookPersonality`; they deliberately omit tool calls, model reasoning, thumbnails, storage keys and a persona's prompt and scratchpad.
+- **Speech models (`speech.go`, ADR 0x052):** `ModelKind` (`chat`, `speech`, `transcription`) says what a model does; `Model.EffectiveKind` reads an empty one as chat.
+  The known speech models table (`KnownSpeechModels`, `LookupKnownSpeechModel`) gives what a provider's listing doesn't: each model's kind, `SpeechAdapter`, voices, style support, input limits and audio formats.
+  It is kept by hand and has no OpenAI synthesis model, since those shut down 2027-01-06.
+  `ResolveSpeechModel` decides a new model's kind and voices (the table's for a model it knows), and `NormalizeSpeechVoices` checks a voice list; both connection and catalog models go through them.
 - **Per-turn options (`turn_options.go`):** `TurnOptions` (pre/post context, a one-turn model id, an output cap) rides on `ChatMessage.TurnOptions`, which is request-only (`json:"-"`, no column) like `ChatMessage.Steer`.
   Pre context is trusted as system instruction and post context as developer/user text, so an extension passes only text it vouches for; `HasContext` reports either, and `MinTurnMaxOutputTokens` is the cap's floor.
   Nil on every ordinary message; the nil-safe accessors (`TurnPreContext` and the rest) let callers read it without a check.

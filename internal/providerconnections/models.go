@@ -15,6 +15,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/ent/userpreference"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
 // maxModelIDLen bounds a model id an account enables; provider ids are far
@@ -85,6 +86,15 @@ type ModelChoice struct {
 	DisplayName   string `json:"display_name,omitempty"`
 	ToolSupport   *bool  `json:"tool_support,omitempty"`
 	VisionSupport *bool  `json:"vision_support,omitempty"`
+	// Kind is the model's kind for a model the known speech table doesn't
+	// know: any model on an open-ended connection (OpenRouter, Ollama, Custom),
+	// or a built-in provider's speech model newer than the table. A known
+	// model always takes the table's; empty is chat (ADR 0x052).
+	Kind models.ModelKind `json:"kind,omitempty"`
+	// Voices are the voices a speech model offers: narrowed or relabelled from
+	// the known table's, or typed for a model the table doesn't know. Nil keeps
+	// an enabled model's, or takes the table's for a new one.
+	Voices []models.SpeechVoice `json:"voices,omitempty"`
 }
 
 // enabledModels returns the connection's enabled model rows by name.
@@ -133,6 +143,7 @@ func (s *Store) withEnabled(ctx context.Context, connectionID uuid.UUID, listed 
 		if row, ok := enabled[m.ID]; ok {
 			cm.Enabled = true
 			cm.ToolSupport, cm.VisionSupport = capabilitiesOf(row)
+			withRowSpeech(&cm.ListedModel, row)
 			delete(enabled, m.ID)
 		}
 		out = append(out, cm)
@@ -140,6 +151,7 @@ func (s *Store) withEnabled(ctx context.Context, connectionID uuid.UUID, listed 
 	for _, row := range enabled {
 		cm := ConnectionModel{ListedModel: ListedModel{ID: row.Name, DisplayName: row.DisplayName}, Enabled: true}
 		cm.ToolSupport, cm.VisionSupport = capabilitiesOf(row)
+		withRowSpeech(&cm.ListedModel, row)
 		out = append(out, cm)
 	}
 	return out, nil
@@ -218,12 +230,16 @@ func (s *Store) SetModels(ctx context.Context, userID uuid.UUID, conn *ent.Provi
 			}
 			continue
 		}
-		id, err := enableModel(ctx, tx, conn, c)
+		id, kind, err := enableModel(ctx, tx, conn, c)
 		if err != nil {
 			if ent.IsConstraintError(err) {
 				return ErrModelsChanged
 			}
 			return err
+		}
+		// Only a chat model can be the default: a voice is never chatted with.
+		if kind != models.ModelKindChat {
+			continue
 		}
 		if err := defaultIfNone(ctx, tx, userID, id); err != nil {
 			return err
@@ -338,8 +354,9 @@ func defaultIfNone(ctx context.Context, tx *ent.Tx, userID, modelID uuid.UUID) e
 	return nil
 }
 
-// enableModel creates or brings back a model on the connection and returns its ID.
-func enableModel(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConnection, c ModelChoice) (uuid.UUID, error) {
+// enableModel creates or brings back a model on the connection and returns its
+// ID and kind. A kind, once set, stays: a model is what it is.
+func enableModel(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConnection, c ModelChoice) (uuid.UUID, models.ModelKind, error) {
 	displayName := strings.TrimSpace(c.DisplayName)
 	if displayName == "" {
 		displayName = c.ID
@@ -349,31 +366,64 @@ func enableModel(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConnection, 
 		Only(ctx)
 	switch {
 	case ent.IsNotFound(err):
+		kind, voices, err := models.ResolveSpeechModel(models.ModelProvider(conn.Preset), c.ID, c.Kind, c.Voices)
+		if err != nil {
+			return uuid.Nil, "", err
+		}
 		create := tx.Model.Create().
 			SetConnectionID(conn.ID).
 			SetName(c.ID).
 			SetDisplayName(displayName).
 			SetDescription("").
 			SetProvider(entmodel.Provider(conn.Preset)).
-			SetToolSupport(c.ToolSupport != nil && *c.ToolSupport).
-			SetVisionSupport(c.VisionSupport != nil && *c.VisionSupport)
+			SetKind(entmodel.Kind(kind)).
+			SetToolSupport(!kind.IsAudio() && c.ToolSupport != nil && *c.ToolSupport).
+			SetVisionSupport(!kind.IsAudio() && c.VisionSupport != nil && *c.VisionSupport)
+		if voices != nil {
+			create.SetSpeechVoices(voices)
+		}
 		created, err := create.Save(ctx)
 		if err != nil {
-			return uuid.Nil, fmt.Errorf("enable model %s: %w", c.ID, err)
+			return uuid.Nil, "", fmt.Errorf("enable model %s: %w", c.ID, err)
 		}
-		return created.ID, nil
+		return created.ID, kind, nil
 	case err != nil:
-		return uuid.Nil, fmt.Errorf("read model %s: %w", c.ID, err)
+		return uuid.Nil, "", fmt.Errorf("read model %s: %w", c.ID, err)
 	}
+	kind := models.ModelKind(existing.Kind)
 	update := existing.Update().SetDeleted(false).SetDisplayName(displayName)
-	if c.ToolSupport != nil {
-		update.SetToolSupport(*c.ToolSupport)
+	if !kind.IsAudio() {
+		if c.ToolSupport != nil {
+			update.SetToolSupport(*c.ToolSupport)
+		}
+		if c.VisionSupport != nil {
+			update.SetVisionSupport(*c.VisionSupport)
+		}
 	}
-	if c.VisionSupport != nil {
-		update.SetVisionSupport(*c.VisionSupport)
+	// Voices sent for an enabled speech model replace the ones it offers: this is
+	// how an account narrows or relabels them. Left out, they stay.
+	if kind == models.ModelKindSpeech && c.Voices != nil {
+		v, err := models.CheckSpeechVoices(models.ModelProvider(conn.Preset), c.ID, c.Voices)
+		if err != nil {
+			return uuid.Nil, "", err
+		}
+		update.SetSpeechVoices(v)
 	}
 	if _, err := update.Save(ctx); err != nil {
-		return uuid.Nil, fmt.Errorf("enable model %s: %w", c.ID, err)
+		return uuid.Nil, "", fmt.Errorf("enable model %s: %w", c.ID, err)
 	}
-	return existing.ID, nil
+	return existing.ID, kind, nil
+}
+
+// withRowSpeech shows an enabled row's kind and voices in place of the listing's guess:
+// once enabled, a model is what its row says.
+func withRowSpeech(m *ListedModel, row *ent.Model) {
+	m.Kind, m.Voices = "", nil
+	kind := models.ModelKind(row.Kind)
+	if kind.IsAudio() {
+		m.Kind = kind
+	}
+	if kind == models.ModelKindSpeech {
+		m.Voices = row.SpeechVoices
+	}
 }

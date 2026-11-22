@@ -15900,6 +15900,9 @@ export interface components {
             connection_id?: string;
             /** @description That connection's name, as the account named it (e.g. "Desk Ollama"), in the account's model list; absent where connection_id is. */
             connection_name?: string;
+            kind?: components["schemas"]["ModelKind"];
+            /** @description The voices a speech model offers (ADR 0x052); absent for other kinds. */
+            speech_voices?: components["schemas"]["SpeechVoice"][];
         };
         /**
          * @example pending
@@ -16747,6 +16750,17 @@ export interface components {
             /** @description Where to create a key, when known. */
             keys_url?: string;
         };
+        /**
+         * @description What a model does (ADR 0x052). Only chat models are offered for chat, subagents and the text utility roles; speech models are voices, and transcription models dictation.
+         * @enum {string}
+         */
+        ModelKind: "chat" | "speech" | "transcription";
+        SpeechVoice: {
+            /** @description The voice id the provider takes. */
+            id: string;
+            /** @description The name people see; defaults to the id. */
+            name: string;
+        };
         /** @description A model a provider offers. */
         ListedModel: {
             id: string;
@@ -16756,6 +16770,12 @@ export interface components {
             tool_support?: boolean;
             /** @description Whether it takes images, as the provider reports; absent when unknown. */
             vision_support?: boolean;
+            /** @description Set for a speech or transcription model: a built-in provider's known speech models are listed beside its chat models. Absent for chat. */
+            kind?: components["schemas"]["ModelKind"];
+            /** @description A speech model's voices. */
+            voices?: components["schemas"]["SpeechVoice"][];
+            /** @description Whether a speech model takes a free-text style instruction. */
+            style?: boolean;
         };
         /** @description One of a connection's models as the account sees it. */
         ConnectionModel: components["schemas"]["ListedModel"] & {
@@ -16772,6 +16792,10 @@ export interface components {
                 tool_support?: boolean;
                 /** @description Left out, an enabled model keeps its value, and a new one starts off. */
                 vision_support?: boolean;
+                /** @description For a model the known speech models table doesn't know, on an OpenRouter, Ollama or Custom connection: speech or transcription adds it by id without the listing. Ignored for a known model, which takes the table's kind; a kind, once set, stays. */
+                kind?: components["schemas"]["ModelKind"];
+                /** @description A speech model's offered voices. Left out, an enabled model keeps its own and a new one takes the table's; a new model the table doesn't know needs at least one. */
+                voices?: components["schemas"]["SpeechVoice"][];
             }[];
         };
         ProviderConnected: {

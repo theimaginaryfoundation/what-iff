@@ -88,6 +88,7 @@ func newFixture(t *testing.T) fixture {
 			subscription_tier text NOT NULL DEFAULT 'high',
 			deleted bool NOT NULL DEFAULT false,
 			is_default bool NOT NULL DEFAULT false,
+			kind text NOT NULL DEFAULT 'chat', speech_voices json NULL,
 			connection_id uuid NULL,
 			UNIQUE (connection_id, name),
 			FOREIGN KEY (connection_id) REFERENCES provider_connections(id) ON DELETE CASCADE
@@ -690,4 +691,103 @@ func TestKeepDistinctNames(t *testing.T) {
 	require.Empty(t, listed[0].DisplayName)
 	require.Empty(t, listed[1].DisplayName)
 	require.Empty(t, listed[2].DisplayName)
+}
+
+func addOpenAI(t *testing.T, f fixture) Connection {
+	t.Helper()
+	rec := f.call(t, f.alice, http.MethodPost, "/provider-connections", map[string]string{
+		"preset": "openai", "key": aliceOpenAI, "current_password": "right",
+	})
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	return decode[connected](t, rec).Connection
+}
+
+func listedByID(t *testing.T, f fixture, connID uuid.UUID) map[string]ConnectionModel {
+	t.Helper()
+	rec := f.call(t, f.alice, http.MethodGet, "/provider-connections/"+connID.String()+"/models", nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	out := map[string]ConnectionModel{}
+	for _, m := range decode[[]ConnectionModel](t, rec) {
+		out[m.ID] = m
+	}
+	return out
+}
+
+// A built-in provider's known speech models are listed beside its chat models,
+// marked with their kind, whether or not the provider lists them (ADR 0x052 §2).
+func TestSpeech_KnownModelsAreListedWithTheirKind(t *testing.T) {
+	f := newFixture(t)
+	conn := addOpenAI(t, f)
+
+	byID := listedByID(t, f, conn.ID)
+	require.Contains(t, byID, "alpha")
+	require.Empty(t, byID["alpha"].Kind, "a chat model")
+	transcribe, ok := byID["gpt-transcribe"]
+	require.True(t, ok, "listed though the provider's listing lacks it")
+	require.Equal(t, models.ModelKindTranscription, transcribe.Kind)
+	require.Equal(t, "GPT Transcribe", transcribe.DisplayName)
+	require.False(t, transcribe.Enabled)
+}
+
+// Enabling a known speech model needs no listing, takes the table's kind, and
+// never makes it the default model.
+func TestSpeech_EnablingAKnownModel(t *testing.T) {
+	f := newFixture(t)
+	conn := addOpenAI(t, f)
+	_, err := f.db.Exec(`INSERT INTO user_preferences (id, user_preferences) VALUES (?, ?)`, uuid.New(), f.alice)
+	require.NoError(t, err)
+
+	yes := true
+	rec := f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "gpt-transcribe", Enabled: true, Kind: models.ModelKindChat, ToolSupport: &yes})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	row, err := f.store.client.Model.Query().Only(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "transcription", string(row.Kind), "the table's kind wins over the request's")
+	require.False(t, row.ToolSupport, "a speech model takes no tools")
+
+	var def sql.NullString
+	require.NoError(t, f.db.QueryRow(`SELECT default_model FROM user_preferences WHERE user_preferences = ?`, f.alice).Scan(&def))
+	require.False(t, def.Valid, "a transcription model is never the default chat model")
+
+	require.True(t, listedByID(t, f, conn.ID)["gpt-transcribe"].Enabled)
+}
+
+// On an open-ended connection a speech model is added by id with typed voices,
+// without being in the listing; a chat model still must be listed.
+func TestSpeech_AddedByIDOnAnOpenEndedConnection(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+
+	rec := f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "phonon", Enabled: true, Kind: models.ModelKindSpeech})
+	require.Equal(t, http.StatusBadRequest, rec.Code, "a voice model the table doesn't know needs voices")
+
+	rec = f.enableModels(t, f.alice, conn.ID, ModelChoice{
+		ID: "phonon", Enabled: true, Kind: models.ModelKindSpeech,
+		Voices: []models.SpeechVoice{{ID: " af_bella ", Name: ""}, {ID: "am_adam", Name: "Adam"}, {ID: "af_bella", Name: "dupe"}},
+	})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	row, err := f.store.client.Model.Query().Only(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "speech", string(row.Kind))
+	require.Equal(t, []models.SpeechVoice{{ID: "af_bella", Name: "af_bella"}, {ID: "am_adam", Name: "Adam"}}, row.SpeechVoices)
+
+	got := listedByID(t, f, conn.ID)["phonon"]
+	require.True(t, got.Enabled, "an enabled model shows though the server doesn't list it")
+	require.Equal(t, models.ModelKindSpeech, got.Kind)
+	require.Len(t, got.Voices, 2)
+
+	// Narrowing the voices of an enabled model.
+	rec = f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "phonon", Enabled: true, Voices: []models.SpeechVoice{{ID: "am_adam", Name: "Adam"}}})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	row, err = f.store.client.Model.Query().Only(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []models.SpeechVoice{{ID: "am_adam", Name: "Adam"}}, row.SpeechVoices)
+
+	rec = f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "omega", Enabled: true})
+	require.Equal(t, http.StatusBadRequest, rec.Code, "a chat model must still be listed")
+
+	rec = f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true, Kind: "image"})
+	require.Equal(t, http.StatusBadRequest, rec.Code, "an unknown kind, on a listed model")
+	require.Contains(t, rec.Body.String(), "kind")
 }

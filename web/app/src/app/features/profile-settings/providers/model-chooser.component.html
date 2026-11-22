@@ -1,7 +1,7 @@
 <ui-modal [open]="open()" size="lg" labelledBy="model-chooser-title" (dismiss)="close()">
   <div modal-header>
     <h2 id="model-chooser-title" class="chooser__title">{{ connection()?.name }} models</h2>
-    <p class="chooser__subtitle">The models you enable appear in your model picker.</p>
+    <p class="chooser__subtitle">The chat models you enable appear in your model picker; voice and dictation models, in Voice settings.</p>
   </div>
 
   <div class="chooser" data-testid="model-chooser">
@@ -43,15 +43,20 @@
 
       <div class="chooser__filters" role="group" aria-label="Show">
         @for (f of filters; track f.id) {
-          <button
-            class="chooser__chip"
-            type="button"
-            [class.chooser__chip--on]="filter() === f.id"
-            [attr.aria-pressed]="filter() === f.id"
-            (click)="setFilter(f.id)"
-          >
-            {{ f.label }}@if (f.id === 'enabled') { ({{ enabledCount() }})}
-          </button>
+          @if (f.id !== "voice" || hasAudio()) {
+            <button
+              class="chooser__chip"
+              type="button"
+              [class.chooser__chip--on]="filter() === f.id"
+              [attr.aria-pressed]="filter() === f.id"
+              (click)="setFilter(f.id)"
+            >
+              {{ f.label }}
+              @if (f.id === "enabled") {
+                ({{ enabledCount() }})
+              }
+            </button>
+          }
         }
         @if (narrowed()) {
           <span class="chooser__results" aria-live="polite">{{ shown().length }} of {{ rows().length }}</span>
@@ -122,19 +127,35 @@
                   <ui-edit-icon [size]="12" />
                 </button>
               }
-              @for (cap of capabilities; track cap.id) {
-                @let value = row[cap.id];
-                <button
-                  class="chooser__cap"
-                  type="button"
-                  [class.chooser__cap--on]="value === true"
-                  [class.chooser__cap--ask]="value === undefined && row.enabled"
-                  [attr.aria-pressed]="value === true"
-                  [attr.aria-label]="cap.label + ' for ' + row.name + (value === undefined ? ', not reported' : '')"
-                  (click)="toggleCapability(row, cap.id)"
-                >
-                  {{ cap.label }}@if (value === undefined && row.enabled) {?}
-                </button>
+              @if (row.kind !== "chat") {
+                <span class="chooser__kind" data-testid="model-chooser-kind">
+                  @if (row.kind === "speech") {
+                    Voice
+                    @if (row.voices?.length) {
+                      · {{ row.voices!.length }} {{ row.voices!.length === 1 ? "voice" : "voices" }}
+                    }
+                  } @else {
+                    Dictation
+                  }
+                </span>
+              } @else {
+                @for (cap of capabilities; track cap.id) {
+                  @let value = row[cap.id];
+                  <button
+                    class="chooser__cap"
+                    type="button"
+                    [class.chooser__cap--on]="value === true"
+                    [class.chooser__cap--ask]="value === undefined && row.enabled"
+                    [attr.aria-pressed]="value === true"
+                    [attr.aria-label]="cap.label + ' for ' + row.name + (value === undefined ? ', not reported' : '')"
+                    (click)="toggleCapability(row, cap.id)"
+                  >
+                    {{ cap.label }}
+                    @if (value === undefined && row.enabled) {
+                      ?
+                    }
+                  </button>
+                }
               }
             </div>
           </div>
@@ -146,10 +167,60 @@
         }
       </div>
 
+      @if (canAddById()) {
+        <details class="chooser__add" data-testid="model-chooser-add">
+          <summary>Add a voice or dictation model by id</summary>
+          <p class="chooser__note">
+            {{ connection()?.name }} may not list its speech models. Add one by the id its server uses, such as a Kokoro or Speaches model;
+            for a voice model, list the voice ids it takes.
+          </p>
+          <div class="chooser__add-fields">
+            <input
+              class="chooser__field"
+              type="text"
+              maxlength="200"
+              placeholder="Model id"
+              aria-label="Model id"
+              [value]="addId()"
+              (input)="addId.set($any($event.target).value)"
+            />
+            <div class="chooser__kinds" role="radiogroup" aria-label="What the model does">
+              <label class="chooser__kind-choice">
+                <ui-radio name="add-kind" value="speech" [checked]="addKind() === 'speech'" (selected)="addKind.set('speech')" />
+                Voice
+              </label>
+              <label class="chooser__kind-choice">
+                <ui-radio
+                  name="add-kind"
+                  value="transcription"
+                  [checked]="addKind() === 'transcription'"
+                  (selected)="addKind.set('transcription')"
+                />
+                Dictation
+              </label>
+            </div>
+            @if (addKind() === "speech") {
+              <input
+                class="chooser__field"
+                type="text"
+                placeholder="Voice ids, separated by commas"
+                aria-label="Voice ids, separated by commas"
+                [value]="addVoices()"
+                (input)="addVoices.set($any($event.target).value)"
+              />
+            }
+            <button class="chooser__button" type="button" (click)="addFromForm()">Add</button>
+          </div>
+          @if (addError()) {
+            <div class="chooser__message" role="alert">{{ addError() }}</div>
+          }
+        </details>
+      }
+
       @if (unconfirmed()) {
         <p class="chooser__note">
-          <strong>Tools? / Images?</strong> {{ connection()?.name }} doesn't say what these models support. Turn on what
-          yours does: a model offered tools it can't use fails its turns, and one without images is sent text only.
+          <strong>Tools? / Images?</strong> {{ connection()?.name }} doesn't say what these models support. Turn on what yours does: a model
+          offered tools it can't use fails its turns, and one without images is sent text only.
         </p>
       } @else {
         <p class="chooser__note">Tools and Images come from what {{ connection()?.name }} reports, where it does.</p>
@@ -171,7 +242,7 @@
       [disabled]="saving() || loading() || !!loadError()"
       data-testid="model-chooser-save"
     >
-      {{ saving() ? 'Saving...' : 'Save' }}
+      {{ saving() ? "Saving..." : "Save" }}
     </button>
   </div>
 </ui-modal>
