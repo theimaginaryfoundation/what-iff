@@ -54,6 +54,20 @@ func (Model) Fields() []ent.Field {
 		field.Int64("base_credits_per_slab").
 			Default(1).
 			Comment("Credits charged per token slab for chat/job turns using this model"),
+		// Speech is priced per character rather than by base_credits_per_slab: the slab is
+		// 15,000 tokens, rounded up per call, and synthesis is billed per segment (a sentence
+		// to a paragraph). At ~1,500 audio tokens a minute a slab is ~10 minutes of audio, so
+		// slab pricing would charge a 30-second reply as ten minutes. Characters are also what
+		// every speech route can count (the OpenAI-style route reports no tokens) and what a
+		// cost can be shown in before anything is synthesised. See ADR 0x052 §11.
+		field.Float("credits_per_1k_chars").
+			Default(0).
+			Min(0).
+			Comment("Credits charged per 1,000 characters a speech model reads aloud (ADR 0x052 §11), for a linked meter; like base_credits_per_slab, it has no effect without one. Not slab-priced: a 15k-token slab is ~10 minutes of audio, rounded up per segment"),
+		field.Float("credits_per_minute").
+			Default(0).
+			Min(0).
+			Comment("Credits charged per minute a transcription model transcribes (ADR 0x052 §11), for a linked meter"),
 		field.Enum("subscription_tier").
 			Values("low", "medium", "high", "ultra").
 			Default("high").

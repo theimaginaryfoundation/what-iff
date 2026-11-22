@@ -90,6 +90,26 @@ export class SpeechService {
     return this.http.post(`${this.baseUrl}/preview`, { ...voice, text }, { responseType: 'arraybuffer' }).pipe(catchError(decodeErrorBody));
   }
 
+  /** Claims a pending track to play; only one client gets it. */
+  claim(trackId: string): Observable<{ claimed: boolean; track: SpeechTrack }> {
+    return this.http.post<{ claimed: boolean; track: SpeechTrack }>(`${this.baseUrl}/tracks/${trackId}/claim`, {});
+  }
+
+  /** Marks a pending track skipped: it won't be read out on arrival. */
+  skip(trackId: string): Observable<void> {
+    return this.http.post<void>(`${this.baseUrl}/tracks/${trackId}/skip`, {});
+  }
+
+  /** The chat's replies waiting to be read out on arrival, newest first. */
+  pending(chatId: string): Observable<SpeechTrack[]> {
+    return this.http.get<SpeechTrack[]>(`${this.baseUrl}/chats/${chatId}/pending`);
+  }
+
+  /** Sets whether the chat's replies are read aloud as they arrive; null follows the personality. */
+  setChatAutoplay(chatId: string, autoplay: boolean | null): Observable<unknown> {
+    return this.http.put(`${this.baseUrl}/chats/${chatId}/autoplay`, { autoplay });
+  }
+
   setVoice(personalityId: string, voice: PersonalityVoice): Observable<Personality> {
     return this.http.put<Personality>(`${environment.apiUrl}/personality/${personalityId}/voice`, voice);
   }

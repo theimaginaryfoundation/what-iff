@@ -289,6 +289,12 @@ func (a *Agent) synthesizeTrack(ctx context.Context, userID uuid.UUID, l speechL
 		return models.SpeechTrackFailed, "internal_error", nil
 	}
 	format := preferredSpeechFormat(v.target.spec)
+	// The characters already synthesised for this track (a worker taking over one whose
+	// worker went away), so billing rounds the track's total once.
+	trackChars := 0
+	for _, t := range said {
+		trackChars += utf8.RuneCountInString(t)
+	}
 	for i, text := range speechtext.Segment(rest, v.maxSegmentChars()) {
 		seq := len(said) + i
 		if err := ctx.Err(); err != nil {
@@ -323,7 +329,8 @@ func (a *Agent) synthesizeTrack(ctx context.Context, userID uuid.UUID, l speechL
 			a.deleteSpeechFiles(context.WithoutCancel(ctx), []string{key})
 			return models.SpeechTrackFailed, "internal_error", nil
 		}
-		a.recordSpeech(ctx, decision, userID, track.ChatID, v, usage)
+		trackChars += usage.Characters
+		a.recordSpeech(ctx, decision, userID, track.ChatID, v, usage, trackChars)
 	}
 	return models.SpeechTrackComplete, "", nil
 }
@@ -388,13 +395,16 @@ func (a *Agent) checkSpeechQuota(ctx context.Context, userID uuid.UUID) (meterin
 	return d, d.Allowed, nil
 }
 
-func (a *Agent) recordSpeech(ctx context.Context, d metering.Decision, userID, chatID uuid.UUID, v voice, usage provider.SpeechUsage) {
+// recordSpeech records one synthesis. trackChars is the track's characters so far, this
+// synthesis included (metering.Usage.SpeechTrackCharacters).
+func (a *Agent) recordSpeech(ctx context.Context, d metering.Decision, userID, chatID uuid.UUID, v voice, usage provider.SpeechUsage, trackChars int) {
 	if a.meter == nil {
 		return
 	}
 	u := metering.Usage{
 		UserID: userID, ActionType: models.ActionTypeSpeechSynthesis, Model: v.target.model,
-		SpeechProvider: v.target.provider, SpeechCharacters: usage.Characters, Source: metering.TurnSourceApp,
+		SpeechProvider: v.target.provider, SpeechCharacters: usage.Characters, SpeechTrackCharacters: trackChars,
+		Source: metering.TurnSourceApp,
 	}
 	if chatID != uuid.Nil {
 		u.ChatID = chatID.String()
@@ -479,6 +489,7 @@ func (a *Agent) SpeechTrack(ctx context.Context, userID, trackID uuid.UUID) (*mo
 	if err != nil {
 		return nil, err
 	}
+	a.settleOrphanTurnTrack(ctx, track)
 	if track.Status == models.SpeechTrackOpen && track.MessageID != nil && !track.HasWorker(time.Now()) {
 		a.resumeSpeechTrack(ctx, userID, track)
 	}
@@ -538,12 +549,13 @@ func (a *Agent) PreviewVoice(ctx context.Context, userID uuid.UUID, pv models.Pe
 	if err != nil {
 		return provider.SpeechAudio{}, err
 	}
-	a.recordSpeech(ctx, decision, userID, uuid.Nil, v, usage)
+	a.recordSpeech(ctx, decision, userID, uuid.Nil, v, usage, usage.Characters)
 	return audio, nil
 }
 
 // SweepSpeech deletes the audio nobody plays (ADR 0x052 §7): tracks unplayed for 30
-// days, and tracks whose message is gone, files first. It runs until ctx ends.
+// days, tracks whose message is gone, and turn tracks no reply was ever tied to (after
+// datastore.UnlinkedSpeechTrackTTL), files first. It runs until ctx ends.
 func (a *Agent) SweepSpeech(ctx context.Context, every time.Duration) {
 	if every <= 0 {
 		every = time.Hour

@@ -63,6 +63,7 @@ import { ChatSessionService } from './chat-session.service';
 import { isChatSendFailed, isChatSendSucceeded } from './chat-send-result';
 import { ChatSendGate } from './services/chat-send-gate';
 import { SpeechPlayerService } from '../../core/services/speech-player.service';
+import { SpeechAutoplayService } from '../../core/services/speech-autoplay.service';
 import { Mood } from '../../core/models/mood.model';
 import { InheritedTurnSettings, effectiveReasoningEffort, resolveEffectiveTurnSettings } from '../../core/models/turn-settings.model';
 import { BackgroundNoticesComponent } from './components/background-notices/background-notices.component';
@@ -145,6 +146,9 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   readonly isSandboxed = isSandboxed;
   readonly sendGate = inject(ChatSendGate);
   private readonly speechPlayer = inject(SpeechPlayerService);
+  private readonly speechAutoplay = inject(SpeechAutoplayService);
+  /** The chat on screen, for replies read aloud as they arrive (ADR 0x052 §9). */
+  private readonly trackOpenChat = effect(() => this.speechAutoplay.setOpenChat(this.session.thread()?.id ?? null));
   private readonly chatService = inject(ChatService);
   private readonly fileAttachmentService = inject(FileAttachmentService);
   private readonly imageGallery = inject(ImageGalleryService);
@@ -577,7 +581,13 @@ export class ChatPageComponent implements OnInit, OnDestroy {
       next: personality => {
         this.upsertPersonality(personality);
         // Replies get Listen when the personality has a voice (ADR 0x052).
-        if (threadId) this.speechPlayer.setChatVoice(threadId, !!personality.voice);
+        if (threadId) {
+          this.speechPlayer.setChatVoice(threadId, !!personality.voice);
+          this.speechAutoplay.setChatAutoplay(threadId, {
+            personality: !!personality.voice?.autoplay,
+            override: this.session.thread()?.voice_autoplay ?? null,
+          });
+        }
       },
     });
     onCleanup(() => sub.unsubscribe());
@@ -680,6 +690,7 @@ ${text}`
   }
 
   ngOnDestroy(): void {
+    this.speechAutoplay.setOpenChat(null);
     if (this.workspace.host() === 'chat') this.workspace.hide();
     if (this.clearCopyFeedbackTimer) {
       clearTimeout(this.clearCopyFeedbackTimer);

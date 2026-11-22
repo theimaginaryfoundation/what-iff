@@ -14,6 +14,8 @@ export function isSandboxed(chat: Pick<Chat, 'context_scope'> | null | undefined
 }
 
 export interface Chat {
+  /** Whether this chat's replies are read aloud as they arrive; null follows the personality (ADR 0x052). */
+  voice_autoplay?: boolean | null;
   id: string;
   user_id: string;
   name: string;

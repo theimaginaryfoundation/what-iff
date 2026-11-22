@@ -12,7 +12,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
+	"github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
+	"github.com/theimaginaryfoundation/what-iff/ent/job"
 	entmodel "github.com/theimaginaryfoundation/what-iff/ent/model"
 	"github.com/theimaginaryfoundation/what-iff/ent/personality"
 	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
@@ -56,7 +58,7 @@ func (d *Datastore) SetPersonalityVoice(ctx context.Context, userID, personality
 	}
 	update := tx.Personality.UpdateOneID(personalityID)
 	if voice == nil {
-		update.ClearVoiceModelID().SetVoice("").SetVoiceStyle("")
+		update.ClearVoiceModelID().SetVoice("").SetVoiceStyle("").SetVoiceAutoplay(false)
 	} else {
 		v := *voice
 		v.Voice, v.Style = strings.TrimSpace(v.Voice), strings.TrimSpace(v.Style)
@@ -76,7 +78,7 @@ func (d *Datastore) SetPersonalityVoice(ctx context.Context, userID, personality
 		if !slices.ContainsFunc(m.SpeechVoices, func(o models.SpeechVoice) bool { return o.ID == v.Voice }) {
 			return nil, fmt.Errorf("%w: %s doesn't offer the voice %q", models.ErrInvalidPersonalityVoice, m.DisplayName, v.Voice)
 		}
-		update.SetVoiceModelID(v.ModelID).SetVoice(v.Voice).SetVoiceStyle(v.Style)
+		update.SetVoiceModelID(v.ModelID).SetVoice(v.Voice).SetVoiceStyle(v.Style).SetVoiceAutoplay(v.Autoplay)
 	}
 	if _, err := update.Save(ctx); err != nil {
 		return nil, err
@@ -91,14 +93,17 @@ func toSpeechTrack(e *ent.SpeechTrack) *models.SpeechTrack {
 	t := &models.SpeechTrack{
 		ID: e.ID, UserID: e.UserID, ChatID: e.ChatID, MessageID: e.MessageID, JobID: e.JobID,
 		ModelID: e.ModelID, Voice: e.Voice, Style: e.Style, VoiceKey: e.VoiceKey,
-		Status: models.SpeechTrackStatus(e.Status), ErrorCode: e.ErrorCode,
+		Status: models.SpeechTrackStatus(e.Status), ErrorCode: e.ErrorCode, CreatedAt: e.CreatedAt,
 		Segments: []models.SpeechSegment{}, WorkerUntil: e.WorkerUntil,
+	}
+	if e.Autoplay != nil {
+		t.Autoplay = models.SpeechAutoplay(*e.Autoplay)
 	}
 	segs := append([]*ent.SpeechSegment(nil), e.Edges.Segments...)
 	slices.SortFunc(segs, func(a, b *ent.SpeechSegment) int { return a.Seq - b.Seq })
 	for _, s := range segs {
 		t.Segments = append(t.Segments, models.SpeechSegment{
-			Seq: s.Seq, Text: s.Text, FileKey: s.FileKey, Format: models.AudioFormat(s.Format),
+			ID: s.ID, Seq: s.Seq, Text: s.Text, FileKey: s.FileKey, Format: models.AudioFormat(s.Format),
 			DurationMS: s.DurationMs, SizeBytes: s.SizeBytes,
 		})
 	}
@@ -331,9 +336,18 @@ func messageGone() predicate.SpeechTrack {
 	})
 }
 
-// sweepable is a track to delete: unplayed since cutoff, or whose message is gone.
+// UnlinkedSpeechTrackTTL is how long a turn's track may stay tied to no reply before the
+// sweep deletes it: far longer than a turn runs, so only a turn that died leaves one.
+const UnlinkedSpeechTrackTTL = 24 * time.Hour
+
+// sweepable is a track to delete: unplayed since cutoff, whose message is gone, or a turn's
+// track its turn never tied to a reply.
 func sweepable(cutoff time.Time) predicate.SpeechTrack {
-	return speechtrack.Or(speechtrack.LastPlayedAtLT(cutoff), messageGone())
+	return speechtrack.Or(
+		speechtrack.LastPlayedAtLT(cutoff),
+		messageGone(),
+		speechtrack.And(speechtrack.MessageIDIsNil(), speechtrack.CreatedAtLT(time.Now().Add(-UnlinkedSpeechTrackTTL))),
+	)
 }
 
 // SweepableSpeechTracks lists up to limit tracks to delete: unplayed since cutoff, or
@@ -402,4 +416,149 @@ func (d *Datastore) DeleteSpeechTrack(ctx context.Context, trackID uuid.UUID) er
 		return nil
 	}
 	return err
+}
+
+// Autoplay (ADR 0x052 §9).
+
+// NewTurnSpeechTrack is the track a turn makes for its reply when the chat reads
+// replies aloud as they arrive.
+type NewTurnSpeechTrack struct {
+	UserID, ChatID, JobID, ModelID uuid.UUID
+	Voice, Style, VoiceKey         string
+}
+
+// CreateTurnSpeechTrack makes a turn's track, pending autoplay, with no reply yet, and
+// records it on the turn's job so the client watching the turn finds it.
+func (d *Datastore) CreateTurnSpeechTrack(ctx context.Context, n NewTurnSpeechTrack) (*models.SpeechTrack, error) {
+	e, err := d.dbClient.SpeechTrack.Create().
+		SetUserID(n.UserID).SetChatID(n.ChatID).SetJobID(n.JobID).
+		SetModelID(n.ModelID).SetVoice(n.Voice).SetStyle(n.Style).SetVoiceKey(n.VoiceKey).
+		SetAutoplay(speechtrack.AutoplayPending).
+		SetLastPlayedAt(time.Now()).
+		Save(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.dbClient.Job.UpdateOneID(n.JobID).SetSpeechTrackID(e.ID).Exec(ctx); err != nil {
+		return nil, err
+	}
+	return toSpeechTrack(e), nil
+}
+
+// SpeechTrackTurn reports, for a turn's track, whether its run is still at work and the reply
+// it saved, if any. A run that is gone, or that a worker left mid-way, is not at work.
+func (d *Datastore) SpeechTrackTurn(ctx context.Context, jobID uuid.UUID) (running bool, replyID *uuid.UUID, err error) {
+	j, err := d.dbClient.Job.Query().Where(job.ID(jobID)).Only(ctx)
+	if ent.IsNotFound(err) {
+		return false, nil, nil
+	}
+	if err != nil {
+		return false, nil, err
+	}
+	running, err = d.dbClient.Job.Query().Where(job.ID(jobID), unfinishedTurnRun(time.Now())).Exist(ctx)
+	if err != nil {
+		return false, nil, err
+	}
+	return running, j.ResultID, nil
+}
+
+// LinkSpeechTrack ties a turn's track to the reply it saved.
+func (d *Datastore) LinkSpeechTrack(ctx context.Context, trackID, messageID uuid.UUID) error {
+	return d.dbClient.SpeechTrack.UpdateOneID(trackID).SetMessageID(messageID).Exec(ctx)
+}
+
+// ClaimSpeechTrack moves the account's pending track to played, for the one client that
+// will play it, and reports whether it did. A pending track older than a day is skipped
+// instead: a reply from yesterday isn't read out on arrival.
+func (d *Datastore) ClaimSpeechTrack(ctx context.Context, userID, trackID uuid.UUID) (bool, error) {
+	now := time.Now()
+	n, err := d.dbClient.SpeechTrack.Update().
+		Where(
+			speechtrack.ID(trackID), speechtrack.UserID(userID),
+			speechtrack.AutoplayEQ(speechtrack.AutoplayPending),
+			speechtrack.CreatedAtGT(now.Add(-models.AutoplayMaxAge)),
+		).
+		SetAutoplay(speechtrack.AutoplayPlayed).
+		SetLastPlayedAt(now).
+		Save(ctx)
+	if err != nil || n == 1 {
+		return n == 1, err
+	}
+	_, err = d.dbClient.SpeechTrack.Update().
+		Where(speechtrack.ID(trackID), speechtrack.UserID(userID), speechtrack.AutoplayEQ(speechtrack.AutoplayPending)).
+		SetAutoplay(speechtrack.AutoplaySkipped).
+		Save(ctx)
+	return false, err
+}
+
+// SkipSpeechTrack marks the account's pending track skipped: it won't be read out on
+// arrival, and keeps its Listen button.
+func (d *Datastore) SkipSpeechTrack(ctx context.Context, userID, trackID uuid.UUID) error {
+	_, err := d.dbClient.SpeechTrack.Update().
+		Where(speechtrack.ID(trackID), speechtrack.UserID(userID), speechtrack.AutoplayEQ(speechtrack.AutoplayPending)).
+		SetAutoplay(speechtrack.AutoplaySkipped).
+		Save(ctx)
+	return err
+}
+
+// SkipPendingSpeechTracks skips every pending track in the chat, when the chat stops
+// reading replies aloud.
+func (d *Datastore) SkipPendingSpeechTracks(ctx context.Context, userID, chatID uuid.UUID) error {
+	_, err := d.dbClient.SpeechTrack.Update().
+		Where(speechtrack.UserID(userID), speechtrack.ChatID(chatID), speechtrack.AutoplayEQ(speechtrack.AutoplayPending)).
+		SetAutoplay(speechtrack.AutoplaySkipped).
+		Save(ctx)
+	return err
+}
+
+// PendingSpeechTracks lists the chat's tracks waiting to be read out on arrival, newest
+// first.
+func (d *Datastore) PendingSpeechTracks(ctx context.Context, userID, chatID uuid.UUID) ([]*models.SpeechTrack, error) {
+	rows, err := d.dbClient.SpeechTrack.Query().
+		Where(speechtrack.UserID(userID), speechtrack.ChatID(chatID), speechtrack.AutoplayEQ(speechtrack.AutoplayPending)).
+		Order(ent.Desc(speechtrack.FieldCreatedAt)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*models.SpeechTrack, len(rows))
+	for i, r := range rows {
+		out[i] = toSpeechTrack(r)
+	}
+	return out, nil
+}
+
+// SpeechTrackState is a track's autoplay and status, read by the turn that follows it.
+func (d *Datastore) SpeechTrackState(ctx context.Context, trackID uuid.UUID) (models.SpeechAutoplay, models.SpeechTrackStatus, error) {
+	e, err := d.dbClient.SpeechTrack.Query().Where(speechtrack.ID(trackID)).
+		Select(speechtrack.FieldAutoplay, speechtrack.FieldStatus).Only(ctx)
+	if ent.IsNotFound(err) {
+		return "", "", ErrSpeechTrackNotFound
+	}
+	if err != nil {
+		return "", "", err
+	}
+	var a models.SpeechAutoplay
+	if e.Autoplay != nil {
+		a = models.SpeechAutoplay(*e.Autoplay)
+	}
+	return a, models.SpeechTrackStatus(e.Status), nil
+}
+
+// SetChatVoiceAutoplay sets the chat's autoplay override; nil follows the personality.
+func (d *Datastore) SetChatVoiceAutoplay(ctx context.Context, userID, chatID uuid.UUID, autoplay *bool) error {
+	update := d.dbClient.Chat.Update().Where(chat.ID(chatID), chat.HasOwnerWith(user.ID(userID)))
+	if autoplay == nil {
+		update.ClearVoiceAutoplay()
+	} else {
+		update.SetVoiceAutoplay(*autoplay)
+	}
+	n, err := update.Save(ctx)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrChatNotFound
+	}
+	return nil
 }

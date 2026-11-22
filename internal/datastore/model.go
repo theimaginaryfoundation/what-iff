@@ -26,6 +26,7 @@ var (
 	ErrInvalidProvider             = errors.New("invalid model provider")
 	ErrInvalidSubscriptionTier     = errors.New("invalid model subscription tier")
 	ErrInvalidReasoningSupport     = errors.New("invalid model reasoning support override")
+	ErrInvalidSpeechPrice          = fmt.Errorf("a speech price must be between 0 and %d", maxSpeechPrice)
 )
 
 func toModelModel(e *ent.Model) *models.Model {
@@ -38,6 +39,8 @@ func toModelModel(e *ent.Model) *models.Model {
 		ToolSupport:        e.ToolSupport,
 		VisionSupport:      e.VisionSupport != nil && *e.VisionSupport,
 		BaseCreditsPerSlab: e.BaseCreditsPerSlab,
+		CreditsPer1kChars:  e.CreditsPer1kChars,
+		CreditsPerMinute:   e.CreditsPerMinute,
 		SubscriptionTier:   string(e.SubscriptionTier),
 		Deleted:            e.Deleted,
 		IsDefault:          e.IsDefault,
@@ -656,6 +659,12 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 		return nil, err
 	}
 	audio := kind.IsAudio()
+	if !validSpeechPrice(req.CreditsPer1kChars) || !validSpeechPrice(req.CreditsPerMinute) {
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return nil, ErrInvalidSpeechPrice
+	}
 
 	existing, err := tx.Model.Query().
 		Where(entmodel.Name(name), entmodel.ConnectionIDIsNil()).
@@ -685,6 +694,8 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 				SetSubscriptionTier(subscriptionTier).
 				SetKind(entmodel.Kind(kind)).
 				SetSpeechVoices(voices).
+				SetCreditsPer1kChars(req.CreditsPer1kChars).
+				SetCreditsPerMinute(req.CreditsPerMinute).
 				Save(ctx)
 			if rerr != nil {
 				d.logger.Error(i18n.T1("update.failed", "Entity", "model"), zap.Error(rerr))
@@ -734,6 +745,8 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 		SetSubscriptionTier(subscriptionTier).
 		SetKind(entmodel.Kind(kind)).
 		SetSpeechVoices(voices).
+		SetCreditsPer1kChars(req.CreditsPer1kChars).
+		SetCreditsPerMinute(req.CreditsPerMinute).
 		SetDeleted(false).
 		Save(ctx)
 	if err != nil {
@@ -866,6 +879,24 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 	}
 	if req.BaseCreditsPerSlab != nil {
 		update.SetBaseCreditsPerSlab(normalizeBaseCreditsPerSlab(*req.BaseCreditsPerSlab))
+	}
+	if req.CreditsPer1kChars != nil {
+		if !validSpeechPrice(*req.CreditsPer1kChars) {
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, ErrInvalidSpeechPrice
+		}
+		update.SetCreditsPer1kChars(*req.CreditsPer1kChars)
+	}
+	if req.CreditsPerMinute != nil {
+		if !validSpeechPrice(*req.CreditsPerMinute) {
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, ErrInvalidSpeechPrice
+		}
+		update.SetCreditsPerMinute(*req.CreditsPerMinute)
 	}
 	if req.SpeechVoices != nil {
 		voices, verr := models.CheckSpeechVoices(models.ModelProvider(current.Provider), current.Name, req.SpeechVoices)
@@ -1083,4 +1114,13 @@ func resolveDefaultModelTx(ctx context.Context, tx *ent.Tx) (*ent.Model, error) 
 	return tx.Model.Query().
 		Where(entmodel.Deleted(false), entmodel.ConnectionIDIsNil(), entmodel.KindEQ(entmodel.KindChat)).
 		First(ctx)
+}
+
+// maxSpeechPrice bounds a speech price, in credits per unit: far above any real one, and
+// low enough that a track's total can never overflow when it is rounded to credits.
+const maxSpeechPrice = 1_000_000
+
+// validSpeechPrice is a price an admin can set: a number from zero to maxSpeechPrice.
+func validSpeechPrice(p float64) bool {
+	return p >= 0 && p <= maxSpeechPrice
 }

@@ -30,6 +30,7 @@ import {
 import { isHttpErrorResponse } from './helpers/chat-send.helpers';
 import { ChatSendMessageOptions, ChatSendMessageResult } from './chat-send-result';
 import { ChatSendGate } from './services/chat-send-gate';
+import { SpeechAutoplayService } from '../../core/services/speech-autoplay.service';
 import { AssistantTurn } from './assistant-turn';
 
 const TURN_SETTING_KEYS = ['reasoning_effort', 'agent_loop'] as const satisfies readonly (keyof TurnSettingsPatch)[];
@@ -43,6 +44,7 @@ export class ChatSessionService implements OnDestroy {
   private readonly draftService = inject(DraftMessageService);
   private readonly jobService = inject(JobService);
   private readonly sendGate = inject(ChatSendGate);
+  private readonly speechAutoplay = inject(SpeechAutoplayService);
   private readonly document = inject(DOCUMENT);
 
   private readonly _thread = signal<Chat | null>(null);
@@ -85,6 +87,7 @@ export class ChatSessionService implements OnDestroy {
       this.refreshThread(chatId);
     },
     watchIntervalMs: CHAT_ACTIVE_TURN_WATCH_INTERVAL_MS,
+    onSpeechTrack: (chatId, trackId) => this.speechAutoplay.onTurnTrack(chatId, trackId),
     canWatch: () => this.document.visibilityState !== 'hidden' && !this._loading(),
   });
   /**

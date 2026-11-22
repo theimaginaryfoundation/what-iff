@@ -21,8 +21,15 @@ type Model struct {
 	ToolSupport        bool      `json:"tool_support"`
 	VisionSupport      bool      `json:"vision_support"`
 	BaseCreditsPerSlab int64     `json:"base_credits_per_slab"`
-	SubscriptionTier   string    `json:"subscription_tier,omitempty"`
-	Deleted            bool      `json:"deleted"`
+	// CreditsPer1kChars and CreditsPerMinute price a speech and a transcription model for a
+	// linked meter, as BaseCreditsPerSlab prices a chat model (ADR 0x052 §11); fractional,
+	// since speech is priced close to cost. Zero for other kinds. Speech isn't slab-priced:
+	// a 15k-token slab is about ten minutes of audio, rounded up per synthesised segment, so
+	// it would charge a 30-second reply as ten minutes.
+	CreditsPer1kChars float64 `json:"credits_per_1k_chars,omitempty"`
+	CreditsPerMinute  float64 `json:"credits_per_minute,omitempty"`
+	SubscriptionTier  string  `json:"subscription_tier,omitempty"`
+	Deleted           bool    `json:"deleted"`
 	// IsDefault marks the application-wide default model. At most one active model
 	// has this set; it is used as the default for new users when present.
 	IsDefault bool `json:"is_default"`
@@ -61,6 +68,9 @@ type CreateModelRequest struct {
 	VisionSupport      bool   `json:"vision_support"`
 	BaseCreditsPerSlab int64  `json:"base_credits_per_slab"`
 	SubscriptionTier   string `json:"subscription_tier"`
+	// CreditsPer1kChars and CreditsPerMinute price a speech or transcription model.
+	CreditsPer1kChars float64 `json:"credits_per_1k_chars,omitempty"`
+	CreditsPerMinute  float64 `json:"credits_per_minute,omitempty"`
 	// Kind is chat (the default), speech or transcription (ADR 0x052). A model the
 	// known speech models table knows takes the table's kind.
 	Kind ModelKind `json:"kind,omitempty"`
@@ -69,14 +79,16 @@ type CreateModelRequest struct {
 }
 
 type UpdateModelRequest struct {
-	Name               string  `json:"name,omitempty"`
-	DisplayName        string  `json:"display_name,omitempty"`
-	Description        string  `json:"description,omitempty"`
-	Provider           string  `json:"provider,omitempty"`
-	ToolSupport        *bool   `json:"tool_support,omitempty"`
-	VisionSupport      *bool   `json:"vision_support,omitempty"`
-	BaseCreditsPerSlab *int64  `json:"base_credits_per_slab,omitempty"`
-	SubscriptionTier   *string `json:"subscription_tier,omitempty"`
+	Name               string   `json:"name,omitempty"`
+	DisplayName        string   `json:"display_name,omitempty"`
+	Description        string   `json:"description,omitempty"`
+	Provider           string   `json:"provider,omitempty"`
+	ToolSupport        *bool    `json:"tool_support,omitempty"`
+	VisionSupport      *bool    `json:"vision_support,omitempty"`
+	BaseCreditsPerSlab *int64   `json:"base_credits_per_slab,omitempty"`
+	CreditsPer1kChars  *float64 `json:"credits_per_1k_chars,omitempty"`
+	CreditsPerMinute   *float64 `json:"credits_per_minute,omitempty"`
+	SubscriptionTier   *string  `json:"subscription_tier,omitempty"`
 	// ReasoningSupportOverride sets the admin override ("none"|"optional"|"toggle"|"always");
 	// "" clears it (derive from the name again); nil leaves it.
 	ReasoningSupportOverride *string `json:"reasoning_support_override,omitempty"`

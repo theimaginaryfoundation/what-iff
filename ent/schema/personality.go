@@ -80,6 +80,10 @@ func (Personality) Fields() []ent.Field {
 		field.Text("voice_style").
 			Optional().
 			Default(""),
+		// Whether the personality's replies are read aloud as they arrive, by default; a
+		// chat can override it (ADR 0x052 §9).
+		field.Bool("voice_autoplay").
+			Default(false),
 	}, turnSettingFields("personality")...)
 }
 

@@ -84,7 +84,7 @@ func newFixture(t *testing.T) fixture {
 			tool_support bool NOT NULL DEFAULT false,
 			reasoning_support_override text NULL,
 			vision_support bool NULL,
-			base_credits_per_slab integer NOT NULL DEFAULT 1,
+			base_credits_per_slab integer NOT NULL DEFAULT 1, credits_per_1k_chars real NOT NULL DEFAULT 0, credits_per_minute real NOT NULL DEFAULT 0,
 			subscription_tier text NOT NULL DEFAULT 'high',
 			deleted bool NOT NULL DEFAULT false,
 			is_default bool NOT NULL DEFAULT false,

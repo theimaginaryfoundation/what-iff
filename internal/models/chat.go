@@ -33,7 +33,10 @@ type Chat struct {
 	Tags             []string   `json:"tags,omitempty"`
 	// IsFavorite is nil when the field was not provided (PATCH semantics).
 	// When non-nil, it reflects an explicit true/false from the caller.
-	IsFavorite      *bool     `json:"is_favorite,omitempty"`
+	IsFavorite *bool `json:"is_favorite,omitempty"`
+	// VoiceAutoplay overrides the personality's voice autoplay for this chat (ADR 0x052 §9):
+	// nil follows the personality. Set on its own route.
+	VoiceAutoplay   *bool     `json:"voice_autoplay"`
 	PersonalityID   uuid.UUID `json:"personality_id"`
 	PersonalityName string    `json:"personality_name,omitempty"`
 	// PersonalityExpressionsEnabled is populated from the personality edge on GetChat

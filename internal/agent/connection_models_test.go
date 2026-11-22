@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -45,7 +46,10 @@ type connectionFixture struct {
 func newConnectionFixture(t *testing.T) *connectionFixture {
 	t.Helper()
 	ctx := context.Background()
-	db, err := sql.Open("sqlite3", "file:"+uuid.NewString()+"?mode=memory&_fk=1")
+	// A file in WAL mode: every connection sees the same database (a private in-memory one is
+	// new and empty on each, so a connection dropped by a cancelled query lost it), readers
+	// don't block the background workers' writes, and writers wait their turn.
+	db, err := sql.Open("sqlite3", "file:"+filepath.Join(t.TempDir(), "agent.db")+"?_fk=1&_journal_mode=WAL&_busy_timeout=10000&_txlock=immediate")
 	require.NoError(t, err)
 	// The tables from the ent schema, so they match any build's (a build may add
 	// columns to users), keeping only the foreign keys among them.

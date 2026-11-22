@@ -14,6 +14,8 @@ const TRACK_POLL_MS = 1000;
  * server's 90-second worker leases, so a worker that went away has been replaced by then.
  */
 const TRACK_STALL_MS = 200_000;
+/** How many times in a row a segment may fail to load while its track is still open. */
+const MAX_SEGMENT_RETRIES = 3;
 
 /**
  * Plays replies aloud (ADR 0x052 §7): one player for the whole app, so starting a reply stops
@@ -31,6 +33,10 @@ export class SpeechPlayerService {
   readonly playing = signal<string | null>(null);
   /** The reply whose first segment is on its way, or null. */
   readonly loading = signal<string | null>(null);
+  /** Dictation is recording: nothing starts playing on its own meanwhile. */
+  readonly recording = signal(false);
+  /** Whether a gesture has let this page play sound yet (browsers block it before one). */
+  readonly unlocked = signal(false);
   /** Why the last reply couldn't be read, with the reply, or null. */
   readonly error = signal<{ messageId: string; text: string } | null>(null);
 
@@ -73,7 +79,17 @@ export class SpeechPlayerService {
     if (this.context.state === 'suspended') {
       void this.context.resume();
     }
+    this.unlocked.set(true);
     return this.context;
+  }
+
+  /**
+   * Whether sound can start now without a gesture: unlocked by an earlier one, and not suspended
+   * since (iOS suspends audio after an interruption or a while in the background, and only a gesture
+   * resumes it).
+   */
+  soundReady(): boolean {
+    return this.unlocked() && this.context?.state === 'running';
   }
 
   /** Plays a reply aloud from the start, stopping anything else. */
@@ -84,50 +100,116 @@ export class SpeechPlayerService {
     this.error.set(null);
     this.loading.set(messageId);
     try {
-      let track = await firstValueFrom(this.speech.listen(messageId));
-      let next = 0;
-      let startAt = context.currentTime + 0.05;
-      let waited = 0;
-      while (session === this.session) {
-        if (next < track.segments.length) {
-          const data = await firstValueFrom(this.speech.segment(track.id, track.segments[next].seq));
-          if (session !== this.session) return;
-          const buffer = await context.decodeAudioData(data);
-          if (session !== this.session) return;
-          startAt = Math.max(startAt, context.currentTime);
-          this.schedule(context, buffer, startAt);
-          startAt += buffer.duration;
-          next++;
-          waited = 0;
-          this.loading.set(null);
-          this.playing.set(messageId);
-          continue;
-        }
-        if (track.status !== 'open') break;
-        if (waited >= TRACK_STALL_MS) {
-          throw new Error('stalled');
-        }
-        await this.wait(TRACK_POLL_MS);
-        waited += TRACK_POLL_MS;
-        if (session !== this.session) return;
-        track = await firstValueFrom(this.speech.track(track.id));
-      }
-      if (session !== this.session) return;
-      this.loading.set(null);
-      if (track.status === 'stopped' || track.status === 'failed') {
-        this.error.set({ messageId, text: trackFailure(track) });
-      }
-      // Done when the last scheduled segment ends.
-      const remaining = Math.max(0, startAt - context.currentTime);
-      await this.wait(remaining * 1000);
-      if (session === this.session) {
-        this.playing.set(null);
-        this.sources = [];
-      }
+      const track = await firstValueFrom(this.speech.listen(messageId));
+      await this.follow(session, context, messageId, track);
     } catch (err) {
       if (session !== this.session) return;
       this.stop();
       this.error.set({ messageId, text: playFailure(err) });
+    }
+  }
+
+  /**
+   * Plays a track this client claimed, from its first segment, following it while it is still
+   * being made: a reply read as it streams (ADR 0x052 §8). Until the track knows its reply, it is
+   * keyed by `track:<id>`.
+   */
+  async playTrack(track: SpeechTrack): Promise<void> {
+    this.stop();
+    const session = this.session;
+    const context = this.unlock();
+    const key = track.message_id ?? `track:${track.id}`;
+    this.error.set(null);
+    this.loading.set(key);
+    try {
+      await this.follow(session, context, key, track);
+    } catch (err) {
+      if (session !== this.session) return;
+      this.stop();
+      // A track that's gone was a turn that failed: there was nothing to read, which isn't an error.
+      if (err instanceof HttpErrorResponse && err.status === 404) return;
+      this.error.set({ messageId: key, text: playFailure(err) });
+    }
+  }
+
+  /**
+   * Schedules the track's segments back to back as they arrive, asking for the track again while it
+   * is open. A segment the server withdrew (a round read as it streamed that turned out to be
+   * narration) is cancelled if it hasn't started, and the track goes on from there.
+   */
+  private async follow(session: number, context: AudioContext, key: string, track: SpeechTrack): Promise<void> {
+    const scheduled: Scheduled[] = [];
+    let startAt = context.currentTime + 0.05;
+    let waited = 0;
+    let fetchFailures = 0;
+    while (session === this.session) {
+      const withdrawn = scheduled.findIndex(s => track.segments[s.seq]?.id !== s.id);
+      if (withdrawn >= 0) {
+        // A round read out turned out not to be the last: its audio stops, playing or not, and
+        // what replaces it follows what is kept.
+        for (const s of scheduled.splice(withdrawn)) {
+          try {
+            s.source.stop();
+          } catch {
+            // Already ended.
+          }
+        }
+        startAt = Math.max(context.currentTime, scheduled.at(-1)?.end ?? context.currentTime);
+      }
+      if (track.message_id && key !== track.message_id) {
+        key = track.message_id;
+        if (this.loading()) this.loading.set(key);
+        if (this.playing()) this.playing.set(key);
+      }
+      const next = scheduled.length;
+      if (next < track.segments.length) {
+        const seg = track.segments[next];
+        let data: ArrayBuffer;
+        try {
+          data = await firstValueFrom(this.speech.segment(track.id, seg.seq));
+        } catch (err) {
+          // The segment may have been withdrawn since this copy of the track was read: read the
+          // track again rather than give up, unless that keeps failing.
+          if (session !== this.session) return;
+          if (track.status !== 'open' || ++fetchFailures > MAX_SEGMENT_RETRIES) throw err;
+          await this.wait(TRACK_POLL_MS);
+          if (session !== this.session) return;
+          track = await firstValueFrom(this.speech.track(track.id));
+          continue;
+        }
+        if (session !== this.session) return;
+        const buffer = await context.decodeAudioData(data);
+        if (session !== this.session) return;
+        startAt = Math.max(startAt, context.currentTime);
+        const source = this.schedule(context, buffer, startAt);
+        scheduled.push({ id: seg.id, seq: seg.seq, source, start: startAt, end: startAt + buffer.duration });
+        startAt += buffer.duration;
+        waited = 0;
+        fetchFailures = 0;
+        this.loading.set(null);
+        this.playing.set(key);
+        continue;
+      }
+      if (track.status !== 'open') break;
+      if (waited >= TRACK_STALL_MS) {
+        throw new Error('stalled');
+      }
+      await this.wait(TRACK_POLL_MS);
+      waited += TRACK_POLL_MS;
+      if (session !== this.session) return;
+      track = await firstValueFrom(this.speech.track(track.id));
+    }
+    if (session !== this.session) return;
+    this.loading.set(null);
+    if (track.status === 'stopped' || track.status === 'failed') {
+      this.error.set({ messageId: key, text: trackFailure(track) });
+    }
+    // Done when the last scheduled segment ends.
+    const remaining = Math.max(0, startAt - context.currentTime);
+    await this.wait(remaining * 1000);
+    if (session === this.session) {
+      this.playing.set(null);
+      this.sources = [];
     }
   }
 
@@ -156,13 +238,23 @@ export class SpeechPlayerService {
     this.loading.set(null);
   }
 
-  private schedule(context: AudioContext, buffer: AudioBuffer, at: number): void {
+  private schedule(context: AudioContext, buffer: AudioBuffer, at: number): AudioBufferSourceNode {
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.connect(context.destination);
     source.start(at);
     this.sources.push(source);
+    return source;
   }
+}
+
+/** One segment scheduled to play. */
+interface Scheduled {
+  id: string;
+  seq: number;
+  source: AudioBufferSourceNode;
+  start: number;
+  end: number;
 }
 
 function trackFailure(track: SpeechTrack): string {

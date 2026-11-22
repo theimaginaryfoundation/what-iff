@@ -49,6 +49,7 @@ func toChatModel(e *ent.Chat) *models.Chat {
 		IsAutoMood:      e.IsAutoMood,
 		Archived:        &arch,
 		IsFavorite:      &fav,
+		VoiceAutoplay:   e.VoiceAutoplay,
 		CreatedAt:       e.CreatedAt,
 		UpdatedAt:       e.UpdatedAt,
 	}

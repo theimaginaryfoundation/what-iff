@@ -38,6 +38,11 @@ func (Job) Fields() []ent.Field {
 		field.String("error_code").
 			Optional().
 			Comment("Stable code for the failure when it has one (models error codes), so clients can branch on it; empty otherwise"),
+		// The reply's speech track when the turn's chat reads replies aloud as they arrive
+		// (ADR 0x052 §9), so the client watching the turn can claim and play it.
+		field.UUID("speech_track_id", uuid.UUID{}).
+			Optional().
+			Nillable(),
 		field.UUID("result_id", uuid.UUID{}).
 			Optional().
 			Nillable().

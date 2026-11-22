@@ -1318,9 +1318,29 @@ func (a *Agent) generateAssistantForMessage(ctx context.Context, userID uuid.UUI
 	}
 	a.recordModelContextSegmentEstimates(ctx, modelContext)
 
+	// A chat that reads replies aloud as they arrive gets the reply's track now, so the
+	// client watching the turn can claim it and hear the reply as it streams (ADR 0x052 §8).
+	live := a.beginTurnSpeech(ctx, userID, chatJob, chatCtx)
+	ctx = withLiveSpeech(ctx, live)
+	if live != nil {
+		defer func() {
+			// A panic is recovered further up; the speaker still has to hear the turn is over,
+			// or it waits for it as long as the process lives.
+			if r := recover(); r != nil {
+				live.end(context.WithoutCancel(ctx), nil)
+				panic(r)
+			}
+		}()
+	}
+
 	agentMessage, result, err := a.dispatchAssistantGeneration(ctx, userID, chatJob, chatMessage, chatCtx, modelContext)
 	if err == nil && agentMessage != nil {
 		a.persistContextBreakdown(ctx, userID, agentMessage, chatCtx, modelContext, result)
+	}
+	if err != nil {
+		live.end(ctx, nil)
+	} else {
+		live.end(ctx, agentMessage)
 	}
 	return agentMessage, result, err
 }
@@ -1396,6 +1416,7 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 			zap.String("provider", opts.provider), zap.String("model", chatCtx.model))
 	}
 	draftBuffer := newJobDraftDeltaBuffer(a.lifecycleCtx, a.ds, a.logger, chatJob, jobDraftDeltaFlushMinChars, jobDraftDeltaFlushMaxWait)
+	liveSpeechFrom(ctx).attach(draftBuffer)
 	adapter.SetTextDeltaHandler(draftBuffer.HandleDelta)
 	defer draftBuffer.Flush()
 	// Stream reasoning live too, so always-on reasoning models (GLM, MiMo) show
@@ -1814,6 +1835,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 
 	adapter := provider.NewLocalAdapter(a.LocalProvider, params, functionTools, policy.disabledTools)
 	draftBuffer := newJobDraftDeltaBuffer(a.lifecycleCtx, a.ds, a.logger, chatJob, jobDraftDeltaFlushMinChars, jobDraftDeltaFlushMaxWait)
+	liveSpeechFrom(ctx).attach(draftBuffer)
 	adapter.SetTextDeltaHandler(draftBuffer.HandleDelta)
 	defer draftBuffer.Flush()
 	chatCtx.toolProgress = a.newChatToolProgress(chatJob, func() {
@@ -2225,6 +2247,9 @@ type jobDraftDeltaBuffer struct {
 	// the text so far at each boundary, past the paragraph break once the next round writes.
 	// The reply's final round is read aloud from here (ADR 0x052 §6).
 	finalRoundStart int
+	// rounds counts the tool-round boundaries so far, so a reader can tell a round that
+	// turned out not to be the last.
+	rounds int
 }
 
 func newJobDraftDeltaBuffer(
@@ -2353,7 +2378,19 @@ func (b *jobDraftDeltaBuffer) MarkRoundBoundary() {
 	b.mu.Lock()
 	b.breakBeforeNext = b.allText != ""
 	b.finalRoundStart = len(b.allText)
+	b.rounds++
 	b.mu.Unlock()
+}
+
+// liveText is the text streamed so far, where the latest round starts in it, and how
+// many round boundaries there have been: what a reply read aloud as it streams follows.
+func (b *jobDraftDeltaBuffer) liveText() (text string, roundStart, rounds int) {
+	if b == nil {
+		return "", 0, 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.allText, b.finalRoundStart, b.rounds
 }
 
 // streamed is the reply's text as streamed, trimmed as it is saved, and where its final

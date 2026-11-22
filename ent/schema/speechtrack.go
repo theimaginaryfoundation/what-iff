@@ -48,6 +48,10 @@ func (SpeechTrack) Fields() []ent.Field {
 		// The synthesis worker's lease: past it, a track still open has no worker and a
 		// request for it starts one.
 		field.Time("worker_until").Optional().Nillable(),
+		// Autoplay (ADR 0x052 §9): pending from the turn that writes the reply when its chat
+		// reads replies aloud, then played by the one client that claims it, or skipped.
+		// NULL for a track made by Listen.
+		field.Enum("autoplay").Values("pending", "played", "skipped").Optional().Nillable(),
 		// Which worker holds the lease: renewing it, adding a segment and finishing the
 		// track all name it, so a worker that lost its lease can't write over its successor.
 		field.UUID("worker_token", uuid.UUID{}).Optional().Nillable(),
@@ -73,6 +77,7 @@ func (SpeechTrack) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("message_id", "voice_key").Unique(),
 		index.Fields("job_id"),
+		index.Fields("chat_id", "autoplay"),
 		index.Fields("last_played_at"),
 	}
 }

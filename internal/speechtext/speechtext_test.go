@@ -78,6 +78,31 @@ func TestSentences_Abbreviations(t *testing.T) {
 	require.Equal(t, []string{`He said "go!"`, "So we did."}, sentences(`He said "go!" So we did.`))
 }
 
+func TestNextSpeakable(t *testing.T) {
+	t.Parallel()
+	piece, n := NextSpeakable("It will rain on Tuesday. Take a co", true, 600)
+	require.Equal(t, "It will rain on Tuesday.", piece)
+	require.Equal(t, "Take a co", "It will rain on Tuesday. Take a co"[n:])
+
+	piece, _ = NextSpeakable("Take a coat", false, 600)
+	require.Empty(t, piece, "no sentence is complete yet")
+	piece, _ = NextSpeakable("Ends here.", false, 600)
+	require.Empty(t, piece, "complete only once space follows")
+
+	text := "One. Two.\n\nThree. Four"
+	piece, n = NextSpeakable(text, false, 600)
+	require.Equal(t, "One. Two.", piece, "to the end of a paragraph")
+	require.Equal(t, "Three. Four", text[n:])
+
+	long := strings.Repeat("A short sentence here. ", 30)
+	piece, _ = NextSpeakable(long, false, 300)
+	require.LessOrEqual(t, len([]rune(piece)), 300)
+	require.GreaterOrEqual(t, len([]rune(piece)), 100, "about a third of the limit within a long paragraph")
+
+	piece, _ = NextSpeakable("Ask Dr. Lee tomorrow", true, 600)
+	require.Empty(t, piece, "an abbreviation doesn't end a sentence")
+}
+
 // Segments are runs of the prepared text, in order, so a track can be resumed from the
 // text it has read rather than a segment count.
 func TestSegment_PiecesAreRunsOfTheText(t *testing.T) {
@@ -125,4 +150,39 @@ func TestPrepare_KeepsProseThatLooksLikeMarkup(t *testing.T) {
 	require.Equal(t, "if a<b then c>d ok", Prepare("if a<b then c>d ok"))
 	require.Equal(t, "Bold and gone.", Prepare(`<b>Bold</b> and <span class="x">gone</span>.`))
 	require.Equal(t, "See. Done.", Prepare("See www.example.com/x. Done."), "the sentence keeps its stop")
+}
+
+// Streaming text is read only as far as its words are settled: what Prepare reads now
+// is what it reads once the rest arrives.
+func TestSettled_StopsBeforeOpenMarkup(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"**Note. Then more":          "",
+		"I *think. So":               "I ",
+		"Here [see this. And":        "Here ",
+		"A [link](http://x":          "A ",
+		"Use `go te":                 "Use ",
+		"Done **well**. And _so_ on": "Done **well**. And _so_ on",
+		"snake_case words. More":     "snake_case words. More",
+		"Line one.\n**bold":          "Line one.\n",
+		"Text\n```go":                "Text\n",
+		"a < b, and <b":              "a < b, and ",
+		"2 * 3 = 6. Next":            "2 * 3 = 6. Next",
+	} {
+		require.Equal(t, want, Settled(in), in)
+	}
+	// Whatever is settled reads as a prefix of the whole, however it ends.
+	full := "**Note.** Then *more* [here](http://x). Done."
+	for i := range len(full) {
+		require.True(t, strings.HasPrefix(Prepare(full), Prepare(Settled(full[:i]))), full[:i])
+	}
+}
+
+func TestResync(t *testing.T) {
+	t.Parallel()
+	pos, ok := Resync("Note. Then more.", "**Note.")
+	require.True(t, ok)
+	require.Equal(t, "Note.", "Note. Then more."[:pos])
+	_, ok = Resync("Something else.", "Note.")
+	require.False(t, ok)
 }

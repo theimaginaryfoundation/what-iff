@@ -78,9 +78,6 @@ type speechFixture struct {
 func newSpeechFixture(t *testing.T, reply string, finalRoundOffset int) *speechFixture {
 	t.Helper()
 	f := &speechFixture{connectionFixture: newConnectionFixture(t), files: &memFiles{files: map[string][]byte{}}}
-	// The database is in memory with no shared cache: every connection would be a new, empty
-	// one, and the speech worker runs beside the test.
-	f.db.SetMaxOpenConns(1)
 	ctx := context.Background()
 	migrator, err := schema.NewMigrate(entsql.OpenDB(dialect.SQLite, f.db))
 	require.NoError(t, err)
@@ -89,7 +86,7 @@ func newSpeechFixture(t *testing.T, reply string, finalRoundOffset int) *speechF
 		migrate.PersonalitiesTable, migrate.MoodsTable, migrate.PersonalityMoodsTable, migrate.FileAttachmentsTable,
 		migrate.PersonalityExpressionsTable, migrate.ChatMessagesTable, migrate.ToolCallsTable,
 		migrate.SpeechTracksTable, migrate.SpeechSegmentsTable, migrate.RitualsTable, migrate.ChatMessageRitualsTable,
-		migrate.ChatMessageContextItemsTable)...)
+		migrate.ChatMessageContextItemsTable, migrate.JobsTable)...)
 	schemaMu.Unlock()
 	require.NoError(t, err)
 
@@ -222,6 +219,9 @@ func TestListen_ReadsTheFinalRoundInSegmentsAndStoresThem(t *testing.T) {
 	require.Equal(t, []string{models.ActionTypeSpeechSynthesis, models.ActionTypeSpeechSynthesis}, meter.checks)
 	require.Equal(t, len([]rune("It will rain on Tuesday.")), meter.records[0].SpeechCharacters)
 	require.Equal(t, "kokoro", meter.records[0].Model)
+	first, second := len([]rune("It will rain on Tuesday.")), len([]rune("Take a coat.\n\nThe rest of the week is dry."))
+	require.Equal(t, first, meter.records[0].SpeechTrackCharacters)
+	require.Equal(t, first+second, meter.records[1].SpeechTrackCharacters, "the track's running total, for rounding once per track")
 
 	seg, err := f.a.SpeechSegmentAudio(ctx, f.alice, track.ID, 0, "")
 	require.NoError(t, err)
@@ -327,6 +327,7 @@ func TestPreviewVoice(t *testing.T) {
 	require.Equal(t, "ID3Hi, I'm Ada.", string(audio.Data))
 	require.Len(t, meter.records, 1)
 	require.Zero(t, f.files.count(), "a preview isn't stored")
+	require.Equal(t, meter.records[0].SpeechCharacters, meter.records[0].SpeechTrackCharacters, "a preview is its own track")
 
 	_, err = f.a.PreviewVoice(ctx, f.alice, pv, strings.Repeat("a", models.MaxPreviewChars+1))
 	require.ErrorIs(t, err, ErrPreviewTooLong)

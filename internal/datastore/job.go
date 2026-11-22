@@ -41,6 +41,7 @@ func toJobModel(e *ent.Job) *models.Job {
 		Error:          e.Error,
 		ErrorCode:      e.ErrorCode,
 		ResultID:       resultID,
+		SpeechTrackID:  e.SpeechTrackID,
 		DraftDeltas:    append([]string(nil), e.DraftDeltas...),
 		DraftReasoning: append([]string(nil), e.DraftReasoning...),
 		Progress:       e.Progress,

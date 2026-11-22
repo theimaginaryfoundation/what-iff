@@ -34,6 +34,24 @@ type fakeSpeech struct {
 	audio    []byte
 	format   models.AudioFormat
 	previews []string
+	claimed  bool
+	pending  []*models.SpeechTrack
+	autoplay []*bool
+}
+
+func (f *fakeSpeech) ClaimSpeech(context.Context, uuid.UUID, uuid.UUID) (*models.SpeechTrack, bool, error) {
+	return f.track, f.claimed, f.err
+}
+
+func (f *fakeSpeech) SkipSpeech(context.Context, uuid.UUID, uuid.UUID) error { return f.err }
+
+func (f *fakeSpeech) PendingSpeech(context.Context, uuid.UUID, uuid.UUID) ([]*models.SpeechTrack, error) {
+	return f.pending, f.err
+}
+
+func (f *fakeSpeech) SetChatAutoplay(_ context.Context, _, chatID uuid.UUID, autoplay *bool) (*models.Chat, error) {
+	f.autoplay = append(f.autoplay, autoplay)
+	return &models.Chat{ID: chatID, VoiceAutoplay: autoplay}, f.err
 }
 
 func (f *fakeSpeech) Listen(context.Context, uuid.UUID, uuid.UUID) (*models.SpeechTrack, error) {
@@ -234,4 +252,36 @@ func TestPreview(t *testing.T) {
 	s.err = fmt.Errorf("%w for user", agent.ErrQuotaExceeded)
 	rec = serve(t, s, httptest.NewRequest(http.MethodPost, "/speech/preview", strings.NewReader(body)), true)
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+}
+
+func TestAutoplayRoutes(t *testing.T) {
+	t.Parallel()
+	trackID, chatID := uuid.New(), uuid.New()
+	s := &fakeSpeech{track: &models.SpeechTrack{ID: trackID, Status: models.SpeechTrackOpen, Autoplay: models.SpeechAutoplayPlayed}, claimed: true}
+
+	rec := serve(t, s, httptest.NewRequest(http.MethodPost, "/speech/tracks/"+trackID.String()+"/claim", nil), true)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"claimed":true`)
+	s.claimed = false
+	rec = serve(t, s, httptest.NewRequest(http.MethodPost, "/speech/tracks/"+trackID.String()+"/claim", nil), true)
+	require.Contains(t, rec.Body.String(), `"claimed":false`, "another client got it")
+
+	rec = serve(t, s, httptest.NewRequest(http.MethodPost, "/speech/tracks/"+trackID.String()+"/skip", nil), true)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+
+	rec = serve(t, s, httptest.NewRequest(http.MethodGet, "/speech/chats/"+chatID.String()+"/pending", nil), true)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `[]`, rec.Body.String(), "an empty list, not null")
+
+	for _, body := range []string{`{"autoplay":true}`, `{"autoplay":null}`} {
+		rec = serve(t, s, httptest.NewRequest(http.MethodPut, "/speech/chats/"+chatID.String()+"/autoplay", strings.NewReader(body)), true)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	}
+	require.Len(t, s.autoplay, 2)
+	require.True(t, *s.autoplay[0])
+	require.Nil(t, s.autoplay[1], "null follows the personality")
+
+	s.err = datastore.ErrChatNotFound
+	rec = serve(t, s, httptest.NewRequest(http.MethodPut, "/speech/chats/"+chatID.String()+"/autoplay", strings.NewReader(`{"autoplay":false}`)), true)
+	require.Equal(t, http.StatusNotFound, rec.Code)
 }

@@ -40,8 +40,9 @@ func createJobTestSchema(t *testing.T, db *sql.DB) {
 		progress text,
 		steer bool NOT NULL DEFAULT false,
 		user_jobs uuid NOT NULL,
+		speech_track_id uuid NULL,
 		FOREIGN KEY (user_jobs) REFERENCES users(id)
-	)`)
+		)`)
 	require.NoError(t, err)
 	// Advanced runs' draft tool calls hang off jobs (ADR 0x026), and the draft paths touch them.
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS tool_calls (
@@ -1170,7 +1171,8 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 			steer bool NOT NULL DEFAULT false,
 			created_at datetime NOT NULL,
 			updated_at datetime NOT NULL,
-			user_jobs uuid NOT NULL
+			user_jobs uuid NOT NULL,
+			speech_track_id uuid NULL
 		)`,
 		`CREATE TABLE chat_messages (
 			id uuid PRIMARY KEY,

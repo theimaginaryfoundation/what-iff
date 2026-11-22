@@ -15,6 +15,10 @@ Turns a reply's markdown into the words to read aloud, and splits them into the 
   Every segment is a run of the text, joined as it stood (no space added after a full-width stop or inside a cut word).
 - `Remaining(prepared, said)` is the text after segments already read, or false when the text no longer starts with them: a track resumes from what it read, not how many segments it has.
 
+- `NextSpeakable` picks the next piece of streaming text to read now: only sentences followed by space or ended by a full-width stop (the rest may still change), one for a round's first piece, then to a paragraph's end or about a third of the limit.
+- `Settled(md)` is the part of streaming markdown whose words can't change as more arrives: the line being written is cut before an emphasis, code span, strike-through, link or tag still open on it, or a fence it opens.
+- `Resync(prepared, said)` finds where prepared text reaches words already read aloud that were prepared differently (same letters and digits), or says they differ.
+
 ## Dependencies
 
 - **Inbound:** `internal/agent` (voice replies and previews).
