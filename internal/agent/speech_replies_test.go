@@ -175,10 +175,15 @@ func TestListen_ReadsTheFinalRoundInSegmentsAndStoresThem(t *testing.T) {
 	require.Equal(t, len([]rune("It will rain on Tuesday.")), meter.records[0].SpeechCharacters)
 	require.Equal(t, "kokoro", meter.records[0].Model)
 
-	audio, format, err := f.a.SpeechSegmentAudio(ctx, f.alice, track.ID, 0)
+	seg, err := f.a.SpeechSegmentAudio(ctx, f.alice, track.ID, 0, "")
 	require.NoError(t, err)
-	require.Equal(t, models.AudioFormatMP3, format)
-	require.Equal(t, "ID3It will rain on Tuesday.", string(audio))
+	require.Equal(t, models.AudioFormatMP3, seg.Format)
+	require.Equal(t, "ID3It will rain on Tuesday.", string(seg.Data))
+	require.NotEmpty(t, seg.ETag)
+	same, err := f.a.SpeechSegmentAudio(ctx, f.alice, track.ID, 0, seg.ETag)
+	require.NoError(t, err)
+	require.True(t, same.NotModified, "the version the client has")
+	require.Nil(t, same.Data, "not read again")
 
 	// Playing it again replays the stored audio.
 	again, err := f.a.Listen(ctx, f.alice, f.reply)

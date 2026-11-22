@@ -2904,7 +2904,11 @@ paths:
   /speech/tracks/{id}/segments/{seq}:
     get:
       summary: One segment's audio
-      description: The audio never changes, so it may be cached privately.
+      description: >-
+        A segment can be withdrawn and made again at the same seq, so the audio
+        is answered with an ETag naming its version and `Cache-Control:
+        private, no-cache`: a client may keep it but asks each time, and an
+        If-None-Match naming the version stored is answered 304.
       tags: [Speech]
       security:
         - bearerAuth: []
@@ -2921,9 +2925,18 @@ paths:
           schema:
             type: integer
             minimum: 0
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: The audio
+          headers:
+            ETag:
+              schema:
+                type: string
           content:
             audio/mpeg:
               schema:
@@ -2933,6 +2946,8 @@ paths:
               schema:
                 type: string
                 format: binary
+        '304':
+          description: The client has this version already
         '404':
           description: Segment not found
           content:
