@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -98,8 +99,11 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 	case !setting.ServiceTier.Valid():
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Unknown service tier", nil)
 		return
+	case role.ModelKind() != models.ModelKindChat && (setting.ReasoningEffort != "" || setting.ServiceTier != ""):
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "A dictation model takes no reasoning effort or service tier", nil)
+		return
 	}
-	if req.ModelID != nil && !h.checkModel(w, r, *req.ModelID, setting.ServiceTier) {
+	if req.ModelID != nil && !h.checkModel(w, r, *req.ModelID, role, setting.ServiceTier) {
 		return
 	}
 	err := h.store.SetUtilityModel(r.Context(), userID, setting)
@@ -158,8 +162,12 @@ func (h *Handler) utilityModels(ctx context.Context, userID uuid.UUID) (models.U
 	if err != nil {
 		return models.UtilityModels{}, err
 	}
-	out := models.UtilityModels{AccountsChoose: h.accountsChoose, Roles: make([]models.UtilityRoleModel, 0, len(models.UtilityRoles))}
-	for _, role := range models.UtilityRoles {
+	out := models.UtilityModels{
+		AccountsChoose: h.accountsChoose,
+		Roles:          make([]models.UtilityRoleModel, 0, len(models.UtilityRoles)),
+		SpeechRoles:    make([]models.UtilityRoleModel, 0, len(models.SpeechUtilityRoles)),
+	}
+	for _, role := range append(append([]models.UtilityRole(nil), models.UtilityRoles...), models.SpeechUtilityRoles...) {
 		entry := models.UtilityRoleModel{Role: role}
 		for _, s := range settings {
 			if s.Role != role {
@@ -184,7 +192,11 @@ func (h *Handler) utilityModels(ctx context.Context, userID uuid.UUID) (models.U
 				entry.Deployment = choice
 			}
 		}
-		out.Roles = append(out.Roles, entry)
+		if role.ModelKind() == models.ModelKindChat {
+			out.Roles = append(out.Roles, entry)
+		} else {
+			out.SpeechRoles = append(out.SpeechRoles, entry)
+		}
 	}
 	return out, nil
 }
@@ -194,13 +206,20 @@ func (h *Handler) utilityModels(ctx context.Context, userID uuid.UUID) (models.U
 // or a catalog model whose provider the account holds no key for, which would only fail at
 // every call; or when the model can't be read. A connection model carries its connection's
 // key, and a model that doesn't exist is the store's to refuse.
-func (h *Handler) checkModel(w http.ResponseWriter, r *http.Request, modelID uuid.UUID, tier models.UtilityServiceTier) bool {
+func (h *Handler) checkModel(w http.ResponseWriter, r *http.Request, modelID uuid.UUID, role models.UtilityRole, tier models.UtilityServiceTier) bool {
 	m, err := h.store.GetModel(r.Context(), modelID)
 	if errors.Is(err, datastore.ErrModelNotFound) {
 		return true
 	}
 	if err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error saving the utility model", err)
+		return false
+	}
+	if m.EffectiveKind() != role.ModelKind() {
+		// The datastore refuses it too (assertUserCanUseModelOfKindTx), as a plain
+		// not-available; this check exists only to say why, as model_wrong_kind.
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, models.ErrCodeModelWrongKind,
+			fmt.Sprintf("%s can't run on %s: it needs a %s model", role, m.DisplayName, role.ModelKind()), nil)
 		return false
 	}
 	if tier != models.UtilityServiceTierDefault && !offersServiceTier(m) {

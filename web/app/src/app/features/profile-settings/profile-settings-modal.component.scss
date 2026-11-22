@@ -437,7 +437,7 @@ small {
 
   .profile-settings__plan-features li::before {
     color: var(--success, #10b981);
-    content: '✓';
+    content: "✓";
     flex-shrink: 0;
     font-weight: 700;
     margin-top: 1px;
@@ -921,7 +921,7 @@ small {
 
 .profile-settings__plan-action-features li::before {
   color: var(--success, #10b981);
-  content: '✓';
+  content: "✓";
   margin-right: 0.4rem;
 }
 

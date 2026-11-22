@@ -47,6 +47,7 @@
   `UsesOpenAIResponsesAPI` (`model_defaults.go`) reports a catalog model on OpenAI's own Responses API, the only one that takes a service tier or continues a stored conversation.
   `UtilityRoles` lists them in display order and `Valid` checks one.
   They live here, not in `agent/provider`, so code that can't import the agent, such as the datastore, can name a role.
+  `transcription` (dictation, ADR 0x052) is a role too, listed apart in `SpeechUtilityRoles` since it is optional and nothing asks for it; `UtilityRole.ModelKind` is the model kind each role runs on.
 - **Error envelope (`error.go`):** `ErrorResponse` plus the error-code registry — `ErrCode*` constants and `GenericErrorCode(status)`.
   This is the single source of truth for the taxonomy; the `ErrorCode` enum in `openapi.yaml` mirrors it and must be updated alongside.
   Adding a provider connection that fails answers with `provider_unreachable`, `provider_key_rejected`, `provider_incompatible` or `provider_unavailable`, `custom_address_not_allowed` when the deployment does not let accounts choose an address, `provider_connection_exists` for a second connection to a built-in provider, and `default_model_in_use` when a change would take away the account's default model (ADR 0x027).

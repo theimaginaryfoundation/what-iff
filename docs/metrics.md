@@ -97,6 +97,9 @@ Notes on these metrics:
 | `whatiff.gen_ai.retries` | counter | — | provider, model, `reason` (rate_limited, server_error, network, truncated, length) |
 | `whatiff.gen_ai.safety_blocks` | counter | — | provider, model, `call_path` |
 | `whatiff.utility.model_fallbacks` | counter, {call} | — | `role`, `scope` (account, deployment, empty), `reason` (unavailable, unreadable) |
+| `whatiff.speech.duration` | histogram, s | slow | provider, model, `operation` (transcription, synthesis) |
+| `whatiff.speech.clip.duration` | histogram, s (length of each dictated clip) | slow | provider, model |
+| `whatiff.speech.failures` | counter, {call} | — | provider, model, `operation` (transcription, synthesis) |
 | `whatiff.gen_ai.images_dropped` | counter, {image}, one per image (a request can add several) | — | provider, `call_path`, `reason` (no_data, unsupported_type) |
 | `whatiff.gen_ai.context.tokens` | histogram, {token} | tokens | `segment`, `call_path` |
 

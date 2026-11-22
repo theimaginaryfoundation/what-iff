@@ -43,6 +43,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/ritual"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/role"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/search"
+	speechhandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/speech"
 	toolshandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/utilitymodel"
@@ -380,6 +381,7 @@ func (s *Server) setupRoutes() {
 	})
 	modelHandler := model.NewHandler(dataStore, s.logger)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
+	speechHandler := speechhandler.NewHandler(agent, s.logger)
 	chatHandler := chat.NewHandler(dataStore, s.logger, agent, chat.HandlerConfig{
 		RequireBilling: s.config.RequireBilling,
 	})
@@ -447,6 +449,7 @@ func (s *Server) setupRoutes() {
 	modelRouter.Use(middleware.OptionalAuthMiddleware(s.db, dataStore, s.logger))
 	modelRouter.HandleFunc("", modelHandler.ListModels).Methods("GET")
 	personalityHandler.RegisterRoutes(authRouter)
+	speechHandler.RegisterRoutes(authRouter)
 	ritualHandler.RegisterRoutes(authRouter)
 	fileAttachmentHandler.RegisterRoutes(authRouter)
 	imageGalleryHandler.RegisterRoutes(authRouter)

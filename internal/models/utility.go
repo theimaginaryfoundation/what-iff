@@ -24,11 +24,20 @@ const (
 	UtilityRoleSimple UtilityRole = "simple"
 	// UtilityRolePersonality covers generating a personality.
 	UtilityRolePersonality UtilityRole = "personality"
+	// UtilityRoleTranscription is dictation (ADR 0x052): transcribing a clip the
+	// person records in the composer. It runs on a transcription model.
+	UtilityRoleTranscription UtilityRole = "transcription"
 )
 
-// UtilityRoles lists the roles a model can be chosen for, in the order a
-// settings screen shows them.
+// UtilityRoles lists the background-work roles a chat model can be chosen for, in
+// the order a settings screen shows them. Background work doesn't run until each
+// is chosen, so onboarding asks for every one.
 var UtilityRoles = []UtilityRole{UtilityRoleMemory, UtilityRoleMemoryMerge, UtilityRoleSimple, UtilityRolePersonality}
+
+// SpeechUtilityRoles lists the roles that run on audio models (ADR 0x052). Each
+// is an optional feature, off until chosen, so they are listed apart from
+// UtilityRoles and nothing asks for them.
+var SpeechUtilityRoles = []UtilityRole{UtilityRoleTranscription}
 
 // Valid reports whether r is a known role.
 func (r UtilityRole) Valid() bool {
@@ -37,7 +46,21 @@ func (r UtilityRole) Valid() bool {
 			return true
 		}
 	}
+	for _, known := range SpeechUtilityRoles {
+		if r == known {
+			return true
+		}
+	}
 	return false
+}
+
+// ModelKind is the kind of model the role runs on: transcription for dictation,
+// chat for the rest.
+func (r UtilityRole) ModelKind() ModelKind {
+	if r == UtilityRoleTranscription {
+		return ModelKindTranscription
+	}
+	return ModelKindChat
 }
 
 // UtilityScope is whose choice a utility model setting is.
@@ -112,6 +135,10 @@ type UtilityModels struct {
 	// their own keys, and so pay for their background work.
 	AccountsChoose bool               `json:"accounts_choose"`
 	Roles          []UtilityRoleModel `json:"roles"`
+	// SpeechRoles are the roles that run on audio models (dictation), in
+	// SpeechUtilityRoles order: optional features, listed apart so nothing asks
+	// for them as it does for background work.
+	SpeechRoles []UtilityRoleModel `json:"speech_roles"`
 }
 
 // SetUtilityModelRequest chooses a model for a role, or switches it off: exactly one of

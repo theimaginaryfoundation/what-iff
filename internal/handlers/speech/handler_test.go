@@ -1,0 +1,137 @@
+package speech
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/gorilla/mux"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/agent"
+	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
+)
+
+type fakeSpeech struct {
+	dictation agent.DictationModel
+	err       error
+	text      string
+	got       []agent.DictationClip
+}
+
+func (f *fakeSpeech) Dictation(context.Context) (agent.DictationModel, error) {
+	return f.dictation, f.err
+}
+
+func (f *fakeSpeech) Transcribe(_ context.Context, _ uuid.UUID, clip agent.DictationClip) (string, error) {
+	f.got = append(f.got, clip)
+	return f.text, f.err
+}
+
+func serve(t *testing.T, s *fakeSpeech, req *http.Request, signedIn bool) *httptest.ResponseRecorder {
+	t.Helper()
+	router := mux.NewRouter()
+	NewHandler(s, zap.NewNop()).RegisterRoutes(router)
+	if signedIn {
+		req = req.WithContext(apicontext.WithUserID(req.Context(), uuid.New()))
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+func clipRequest(t *testing.T, fields map[string]string, audio []byte) *http.Request {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for k, v := range fields {
+		require.NoError(t, w.WriteField(k, v))
+	}
+	if audio != nil {
+		part, err := w.CreateFormFile("audio", "clip")
+		require.NoError(t, err)
+		_, _ = part.Write(audio)
+	}
+	require.NoError(t, w.Close())
+	req := httptest.NewRequest(http.MethodPost, "/speech/transcriptions", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	return req
+}
+
+func TestGetDictation(t *testing.T) {
+	t.Parallel()
+	s := &fakeSpeech{dictation: agent.DictationModel{Model: "gpt-transcribe", DisplayName: "GPT Transcribe", Formats: []models.AudioFormat{models.AudioFormatWebM}, MaxSeconds: 300}}
+	rec := serve(t, s, httptest.NewRequest(http.MethodGet, "/speech/dictation", nil), true)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"available":true,"model":"gpt-transcribe","display_name":"GPT Transcribe","formats":["webm"],"max_seconds":300}`, rec.Body.String())
+
+	s.err = &models.UtilityRoleUnavailableError{Role: models.UtilityRoleTranscription, Err: models.ErrUtilityRoleOff}
+	rec = serve(t, s, httptest.NewRequest(http.MethodGet, "/speech/dictation", nil), true)
+	require.Equal(t, http.StatusOK, rec.Code, "no microphone is not an error")
+	require.JSONEq(t, `{"available":false,"code":"utility_role_off"}`, rec.Body.String())
+
+	rec = serve(t, s, httptest.NewRequest(http.MethodGet, "/speech/dictation", nil), false)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+func TestTranscribe(t *testing.T) {
+	t.Parallel()
+	s := &fakeSpeech{text: "Hello there."}
+	chat := uuid.NewString()
+	rec := serve(t, s, clipRequest(t, map[string]string{"format": "WAV", "chat_id": chat, "language": "en-GB"}, []byte("pcm")), true)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var out Transcription
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	require.Equal(t, "Hello there.", out.Text)
+	require.Equal(t, []agent.DictationClip{{Audio: []byte("pcm"), Format: models.AudioFormatWAV, Language: "en-GB", ChatID: chat}}, s.got)
+
+	rec = serve(t, s, clipRequest(t, map[string]string{"format": "wav", "chat_id": "not-a-uuid"}, []byte("pcm")), true)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Empty(t, s.got[1].ChatID, "a bad chat id is dropped, not trusted")
+}
+
+func TestTranscribe_Refusals(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		fields map[string]string
+		audio  []byte
+		err    error
+		status int
+		code   string
+	}{
+		{"no clip", map[string]string{"format": "webm"}, nil, nil, http.StatusBadRequest, ""},
+		{"unknown format", map[string]string{"format": "aiff"}, []byte("x"), nil, http.StatusBadRequest, models.ErrCodeAudioFormatUnsupported},
+		{"out of credits", map[string]string{"format": "wav"}, []byte("x"), fmt.Errorf("%w for user", agent.ErrQuotaExceeded), http.StatusTooManyRequests, models.ErrCodeQuotaExceeded},
+		{"format the model refuses", map[string]string{"format": "webm"}, []byte("x"), agent.ErrAudioFormatUnsupported, http.StatusUnsupportedMediaType, models.ErrCodeAudioFormatUnsupported},
+		{"too long", map[string]string{"format": "wav"}, []byte("x"), agent.ErrClipTooLong, http.StatusRequestEntityTooLarge, models.ErrCodeClipTooLong},
+		{"no dictation model", map[string]string{"format": "wav"}, []byte("x"), &models.UtilityRoleUnavailableError{Role: models.UtilityRoleTranscription, Err: models.ErrUtilityRoleNotSet}, http.StatusConflict, models.ErrCodeUtilityModelNotSet},
+		{"provider failure", map[string]string{"format": "wav"}, []byte("x"), errors.New("Mistral transcription: status 500"), http.StatusBadGateway, models.ErrCodeBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rec := serve(t, &fakeSpeech{err: tc.err}, clipRequest(t, tc.fields, tc.audio), true)
+			require.Equal(t, tc.status, rec.Code, rec.Body.String())
+			if tc.code != "" {
+				require.Contains(t, rec.Body.String(), `"code":"`+tc.code+`"`)
+			}
+			require.NotContains(t, rec.Body.String(), "status 500", "a provider's own error isn't shown")
+		})
+	}
+}
+
+func TestTranscribe_TooLargeAnUpload(t *testing.T) {
+	t.Parallel()
+	rec := serve(t, &fakeSpeech{}, clipRequest(t, map[string]string{"format": "wav"}, make([]byte, maxUploadBytes+1)), true)
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+	require.Contains(t, rec.Body.String(), models.ErrCodeClipTooLong)
+}

@@ -43,6 +43,8 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 // enable_experimental_models; unauthenticated callers see the default catalog
 // (experimental providers hidden, same as enable_experimental_models=false).
 // Subscription tiers are included only where they apply (metering.Linked).
+// kind=speech or kind=transcription lists the voice or dictation models the
+// account can use instead (ADR 0x052); chat models are the default.
 func (h *Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -50,9 +52,20 @@ func (h *Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 		modelList []*models.Model
 		err       error
 	)
-	if userID, ok := middleware.GetUserIDFromContext(ctx); ok {
+	kind := models.ModelKind(r.URL.Query().Get("kind"))
+	userID, signedIn := middleware.GetUserIDFromContext(ctx)
+	switch {
+	case kind != "" && !kind.Valid():
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Unknown model kind", nil)
+		return
+	case kind.IsAudio() && !signedIn:
+		// Voice and dictation models are chosen in settings, which need an account.
+		modelList = []*models.Model{}
+	case kind.IsAudio():
+		modelList, err = h.ds.ListAudioModelsForUser(ctx, userID, kind)
+	case signedIn:
 		modelList, err = h.ds.ListModelsForUser(ctx, userID)
-	} else {
+	default:
 		modelList, err = h.ds.ListModelsDefault(ctx)
 	}
 	if err != nil {

@@ -49,8 +49,16 @@ const (
 	// Specific — stable contracts clients may branch on. These three predate
 	// this ADR and keep their original spelling. The handler packages still
 	// define their own copies; those collapse onto these in phase 2.
-	ErrCodeMessageTooLong      = "message_too_long"
-	ErrCodeQuotaExceeded       = "quota_exceeded"
+	ErrCodeMessageTooLong = "message_too_long"
+	ErrCodeQuotaExceeded  = "quota_exceeded"
+	// ErrCodeModelWrongKind is a model chosen for a use its kind doesn't serve: a voice
+	// or dictation model for chat, or a chat model for dictation (ADR 0x052).
+	ErrCodeModelWrongKind = "model_wrong_kind"
+	// ErrCodeAudioFormatUnsupported is a dictated clip in a format the dictation model
+	// doesn't take; the client records WAV for that model instead (ADR 0x052 §10).
+	ErrCodeAudioFormatUnsupported = "audio_format_unsupported"
+	// ErrCodeClipTooLong is a dictated clip longer or larger than the dictation model takes.
+	ErrCodeClipTooLong         = "clip_too_long"
 	ErrCodeSystemPromptTooLong = "system_prompt_too_long"
 	// ErrCodeBuzzTermsRequired: a Buzz community has join terms the owner has not yet
 	// accepted for the persona; details.policy carries them (ADR 0x028).
@@ -148,6 +156,9 @@ var AllErrorCodes = []string{
 	ErrCodeUtilityModelNotSet,
 	ErrCodeUtilityRoleOff,
 	ErrCodeUtilityModelUnavailable,
+	ErrCodeModelWrongKind,
+	ErrCodeAudioFormatUnsupported,
+	ErrCodeClipTooLong,
 	ErrCodeReauthenticationRequired,
 	ErrCodeProviderUnreachable,
 	ErrCodeProviderKeyRejected,

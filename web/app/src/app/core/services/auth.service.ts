@@ -621,6 +621,9 @@ export class AuthService {
           }),
           import('./personality-presence.service').then(({ PersonalityPresenceService }) => {
             this.injector.get(PersonalityPresenceService).clearCache();
+          }),
+          import('./speech.service').then(({ SpeechService }) => {
+            this.injector.get(SpeechService).clearCache();
           })
         ]).catch(() => {
           // Ignore if services can't be loaded

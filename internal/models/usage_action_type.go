@@ -10,4 +10,8 @@ const (
 	ActionTypeJobRun          = "job_run"
 	ActionTypeImageGeneration = "image_generation"
 	ActionTypeWebSearch       = "web_search"
+	// ActionTypeSpeechSynthesis is one segment of a reply read aloud, or a voice
+	// preview (ADR 0x052 §11); ActionTypeTranscription is one dictated clip.
+	ActionTypeSpeechSynthesis = "speech_synthesis"
+	ActionTypeTranscription   = "transcription"
 )

@@ -1,7 +1,7 @@
 import { ReasoningEffort } from './turn-settings.model';
 
 /** A group of background work that runs on one model (ADR 0x027 section 6). */
-export type UtilityRole = 'memory' | 'memory_merge' | 'simple' | 'personality';
+export type UtilityRole = 'memory' | 'memory_merge' | 'simple' | 'personality' | 'transcription';
 
 /** How fast, and at what price, a role's calls ask to be processed; only some models offer it. */
 export type UtilityServiceTier = 'priority' | 'flex';
@@ -26,7 +26,10 @@ export interface UtilityRoleModel {
 export interface UtilityModels {
   /** Whether the account may choose: only where it brings its own keys, and so pays. */
   accounts_choose: boolean;
+  /** The roles background work needs, which onboarding asks for. */
   roles: UtilityRoleModel[];
+  /** The roles that run on audio models (ADR 0x052): dictation. Optional, off until chosen. */
+  speech_roles?: UtilityRoleModel[];
 }
 
 /** What choosing a model for a role sends. */

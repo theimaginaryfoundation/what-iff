@@ -122,6 +122,17 @@ type Usage struct {
 	// models.ActionTypeImageGeneration; empty means OpenAI, the only vendor before
 	// users could choose one.
 	ImageProvider string
+	// SpeechProvider is the provider (a models.ModelProvider, or a connection's preset) a
+	// speech synthesis or transcription ran on (ADR 0x052 §11), so an implementation can
+	// price providers separately. Only meaningful for models.ActionTypeSpeechSynthesis and
+	// models.ActionTypeTranscription; Model names the model.
+	SpeechProvider string
+	// SpeechCharacters is the text one synthesis read aloud, in characters. Only meaningful
+	// for models.ActionTypeSpeechSynthesis.
+	SpeechCharacters int
+	// AudioSeconds is the length of one transcribed clip. Only meaningful for
+	// models.ActionTypeTranscription.
+	AudioSeconds float64
 	// ReasoningEffort is the reasoning effort ("off"|"low"|"medium"|"high") the turn was run
 	// at when the user explicitly selected one, the model honours it, and it is above the
 	// model's native level (models.ReasoningEffortAboveNative; ADR 0x026). Empty when no effort

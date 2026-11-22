@@ -316,3 +316,37 @@ func TestSet_EffortAndTier(t *testing.T) {
 	}
 	require.Len(t, f.store.settings, 1, "a refused write changes nothing")
 }
+
+// Dictation (ADR 0x052) is listed apart from background work, so nothing asks for it as it
+// does for the roles background work needs, and runs only on a transcription model.
+func TestSpeechRoles_ListedApartAndKindChecked(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	chat, ears := uuid.New(), uuid.New()
+	f.store.usable[chat], f.store.usable[ears] = true, true
+	f.store.catalog = map[uuid.UUID]*models.Model{
+		chat: {ID: chat, Name: "gpt-5.1", DisplayName: "GPT-5.1", Provider: string(models.ModelProviderOpenAI)},
+		ears: {ID: ears, Name: "gpt-transcribe", DisplayName: "GPT Transcribe", Provider: string(models.ModelProviderOpenAI), Kind: models.ModelKindTranscription},
+	}
+
+	rec, got := f.do(t, http.MethodGet, "/utility-models", "", true)
+	require.Equal(t, http.StatusOK, rec.Code)
+	for _, r := range got.Roles {
+		require.NotEqual(t, models.UtilityRoleTranscription, r.Role, "not among the roles background work needs")
+	}
+	require.Equal(t, []models.UtilityRoleModel{{Role: models.UtilityRoleTranscription}}, got.SpeechRoles)
+
+	rec, _ = f.do(t, http.MethodPut, "/utility-models/transcription", `{"model_id":"`+chat.String()+`"}`, true)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), models.ErrCodeModelWrongKind)
+	rec, _ = f.do(t, http.MethodPut, "/utility-models/simple", `{"model_id":"`+ears.String()+`"}`, true)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "a transcription model can't do background work")
+	require.Contains(t, rec.Body.String(), models.ErrCodeModelWrongKind)
+	rec, _ = f.do(t, http.MethodPut, "/utility-models/transcription", `{"model_id":"`+ears.String()+`","service_tier":"flex"}`, true)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "dictation takes no tier")
+	require.Empty(t, f.store.settings)
+
+	rec, got = f.do(t, http.MethodPut, "/utility-models/transcription", `{"model_id":"`+ears.String()+`"}`, true)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, &models.UtilityChoice{ModelID: &ears}, got.SpeechRoles[0].Account)
+}

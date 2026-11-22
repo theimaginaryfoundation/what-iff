@@ -40,6 +40,7 @@ import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { ShieldIconComponent, UserIconComponent } from '../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { BackgroundModelsComponent } from './background-models/background-models.component';
+import { DictationModelComponent } from './voice/dictation-model.component';
 import { ProfileSettingsModalService, ProfileSettingsTab } from './profile-settings-modal.service';
 import { ProvidersSectionComponent } from './providers/providers-section.component';
 
@@ -47,7 +48,17 @@ import { ProvidersSectionComponent } from './providers/providers-section.compone
 @Component({
   selector: 'app-profile-settings-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ReactiveFormsModule, UserIconComponent, ShieldIconComponent, TooltipDirective, ProvidersSectionComponent, BackgroundModelsComponent],
+  imports: [
+    CommonModule,
+    ModalComponent,
+    ReactiveFormsModule,
+    UserIconComponent,
+    ShieldIconComponent,
+    TooltipDirective,
+    ProvidersSectionComponent,
+    BackgroundModelsComponent,
+    DictationModelComponent,
+  ],
   templateUrl: './profile-settings-modal.component.html',
   styleUrl: './profile-settings-modal.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -106,7 +117,7 @@ export class ProfileSettingsModalComponent {
   readonly defaultModelUnlisted = computed(() => {
     const id = this.preferences()?.default_model_id;
     const models = this.models();
-    return this.hasDefaultModel() && models.length > 0 && !models.some((model) => model.id === id);
+    return this.hasDefaultModel() && models.length > 0 && !models.some(model => model.id === id);
   });
   /**
    * False until the account has a default model: on an install without a model catalog that is
@@ -356,7 +367,10 @@ export class ProfileSettingsModalComponent {
 
   private async savePreferences(
     patch: Partial<
-      Pick<UserPreferencesUpdateRequest, 'default_model_id' | 'default_personality_id' | 'image_generation_provider' | 'reasoning_effort' | 'agent_loop'>
+      Pick<
+        UserPreferencesUpdateRequest,
+        'default_model_id' | 'default_personality_id' | 'image_generation_provider' | 'reasoning_effort' | 'agent_loop'
+      >
     >,
     successMessage: string,
   ): Promise<void> {
