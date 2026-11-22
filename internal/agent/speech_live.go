@@ -212,7 +212,8 @@ func (l *liveSpeech) run(ctx context.Context) {
 
 // speak reads the reply as it streams, and the rest once it is saved. Whatever stops it
 // early ends the track (failed), so a client following it isn't left waiting, and the
-// next request for it starts a worker that carries on from the text read.
+// next request for it starts a worker that carries on from the text read; the instance
+// shutting down leaves it open instead, for the next request, a poll included.
 func (l *liveSpeech) speak(ctx context.Context) {
 	a := l.a
 	token, ok, err := a.ds.AcquireSpeechWorker(ctx, l.trackID, time.Now().Add(speechWorkerLease))
@@ -223,11 +224,20 @@ func (l *liveSpeech) speak(ctx context.Context) {
 	work, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go a.holdSpeechLease(work, cancel, lease)
-	status, code := models.SpeechTrackFailed, "cancelled"
+	status, code := models.SpeechTrackFailed, speechInterrupted
 	defer func() {
 		if r := recover(); r != nil {
 			a.logger.Error("live speech panicked", zap.Any("panic", r))
 			status, code = models.SpeechTrackFailed, "internal_error"
+		}
+		if ctx.Err() != nil && status != models.SpeechTrackComplete {
+			// The instance is shutting down, whatever step it cut short: leave the track open
+			// for the next request to carry on from what it read (from the saved reply, once
+			// there is one).
+			if err := a.ds.ReleaseSpeechWorker(context.WithoutCancel(ctx), l.trackID, token); err != nil {
+				a.logger.Warn("couldn't release a speech track", zap.Error(err))
+			}
+			return
 		}
 		// Finishing names the lease: one lost to another worker is that worker's to finish.
 		if err := a.ds.FinishSpeechTrack(context.WithoutCancel(ctx), l.trackID, token, status, code); err != nil {
@@ -364,7 +374,7 @@ func (s *liveSegmenter) say(ctx context.Context, piece string) (models.SpeechTra
 	audio, usage, err := a.synthesize(ctx, s.client, l.v, piece, s.format)
 	if err != nil {
 		if ctx.Err() != nil {
-			return models.SpeechTrackFailed, "cancelled", true
+			return models.SpeechTrackFailed, speechInterrupted, true
 		}
 		a.logger.Warn("live speech synthesis failed", zap.String("track_id", l.trackID.String()), zap.Error(err))
 		return models.SpeechTrackFailed, speechFailureCode(err), true
@@ -417,6 +427,7 @@ func (a *Agent) ClaimSpeech(ctx context.Context, userID, trackID uuid.UUID) (*mo
 	if err != nil {
 		return nil, false, err
 	}
+	a.settleOrphanTurnTrack(ctx, track)
 	if !claimed || track.MessageID == nil || track.Status != models.SpeechTrackOpen || len(track.Segments) > 0 {
 		return track, claimed, nil
 	}
@@ -432,6 +443,32 @@ func (a *Agent) ClaimSpeech(ctx context.Context, userID, trackID uuid.UUID) (*mo
 	}
 	a.startSpeechWorker(userID, track.ID, v, speechtext.Spoken(msg.Message, msg.FinalRoundOffset))
 	return track, true, nil
+}
+
+// settleOrphanTurnTrack deals with a turn's track that no reply is tied to and no worker
+// holds, once its turn is no longer at work: the instance running the turn went away before
+// the turn ended. A reply the turn did save is tied to it, so it is made from that; with none,
+// the track fails and isn't read aloud on arrival. A turn still at work is left to its speaker.
+func (a *Agent) settleOrphanTurnTrack(ctx context.Context, track *models.SpeechTrack) {
+	if track.JobID == nil || track.MessageID != nil || track.Status != models.SpeechTrackOpen || track.HasWorker(time.Now()) {
+		return
+	}
+	running, replyID, err := a.ds.SpeechTrackTurn(ctx, *track.JobID)
+	if err != nil || running {
+		return
+	}
+	if replyID != nil {
+		if err := a.ds.LinkSpeechTrack(ctx, track.ID, *replyID); err == nil {
+			track.MessageID = replyID
+		}
+		return
+	}
+	if err := a.ds.FinishSpeechTrack(ctx, track.ID, uuid.Nil, models.SpeechTrackFailed, "turn_failed"); err == nil {
+		track.Status, track.ErrorCode = models.SpeechTrackFailed, "turn_failed"
+	}
+	if err := a.ds.SkipSpeechTrack(ctx, track.UserID, track.ID); err == nil && track.Autoplay == models.SpeechAutoplayPending {
+		track.Autoplay = models.SpeechAutoplaySkipped
+	}
 }
 
 // SkipSpeech marks a pending track skipped: it won't be read out on arrival.

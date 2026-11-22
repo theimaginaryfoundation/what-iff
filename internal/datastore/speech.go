@@ -14,6 +14,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
+	"github.com/theimaginaryfoundation/what-iff/ent/job"
 	entmodel "github.com/theimaginaryfoundation/what-iff/ent/model"
 	"github.com/theimaginaryfoundation/what-iff/ent/personality"
 	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
@@ -335,9 +336,18 @@ func messageGone() predicate.SpeechTrack {
 	})
 }
 
-// sweepable is a track to delete: unplayed since cutoff, or whose message is gone.
+// UnlinkedSpeechTrackTTL is how long a turn's track may stay tied to no reply before the
+// sweep deletes it: far longer than a turn runs, so only a turn that died leaves one.
+const UnlinkedSpeechTrackTTL = 24 * time.Hour
+
+// sweepable is a track to delete: unplayed since cutoff, whose message is gone, or a turn's
+// track its turn never tied to a reply.
 func sweepable(cutoff time.Time) predicate.SpeechTrack {
-	return speechtrack.Or(speechtrack.LastPlayedAtLT(cutoff), messageGone())
+	return speechtrack.Or(
+		speechtrack.LastPlayedAtLT(cutoff),
+		messageGone(),
+		speechtrack.And(speechtrack.MessageIDIsNil(), speechtrack.CreatedAtLT(time.Now().Add(-UnlinkedSpeechTrackTTL))),
+	)
 }
 
 // SweepableSpeechTracks lists up to limit tracks to delete: unplayed since cutoff, or
@@ -433,6 +443,23 @@ func (d *Datastore) CreateTurnSpeechTrack(ctx context.Context, n NewTurnSpeechTr
 		return nil, err
 	}
 	return toSpeechTrack(e), nil
+}
+
+// SpeechTrackTurn reports, for a turn's track, whether its run is still at work and the reply
+// it saved, if any. A run that is gone, or that a worker left mid-way, is not at work.
+func (d *Datastore) SpeechTrackTurn(ctx context.Context, jobID uuid.UUID) (running bool, replyID *uuid.UUID, err error) {
+	j, err := d.dbClient.Job.Query().Where(job.ID(jobID)).Only(ctx)
+	if ent.IsNotFound(err) {
+		return false, nil, nil
+	}
+	if err != nil {
+		return false, nil, err
+	}
+	running, err = d.dbClient.Job.Query().Where(job.ID(jobID), unfinishedTurnRun(time.Now())).Exist(ctx)
+	if err != nil {
+		return false, nil, err
+	}
+	return running, j.ResultID, nil
 }
 
 // LinkSpeechTrack ties a turn's track to the reply it saved.

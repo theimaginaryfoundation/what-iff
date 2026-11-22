@@ -257,3 +257,97 @@ func TestLiveSpeech_AClaimAtTheTurnsEndIsRead(t *testing.T) {
 	require.Equal(t, models.SpeechTrackComplete, done.Status)
 	require.Len(t, done.Segments, 1)
 }
+
+// The instance shutting down mid-turn leaves the claimed track open with what it read. The
+// turn's reply, saved but never tied to the track, is tied to it on the next poll, which
+// carries on from there (ADR 0x052 §8).
+func TestLiveSpeech_ShutdownMidTurnIsCarriedOnFromTheSavedReply(t *testing.T) {
+	t.Parallel()
+	f := newSpeechFixture(t, "unused", 0)
+	f.autoplayOn(t)
+	life, shutDown := context.WithCancel(context.Background())
+	f.a.lifecycleCtx = life
+	tr := f.startTurn(t)
+	trackID := *tr.job.SpeechTrackID
+	_, claimed, err := f.a.ClaimSpeech(tr.ctx, f.alice, trackID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	final := longRound(12)
+	tr.write(final[:len(final)/2])
+	require.Eventually(t, func() bool {
+		stored, err := f.a.ds.GetSpeechTrack(tr.ctx, f.alice, trackID)
+		return err == nil && len(stored.Segments) >= 1
+	}, 3*time.Second, 5*time.Millisecond, "a segment is stored before the instance goes")
+	shutDown()
+	<-tr.live.done
+	stored, err := f.a.ds.GetSpeechTrack(tr.ctx, f.alice, trackID)
+	require.NoError(t, err)
+	require.Equal(t, models.SpeechTrackOpen, stored.Status, "shutting down is not the track's end")
+	require.False(t, stored.HasWorker(time.Now()))
+	require.Nil(t, stored.MessageID)
+	read := len(stored.Segments)
+	require.Positive(t, read)
+
+	// The turn saved its reply before the instance went, but never tied the track to it.
+	m, err := f.ent.ChatMessage.Create().SetChatID(f.chat).SetMessage(final).SetOrigin("Assistant").SetSentAt(time.Now()).Save(tr.ctx)
+	require.NoError(t, err)
+	require.NoError(t, f.ent.Job.UpdateOneID(tr.job.ID).SetStatus("complete").SetResultID(m.ID).Exec(tr.ctx))
+
+	f.a.lifecycleCtx = context.Background()
+	done := f.waitTrack(t, trackID)
+	require.Equal(t, models.SpeechTrackComplete, done.Status)
+	require.Equal(t, m.ID, *done.MessageID)
+	var texts []string
+	for _, s := range done.Segments {
+		texts = append(texts, s.Text)
+	}
+	require.Equal(t, strings.Join(strings.Fields(final), " "), strings.Join(texts, " "), "the whole reply, once")
+}
+
+// A turn that died without a reply leaves its track tied to nothing: a poll fails it and
+// takes it off the pending list, rather than leaving the client to give up on it.
+func TestLiveSpeech_ATrackWhoseTurnDiedWithoutAReplyFails(t *testing.T) {
+	t.Parallel()
+	f := newSpeechFixture(t, "unused", 0)
+	f.autoplayOn(t)
+	tr := f.startTurn(t)
+	trackID := *tr.job.SpeechTrackID
+
+	track, err := f.a.SpeechTrack(tr.ctx, f.alice, trackID)
+	require.NoError(t, err)
+	require.Equal(t, models.SpeechTrackOpen, track.Status, "a turn still at work is left to its speaker")
+	require.Equal(t, models.SpeechAutoplayPending, track.Autoplay)
+
+	// The instance running the turn goes; its job is left processing, and goes stale.
+	require.NoError(t, f.ent.Job.UpdateOneID(tr.job.ID).SetUpdatedAt(time.Now().Add(-time.Hour)).Exec(tr.ctx))
+	track, err = f.a.SpeechTrack(tr.ctx, f.alice, trackID)
+	require.NoError(t, err)
+	require.Equal(t, models.SpeechTrackFailed, track.Status)
+	require.Equal(t, "turn_failed", track.ErrorCode)
+	pending, err := f.a.PendingSpeech(tr.ctx, f.alice, f.chat)
+	require.NoError(t, err)
+	require.Empty(t, pending, "not read aloud on arrival")
+}
+
+// A turn's track no reply was ever tied to is swept after a day.
+func TestSweepSpeech_DeletesATurnTrackNeverTiedToAReply(t *testing.T) {
+	t.Parallel()
+	f := newSpeechFixture(t, "unused", 0)
+	f.autoplayOn(t)
+	tr := f.startTurn(t)
+	trackID := *tr.job.SpeechTrackID
+	tr.live.end(tr.ctx, &models.ChatMessage{ID: f.reply}) // tied, so the speaker leaves it be
+	<-tr.live.done
+	require.NoError(t, f.ent.SpeechTrack.UpdateOneID(trackID).ClearMessageID().Exec(tr.ctx))
+
+	f.a.sweepSpeechOnce(tr.ctx)
+	_, err := f.a.ds.GetSpeechTrack(tr.ctx, f.alice, trackID)
+	require.NoError(t, err, "a day hasn't passed")
+
+	_, err = f.db.ExecContext(tr.ctx, "UPDATE speech_tracks SET created_at = ? WHERE id = ?", time.Now().Add(-25*time.Hour), trackID)
+	require.NoError(t, err)
+	f.a.sweepSpeechOnce(tr.ctx)
+	_, err = f.a.ds.GetSpeechTrack(tr.ctx, f.alice, trackID)
+	require.Error(t, err)
+}

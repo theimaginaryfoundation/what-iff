@@ -488,6 +488,7 @@ func (a *Agent) SpeechTrack(ctx context.Context, userID, trackID uuid.UUID) (*mo
 	if err != nil {
 		return nil, err
 	}
+	a.settleOrphanTurnTrack(ctx, track)
 	if track.Status == models.SpeechTrackOpen && track.MessageID != nil && !track.HasWorker(time.Now()) {
 		a.resumeSpeechTrack(ctx, userID, track)
 	}
@@ -552,7 +553,8 @@ func (a *Agent) PreviewVoice(ctx context.Context, userID uuid.UUID, pv models.Pe
 }
 
 // SweepSpeech deletes the audio nobody plays (ADR 0x052 §7): tracks unplayed for 30
-// days, and tracks whose message is gone, files first. It runs until ctx ends.
+// days, tracks whose message is gone, and turn tracks no reply was ever tied to (after
+// datastore.UnlinkedSpeechTrackTTL), files first. It runs until ctx ends.
 func (a *Agent) SweepSpeech(ctx context.Context, every time.Duration) {
 	if every <= 0 {
 		every = time.Hour

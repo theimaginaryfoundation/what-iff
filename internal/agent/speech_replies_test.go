@@ -78,9 +78,6 @@ type speechFixture struct {
 func newSpeechFixture(t *testing.T, reply string, finalRoundOffset int) *speechFixture {
 	t.Helper()
 	f := &speechFixture{connectionFixture: newConnectionFixture(t), files: &memFiles{files: map[string][]byte{}}}
-	// The database is in memory with no shared cache: every connection would be a new, empty
-	// one, and the speech worker runs beside the test.
-	f.db.SetMaxOpenConns(1)
 	ctx := context.Background()
 	migrator, err := schema.NewMigrate(entsql.OpenDB(dialect.SQLite, f.db))
 	require.NoError(t, err)
