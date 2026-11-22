@@ -488,6 +488,9 @@ func (d *Datastore) UpdateChatMessage(ctx context.Context, userID uuid.UUID, cha
 
 	if !exists {
 		d.logger.Error(i18n.T2("chat.message.not_found_or_unauthorized", "ChatMessageID", chatMessage.ID.String(), "UserID", userID.String()))
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
 		return nil, ErrChatMessageNotFound
 	}
 

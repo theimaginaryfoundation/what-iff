@@ -84,6 +84,9 @@ func (d *Datastore) GetUserPreferences(ctx context.Context, userID uuid.UUID) (*
 		Only(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T1("query.failed", "Entity", "user preferences"), zap.Error(err))
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
 		return nil, err
 	}
 
