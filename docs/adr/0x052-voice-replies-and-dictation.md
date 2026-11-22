@@ -237,8 +237,9 @@ So a round's text is held until it **commits**:
 The 200 characters are a debounce, not a minimum: a reply that finishes shorter ("Sure, done!") commits when it ends, and is spoken.
 
 Nothing is synthesised before a round commits.
-After that, its sentences are segmented and synthesised as they complete.
-If a committed round still ends in a tool call (a long preamble, rare), its segments are withdrawn: the track drops them, a client playing one stops at the end of that segment, and the track starts again with the next round.
+After that, its sentences are segmented and synthesised as they complete, from settled text only: markdown reads differently once an inline construct closes ("**Note." has its asterisks, "**Note.** More" does not), so the line being written is read only up to an emphasis, code span, strike-through, link or tag still open on it.
+When the saved reply is prepared differently from what streamed anyway, the track carries on from the same words (letters and digits matching) rather than reading the opening again; only words that differ start the final round over.
+If a committed round still ends in a tool call (a long preamble, rare), its segments are withdrawn: the track drops them, a client playing one stops it, and the track starts again with the next round.
 A saved reply's track holds only its final round, matching decision 6.
 
 Holding to 200 characters costs a second or two of generation before speech starts; first sound is then that, plus one sentence of synthesis, plus at most one poll.
@@ -247,6 +248,9 @@ It is cheaper and simpler than synthesising every round speculatively and paying
 The streaming track is created when the turn starts (decision 9 says when), and the job carries its id, so the client watching the turn finds it with the polls it already makes.
 Synthesis during the turn starts only once the track is claimed, which means a client is there to hear it.
 An unclaimed track synthesises nothing while the turn runs; if it is claimed later, it is made from the saved reply like any other.
+A claim that lands as the turn ends is still read: the turn's speaker looks at the track once more before it lets go.
+The speaker takes the track's lease like any worker (decision 7); if it stops early (a deploy, out of credits, a provider failure) the track fails, and the next request for it, a poll included, carries on from the text already read.
+While no client has claimed the track, the speaker looks for a claim four times a second for the first ten seconds, when a watching client claims, and once a second after.
 
 ### 9. Autoplay
 
@@ -287,8 +291,12 @@ A reply is marked read when the chat loads, as today, whether or not it has been
 
 **Browsers' autoplay rules.**
 Browsers block sound a page starts without a gesture, iOS most strictly.
-The client unlocks one audio context on the person's first tap or click in the session (sending, opening a chat, the microphone).
-When a pending track is found and audio is still locked (the app opened straight into a chat from a notification, say), the client does not claim it; the reply shows **Tap to listen**, and tapping claims and plays it.
+The client unlocks one audio context on the person's first tap or click in the session (sending, opening a chat, the microphone), and resumes it on any later one if the browser has suspended it since (iOS does, after an interruption or a while in the background).
+When a pending track is found and audio is not running (still locked, or suspended; the app opened straight into a chat from a notification, say), the client does not claim it; the reply shows **Tap to listen**, and tapping claims and plays it.
+
+**Withdrawn segments while playing.**
+A round withdrawn while it plays stops at once, and what replaces it follows the audio that is kept.
+A segment the client was told of may be withdrawn before it fetches it; the client then reads the track again rather than giving up.
 
 ### 10. Dictation
 
