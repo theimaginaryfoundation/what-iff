@@ -5015,7 +5015,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A speech track and its segments so far */
+        /**
+         * A speech track and its segments so far
+         * @description Polled while the track is `open`. A saved reply's track that has lost its worker (the instance it ran on went away) gets another, so polling always moves on; one that can't go on (its reply or voice gone) comes back `failed`.
+         */
         get: {
             parameters: {
                 query?: never;
