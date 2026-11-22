@@ -1,0 +1,262 @@
+:host {
+  display: block;
+  position: relative;
+  min-height: 0;
+  flex: 1;
+}
+.map {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  cursor: grab;
+  touch-action: pan-x pan-y;
+  border: 1px solid var(--constellation-border);
+  border-radius: 12px;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+  &--dragging {
+    cursor: grabbing;
+    user-select: none;
+  }
+  &:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+}
+.map__sizer {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+.map__board {
+  width: 4400px;
+  height: 4400px;
+  position: absolute;
+  inset: 0 auto auto 0;
+  transform-origin: 0 0;
+  background-image: radial-gradient(circle, var(--constellation-border) 1px, transparent 1px);
+  background-size: 73px 83px;
+}
+.map__lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.map__orbit {
+  fill: none;
+  stroke: var(--constellation-border);
+  stroke-width: 1;
+  stroke-dasharray: 2 17;
+}
+.map__edge {
+  fill: none;
+  stroke: var(--constellation-muted);
+  opacity: 0.5;
+  stroke-width: 1.6;
+}
+.map__edge--earned {
+  stroke: var(--constellation-accent);
+  opacity: 1;
+}
+.map__edge--choice {
+  stroke: var(--constellation-accent);
+  stroke-dasharray: 5 8;
+  opacity: 0.55;
+}
+.map__sector {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 320px;
+  text-align: center;
+  font:
+    18px Georgia,
+    serif;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--constellation-accent);
+  pointer-events: none;
+  small {
+    display: block;
+    font:
+      10px system-ui,
+      sans-serif;
+    color: var(--constellation-muted);
+    margin-top: 7px;
+    letter-spacing: 0.1em;
+  }
+}
+.map__skill {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 188px;
+  height: 144px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--constellation-text);
+  isolation: isolate;
+  &:focus-visible {
+    outline: 2px solid var(--constellation-accent);
+    outline-offset: 9px;
+    border-radius: 8px;
+  }
+  small {
+    color: var(--constellation-muted);
+    font-size: 10px;
+    margin-top: 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+}
+.map__gem {
+  display: grid;
+  place-items: center;
+  width: 66px;
+  height: 66px;
+  flex-shrink: 0;
+  transform: rotate(45deg);
+  margin: 12px 0 22px;
+  border: 1px solid var(--constellation-border);
+  background: linear-gradient(135deg, var(--constellation-mid), var(--constellation-bg));
+  box-shadow: inset 0 0 18px rgb(0 0 0 / 0.3);
+  transition: box-shadow 160ms ease;
+  > * {
+    transform: rotate(-45deg);
+  }
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 5px;
+    border: 1px solid var(--constellation-border);
+    pointer-events: none;
+  }
+}
+.map__title {
+  font-size: 12px;
+  line-height: 1.35;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  max-width: 185px;
+}
+.map__check {
+  font-size: 26px;
+}
+.map__skill:hover .map__gem,
+.map__skill--selected .map__gem {
+  outline: 1px solid var(--constellation-accent);
+  outline-offset: 8px;
+  box-shadow: 0 0 30px var(--constellation-glow);
+}
+.map__skill--ready .map__gem {
+  border-color: var(--constellation-accent);
+}
+.map__skill--done .map__gem {
+  background: linear-gradient(135deg, var(--constellation-brand), var(--constellation-mid));
+  border-color: var(--constellation-accent);
+}
+.map__skill--origin {
+  width: 260px;
+  height: 240px;
+  .map__gem {
+    width: 130px;
+    height: 130px;
+    margin: 26px 0 40px;
+    border-color: var(--constellation-accent);
+    box-shadow: 0 0 60px var(--constellation-glow);
+    &::after {
+      content: "";
+      position: absolute;
+      inset: -22px;
+      border: 1px solid var(--constellation-border);
+      border-radius: 50%;
+    }
+  }
+  .map__title {
+    font:
+      20px Georgia,
+      serif;
+    letter-spacing: 0.12em;
+    max-width: 260px;
+  }
+}
+.map__rails {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.map__rail {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: grab;
+  background: color-mix(in srgb, var(--constellation-accent) 3%, transparent);
+  &:hover {
+    background: color-mix(in srgb, var(--constellation-accent) 10%, transparent);
+  }
+  span {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--constellation-muted);
+    font-size: 8px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  &--top,
+  &--bottom {
+    height: 42px;
+    left: 0;
+    right: 0;
+  }
+  &--top {
+    top: 0;
+  }
+  &--bottom {
+    bottom: 0;
+  }
+  &--left,
+  &--right {
+    width: 42px;
+    top: 42px;
+    bottom: 42px;
+    span {
+      writing-mode: vertical-rl;
+    }
+  }
+  &--left {
+    left: 0;
+  }
+  &--right {
+    right: 0;
+  }
+}
+@media (max-width: 760px) {
+  .map__rail--top,
+  .map__rail--bottom {
+    height: 26px;
+  }
+  .map__rail--left,
+  .map__rail--right {
+    width: 26px;
+    top: 26px;
+    bottom: 26px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .map__gem {
+    transition: none;
+  }
+}

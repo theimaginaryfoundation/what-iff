@@ -26,6 +26,9 @@
 //   Misc             --scrollbar, --card-shadow, --card-shadow-hover,
 //                    --sidebar-gradient, --thread-active-bg
 //   Personality      --persona-accent (consumed via inline style; fallback below)
+//   Constellation    --constellation-bg, --constellation-mid, --constellation-panel,
+//                    --constellation-text, --constellation-muted, --constellation-accent,
+//                    --constellation-brand, --constellation-border, --constellation-glow
 //
 // Contrast notes (verified against light + dark themes, WCAG 2.1 AA):
 //   - --text-primary on --bg-base / --bg-card    >= 12:1  (AAA body)

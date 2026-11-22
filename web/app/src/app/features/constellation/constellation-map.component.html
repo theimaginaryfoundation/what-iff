@@ -1,0 +1,85 @@
+<div
+  #viewport
+  class="map"
+  [class.map--dragging]="dragging()"
+  tabindex="0"
+  aria-label="Skill constellation. Drag empty space or use arrow keys to explore. Tab to a task and press Enter for its objective."
+  (pointerdown)="startPan($event)"
+  (pointermove)="movePan($event)"
+  (pointerup)="endPan()"
+  (pointercancel)="endPan()"
+  (lostpointercapture)="endPan()"
+  (keydown)="onKeydown($event)"
+  (wheel)="onWheel($event)"
+>
+  <div class="map__sizer" [style.width.px]="boardSize * zoom()" [style.height.px]="boardSize * zoom()">
+    <div class="map__board" [style.left.px]="offsetX()" [style.top.px]="offsetY()" [style.transform]="'scale(' + zoom() + ')'">
+      <svg class="map__lines" [attr.viewBox]="'0 0 ' + boardSize + ' ' + boardSize" aria-hidden="true">
+        @for (radius of rings; track radius) {
+          <circle class="map__orbit" [attr.cx]="origin.x" [attr.cy]="origin.y" [attr.r]="radius" />
+        }
+        @for (edge of edges; track edge.from + edge.to) {
+          <path
+            class="map__edge"
+            [class.map__edge--choice]="edge.choice"
+            [class.map__edge--earned]="completed().has(edge.from)"
+            [attr.d]="edge.path"
+          />
+        }
+      </svg>
+      @for (label of labels; track label.title) {
+        <div class="map__sector" [style.left.px]="label.x" [style.top.px]="label.y">
+          {{ label.title }}<small>{{ label.subtitle }}</small>
+        </div>
+      }
+      @for (node of nodes; track node.id) {
+        <button
+          type="button"
+          class="map__skill"
+          [class.map__skill--origin]="node.id === 'S1'"
+          [class.map__skill--selected]="selected() === node.id"
+          [class.map__skill--ready]="ready(node)"
+          [class.map__skill--done]="completed().has(node.id)"
+          [attr.data-objective]="node.id"
+          [style.left.px]="positions[node.id].x"
+          [style.top.px]="positions[node.id].y"
+          [attr.aria-label]="
+            node.title + ': ' + (completed().has(node.id) ? 'completed' : ready(node) ? 'ready' : 'upcoming') + '. Open objective'
+          "
+          [attr.aria-pressed]="selected() === node.id"
+          (click)="select.emit(node.id)"
+        >
+          <span class="map__gem">
+            @if (completed().has(node.id)) {
+              <span class="map__check" aria-hidden="true">✓</span>
+            } @else if (node.id === "S1") {
+              <ui-user-icon [size]="46" />
+            } @else {
+              <ui-constellation-icon [size]="27" />
+            }
+          </span>
+          <span class="map__title">{{ node.title }}</span>
+          <small>{{
+            node.id === "S1" ? "The origin" : completed().has(node.id) ? "Completed" : ready(node) ? "Ready to learn" : node.xp + " XP"
+          }}</small>
+        </button>
+      }
+    </div>
+  </div>
+</div>
+<div class="map__rails" aria-label="Drag margins">
+  @for (rail of rails; track rail) {
+    <div
+      class="map__rail"
+      [class]="'map__rail map__rail--' + rail"
+      (pointerdown)="startPan($event, true)"
+      (pointermove)="movePan($event)"
+      (pointerup)="endPan()"
+      (pointercancel)="endPan()"
+      (lostpointercapture)="endPan()"
+      (wheel)="onWheel($event, true)"
+    >
+      <span>Drag to explore</span>
+    </div>
+  }
+</div>
