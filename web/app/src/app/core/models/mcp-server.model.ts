@@ -10,6 +10,11 @@ export interface MCPServer {
   oauth_client_id?: string;
   oauth_scopes?: string[];
   oauth_pkce_policy?: 'required' | 'supported' | 'not_supported';
+  /** Set when the sign-in was read from the server (issue #517): the token's audience. */
+  oauth_resource?: string;
+  /** The authorization server the sign-in was read from; empty for settings typed in. */
+  oauth_issuer?: string;
+  oauth_client_registration?: MCPOAuthRegistration;
   oauth_access_token_expires_at?: string;
   oauth_refresh_token_expires_at?: string;
   oauth_authenticated_at?: string;
@@ -47,6 +52,11 @@ export interface CreateMCPServerRequest {
   oauth_client_secret?: string;
   oauth_scopes?: string[];
   oauth_pkce_policy?: 'required' | 'supported' | 'not_supported';
+  /**
+   * Sets the sign-in up from the server URL: read from the server, with a client registered
+   * unless oauth_client_id is given. The endpoint, scope and PKCE fields are then ignored.
+   */
+  oauth_auto?: boolean;
 }
 
 export interface UpdateMCPServerRequest {
@@ -64,6 +74,27 @@ export interface UpdateMCPServerRequest {
   oauth_client_secret?: string | null;
   oauth_scopes?: string[];
   oauth_pkce_policy?: 'required' | 'supported' | 'not_supported';
+  /** Reads the sign-in from the server again, as on create. */
+  oauth_auto?: boolean;
+}
+
+/** How a connector's OAuth client is set up. */
+export type MCPOAuthRegistration = 'manual' | 'metadata_document' | 'dynamic';
+
+/** What an MCP server says about signing in to it (POST /mcp-servers/oauth/discover). */
+export interface MCPServerOAuthDiscovery {
+  resource: string;
+  resource_name?: string;
+  issuer: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  registration_endpoint?: string;
+  scopes?: string[];
+  client_id_metadata_document_supported: boolean;
+  iss_parameter_supported: boolean;
+  legacy?: boolean;
+  /** How a client will be got on save; manual means a client ID has to be typed in. */
+  registration: MCPOAuthRegistration;
 }
 
 export interface TestMCPServerConnectionRequest {

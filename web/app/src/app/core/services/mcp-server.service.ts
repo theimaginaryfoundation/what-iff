@@ -14,7 +14,8 @@ import {
   TestMCPServerConnectionResponse,
   StartMCPServerOAuthRequest,
   StartMCPServerOAuthResponse,
-  MCPServerOAuthConfigResponse
+  MCPServerOAuthConfigResponse,
+  MCPServerOAuthDiscovery
 } from '../models/mcp-server.model';
 
 @Injectable({
@@ -56,6 +57,14 @@ export class MCPServerService {
   startOAuth(id: string, request?: StartMCPServerOAuthRequest): Observable<StartMCPServerOAuthResponse> {
     return this.http.post<StartMCPServerOAuthResponse>(`${this.apiUrl}/${id}/oauth/start`, request || {})
       .pipe(catchError(this.handleError));
+  }
+
+  /**
+   * Reads how to sign in to an MCP server from the server itself. Errors are passed through as
+   * they came, so the caller can branch on their code (mcp_oauth_not_required and so on).
+   */
+  discoverOAuth(serverUrl: string): Observable<MCPServerOAuthDiscovery> {
+    return this.http.post<MCPServerOAuthDiscovery>(`${this.apiUrl}/oauth/discover`, { server_url: serverUrl });
   }
 
   getOAuthConfig(): Observable<MCPServerOAuthConfigResponse> {

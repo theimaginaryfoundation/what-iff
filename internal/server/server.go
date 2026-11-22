@@ -373,6 +373,8 @@ func (s *Server) setupRoutes() {
 		RedirectURL:         s.config.MCPOAuthRedirectURL,
 		PostAuthRedirectURL: s.config.MCPOAuthPostAuthURL,
 		AllowedRedirects:    s.config.MCPOAuthAllowedRedirects,
+		ClientMetadataURL:   s.config.MCPOAuthClientMetadataURL,
+		AllowLocalhost:      s.config.MCPAllowLocalhostConnections,
 	})
 	go mcpoauth.NewSweeper(oauthService, s.config.MCPOAuthSweepInterval, s.config.MCPOAuthRefreshAhead, s.config.MCPOAuthMaxFailures).Run(s.lifecycleCtx)
 	mcpServerHandler := mcpserver.NewHandler(dataStore, mcpclient.New(nil, s.logger), oauthService, s.logger, mcpserver.Config{

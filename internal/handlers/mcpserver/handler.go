@@ -68,6 +68,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 		mcpRouter.HandleFunc("", h.ListMCPServers).Methods("GET")
 		mcpRouter.HandleFunc("/test-connection", h.TestMCPServerConnection).Methods("POST")
 		mcpRouter.HandleFunc("/oauth/config", h.GetMCPServerOAuthConfig).Methods("GET")
+		mcpRouter.HandleFunc("/oauth/discover", h.DiscoverMCPServerOAuth).Methods("POST")
 		mcpRouter.HandleFunc("/{id}/oauth/start", h.StartMCPServerOAuth).Methods("POST")
 		mcpRouter.HandleFunc("/{id}", h.GetMCPServer).Methods("GET")
 		mcpRouter.HandleFunc("/{id}", h.UpdateMCPServer).Methods("PUT")
@@ -80,6 +81,7 @@ func (h *Handler) RegisterPublicRoutes(router *mux.Router) {
 	for _, prefix := range []string{"/mcp-servers", "/mcp-server"} {
 		mcpRouter := router.PathPrefix(prefix).Subrouter()
 		mcpRouter.HandleFunc("/oauth/callback", h.HandleMCPServerOAuthCallback).Methods("GET")
+		mcpRouter.HandleFunc("/oauth/client-metadata.json", h.ServeClientMetadataDocument).Methods("GET")
 	}
 }
 
@@ -96,6 +98,10 @@ type createMCPServerRequest struct {
 	OAuthClientSecret string   `json:"oauth_client_secret"`
 	OAuthScopes       []string `json:"oauth_scopes"`
 	OAuthPKCEPolicy   string   `json:"oauth_pkce_policy"`
+	// OAuthAuto sets an oauth connector up from its server URL (issue #517): its sign-in is
+	// read from the server and a client is registered, unless oauth_client_id is given. The
+	// endpoint, scope and PKCE fields are then ignored.
+	OAuthAuto bool `json:"oauth_auto"`
 }
 
 type testMCPServerConnectionRequest struct {
@@ -143,7 +149,7 @@ func (h *Handler) CreateMCPServer(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "auth_mode must be 'header' or 'oauth'", nil)
 		return
 	}
-	if authMode == models.MCPServerAuthModeOAuth {
+	if authMode == models.MCPServerAuthModeOAuth && !req.OAuthAuto {
 		if strings.TrimSpace(req.OAuthAuthURL) == "" || strings.TrimSpace(req.OAuthTokenURL) == "" || strings.TrimSpace(req.OAuthClientID) == "" {
 			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "oauth_auth_url, oauth_token_url, and oauth_client_id are required for oauth mode", nil)
 			return
@@ -154,7 +160,7 @@ func (h *Handler) CreateMCPServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	server, err := h.provider.CreateMCPServer(r.Context(), userID, models.MCPServer{
+	newServer := models.MCPServer{
 		Name:              name,
 		Description:       description,
 		ServerURL:         serverURL,
@@ -167,7 +173,19 @@ func (h *Handler) CreateMCPServer(w http.ResponseWriter, r *http.Request) {
 		OAuthClientSecret: strings.TrimSpace(req.OAuthClientSecret),
 		OAuthScopes:       normalizeScopes(req.OAuthScopes),
 		OAuthPKCEPolicy:   pkcePolicy,
-	})
+	}
+	if authMode == models.MCPServerAuthModeOAuth {
+		newServer.OAuthClientRegistration = models.MCPOAuthRegistrationManual
+		if req.OAuthAuto {
+			secret, ok := h.autoConfigure(w, r, &newServer, req.OAuthClientID, req.OAuthClientSecret)
+			if !ok {
+				return
+			}
+			newServer.OAuthClientSecret = secret
+		}
+	}
+
+	server, err := h.provider.CreateMCPServer(r.Context(), userID, newServer)
 	if err != nil {
 		h.logger.Error("failed to create mcp server", zap.String("user_id", userID.String()), zap.Error(err))
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to create MCP server", err)
@@ -227,6 +245,7 @@ func (h *Handler) TestMCPServerConnection(w http.ResponseWriter, r *http.Request
 		testServer.AuthToken = strings.TrimSpace(current.AuthToken)
 		testServer.AuthMode = strings.TrimSpace(current.AuthMode)
 		testServer.OAuthAccessToken = strings.TrimSpace(current.OAuthAccessToken)
+		testServer.OAuthAccessTokenExpiresAt = current.OAuthAccessTokenExpiresAt
 	}
 	if req.Authentication.IsSet {
 		if req.Authentication.Value != nil {
@@ -238,7 +257,8 @@ func (h *Handler) TestMCPServerConnection(w http.ResponseWriter, r *http.Request
 	if mode := strings.TrimSpace(req.AuthMode); mode != "" {
 		testServer.AuthMode = mode
 	}
-	if strings.TrimSpace(testServer.AuthMode) == models.MCPServerAuthModeOAuth {
+	if strings.TrimSpace(testServer.AuthMode) == models.MCPServerAuthModeOAuth && (req.ConnectorID == nil || testServer.OAuthAccessToken == "") {
+		// A signed-in OAuth connector is tested with its token; one not signed in yet can't be.
 		handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, testMCPServerConnectionResponse{
 			Pass:      false,
 			ToolCount: 0,
@@ -354,6 +374,9 @@ type updateMCPServerRequest struct {
 	OAuthClientSecret nullableStringField `json:"oauth_client_secret,omitempty"`
 	OAuthScopes       *[]string           `json:"oauth_scopes,omitempty"`
 	OAuthPKCEPolicy   *string             `json:"oauth_pkce_policy,omitempty"`
+	// OAuthAuto reads the connector's sign-in from its server URL again and gets a client for
+	// it (issue #517), as on create; the endpoint, scope and PKCE fields are then ignored.
+	OAuthAuto bool `json:"oauth_auto,omitempty"`
 }
 
 type nullableStringField struct {
@@ -434,6 +457,37 @@ func (h *Handler) UpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.OAuthPKCEPolicy != nil {
 		updated.OAuthPKCEPolicy = strings.TrimSpace(*req.OAuthPKCEPolicy)
+	}
+	if !req.OAuthAuto && updated.OAuthIssuer != "" && updated.ServerURL != current.ServerURL {
+		// A discovered connector moved to another server: its sign-in is read from that one.
+		req.OAuthAuto = true
+	}
+	if !req.OAuthAuto && updated.OAuthIssuer != "" &&
+		(updated.OAuthAuthURL != current.OAuthAuthURL || updated.OAuthTokenURL != current.OAuthTokenURL || updated.OAuthClientID != current.OAuthClientID) {
+		clearDiscovered(&updated)
+	}
+	if req.OAuthAuto && updated.AuthMode == models.MCPServerAuthModeOAuth {
+		clientID, clientSecret := "", ""
+		if req.OAuthClientID != nil {
+			clientID = strings.TrimSpace(*req.OAuthClientID)
+		}
+		if req.OAuthClientSecret.IsSet && req.OAuthClientSecret.Value != nil {
+			clientSecret = strings.TrimSpace(*req.OAuthClientSecret.Value)
+		}
+		secret, ok := h.autoConfigure(w, r, &updated, clientID, clientSecret)
+		if !ok {
+			return
+		}
+		keepSecret := secret == "" && updated.OAuthClientRegistration == models.MCPOAuthRegistrationManual &&
+			updated.OAuthClientID == current.OAuthClientID
+		if !keepSecret {
+			// The client's secret goes with its client: a new one, or none. The person's own client,
+			// unchanged and sent without a secret, keeps the one it has.
+			req.OAuthClientSecret = nullableStringField{IsSet: true}
+			if secret != "" {
+				req.OAuthClientSecret.Value = &secret
+			}
+		}
 	}
 
 	if updated.Name == "" || updated.Description == "" || updated.ServerURL == "" {
@@ -574,7 +628,15 @@ func (h *Handler) HandleMCPServerOAuthCallback(w http.ResponseWriter, r *http.Re
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
 	oauthErr := strings.TrimSpace(r.URL.Query().Get("error"))
 	oauthErrDesc := strings.TrimSpace(r.URL.Query().Get("error_description"))
-	redirectURL, _, _, err := h.oauth.HandleCallback(r.Context(), state, code, oauthErr, oauthErrDesc)
+	result, err := h.oauth.HandleCallback(r.Context(), mcpoauth.CallbackParams{
+		State: state, Code: code, Error: oauthErr, ErrorDescription: oauthErrDesc,
+		Iss: strings.TrimSpace(r.URL.Query().Get("iss")),
+	})
+	redirectURL := result.RedirectURL
+	if err == nil && result.Success {
+		// Authenticate first, then enumerate: the connector's tools are listed now that it can be asked.
+		h.listToolsAfterSignIn(r.Context(), result.UserID, result.ConnectorID)
+	}
 	if err != nil {
 		if strings.TrimSpace(redirectURL) != "" {
 			http.Redirect(w, r, redirectURL, http.StatusFound)

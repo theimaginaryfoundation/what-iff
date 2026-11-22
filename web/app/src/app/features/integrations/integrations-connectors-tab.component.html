@@ -145,7 +145,7 @@
       </div>
       <div>
         <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Connector URL</label>
-        <input [ngModel]="formServerURL()" (ngModelChange)="formServerURL.set($event); onFormValueChange()" type="text"
+        <input [ngModel]="formServerURL()" (ngModelChange)="onServerURLChange($event)" type="text"
           class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
       </div>
       <div>
@@ -198,84 +198,163 @@
       @if (formAuthMode() === 'oauth') {
         <div>
           <div class="flex items-center gap-1 mb-1">
-            <label class="text-xs font-medium text-gray-700 dark:text-gray-300">Redirect URI</label>
-            <ui-help-hint label="What is the redirect URI?" heading="Redirect URI" guide="connectors" guideLabel="Read the connectors guide" align="end">
-              Register this exact address as the redirect (callback) URI in the OAuth app you set up with the provider.
-              It comes from this WhatIff server's settings, so a self-hosted install shows its own address.
+            <span class="text-xs font-medium text-gray-700 dark:text-gray-300">Sign-in setup</span>
+            <ui-help-hint label="How is sign-in set up?" heading="Sign-in setup" guide="connectors" guideLabel="Read the connectors guide" align="end">
+              Automatic reads how to sign in from the server itself, as MCP servers publish it, and registers WhatIff
+              with the server where it allows. Enter the settings by hand for a provider that doesn't publish them.
             </ui-help-hint>
           </div>
-          @switch (oauthRedirectUriState()) {
-            @case ('loaded') {
-              <div class="flex items-start gap-2">
-                <!-- Wraps rather than scrolls: people compare it character by character with the provider's field. -->
-                <code data-testid="oauth-redirect-uri"
-                  class="block w-full select-all break-all rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900/60 text-gray-900 dark:text-white px-3 py-2 text-xs font-mono">{{ oauthRedirectUri() }}</code>
-                <button (click)="copyRedirectUri()" type="button"
-                  class="shrink-0 px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 dark:text-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-700 dark:hover:bg-indigo-900/30">
-                  {{ redirectUriCopied() ? 'Copied' : 'Copy' }}
-                </button>
-              </div>
-            }
-            @case ('error') {
-              <p class="text-[11px] text-amber-700 dark:text-amber-300">
-                Couldn't load this server's redirect URI. Ask whoever runs your WhatIff server for its MCP OAuth callback address.
-              </p>
-            }
-            @default {
-              <p class="text-[11px] text-gray-500 dark:text-gray-400">Loading redirect URI...</p>
-            }
-          }
-          <p class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-            Fill in the provider's details below and save, then select Authenticate on the connector to sign in.
-          </p>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Authorization URL</label>
-          <input [ngModel]="formOAuthAuthURL()" (ngModelChange)="formOAuthAuthURL.set($event); onFormValueChange()" type="text"
-            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Token URL</label>
-          <input [ngModel]="formOAuthTokenURL()" (ngModelChange)="formOAuthTokenURL.set($event); onFormValueChange()" type="text"
-            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Client ID</label>
-          <input [ngModel]="formOAuthClientID()" (ngModelChange)="formOAuthClientID.set($event); onFormValueChange()" type="text"
-            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Client Secret</label>
-          <div class="flex items-center gap-2">
-            <input [ngModel]="formOAuthClientSecret()" (ngModelChange)="formOAuthClientSecret.set($event); formClearOAuthClientSecret.set(false); onFormValueChange()" type="text" [placeholder]="editingServer() ? 'Leave empty to keep existing secret' : ''"
-              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
-            @if (editingServer()) {
-              <button
-                (click)="unsetOAuthClientSecret()"
-                type="button"
-                class="inline-flex items-center justify-center rounded-lg border border-red-300 px-2.5 py-2 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/30"
-                title="Unset saved client secret">
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
-            }
+          <div class="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 p-0.5" role="radiogroup" aria-label="Sign-in setup">
+            <button type="button" role="radio" data-testid="oauth-setup-auto"
+              [attr.aria-checked]="formOAuthSetup() === 'auto'" (click)="setOAuthSetup('auto')"
+              [ngClass]="formOAuthSetup() === 'auto' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'"
+              class="px-3 py-1.5 text-xs font-medium rounded-md">Automatic</button>
+            <button type="button" role="radio" data-testid="oauth-setup-manual"
+              [attr.aria-checked]="formOAuthSetup() === 'manual'" (click)="setOAuthSetup('manual')"
+              [ngClass]="formOAuthSetup() === 'manual' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'"
+              class="px-3 py-1.5 text-xs font-medium rounded-md">Enter settings by hand</button>
           </div>
         </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Scopes (space separated)</label>
-          <input [ngModel]="formOAuthScopes()" (ngModelChange)="formOAuthScopes.set($event); onFormValueChange()" type="text"
-            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">PKCE Policy</label>
-          <select [ngModel]="formOAuthPKCEPolicy()" (ngModelChange)="formOAuthPKCEPolicy.set($event); onFormValueChange()"
-            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm">
-            <option value="required">Required</option>
-            <option value="supported">Supported</option>
-            <option value="not_supported">Not Supported</option>
-          </select>
-        </div>
+
+        @if (formOAuthSetup() === 'auto') {
+          <div class="space-y-2" data-testid="oauth-auto">
+            <p class="text-[11px] text-gray-500 dark:text-gray-400">
+              Save with just the connector URL, then select Authenticate on the connector to sign in. Check the server first
+              to see who it signs in with.
+            </p>
+            <button (click)="checkOAuth()" type="button" data-testid="oauth-check"
+              [disabled]="formServerURL().trim() === '' || discoveryState() === 'checking'"
+              class="px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 dark:text-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-700 dark:hover:bg-indigo-900/30 disabled:opacity-50">
+              {{ discoveryState() === 'checking' ? 'Checking...' : 'Check server' }}
+            </button>
+            @switch (discoveryState()) {
+              @case ('found') {
+                @if (discovery(); as d) {
+                  <div data-testid="oauth-discovery" class="rounded-lg border px-3 py-2 text-xs space-y-1"
+                    [ngClass]="d.registration === 'manual'
+                      ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200'
+                      : 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200'">
+                    <p>Signs in with <span class="font-mono break-all">{{ d.issuer }}</span>{{ d.resource_name ? ' for ' + d.resource_name : '' }}.</p>
+                    @if (d.scopes?.length) {
+                      <p>Asks for: <span class="font-mono break-all">{{ d.scopes!.join(' ') }}</span></p>
+                    }
+                    <p>{{ registrationNote(d) }}</p>
+                  </div>
+                }
+              }
+              @case ('not_required') {
+                <div data-testid="oauth-not-required" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                  <p>{{ discoveryError() }}</p>
+                  <button type="button" (click)="useHeaderAuth()" class="mt-1 font-medium underline">Use a header token instead</button>
+                </div>
+              }
+              @case ('failed') {
+                <div data-testid="oauth-discovery-failed" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                  <p>{{ discoveryError() }}</p>
+                  <button type="button" (click)="setOAuthSetup('manual')" class="mt-1 font-medium underline">Enter the settings by hand</button>
+                </div>
+              }
+            }
+            @if ((discoveryState() === 'idle' || discoveryState() === 'found') && discovery()?.registration !== 'manual') {
+              <label class="inline-flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
+                <ui-checkbox [ngModel]="formOAuthOwnClient()" (ngModelChange)="formOAuthOwnClient.set($event); onFormValueChange()" />
+                I registered an OAuth app with this provider and have its client ID
+              </label>
+            }
+          </div>
+        }
+
+        @if (showRedirectUri()) {
+          <div>
+            <div class="flex items-center gap-1 mb-1">
+              <label class="text-xs font-medium text-gray-700 dark:text-gray-300">Redirect URI</label>
+              <ui-help-hint label="What is the redirect URI?" heading="Redirect URI" guide="connectors" guideLabel="Read the connectors guide" align="end">
+                Register this exact address as the redirect (callback) URI in the OAuth app you set up with the provider.
+                It comes from this WhatIff server's settings, so a self-hosted install shows its own address.
+              </ui-help-hint>
+            </div>
+            @switch (oauthRedirectUriState()) {
+              @case ('loaded') {
+                <div class="flex items-start gap-2">
+                  <!-- Wraps rather than scrolls: people compare it character by character with the provider's field. -->
+                  <code data-testid="oauth-redirect-uri"
+                    class="block w-full select-all break-all rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900/60 text-gray-900 dark:text-white px-3 py-2 text-xs font-mono">{{ oauthRedirectUri() }}</code>
+                  <button (click)="copyRedirectUri()" type="button"
+                    class="shrink-0 px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 dark:text-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-700 dark:hover:bg-indigo-900/30">
+                    {{ redirectUriCopied() ? 'Copied' : 'Copy' }}
+                  </button>
+                </div>
+              }
+              @case ('error') {
+                <p class="text-[11px] text-amber-700 dark:text-amber-300">
+                  Couldn't load this server's redirect URI. Ask whoever runs your WhatIff server for its MCP OAuth callback address.
+                </p>
+              }
+              @default {
+                <p class="text-[11px] text-gray-500 dark:text-gray-400">Loading redirect URI...</p>
+              }
+            }
+            @if (formOAuthSetup() === 'manual') {
+              <p class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                Fill in the provider's details below and save, then select Authenticate on the connector to sign in.
+              </p>
+            }
+          </div>
+        }
+
+        @if (formOAuthSetup() === 'manual') {
+          <div>
+            <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Authorization URL</label>
+            <input [ngModel]="formOAuthAuthURL()" (ngModelChange)="formOAuthAuthURL.set($event); onFormValueChange()" type="text"
+              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Token URL</label>
+            <input [ngModel]="formOAuthTokenURL()" (ngModelChange)="formOAuthTokenURL.set($event); onFormValueChange()" type="text"
+              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+          </div>
+        }
+        @if (formOAuthSetup() === 'manual' || showOwnClientFields()) {
+          <div>
+            <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Client ID</label>
+            <input [ngModel]="formOAuthClientID()" (ngModelChange)="formOAuthClientID.set($event); onFormValueChange()" type="text"
+              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Client Secret</label>
+            <div class="flex items-center gap-2">
+              <input [ngModel]="formOAuthClientSecret()" (ngModelChange)="formOAuthClientSecret.set($event); formClearOAuthClientSecret.set(false); onFormValueChange()" type="text" [placeholder]="editingServer() ? 'Leave empty to keep existing secret' : ''"
+                class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+              @if (editingServer()) {
+                <button
+                  (click)="unsetOAuthClientSecret()"
+                  type="button"
+                  class="inline-flex items-center justify-center rounded-lg border border-red-300 px-2.5 py-2 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/30"
+                  title="Unset saved client secret">
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              }
+            </div>
+          </div>
+        }
+        @if (formOAuthSetup() === 'manual') {
+          <div>
+            <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Scopes (space separated)</label>
+            <input [ngModel]="formOAuthScopes()" (ngModelChange)="formOAuthScopes.set($event); onFormValueChange()" type="text"
+              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">PKCE Policy</label>
+            <select [ngModel]="formOAuthPKCEPolicy()" (ngModelChange)="formOAuthPKCEPolicy.set($event); onFormValueChange()"
+              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm">
+              <option value="required">Required</option>
+              <option value="supported">Supported</option>
+              <option value="not_supported">Not Supported</option>
+            </select>
+          </div>
+        }
       }
       <div class="flex items-center gap-1">
         <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -317,7 +396,7 @@
         (click)="test()"
         [disabled]="!canTest()"
         class="px-4 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 dark:text-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-700 dark:hover:bg-indigo-900/30 disabled:opacity-50">
-        {{ formAuthMode() === 'oauth' ? 'Test unavailable for OAuth' : (isTesting() ? 'Testing...' : 'Test') }}
+        {{ formAuthMode() === 'oauth' && !canTestOAuth() ? 'Authenticate to test' : (isTesting() ? 'Testing...' : 'Test') }}
       </button>
       <button
         (click)="save()"

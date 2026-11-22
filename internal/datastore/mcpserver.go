@@ -110,6 +110,10 @@ func (d *Datastore) toMCPServerModel(e *ent.MCPServer) *models.MCPServer {
 		OAuthClientSecret:          decryptedOAuthClientSecret,
 		OAuthScopes:                e.OauthScopes,
 		OAuthPKCEPolicy:            strings.TrimSpace(e.OauthPkcePolicy),
+		OAuthResource:              e.OauthResource,
+		OAuthIssuer:                e.OauthIssuer,
+		OAuthIssParamSupported:     e.OauthIssParamSupported,
+		OAuthClientRegistration:    e.OauthClientRegistration,
 		OAuthAccessToken:           decryptedOAuthAccessToken,
 		OAuthRefreshToken:          decryptedOAuthRefreshToken,
 		OAuthAccessTokenExpiresAt:  e.OauthAccessTokenExpiresAt,
@@ -208,6 +212,10 @@ func (d *Datastore) CreateMCPServer(ctx context.Context, userID uuid.UUID, serve
 	if s := strings.TrimSpace(server.OAuthPKCEPolicy); s != "" {
 		create.SetOauthPkcePolicy(s)
 	}
+	create.SetOauthResource(strings.TrimSpace(server.OAuthResource)).
+		SetOauthIssuer(strings.TrimSpace(server.OAuthIssuer)).
+		SetOauthIssParamSupported(server.OAuthIssParamSupported).
+		SetOauthClientRegistration(strings.TrimSpace(server.OAuthClientRegistration))
 	if s := strings.TrimSpace(server.OAuthClientSecret); s != "" {
 		encryptedSecret, err := d.encryptTokenForWrite(s)
 		if err != nil {
@@ -432,20 +440,20 @@ func (d *Datastore) UpdateMCPServer(ctx context.Context, userID uuid.UUID, serve
 		}
 	}()
 
-	exists, err := tx.MCPServer.Query().
+	current, err := tx.MCPServer.Query().
 		Where(
 			entmcp.ID(server.ID),
 			entmcp.HasOwnerWith(user.ID(userID)),
 		).
-		Exist(ctx)
+		Only(ctx)
+	if ent.IsNotFound(err) {
+		tx.Rollback()
+		return nil, ErrMCPServerNotFound
+	}
 	if err != nil {
 		d.logger.Error("failed to query mcp server", zap.Error(err))
 		tx.Rollback()
 		return nil, err
-	}
-	if !exists {
-		tx.Rollback()
-		return nil, ErrMCPServerNotFound
 	}
 
 	update := tx.MCPServer.UpdateOneID(server.ID).
@@ -458,6 +466,10 @@ func (d *Datastore) UpdateMCPServer(ctx context.Context, userID uuid.UUID, serve
 		SetOauthClientID(strings.TrimSpace(server.OAuthClientID)).
 		SetOauthScopes(server.OAuthScopes).
 		SetOauthPkcePolicy(strings.TrimSpace(server.OAuthPKCEPolicy)).
+		SetOauthResource(strings.TrimSpace(server.OAuthResource)).
+		SetOauthIssuer(strings.TrimSpace(server.OAuthIssuer)).
+		SetOauthIssParamSupported(server.OAuthIssParamSupported).
+		SetOauthClientRegistration(strings.TrimSpace(server.OAuthClientRegistration)).
 		SetDefaultEnabled(server.DefaultEnabled)
 
 	if strings.TrimSpace(server.AuthMode) == "" {
@@ -465,6 +477,14 @@ func (d *Datastore) UpdateMCPServer(ctx context.Context, userID uuid.UUID, serve
 	}
 	if strings.TrimSpace(server.OAuthPKCEPolicy) == "" {
 		update.SetOauthPkcePolicy(models.MCPServerPKCESupported)
+	}
+	if oauthClientChanged(current, server) {
+		// Tokens belong to one client at one authorization server: another client, or another
+		// server's tokens, must not be sent on (MCP authorization, client registration). The
+		// connector authenticates again.
+		update.ClearOauthAccessToken().ClearOauthRefreshToken().
+			ClearOauthAccessTokenExpiresAt().ClearOauthRefreshTokenExpiresAt().
+			ClearOauthAuthenticatedAt().SetOauthRefreshFailCount(0)
 	}
 
 	if authTokenUpdate.Provided {
@@ -1307,4 +1327,12 @@ func (d *Datastore) UpdateMCPServerRuntimeState(ctx context.Context, userID, mcp
 		return err
 	}
 	return nil
+}
+
+// oauthClientChanged reports whether an update moves the connector to another OAuth client
+// or authorization server, so its tokens can't be kept.
+func oauthClientChanged(current *ent.MCPServer, next models.MCPServer) bool {
+	return strings.TrimSpace(current.OauthClientID) != strings.TrimSpace(next.OAuthClientID) ||
+		strings.TrimSpace(current.OauthIssuer) != strings.TrimSpace(next.OAuthIssuer) ||
+		strings.TrimSpace(current.OauthTokenURL) != strings.TrimSpace(next.OAuthTokenURL)
 }

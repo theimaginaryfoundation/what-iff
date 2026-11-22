@@ -48,6 +48,23 @@ func (MCPServer) Fields() []ent.Field {
 		field.String("oauth_pkce_policy").
 			Optional().
 			Default("supported"),
+		// Set when the OAuth settings were discovered from the server (issue #517): the
+		// canonical MCP server URL sent as the RFC 8707 resource parameter, the authorization
+		// server's issuer (credentials belong to one issuer, and the callback's iss is checked
+		// against it), whether that server always returns iss (RFC 9207), and how the client
+		// was registered. All empty for a connector whose OAuth settings were typed in.
+		field.String("oauth_resource").
+			Optional().
+			Default(""),
+		field.String("oauth_issuer").
+			Optional().
+			Default(""),
+		field.Bool("oauth_iss_param_supported").
+			Default(false),
+		field.String("oauth_client_registration").
+			Optional().
+			Default("").
+			Comment("How the OAuth client was set up: manual, metadata_document (CIMD) or dynamic (RFC 7591); empty is manual"),
 		field.String("oauth_access_token").
 			Optional().
 			Sensitive(),

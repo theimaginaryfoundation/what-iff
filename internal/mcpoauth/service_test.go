@@ -107,7 +107,8 @@ func TestHandleCallbackExchangesAndStoresTokens(t *testing.T) {
 		AllowedRedirects:    []string{"http://localhost:4200"},
 	})
 	store.createdVerifier = "verifier"
-	redirectURL, _, success, err := svc.HandleCallback(context.Background(), "state", "auth-code", "", "")
+	res, err := svc.HandleCallback(context.Background(), CallbackParams{State: "state", Code: "auth-code"})
+	redirectURL, success := res.RedirectURL, res.Success
 	require.NoError(t, err)
 	require.True(t, success)
 	require.Contains(t, redirectURL, "oauth_status=success")
@@ -175,7 +176,8 @@ func TestHandleCallbackFailsOnMalformedTokenJSON(t *testing.T) {
 		AllowedRedirects:    []string{"http://localhost:4200"},
 	})
 	store.createdVerifier = "verifier"
-	redirectURL, message, success, err := svc.HandleCallback(context.Background(), "state", "auth-code", "", "")
+	res, err := svc.HandleCallback(context.Background(), CallbackParams{State: "state", Code: "auth-code"})
+	redirectURL, message, success := res.RedirectURL, res.Message, res.Success
 	require.NoError(t, err)
 	require.False(t, success)
 	require.Contains(t, message, "Failed to exchange OAuth authorization code")
@@ -237,7 +239,8 @@ func TestHandleCallbackFallsBackWhenSessionRedirectNotAllowed(t *testing.T) {
 		AllowedRedirects:    []string{"http://localhost:4200"},
 	})
 	store.createdVerifier = "verifier"
-	redirectURL, _, success, err := svc.HandleCallback(context.Background(), "state", "auth-code", "", "")
+	res, err := svc.HandleCallback(context.Background(), CallbackParams{State: "state", Code: "auth-code"})
+	redirectURL, success := res.RedirectURL, res.Success
 	require.NoError(t, err)
 	require.True(t, success)
 	require.True(t, strings.HasPrefix(redirectURL, "http://localhost:4200/integrations"))

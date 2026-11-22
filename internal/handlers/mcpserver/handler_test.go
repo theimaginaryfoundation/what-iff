@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/mcpoauth"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
@@ -23,6 +24,9 @@ type fakeProvider struct {
 	getFn          func(ctx context.Context, userID, id uuid.UUID) (*models.MCPServer, error)
 	runtimeUpdates []runtimeUpdateCall
 	runtimeErr     error
+	created        *models.MCPServer
+	updated        *models.MCPServer
+	secretUpdate   models.MCPOAuthSecretUpdate
 }
 
 type runtimeUpdateCall struct {
@@ -35,8 +39,9 @@ type runtimeUpdateCall struct {
 	HealthyAt   *time.Time
 }
 
-func (f *fakeProvider) CreateMCPServer(context.Context, uuid.UUID, models.MCPServer) (*models.MCPServer, error) {
-	return nil, nil
+func (f *fakeProvider) CreateMCPServer(_ context.Context, _ uuid.UUID, server models.MCPServer) (*models.MCPServer, error) {
+	f.created = &server
+	return &server, nil
 }
 func (f *fakeProvider) GetMCPServer(ctx context.Context, userID, id uuid.UUID) (*models.MCPServer, error) {
 	if f.getFn != nil {
@@ -47,8 +52,9 @@ func (f *fakeProvider) GetMCPServer(ctx context.Context, userID, id uuid.UUID) (
 func (f *fakeProvider) ListMCPServers(context.Context, uuid.UUID, int, int, models.MCPServerFilters) (*models.PaginatedResponse, error) {
 	return nil, nil
 }
-func (f *fakeProvider) UpdateMCPServer(context.Context, uuid.UUID, models.MCPServer, models.MCPServerAuthTokenUpdate, models.MCPOAuthSecretUpdate, *[]uuid.UUID) (*models.MCPServer, error) {
-	return nil, nil
+func (f *fakeProvider) UpdateMCPServer(_ context.Context, _ uuid.UUID, server models.MCPServer, _ models.MCPServerAuthTokenUpdate, secret models.MCPOAuthSecretUpdate, _ *[]uuid.UUID) (*models.MCPServer, error) {
+	f.updated, f.secretUpdate = &server, secret
+	return &server, nil
 }
 func (f *fakeProvider) UpdateMCPServerRuntimeState(_ context.Context, userID, mcpServerID uuid.UUID, status, reason string, toolCount int, checkedAt, healthyAt *time.Time) error {
 	f.runtimeUpdates = append(f.runtimeUpdates, runtimeUpdateCall{
@@ -82,6 +88,17 @@ type fakeOAuthService struct {
 	lastStartID  uuid.UUID
 	lastUserID   uuid.UUID
 	lastRedirect string
+
+	lastCallback        mcpoauth.CallbackParams
+	callbackUserID      uuid.UUID
+	callbackConnectorID uuid.UUID
+	discovery           *mcpoauth.Discovery
+	discoverErr         error
+	plan                string
+	registration        mcpoauth.Registration
+	lastDiscoverURL     string
+	lastAutoClientID    string
+	metadataDoc         any
 }
 
 func (f *fakeOAuthService) StartAuth(_ context.Context, userID, connectorID uuid.UUID, redirectAfter string) (string, error) {
@@ -94,11 +111,41 @@ func (f *fakeOAuthService) StartAuth(_ context.Context, userID, connectorID uuid
 	return f.startURL, nil
 }
 
-func (f *fakeOAuthService) HandleCallback(_ context.Context, _, _, _, _ string) (string, string, bool, error) {
+func (f *fakeOAuthService) HandleCallback(_ context.Context, p mcpoauth.CallbackParams) (mcpoauth.CallbackResult, error) {
+	f.lastCallback = p
 	if f.callbackErr != nil {
-		return f.callbackURL, f.callbackMsg, f.callbackPass, f.callbackErr
+		return mcpoauth.CallbackResult{RedirectURL: f.callbackURL, Message: f.callbackMsg, Success: f.callbackPass}, f.callbackErr
 	}
-	return f.callbackURL, "ok", true, nil
+	return mcpoauth.CallbackResult{RedirectURL: f.callbackURL, Message: "ok", Success: true, UserID: f.callbackUserID, ConnectorID: f.callbackConnectorID}, nil
+}
+
+func (f *fakeOAuthService) Discover(_ context.Context, serverURL string) (*mcpoauth.Discovery, error) {
+	f.lastDiscoverURL = serverURL
+	if f.discoverErr != nil {
+		return nil, f.discoverErr
+	}
+	return f.discovery, nil
+}
+
+func (f *fakeOAuthService) RegistrationPlan(*mcpoauth.Discovery) string { return f.plan }
+
+func (f *fakeOAuthService) AutoConfigure(_ context.Context, serverURL, clientID, clientSecret string) (*mcpoauth.AutoConfig, error) {
+	f.lastDiscoverURL, f.lastAutoClientID = serverURL, clientID
+	if f.discoverErr != nil {
+		return nil, f.discoverErr
+	}
+	reg := f.registration
+	if clientID != "" {
+		reg = mcpoauth.Registration{Method: models.MCPOAuthRegistrationManual, ClientID: clientID, ClientSecret: clientSecret}
+	}
+	return &mcpoauth.AutoConfig{Discovery: f.discovery, Registration: reg}, nil
+}
+
+func (f *fakeOAuthService) ClientMetadataDocument() (any, bool) {
+	if f.metadataDoc == nil {
+		return nil, false
+	}
+	return f.metadataDoc, true
 }
 
 func (f *fakeOAuthService) CallbackURL() string { return f.callback }

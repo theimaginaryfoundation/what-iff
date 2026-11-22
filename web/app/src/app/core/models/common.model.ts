@@ -55,7 +55,10 @@ export type SpecificErrorCode =
   | 'provider_connection_exists'
   | 'buzz_terms_required'
   | 'default_model_in_use'
-  | 'no_model_selected';
+  | 'no_model_selected'
+  | 'mcp_oauth_not_required'
+  | 'mcp_oauth_client_id_required'
+  | 'mcp_oauth_discovery_failed';
 
 export interface PaginatedResponse<T> {
   results: T[];

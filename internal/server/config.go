@@ -80,12 +80,15 @@ type Config struct {
 	XiaomiKey       string
 	XiaomiBaseURL   string
 	// First-party web search (ADR 0x021). An empty key leaves the tools off.
-	ParallelAPIKey               string
-	ParallelSearchMode           string
-	TokenEncryptionSecret        string
-	MCPOAuthRedirectURL          string
-	MCPOAuthPostAuthURL          string
-	MCPOAuthAllowedRedirects     []string
+	ParallelAPIKey           string
+	ParallelSearchMode       string
+	TokenEncryptionSecret    string
+	MCPOAuthRedirectURL      string
+	MCPOAuthPostAuthURL      string
+	MCPOAuthAllowedRedirects []string
+	// MCPOAuthClientMetadataURL is where this deployment's OAuth Client ID Metadata Document is
+	// served (MCP_OAUTH_CLIENT_METADATA_URL, issue #517); empty derives it from the callback URL.
+	MCPOAuthClientMetadataURL    string
 	MCPAllowLocalhostConnections bool
 	MCPOAuthSweepInterval        time.Duration
 	MCPOAuthRefreshAhead         time.Duration
@@ -227,6 +230,7 @@ func NewConfig() *Config {
 	if mcpOAuthRedirectURL == "" {
 		mcpOAuthRedirectURL = "http://localhost:8080/api/mcp-servers/oauth/callback"
 	}
+	mcpOAuthClientMetadataURL := strings.TrimSpace(os.Getenv("MCP_OAUTH_CLIENT_METADATA_URL"))
 	mcpOAuthPostAuthURL := strings.TrimSpace(os.Getenv("MCP_OAUTH_POST_AUTH_URL"))
 	if mcpOAuthPostAuthURL == "" {
 		mcpOAuthPostAuthURL = "http://localhost:4200/integrations"
@@ -392,6 +396,7 @@ func NewConfig() *Config {
 		MCPOAuthRedirectURL:                 mcpOAuthRedirectURL,
 		MCPOAuthPostAuthURL:                 mcpOAuthPostAuthURL,
 		MCPOAuthAllowedRedirects:            mcpOAuthAllowedRedirects,
+		MCPOAuthClientMetadataURL:           mcpOAuthClientMetadataURL,
 		MCPAllowLocalhostConnections:        mcpAllowLocalhostConnections,
 		MCPOAuthSweepInterval:               mcpOAuthSweepInterval,
 		MCPOAuthRefreshAhead:                mcpOAuthRefreshAhead,

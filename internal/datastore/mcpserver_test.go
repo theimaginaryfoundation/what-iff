@@ -36,6 +36,10 @@ func createMCPServerTestSchema(t *testing.T, db *sql.DB) {
 			oauth_client_secret text,
 			oauth_scopes json,
 			oauth_pkce_policy text NOT NULL DEFAULT 'supported',
+			oauth_resource text NOT NULL DEFAULT '',
+			oauth_issuer text NOT NULL DEFAULT '',
+			oauth_iss_param_supported bool NOT NULL DEFAULT false,
+			oauth_client_registration text NOT NULL DEFAULT '',
 			oauth_access_token text,
 			oauth_refresh_token text,
 			oauth_access_token_expires_at datetime,
@@ -917,4 +921,57 @@ func TestUpdateMCPServer_DoesNotOverwriteRuntimeState(t *testing.T) {
 	require.NotNil(t, got.OAuthRefreshTokenExpiresAt)
 	require.NotNil(t, got.OAuthAuthenticatedAt)
 	require.NotNil(t, got.OAuthLastRefreshAt)
+}
+
+// A connector moved to another OAuth client, or another authorization server, loses its
+// tokens: they belong to the old one (issue #517).
+func TestUpdateMCPServer_AnotherOAuthClientClearsTokens(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	server := baseMCPServerModel()
+	server.AuthMode = models.MCPServerAuthModeOAuth
+	server.OAuthResource = "https://mcp.example.com/mcp"
+	server.OAuthIssuer = "https://auth.example.com"
+	server.OAuthIssParamSupported = true
+	server.OAuthClientRegistration = models.MCPOAuthRegistrationDynamic
+	created, err := ds.CreateMCPServer(ctx, userID, server)
+	require.NoError(t, err)
+	require.Equal(t, "https://mcp.example.com/mcp", created.OAuthResource)
+	require.Equal(t, "https://auth.example.com", created.OAuthIssuer)
+	require.True(t, created.OAuthIssParamSupported)
+	require.Equal(t, models.MCPOAuthRegistrationDynamic, created.OAuthClientRegistration)
+
+	now := time.Now().UTC()
+	signIn := func() {
+		require.NoError(t, ds.SaveMCPServerOAuthTokens(ctx, userID, created.ID, models.MCPOAuthTokenSet{
+			AccessToken: "access-token", RefreshToken: "refresh-token", AuthenticatedAt: &now, LastRefreshAt: &now,
+		}))
+	}
+	signIn()
+
+	renamed := *created
+	renamed.Name = "Renamed"
+	got, err := ds.UpdateMCPServer(ctx, userID, renamed, models.MCPServerAuthTokenUpdate{}, models.MCPOAuthSecretUpdate{}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "access-token", got.OAuthAccessToken, "the same client keeps its tokens")
+
+	for name, change := range map[string]func(*models.MCPServer){
+		"another client":               func(s *models.MCPServer) { s.OAuthClientID = "another-client" },
+		"another authorization server": func(s *models.MCPServer) { s.OAuthIssuer = "https://other-auth.example.com" },
+		"another token endpoint":       func(s *models.MCPServer) { s.OAuthTokenURL = "https://other.example.com/token" },
+	} {
+		signIn()
+		current, err := ds.GetMCPServer(ctx, userID, created.ID)
+		require.NoError(t, err)
+		next := *current
+		change(&next)
+		got, err := ds.UpdateMCPServer(ctx, userID, next, models.MCPServerAuthTokenUpdate{}, models.MCPOAuthSecretUpdate{}, nil)
+		require.NoError(t, err, name)
+		require.Empty(t, got.OAuthAccessToken, name)
+		require.Empty(t, got.OAuthRefreshToken, name)
+		require.Nil(t, got.OAuthAuthenticatedAt, name)
+	}
 }
