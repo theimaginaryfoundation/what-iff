@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -262,19 +264,24 @@ func TestCallToolByFullName_PropagatesMCPSessionHeader(t *testing.T) {
 	require.Equal(t, sessionID, seenToolCallSession)
 }
 
+// Each call without shared session state starts its own session rather than reusing another
+// call's (the tool list comes from the cache, so the call has to initialize for itself).
 func TestCallToolByFullName_DefaultFlowDoesNotReuseSessionAcrossCalls(t *testing.T) {
-	sawMissingSessionOnToolCall := false
+	initializes := 0
+	var toolCallSessions []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		var req map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		method, _ := req["method"].(string)
 		switch method {
-		case "initialize", "notifications/initialized":
-			w.Header().Set(mcpSessionHeader, "sess-once")
-			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{}})
+		case "initialize":
+			initializes++
+			w.Header().Set(mcpSessionHeader, fmt.Sprintf("sess-%d", initializes))
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"protocolVersion": ProtocolVersion}})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
 		case "tools/list":
-			w.Header().Set(mcpSessionHeader, "sess-once")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"jsonrpc": "2.0",
 				"id":      req["id"],
@@ -283,9 +290,7 @@ func TestCallToolByFullName_DefaultFlowDoesNotReuseSessionAcrossCalls(t *testing
 				},
 			})
 		case "tools/call":
-			if r.Header.Get(mcpSessionHeader) == "" {
-				sawMissingSessionOnToolCall = true
-			}
+			toolCallSessions = append(toolCallSessions, r.Header.Get(mcpSessionHeader))
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"jsonrpc": "2.0",
 				"id":      req["id"],
@@ -309,9 +314,109 @@ func TestCallToolByFullName_DefaultFlowDoesNotReuseSessionAcrossCalls(t *testing
 	out, err := client.DiscoverTools(context.Background(), uuid.New(), []*models.MCPServer{server})
 	require.NoError(t, err)
 	require.Len(t, out.Tools, 1)
-	_, err = client.CallToolByFullName(context.Background(), []*models.MCPServer{server}, out.Tools[0].FullName, json.RawMessage(`{}`))
+	for i := 0; i < 2; i++ {
+		_, err = client.CallToolByFullName(context.Background(), []*models.MCPServer{server}, out.Tools[0].FullName, json.RawMessage(`{}`))
+		require.NoError(t, err)
+	}
+	require.Equal(t, []string{"sess-2", "sess-3"}, toolCallSessions)
+}
+
+// statefulMCPServer refuses every request but initialize without a live Mcp-Session-Id, as
+// stateful streamable-HTTP servers do ("Session ID is required"), and 404s ended sessions.
+type statefulMCPServer struct {
+	mu          sync.Mutex
+	initializes int
+	live        map[string]bool
+	toolCalls   int
+}
+
+func (s *statefulMCPServer) handler(t *testing.T) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		method, _ := req["method"].(string)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if method == "initialize" {
+			s.initializes++
+			id := fmt.Sprintf("sess-%d", s.initializes)
+			s.live[id] = true
+			w.Header().Set(mcpSessionHeader, id)
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"protocolVersion": ProtocolVersion}})
+			return
+		}
+		sid := r.Header.Get(mcpSessionHeader)
+		if sid == "" {
+			http.Error(w, "Bad Request: Session ID is required", http.StatusBadRequest)
+			return
+		}
+		if !s.live[sid] {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+		switch method {
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{
+				"tools": []map[string]any{{"name": "whoami", "inputSchema": map[string]any{"type": "object"}}},
+			}})
+		case "tools/call":
+			s.toolCalls++
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{
+				"content": []map[string]any{{"type": "text", "text": "ok"}},
+			}})
+		default:
+			t.Errorf("unexpected method %q", method)
+		}
+	}
+}
+
+// The bug: turn 1 discovers tools (initialize + tools/list) and caches them; turn 2 starts with
+// fresh session state and a cache hit, so it never initialized and every call was refused.
+func TestCallTool_StatefulServerWorksOnALaterTurnWithCachedTools(t *testing.T) {
+	stateful := &statefulMCPServer{live: map[string]bool{}}
+	srv := httptest.NewServer(stateful.handler(t))
+	defer srv.Close()
+	client := New(nil, nil)
+	server := &models.MCPServer{ID: uuid.New(), Name: "telekin", ServerURL: srv.URL, Status: models.MCPServerStatusActive}
+
+	turn1 := make(SessionState)
+	out, err := client.DiscoverToolsWithSessionState(context.Background(), uuid.New(), []*models.MCPServer{server}, turn1)
 	require.NoError(t, err)
-	require.True(t, sawMissingSessionOnToolCall)
+	require.Len(t, out.Tools, 1)
+	_, err = client.CallToolByFullNameWithSessionState(context.Background(), []*models.MCPServer{server}, out.Tools[0].FullName, json.RawMessage(`{}`), turn1)
+	require.NoError(t, err)
+
+	turn2 := make(SessionState)
+	for i := 0; i < 2; i++ {
+		_, err = client.CallToolByFullNameWithSessionState(context.Background(), []*models.MCPServer{server}, out.Tools[0].FullName, json.RawMessage(`{}`), turn2)
+		require.NoError(t, err)
+	}
+	require.Equal(t, 3, stateful.toolCalls)
+	require.Equal(t, 2, stateful.initializes, "one handshake per turn, not per call")
+}
+
+// A server that ends a session answers 404 to it; the client starts a new one and calls again.
+func TestCallTool_RestartsSessionOnNotFound(t *testing.T) {
+	stateful := &statefulMCPServer{live: map[string]bool{}}
+	srv := httptest.NewServer(stateful.handler(t))
+	defer srv.Close()
+	client := New(nil, nil)
+	server := &models.MCPServer{ID: uuid.New(), Name: "telekin", ServerURL: srv.URL, Status: models.MCPServerStatusActive}
+
+	sessions := make(SessionState)
+	out, err := client.DiscoverToolsWithSessionState(context.Background(), uuid.New(), []*models.MCPServer{server}, sessions)
+	require.NoError(t, err)
+	stateful.mu.Lock()
+	stateful.live = map[string]bool{}
+	stateful.mu.Unlock()
+
+	_, err = client.CallToolByFullNameWithSessionState(context.Background(), []*models.MCPServer{server}, out.Tools[0].FullName, json.RawMessage(`{}`), sessions)
+	require.NoError(t, err)
+	require.Equal(t, 1, stateful.toolCalls)
+	require.Equal(t, "sess-2", sessions[sessionKeyForServer(server)])
 }
 
 func TestCallToolByFullName_PreservesExplicitEmptyStringArguments(t *testing.T) {

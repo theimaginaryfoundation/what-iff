@@ -35,6 +35,9 @@ In-process MCP runtime client for connector tool discovery and invocation.
 
 - Discovery and execution use JSON-RPC method calls (`initialize`, `tools/list`, `tools/call`) with best-effort `notifications/initialized`.
 - `initialize` asks for protocol `2025-11-25` and advertises elicitation (form and url) and the MCP Apps extension; the version the server picks is kept with the session and sent as `MCP-Protocol-Version`.
+- Session state (`Mcp-Session-Id`, protocol version) lasts one turn, but the tool list is cached across turns, so `rpcCallTool` runs `initialize` itself when this turn's state has no session for the server (`ensureSession`).
+  Stateful servers refuse calls without a session ("Session ID is required").
+  A 404 to a call that carried a session ID means the server ended it: the client starts a new session and calls once more.
 - A reply that is an SSE stream is read event by event, not to the end first: a server request on it (elicitation) must be answered with a POST before the response arrives.
   `tools/call` runs on a client with no overall timeout, bounded instead by `streamIdleTimeout` (60s) of silence, which is paused while the person answers, and by the caller's context.
 - A tool whose visibility leaves out `model` (an MCP App's helper) is never in the discovered list and is refused by name; only `CallAppTool` reaches it.
