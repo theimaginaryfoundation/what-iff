@@ -109,8 +109,14 @@ func PublicOnlyDialer(timeout time.Duration) *net.Dialer {
 	return &net.Dialer{Timeout: timeout, Control: PublicOnlyControl}
 }
 
-// NewHTTPClient is an HTTP client whose every connection passes control (PublicOnlyControl,
-// PublicOrLoopbackControl, or nil for no check, which only an explicit opt-in should choose).
+// NoAddressCheck is a Control hook that allows every address. It exists so that turning the
+// guard off is a named, greppable choice (a local-network opt-in) rather than a nil that might be
+// an oversight.
+func NoAddressCheck(_, _ string, _ syscall.RawConn) error { return nil }
+
+// NewHTTPClient is an HTTP client whose every connection passes control: PublicOnlyControl,
+// PublicOrLoopbackControl, or NoAddressCheck for an explicit opt-in. A nil control means
+// PublicOnlyControl, so a caller that leaves it out fails closed.
 //
 // Proxy is nil, so HTTPS_PROXY is ignored: through a proxy the checked address would be the
 // proxy's, not the server's. Redirects are followed only within the same origin
@@ -118,6 +124,9 @@ func PublicOnlyDialer(timeout time.Duration) *net.Dialer {
 // or downgraded to http. Everything else (pool limits, TLS and keep-alive timeouts) is
 // http.DefaultTransport's, cloned so it stays in step with the standard library.
 func NewHTTPClient(control func(network, address string, c syscall.RawConn) error, timeout time.Duration) *http.Client {
+	if control == nil {
+		control = PublicOnlyControl
+	}
 	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second, Control: control}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil

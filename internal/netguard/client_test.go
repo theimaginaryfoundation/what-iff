@@ -84,7 +84,11 @@ func TestNewHTTPClientChecksEveryConnection(t *testing.T) {
 	_, err := guarded.Get(srv.URL)
 	require.True(t, errors.Is(err, ErrNonPublicAddress), "got %v", err)
 
-	for _, control := range []func(string, string, syscall.RawConn) error{PublicOrLoopbackControl, nil} {
+	// A nil control is the public-only default, not "no check".
+	_, err = NewHTTPClient(nil, 5*time.Second).Get(srv.URL)
+	require.True(t, errors.Is(err, ErrNonPublicAddress), "nil control must fail closed, got %v", err)
+
+	for _, control := range []func(string, string, syscall.RawConn) error{PublicOrLoopbackControl, NoAddressCheck} {
 		resp, err := NewHTTPClient(control, 5*time.Second).Get(srv.URL)
 		require.NoError(t, err)
 		_ = resp.Body.Close()

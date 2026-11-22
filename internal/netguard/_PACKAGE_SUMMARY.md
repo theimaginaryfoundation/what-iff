@@ -9,7 +9,8 @@ Keeps server-side requests to user-chosen addresses on the public internet.
 - **`IsPublicIP`:** true only for a global unicast address that is not loopback, private, link-local (which includes the cloud metadata address), multicast, unspecified, or a special-use range: shared (100.64.0.0/10), "this network" (0.0.0.0/8), NAT64 and 6to4 (which embed an IPv4 address), benchmarking, documentation, and deprecated site-local.
 - **`PublicOnlyControl` / `PublicOnlyDialer`:** a `net.Dialer` hook, and a dialer using it, that refuse any other address with an error wrapping `ErrNonPublicAddress`.
 - **`PublicOrLoopbackControl` / `Control(allowLoopback)`:** the same hook that also allows loopback, for a local-development opt-in that should reach this machine and nothing else internal.
-- **`NewHTTPClient(control, timeout)`:** the HTTP client for user-chosen addresses, with that hook on every connection, no proxy, same-origin redirects only (`SameOriginRedirects`), and otherwise a clone of `http.DefaultTransport`.
+- **`NoAddressCheck`:** a hook that allows everything, so turning the guard off (a local-network opt-in) is explicit and greppable.
+- **`NewHTTPClient(control, timeout)`:** the HTTP client for user-chosen addresses, with that hook on every connection (nil means `PublicOnlyControl`, so leaving it out fails closed), no proxy, same-origin redirects only (`SameOriginRedirects`), and otherwise a clone of `http.DefaultTransport`.
 
 ## Dependencies
 

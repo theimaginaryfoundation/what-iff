@@ -54,8 +54,11 @@ var (
 	ErrInvalidRedirectAfter = errors.New("invalid redirect_after")
 )
 
-// maxTokenResponseBytes bounds a token endpoint response; real ones are a few KiB.
-const maxTokenResponseBytes = 1 << 20
+// maxTokenResponseBytes bounds a token endpoint response. Real ones, JWT id_tokens included, are a
+// few KiB; 256 KiB leaves ample headroom while keeping what a hostile endpoint can make the
+// server buffer and parse small. A larger response fails with "oauth token endpoint response
+// exceeds N bytes"; raise this constant if a real provider ever needs more.
+const maxTokenResponseBytes = 256 << 10
 
 const defaultOAuthCallbackURL = "http://localhost:8080/api/mcp-servers/oauth/callback"
 
