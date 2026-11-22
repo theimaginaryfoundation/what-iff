@@ -171,10 +171,13 @@ That text is prepared for the ear before it is sent:
 
 - Markdown is reduced to its words: emphasis, headings and list markers go; a link is read as its text.
 - Fenced code blocks, tables and bare URLs are skipped.
-- Emoji and HTML are dropped.
-- Inline vocal tags a model understands (`<laugh>`, `[pace=slow]`) are left alone only if the personality's prompt puts them there; this pass adds none.
+- Emoji and HTML tags are dropped, an angle-bracket vocal tag (`<laugh>`) with them; prose that only looks like a tag ("if a<b then c>d") stays.
+- Bracketed vocal tags a model understands (`[pace=slow]`) are left alone if the personality's prompt puts them there; this pass adds none.
+- If the final round has nothing left to read (a turn that ended on a tool, after "here's your image"), the whole reply is read instead of nothing.
 
 The prepared text is split into **segments** at sentence and paragraph boundaries: the first segment is one sentence, so speech can start quickly, and later segments are paragraphs up to the model's `max_input`.
+Sentences end at a stop followed by a space, or at a full-width stop (。！？), which takes none; text with no spaces at all (Chinese, Japanese) is cut by length where a paragraph or sentence is too long.
+Every segment is a run of the prepared text, which is what lets a track resume from what it has read (decision 7).
 Each segment is one synthesis request and one audio file.
 
 ### 7. Speech tracks
@@ -194,20 +197,24 @@ Each **segment** records its sequence number, its text, its audio file in the fi
 
 A message has at most one track per `voice_key`: playing a reply again in the same voice replays the stored audio and calls no provider; playing it after the personality's voice changed makes a new track.
 Segment audio is kept for 30 days after the track was last played, then deleted, and a later play synthesises it again.
-Tracks and their audio also go when their message or chat is deleted: an hourly sweeper deletes the audio files and then the rows, rather than a database cascade that would drop the rows and strand the files.
+Tracks and their audio also go when their message or chat is deleted: an hourly sweeper finds them (stale, or whose message is gone), deletes each row only if it is still sweepable, so a track played since it was listed keeps its audio, and then deletes its files, rather than a database cascade that would drop the rows and strand the files.
 They are not part of an account export (they can be made again from the text).
 
 Synthesis runs on the server, one segment at a time, in a background worker per track, writing each segment as it finishes.
 The client never sends text to synthesise; it asks for a message's track:
 
 - `POST /speech/messages/{id}`: the reply's track in its personality's current voice, started if it does not exist.
-- `GET /speech/tracks/{id}`: its status and its segments so far, each with its format and, where the container says, its duration.
+- `GET /speech/tracks/{id}`: its status and its segments so far, each with its format and, where the container says, its duration. A saved reply's track that is open with no worker gets one.
 - `GET /speech/tracks/{id}/segments/{seq}`: one segment's audio, privately cacheable since it never changes.
 
-A worker holds a lease on the track, renewed per segment, so a track whose server went away mid-way is picked up by the next request for it.
+A worker holds a 90-second lease on the track, renewed while it works (a slow synthesis call included), so a track whose server went away mid-way is picked up by the next request for it, a poll included.
+The lease carries a token, and renewing it, adding a segment and finishing the track all name it: a worker whose lease lapsed and went to another writes nothing more, so a segment is never made, stored or billed twice, and a stale worker can't end its successor's track.
+A worker resumes from the text the track's segments read, not from their number: segments are runs of the prepared text, so what is left is the text after them, cut afresh.
+A track cut differently before (by the live speaker, decision 8, or by rules since changed) carries on where it stopped; if the reply no longer starts with what was read, those segments are withdrawn and the track read again.
 A track that failed, or stopped when the meter refused, is reopened when asked for again, keeping the segments it has.
 
 The client polls a track every second while it is `open`, and plays segments back to back as they arrive.
+It gives up on a track that gets no new segment for 200 seconds, past two leases, so one whose worker can't be replaced ends with an error rather than polling forever.
 
 **Playback.**
 One player for the whole app: starting a reply stops whatever was playing.
