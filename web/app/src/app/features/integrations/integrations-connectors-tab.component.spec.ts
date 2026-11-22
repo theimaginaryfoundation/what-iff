@@ -2,6 +2,7 @@ import type { MockedObject } from 'vitest';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { of, throwError } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { By } from '@angular/platform-browser';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
@@ -13,7 +14,7 @@ import { IntegrationsConnectorsTabComponent } from './integrations-connectors-ta
 describe('IntegrationsConnectorsTabComponent', () => {
   let fixture: ComponentFixture<IntegrationsConnectorsTabComponent>;
   let component: IntegrationsConnectorsTabComponent;
-  let mcpServerService: Pick<MockedObject<MCPServerService>, 'listMCPServers' | 'getMCPServer' | 'createMCPServer' | 'updateMCPServer' | 'deleteMCPServer' | 'testMCPServerConnection' | 'startOAuth' | 'getOAuthConfig'>;
+  let mcpServerService: Pick<MockedObject<MCPServerService>, 'listMCPServers' | 'getMCPServer' | 'createMCPServer' | 'updateMCPServer' | 'deleteMCPServer' | 'testMCPServerConnection' | 'startOAuth' | 'getOAuthConfig' | 'discoverOAuth'>;
   let ritualService: Pick<MockedObject<RitualService>, 'listRituals'>;
   let confirmationService: Pick<MockedObject<ConfirmationService>, 'confirm' | 'alert'>;
   let routeParams: Record<string, string>;
@@ -44,7 +45,8 @@ describe('IntegrationsConnectorsTabComponent', () => {
       deleteMCPServer: vi.fn().mockName('MCPServerService.deleteMCPServer'),
       testMCPServerConnection: vi.fn().mockName('MCPServerService.testMCPServerConnection'),
       startOAuth: vi.fn().mockName('MCPServerService.startOAuth'),
-      getOAuthConfig: vi.fn().mockName('MCPServerService.getOAuthConfig')
+      getOAuthConfig: vi.fn().mockName('MCPServerService.getOAuthConfig'),
+      discoverOAuth: vi.fn().mockName('MCPServerService.discoverOAuth')
     };
     mcpServerService.getOAuthConfig.mockReturnValue(of({ redirect_uri: 'https://api.example.com/api/mcp-servers/oauth/callback' }));
     mcpServerService.listMCPServers.mockReturnValue(of({ results: [], total_count: 0, page: 1 }));
@@ -222,6 +224,7 @@ describe('IntegrationsConnectorsTabComponent', () => {
     expect(component.formAuthMode()).toBe('oauth');
     expect(component.formOAuthScopes()).toBe('openid email');
     expect(component.formOAuthPKCEPolicy()).toBe('required');
+    expect(component.formOAuthSetup()).toBe('manual');
     expect(component.formDefaultEnabled()).toBe(true);
     expect(component.selectedRitualIds()).toEqual(['r1']);
   });
@@ -298,6 +301,7 @@ describe('IntegrationsConnectorsTabComponent', () => {
   it('saves update payload with explicit null token clears', async () => {
     component.editingServer.set(makeServer({ id: 'edit-id', auth_mode: 'oauth' }));
     mcpServerService.updateMCPServer.mockReturnValueOnce(of(makeServer()));
+    component.formOAuthSetup.set('manual'); // as startEdit sets it for settings typed in
     component.formName.set('n');
     component.formDescription.set('d');
     component.formServerURL.set('https://s.example.com/mcp');
@@ -388,6 +392,7 @@ describe('IntegrationsConnectorsTabComponent', () => {
     component.formAuthMode.set('header');
     fixture.detectChanges();
     component.formAuthMode.set('oauth');
+    component.formOAuthSetup.set('manual'); // the redirect URI is for an app registered by hand
     fixture.detectChanges();
 
     expect(mcpServerService.getOAuthConfig).toHaveBeenCalledTimes(1);
@@ -399,6 +404,7 @@ describe('IntegrationsConnectorsTabComponent', () => {
   it('explains when the redirect URI cannot be loaded', () => {
     mcpServerService.getOAuthConfig.mockReturnValueOnce(throwError(() => new Error('nope')));
     component.formAuthMode.set('oauth');
+    component.formOAuthSetup.set('manual');
     fixture.detectChanges();
 
     expect(component.oauthRedirectUriState()).toBe('error');
@@ -432,5 +438,161 @@ describe('IntegrationsConnectorsTabComponent', () => {
     component.authenticate(makeServer({ auth_mode: 'oauth' }));
     await Promise.resolve();
     expect(confirmationService.alert).toHaveBeenCalled();
+  });
+  describe('automatic OAuth setup (issue #517)', () => {
+    const discovery = {
+      resource: 'https://mcp.example.com/mcp',
+      issuer: 'https://auth.example.com',
+      authorization_endpoint: 'https://auth.example.com/authorize',
+      token_endpoint: 'https://auth.example.com/token',
+      scopes: ['read', 'offline_access'],
+      client_id_metadata_document_supported: true,
+      iss_parameter_supported: true,
+      registration: 'metadata_document' as const
+    };
+
+    function newOAuthConnector(): void {
+      component.startCreate();
+      component.formName.set('Files');
+      component.formDescription.set('My files');
+      component.onServerURLChange('https://mcp.example.com/mcp');
+      component.formAuthMode.set('oauth');
+    }
+
+    it('starts new OAuth connectors in automatic setup', () => {
+      newOAuthConnector();
+      expect(component.formOAuthSetup()).toBe('auto');
+      expect(component.showRedirectUri()).toBe(false);
+    });
+
+    it('saves a new connector with just its URL and oauth_auto', async () => {
+      newOAuthConnector();
+      component.formOAuthAuthURL.set('https://ignored.example.com'); // left over from manual: not sent
+      mcpServerService.createMCPServer.mockReturnValueOnce(of(makeServer()));
+
+      await component.save();
+
+      const payload = mcpServerService.createMCPServer.mock.calls[0][0];
+      expect(payload).toMatchObject({ server_url: 'https://mcp.example.com/mcp', auth_mode: 'oauth', oauth_auto: true });
+      expect(payload.oauth_auth_url).toBeUndefined();
+      expect(payload.oauth_client_id).toBeUndefined();
+      expect(payload.oauth_pkce_policy).toBeUndefined();
+    });
+
+    it('sends the person’s own client ID when they have one', async () => {
+      newOAuthConnector();
+      component.formOAuthOwnClient.set(true);
+      component.formOAuthClientID.set(' mine ');
+      component.formOAuthClientSecret.set('s3cret');
+      mcpServerService.createMCPServer.mockReturnValueOnce(of(makeServer()));
+
+      await component.save();
+
+      expect(mcpServerService.createMCPServer.mock.calls[0][0]).toMatchObject({
+        oauth_auto: true, oauth_client_id: 'mine', oauth_client_secret: 's3cret'
+      });
+    });
+
+    it('shows what the server says on Check server', () => {
+      newOAuthConnector();
+      mcpServerService.discoverOAuth.mockReturnValueOnce(of(discovery));
+      component.checkOAuth();
+      fixture.detectChanges();
+
+      expect(mcpServerService.discoverOAuth).toHaveBeenCalledWith('https://mcp.example.com/mcp');
+      expect(component.discoveryState()).toBe('found');
+      const box = fixture.debugElement.query(By.css('[data-testid="oauth-discovery"]')).nativeElement as HTMLElement;
+      expect(box.textContent).toContain('https://auth.example.com');
+      expect(box.textContent).toContain('read offline_access');
+      expect(box.textContent).toContain('Nothing to register');
+    });
+
+    it('asks for a client ID when the server can’t register WhatIff', () => {
+      newOAuthConnector();
+      mcpServerService.discoverOAuth.mockReturnValueOnce(of({ ...discovery, registration: 'manual' as const }));
+      component.checkOAuth();
+      expect(component.showOwnClientFields()).toBe(true);
+      expect(component.showRedirectUri()).toBe(true);
+    });
+
+    it('offers a header token when the server needs no sign-in', () => {
+      newOAuthConnector();
+      mcpServerService.discoverOAuth.mockReturnValueOnce(throwError(() => new HttpErrorResponse({
+        status: 422, error: { code: 'mcp_oauth_not_required', message: 'This server did not ask for sign-in.' }
+      })));
+      component.checkOAuth();
+      expect(component.discoveryState()).toBe('not_required');
+      expect(component.discoveryError()).toBe('This server did not ask for sign-in.');
+
+      component.useHeaderAuth();
+      expect(component.formAuthMode()).toBe('header');
+    });
+
+    it('points to manual entry when the settings can’t be read', () => {
+      newOAuthConnector();
+      mcpServerService.discoverOAuth.mockReturnValueOnce(throwError(() => new HttpErrorResponse({
+        status: 422, error: { code: 'mcp_oauth_discovery_failed', message: 'no OAuth metadata' }
+      })));
+      component.checkOAuth();
+      expect(component.discoveryState()).toBe('failed');
+      expect(component.discoveryError()).toBe('no OAuth metadata');
+    });
+
+    it('forgets the check when the URL changes', () => {
+      newOAuthConnector();
+      mcpServerService.discoverOAuth.mockReturnValueOnce(of(discovery));
+      component.checkOAuth();
+      component.onServerURLChange('https://other.example.com/mcp');
+      expect(component.discovery()).toBeNull();
+      expect(component.discoveryState()).toBe('idle');
+    });
+
+    it('keeps a discovered connector’s sign-in when only its name changes', async () => {
+      const discovered = makeServer({
+        id: 'edit-id', auth_mode: 'oauth' as const, server_url: 'https://mcp.example.com/mcp',
+        oauth_issuer: 'https://auth.example.com', oauth_client_registration: 'dynamic' as const,
+        oauth_auth_url: 'https://auth.example.com/authorize', oauth_token_url: 'https://auth.example.com/token',
+        oauth_client_id: 'dyn-1', oauth_pkce_policy: 'required' as const
+      });
+      mcpServerService.getMCPServer.mockReturnValueOnce(of(discovered));
+      component.startEdit(discovered);
+      expect(component.formOAuthSetup()).toBe('auto');
+      component.formName.set('Renamed');
+      mcpServerService.updateMCPServer.mockReturnValueOnce(of(discovered));
+
+      await component.save();
+
+      const payload = mcpServerService.updateMCPServer.mock.calls[0][1];
+      expect(payload.oauth_auto).toBeUndefined();
+      expect(payload.oauth_client_id).toBe('dyn-1');
+    });
+
+    it('reads a discovered connector’s sign-in again when its URL changes', async () => {
+      const discovered = makeServer({
+        id: 'edit-id', auth_mode: 'oauth' as const, server_url: 'https://mcp.example.com/mcp',
+        oauth_issuer: 'https://auth.example.com', oauth_client_registration: 'dynamic' as const
+      });
+      mcpServerService.getMCPServer.mockReturnValueOnce(of(discovered));
+      component.startEdit(discovered);
+      component.onServerURLChange('https://new.example.com/mcp');
+      mcpServerService.updateMCPServer.mockReturnValueOnce(of(discovered));
+
+      await component.save();
+
+      expect(mcpServerService.updateMCPServer.mock.calls[0][1]).toMatchObject({ server_url: 'https://new.example.com/mcp', oauth_auto: true });
+    });
+
+    it('lets a signed-in OAuth connector be tested', () => {
+      const signedIn = makeServer({ id: 'edit-id', auth_mode: 'oauth' as const, oauth_has_access_token: true, server_url: 'https://mcp.example.com/mcp' });
+      component.editingServer.set(signedIn);
+      component.formAuthMode.set('oauth');
+      component.formServerURL.set('https://mcp.example.com/mcp');
+      expect(component.canTest()).toBe(true);
+
+      component.test();
+      expect(mcpServerService.testMCPServerConnection).toHaveBeenCalledWith(expect.objectContaining({
+        connector_id: 'edit-id', auth_mode: 'oauth'
+      }));
+    });
   });
 });

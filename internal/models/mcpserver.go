@@ -9,18 +9,25 @@ import (
 // MCPServer represents a user-configured remote MCP server.
 // AuthToken is intentionally excluded from JSON responses.
 type MCPServer struct {
-	ID                         uuid.UUID   `json:"id"`
-	UserID                     uuid.UUID   `json:"user_id"`
-	Name                       string      `json:"name"`
-	Description                string      `json:"description"`
-	ServerURL                  string      `json:"server_url"`
-	AuthMode                   string      `json:"auth_mode"`
-	AuthToken                  string      `json:"-"`
-	OAuthAuthURL               string      `json:"oauth_auth_url,omitempty"`
-	OAuthTokenURL              string      `json:"oauth_token_url,omitempty"`
-	OAuthClientID              string      `json:"oauth_client_id,omitempty"`
-	OAuthScopes                []string    `json:"oauth_scopes,omitempty"`
-	OAuthPKCEPolicy            string      `json:"oauth_pkce_policy,omitempty"`
+	ID              uuid.UUID `json:"id"`
+	UserID          uuid.UUID `json:"user_id"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description"`
+	ServerURL       string    `json:"server_url"`
+	AuthMode        string    `json:"auth_mode"`
+	AuthToken       string    `json:"-"`
+	OAuthAuthURL    string    `json:"oauth_auth_url,omitempty"`
+	OAuthTokenURL   string    `json:"oauth_token_url,omitempty"`
+	OAuthClientID   string    `json:"oauth_client_id,omitempty"`
+	OAuthScopes     []string  `json:"oauth_scopes,omitempty"`
+	OAuthPKCEPolicy string    `json:"oauth_pkce_policy,omitempty"`
+	// OAuthResource, OAuthIssuer, OAuthIssParamSupported and OAuthClientRegistration are
+	// set when the OAuth settings were discovered from the server (issue #517); see
+	// MCPOAuthDiscovery. Empty for settings typed in by hand.
+	OAuthResource              string      `json:"oauth_resource,omitempty"`
+	OAuthIssuer                string      `json:"oauth_issuer,omitempty"`
+	OAuthIssParamSupported     bool        `json:"-"`
+	OAuthClientRegistration    string      `json:"oauth_client_registration,omitempty"`
 	OAuthClientSecret          string      `json:"-"`
 	OAuthAccessToken           string      `json:"-"`
 	OAuthRefreshToken          string      `json:"-"`
@@ -52,6 +59,18 @@ const (
 	MCPServerPKCERequired     = "required"
 	MCPServerPKCESupported    = "supported"
 	MCPServerPKCENotSupported = "not_supported"
+)
+
+// How a connector's OAuth client was set up (issue #517).
+const (
+	// MCPOAuthRegistrationManual is a client ID (and maybe a secret) the person registered
+	// with the provider and typed in.
+	MCPOAuthRegistrationManual = "manual"
+	// MCPOAuthRegistrationMetadataDocument is a Client ID Metadata Document: the client ID is
+	// the URL of a document this deployment serves describing itself.
+	MCPOAuthRegistrationMetadataDocument = "metadata_document"
+	// MCPOAuthRegistrationDynamic is RFC 7591 Dynamic Client Registration.
+	MCPOAuthRegistrationDynamic = "dynamic"
 )
 
 const (

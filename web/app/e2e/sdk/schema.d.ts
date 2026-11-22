@@ -12986,6 +12986,136 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mcp-servers/oauth/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read how to sign in to an MCP server
+         * @description Reads a remote MCP server's sign-in settings from the server itself (issue #517), as the MCP authorization spec lays out: the 401 challenge's resource_metadata, else the well-known Protected Resource Metadata (RFC 9728); then the authorization server's metadata (RFC 8414 or OpenID Connect discovery), whose issuer must match and which must support PKCE with S256. A server without Protected Resource Metadata is read as its own authorization server. Nothing is registered or saved: creating or updating the connector with `oauth_auto` does that. Fetches go to public addresses only.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        server_url: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The server's sign-in settings, and how a client would be got for it. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MCPServerOAuthDiscovery"];
+                    };
+                };
+                /** @description Missing or disallowed server_url. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The sign-in couldn't be set up from the server. `mcp_oauth_not_required`: it didn't ask for any; `mcp_oauth_client_id_required`: its authorization server can't register this app (a client ID has to be typed in); `mcp_oauth_discovery_failed`: its settings couldn't be read (the message says why; they can be entered by hand). */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mcp-servers/oauth/client-metadata.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * This deployment's OAuth Client ID Metadata Document
+         * @description Public. Where an MCP server's authorization server takes a URL as a client ID (Client ID Metadata Documents), connectors set up automatically use this document's URL as theirs, and the authorization server fetches it. Served only where the deployment has a public https address (MCP_OAUTH_CLIENT_METADATA_URL, or beside an https MCP_OAUTH_REDIRECT_URL); 404 otherwise.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The client metadata document. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uri */
+                            client_id?: string;
+                            client_name?: string;
+                            redirect_uris?: string[];
+                            grant_types?: string[];
+                            response_types?: string[];
+                            token_endpoint_auth_method?: string;
+                            application_type?: string;
+                            /** Format: uri */
+                            client_uri?: string;
+                        };
+                    };
+                };
+                /** @description This deployment has no public https address to serve it from. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mcp-servers/oauth/callback": {
         parameters: {
             query?: never;
@@ -12995,7 +13125,7 @@ export interface paths {
         };
         /**
          * OAuth callback for connector authentication
-         * @description Handles OAuth callback and redirects the browser back to the integrations view with status query params.
+         * @description Handles the OAuth callback and redirects the browser back to the integrations view with status query params. A connector set up automatically checks `iss` against its authorization server (RFC 9207). On success the connector's tools are listed, so its tool count and status are current.
          */
         get: {
             parameters: {
@@ -13004,6 +13134,8 @@ export interface paths {
                     code?: string;
                     error?: string;
                     error_description?: string;
+                    /** @description The authorization response's issuer (RFC 9207), when the provider sends one. */
+                    iss?: string;
                 };
                 header?: never;
                 path?: never;
@@ -16245,6 +16377,15 @@ export interface components {
             oauth_scopes?: string[];
             /** @enum {string} */
             oauth_pkce_policy?: "required" | "supported" | "not_supported";
+            /** @description Set when the sign-in was read from the server (issue */
+            oauth_resource?: string;
+            /** @description The authorization server the sign-in was read from; empty for settings typed in. */
+            oauth_issuer?: string;
+            /**
+             * @description How the OAuth client was set up; empty is manual.
+             * @enum {string}
+             */
+            oauth_client_registration?: "manual" | "metadata_document" | "dynamic";
             /** Format: date-time */
             oauth_access_token_expires_at?: string | null;
             /** Format: date-time */
@@ -16300,6 +16441,8 @@ export interface components {
             oauth_scopes?: string[];
             /** @enum {string} */
             oauth_pkce_policy?: "required" | "supported" | "not_supported";
+            /** @description Sets the oauth connector up from its server URL (issue #517): its sign-in is read from the server (see POST /mcp-servers/oauth/discover) and a client is got for it, by a Client ID Metadata Document or Dynamic Client Registration, unless oauth_client_id is given. The endpoint, scope and PKCE fields are then ignored. Fails with 422 and an mcp_oauth_* code when it can't be done. */
+            oauth_auto?: boolean;
             default_enabled: boolean;
         };
         /**
@@ -16328,6 +16471,8 @@ export interface components {
             oauth_scopes?: string[];
             /** @enum {string} */
             oauth_pkce_policy?: "required" | "supported" | "not_supported";
+            /** @description Reads the oauth connector's sign-in from its server URL again and sets it up from its server URL (issue #517): its sign-in is read from the server (see POST /mcp-servers/oauth/discover) and a client is got for it, by a Client ID Metadata Document or Dynamic Client Registration, unless oauth_client_id is given. The endpoint, scope and PKCE fields are then ignored. Fails with 422 and an mcp_oauth_* code when it can't be done. */
+            oauth_auto?: boolean;
             default_enabled?: boolean;
             ritual_ids?: string[];
         };
@@ -16361,6 +16506,34 @@ export interface components {
         StartMCPServerOAuthResponse: {
             /** Format: uri */
             authorization_url: string;
+        };
+        /** @description What an MCP server says about signing in to it (issue */
+        MCPServerOAuthDiscovery: {
+            /**
+             * Format: uri
+             * @description The canonical MCP server URL, sent as the RFC 8707 resource parameter.
+             */
+            resource: string;
+            resource_name?: string;
+            /** Format: uri */
+            issuer: string;
+            /** Format: uri */
+            authorization_endpoint: string;
+            /** Format: uri */
+            token_endpoint: string;
+            /** Format: uri */
+            registration_endpoint?: string;
+            scopes?: string[];
+            client_id_metadata_document_supported: boolean;
+            iss_parameter_supported: boolean;
+            token_endpoint_auth_methods?: string[];
+            /** @description The server has no Protected Resource Metadata and was read as its own authorization server. */
+            legacy?: boolean;
+            /**
+             * @description How a client will be got on save; manual means a client ID has to be typed in.
+             * @enum {string}
+             */
+            registration: "manual" | "metadata_document" | "dynamic";
         };
         MCPServerOAuthConfigResponse: {
             /**
@@ -18709,7 +18882,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "utility_model_not_set" | "utility_role_off" | "utility_model_unavailable" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "connection_name_taken" | "model_name_taken" | "no_model_selected";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "utility_model_not_set" | "utility_role_off" | "utility_model_unavailable" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "connection_name_taken" | "model_name_taken" | "no_model_selected" | "mcp_oauth_not_required" | "mcp_oauth_client_id_required" | "mcp_oauth_discovery_failed";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**

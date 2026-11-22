@@ -39,12 +39,50 @@ type Service struct {
 	redirectURL         string
 	postAuthRedirectURL string
 	allowedRedirects    map[string]struct{}
+	// discoveryClient makes every discovery and registration request (issue #517): public
+	// addresses only, never the credential transport.
+	discoveryClient   *http.Client
+	allowLocalhost    bool
+	clientMetadataURL string
+	clientName        string
 }
 
 type Config struct {
 	RedirectURL         string
 	PostAuthRedirectURL string
 	AllowedRedirects    []string
+	// ClientMetadataURL is the https URL this deployment's Client ID Metadata Document is
+	// served at (issue #517). Empty derives it from RedirectURL when that is an https
+	// ".../oauth/callback"; a deployment without a public https address has none, and
+	// discovered connectors fall back to dynamic registration.
+	ClientMetadataURL string
+	// ClientName is the app's name in that document and in dynamic registrations.
+	ClientName string
+	// AllowLocalhost lets discovery reach MCP and sign-in servers on loopback (local development),
+	// as MCP_ALLOW_LOCALHOST_CONNECTIONS does for connection tests.
+	AllowLocalhost bool
+}
+
+// clientMetadataPath is where the Client ID Metadata Document is served, beside the callback.
+const clientMetadataPath = "/oauth/client-metadata.json"
+
+// clientMetadataURLFor is the metadata document's URL: configured, else next to an https
+// callback; empty when there is no public https address for it.
+func clientMetadataURLFor(configured, callback string) string {
+	if c := strings.TrimSpace(configured); c != "" {
+		u, err := url.Parse(c)
+		if err != nil || u.Scheme != "https" || u.Host == "" || strings.Trim(u.Path, "/") == "" {
+			return ""
+		}
+		return u.String()
+	}
+	u, err := url.Parse(callback)
+	if err != nil || u.Scheme != "https" || u.Host == "" || !strings.HasSuffix(u.Path, "/oauth/callback") {
+		return ""
+	}
+	u.Path = strings.TrimSuffix(u.Path, "/oauth/callback") + clientMetadataPath
+	u.RawQuery, u.Fragment = "", ""
+	return u.String()
 }
 
 var (
@@ -67,6 +105,10 @@ func New(store Store, client *http.Client, logger *zap.Logger, cfg Config) *Serv
 	allowed := normalizeAllowedRedirectOrigins(cfg.AllowedRedirects)
 	allowed[redirectOrigin(safePostAuthURL)] = struct{}{}
 
+	clientName := strings.TrimSpace(cfg.ClientName)
+	if clientName == "" {
+		clientName = "What Iff"
+	}
 	return &Service{
 		store:               store,
 		httpClient:          client,
@@ -74,6 +116,10 @@ func New(store Store, client *http.Client, logger *zap.Logger, cfg Config) *Serv
 		redirectURL:         redirectURL,
 		postAuthRedirectURL: safePostAuthURL,
 		allowedRedirects:    allowed,
+		discoveryClient:     newDiscoveryClient(cfg.AllowLocalhost),
+		allowLocalhost:      cfg.AllowLocalhost,
+		clientMetadataURL:   clientMetadataURLFor(cfg.ClientMetadataURL, redirectURL),
+		clientName:          clientName,
 	}
 }
 
@@ -136,47 +182,68 @@ func (s *Service) StartAuth(ctx context.Context, userID, connectorID uuid.UUID, 
 		q.Set("code_challenge", challenge)
 		q.Set("code_challenge_method", "S256")
 	}
+	if r := strings.TrimSpace(server.OAuthResource); r != "" {
+		// RFC 8707: the token is for this MCP server, and no other.
+		q.Set("resource", r)
+	}
 	authURL.RawQuery = q.Encode()
 	return authURL.String(), nil
 }
 
-func (s *Service) HandleCallback(ctx context.Context, state, code, oauthErr, oauthErrDesc string) (redirectURL, message string, success bool, err error) {
-	safeFail := func(msg string) (string, string, bool, error) {
-		return withOAuthResult(s.postAuthRedirectURL, false, msg, uuid.Nil), msg, false, nil
+// CallbackParams are the query parameters of a provider's redirect back to the callback.
+type CallbackParams struct {
+	State, Code, Error, ErrorDescription string
+	// Iss is the RFC 9207 issuer of the authorization response, when the provider sends one.
+	Iss string
+}
+
+// CallbackResult is where to send the person after the callback, and what happened.
+type CallbackResult struct {
+	RedirectURL string
+	Message     string
+	Success     bool
+	// UserID and ConnectorID are the connector that authenticated, when Success.
+	UserID, ConnectorID uuid.UUID
+}
+
+func (s *Service) HandleCallback(ctx context.Context, p CallbackParams) (CallbackResult, error) {
+	fail := func(redirect string, connectorID uuid.UUID, msg string) CallbackResult {
+		return CallbackResult{RedirectURL: withOAuthResult(redirect, false, msg, connectorID), Message: msg}
 	}
-	if strings.TrimSpace(state) == "" {
-		return safeFail("Missing OAuth state.")
+	if strings.TrimSpace(p.State) == "" {
+		return fail(s.postAuthRedirectURL, uuid.Nil, "Missing OAuth state."), nil
 	}
-	session, server, err := s.store.ConsumeMCPOAuthSessionByState(ctx, state)
+	session, server, err := s.store.ConsumeMCPOAuthSessionByState(ctx, p.State)
 	if err != nil {
-		msg := "OAuth session is invalid or expired. Start authentication again."
-		redirectURL, message, success, _ := safeFail(msg)
-		if errors.Is(err, datastore.ErrMCPOAuthSessionNotFound) ||
-			errors.Is(err, datastore.ErrMCPOAuthSessionExpired) ||
-			errors.Is(err, datastore.ErrMCPOAuthSessionConsumed) {
-			return redirectURL, message, success, err
-		}
-		return redirectURL, message, success, err
+		return fail(s.postAuthRedirectURL, uuid.Nil, "OAuth session is invalid or expired. Start authentication again."), err
 	}
-	if strings.TrimSpace(oauthErr) != "" {
+	redirect := s.chooseRedirect(session.RedirectAfter)
+	if issuer := strings.TrimSpace(server.OAuthIssuer); issuer != "" {
+		// RFC 9207 (MCP authorization): an answer naming another issuer is not acted on, nor is its
+		// error shown; one with no issuer from a server that always sends it is refused too.
+		iss := strings.TrimSpace(p.Iss)
+		if (iss != "" && iss != issuer) || (iss == "" && server.OAuthIssParamSupported) {
+			return fail(redirect, server.ID, "The sign-in answer didn't come from this connector's sign-in server. Start authentication again."), nil
+		}
+	}
+	if strings.TrimSpace(p.Error) != "" {
 		msg := "OAuth provider declined authentication."
-		if strings.TrimSpace(oauthErrDesc) != "" {
-			msg = "OAuth provider declined authentication: " + sanitizeProviderError(oauthErrDesc)
+		if strings.TrimSpace(p.ErrorDescription) != "" {
+			msg = "OAuth provider declined authentication: " + sanitizeProviderError(p.ErrorDescription)
 		}
-		return withOAuthResult(s.chooseRedirect(session.RedirectAfter), false, msg, server.ID), msg, false, nil
+		return fail(redirect, server.ID, msg), nil
 	}
-	if strings.TrimSpace(code) == "" {
-		msg := "Missing OAuth code from provider callback."
-		return withOAuthResult(s.chooseRedirect(session.RedirectAfter), false, msg, server.ID), msg, false, nil
+	if strings.TrimSpace(p.Code) == "" {
+		return fail(redirect, server.ID, "Missing OAuth code from provider callback."), nil
 	}
 
-	tokenRes, err := s.exchangeAuthorizationCode(ctx, server, code, session.CodeVerifier)
+	tokenRes, err := s.exchangeAuthorizationCode(ctx, server, p.Code, session.CodeVerifier)
 	if err != nil {
 		msg := "Failed to exchange OAuth authorization code."
 		if markErr := s.store.MarkMCPServerOAuthRefreshFailure(ctx, session.UserID, session.MCPServerID, msg, false); markErr != nil {
 			s.logger.Warn("failed to mark oauth exchange failure", zap.Error(markErr))
 		}
-		return withOAuthResult(s.chooseRedirect(session.RedirectAfter), false, msg, server.ID), msg, false, nil
+		return fail(redirect, server.ID, msg), nil
 	}
 	now := time.Now().UTC()
 	tokenSet := models.MCPOAuthTokenSet{
@@ -190,11 +257,16 @@ func (s *Service) HandleCallback(ctx context.Context, state, code, oauthErr, oau
 		tokenSet.AccessTokenExpiresAt = &expiresAt
 	}
 	if err := s.store.SaveMCPServerOAuthTokens(ctx, session.UserID, session.MCPServerID, tokenSet); err != nil {
-		msg := "Failed to persist OAuth tokens."
-		return withOAuthResult(s.chooseRedirect(session.RedirectAfter), false, msg, server.ID), msg, false, nil
+		return fail(redirect, server.ID, "Failed to persist OAuth tokens."), nil
 	}
 	msg := "Connector authentication completed."
-	return withOAuthResult(s.chooseRedirect(session.RedirectAfter), true, msg, server.ID), msg, true, nil
+	return CallbackResult{
+		RedirectURL: withOAuthResult(redirect, true, msg, server.ID),
+		Message:     msg,
+		Success:     true,
+		UserID:      session.UserID,
+		ConnectorID: session.MCPServerID,
+	}, nil
 }
 
 func (s *Service) RefreshDueConnectors(ctx context.Context, horizon time.Duration, maxFailures int) {
@@ -263,6 +335,9 @@ func (s *Service) exchangeAuthorizationCode(ctx context.Context, server *models.
 	if strings.TrimSpace(codeVerifier) != "" {
 		form.Set("code_verifier", strings.TrimSpace(codeVerifier))
 	}
+	if r := strings.TrimSpace(server.OAuthResource); r != "" {
+		form.Set("resource", r)
+	}
 	return s.tokenRequest(ctx, server.OAuthTokenURL, form)
 }
 
@@ -276,6 +351,9 @@ func (s *Service) refreshToken(ctx context.Context, server *models.MCPServer) (*
 	form.Set("client_id", strings.TrimSpace(server.OAuthClientID))
 	if strings.TrimSpace(server.OAuthClientSecret) != "" {
 		form.Set("client_secret", strings.TrimSpace(server.OAuthClientSecret))
+	}
+	if r := strings.TrimSpace(server.OAuthResource); r != "" {
+		form.Set("resource", r)
 	}
 	return s.tokenRequest(ctx, server.OAuthTokenURL, form)
 }

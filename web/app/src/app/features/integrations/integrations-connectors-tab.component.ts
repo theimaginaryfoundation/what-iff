@@ -12,8 +12,10 @@ import {
   CreateMCPServerRequest,
   UpdateMCPServerRequest,
   TestMCPServerConnectionRequest,
-  TestMCPServerConnectionResponse
+  TestMCPServerConnectionResponse,
+  MCPServerOAuthDiscovery
 } from '../../core/models/mcp-server.model';
+import { apiErrorMessage, hasErrorCode } from '../../core/utils/api-error.helpers';
 import { Ritual } from '../../core/models/ritual.model';
 import { EntityMarketplaceOutletComponent } from '../../extensions/entity-marketplace-outlet.component';
 import { CheckboxComponent } from '../../shared/ui/checkbox/checkbox.component';
@@ -54,6 +56,16 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
   formClearOAuthClientSecret = signal(false);
   formOAuthScopes = signal('');
   formOAuthPKCEPolicy = signal<'required' | 'supported' | 'not_supported'>('supported');
+  /**
+   * How the OAuth sign-in is set up: read from the server (issue #517), or typed in. New
+   * connectors start automatic; a connector set up by hand stays manual until switched.
+   */
+  formOAuthSetup = signal<'auto' | 'manual'>('auto');
+  /** In automatic setup, whether the person has their own client ID to use. */
+  formOAuthOwnClient = signal(false);
+  discovery = signal<MCPServerOAuthDiscovery | null>(null);
+  discoveryState = signal<'idle' | 'checking' | 'found' | 'not_required' | 'failed'>('idle');
+  discoveryError = signal('');
   formDefaultEnabled = signal(false);
   rituals = signal<Ritual[]>([]);
   selectedRitualIds = signal<string[]>([]);
@@ -71,9 +83,24 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
       !this.isSaving();
   });
 
-  canTest = computed(() => {
-    return this.formAuthMode() !== 'oauth' && this.formServerURL().trim() !== '' && !this.isTesting() && !this.isSaving();
+  /** An OAuth connector can be tested once it is signed in, with its token. */
+  canTestOAuth = computed(() => {
+    const editing = this.editingServer();
+    return !!editing && editing.auth_mode === 'oauth' && !!editing.oauth_has_access_token &&
+      this.formServerURL().trim() === editing.server_url;
   });
+
+  canTest = computed(() => {
+    return (this.formAuthMode() !== 'oauth' || this.canTestOAuth()) &&
+      this.formServerURL().trim() !== '' && !this.isTesting() && !this.isSaving();
+  });
+
+  /** Whether the client ID and secret fields show in automatic setup. */
+  showOwnClientFields = computed(() =>
+    this.formOAuthOwnClient() || this.discovery()?.registration === 'manual');
+
+  /** Whether the redirect URI shows: someone may have to register it with a provider. */
+  showRedirectUri = computed(() => this.formOAuthSetup() === 'manual' || this.showOwnClientFields());
 
   constructor() {
     // Fetched the first time the OAuth fields show, so header-token-only users never ask.
@@ -147,6 +174,9 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
     this.formClearOAuthClientSecret.set(false);
     this.formOAuthScopes.set('');
     this.formOAuthPKCEPolicy.set('supported');
+    this.formOAuthSetup.set('auto');
+    this.formOAuthOwnClient.set(false);
+    this.clearDiscovery();
     this.formDefaultEnabled.set(false);
     this.selectedRitualIds.set([]);
     this.clearTestResult();
@@ -169,6 +199,7 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
         this.formClearOAuthClientSecret.set(false);
         this.formOAuthScopes.set((full.oauth_scopes || []).join(' '));
         this.formOAuthPKCEPolicy.set((full.oauth_pkce_policy || 'supported') as 'required' | 'supported' | 'not_supported');
+        this.setOAuthSetupFor(full);
         this.formDefaultEnabled.set(full.default_enabled);
         this.selectedRitualIds.set(full.ritual_ids ? [...full.ritual_ids] : []);
         this.clearTestResult();
@@ -188,6 +219,7 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
         this.formClearOAuthClientSecret.set(false);
         this.formOAuthScopes.set((server.oauth_scopes || []).join(' '));
         this.formOAuthPKCEPolicy.set((server.oauth_pkce_policy || 'supported') as 'required' | 'supported' | 'not_supported');
+        this.setOAuthSetupFor(server);
         this.formDefaultEnabled.set(server.default_enabled);
         this.selectedRitualIds.set(server.ritual_ids ? [...server.ritual_ids] : []);
         this.clearTestResult();
@@ -258,6 +290,61 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
     this.clearTestResult();
   }
 
+  /** The connector URL changed: what was read from the old one no longer applies. */
+  onServerURLChange(value: string): void {
+    this.formServerURL.set(value);
+    this.clearDiscovery();
+    this.clearTestResult();
+  }
+
+  setOAuthSetup(setup: 'auto' | 'manual'): void {
+    this.formOAuthSetup.set(setup);
+    this.clearTestResult();
+  }
+
+  /**
+   * Reads how to sign in to the connector from its server, to show before saving. Saving reads
+   * it again (and registers a client), so this is a preview, not a step the save depends on.
+   */
+  checkOAuth(): void {
+    const url = this.formServerURL().trim();
+    if (!url || this.discoveryState() === 'checking') return;
+    this.discoveryState.set('checking');
+    this.discoveryError.set('');
+    this.discovery.set(null);
+    this.mcpServerService.discoverOAuth(url).subscribe({
+      next: (d) => {
+        this.discovery.set(d);
+        this.discoveryState.set('found');
+      },
+      error: (err) => {
+        if (hasErrorCode(err, 'mcp_oauth_not_required')) {
+          this.discoveryState.set('not_required');
+        } else {
+          this.discoveryState.set('failed');
+        }
+        this.discoveryError.set(apiErrorMessage(err, "Couldn't read this server's sign-in settings."));
+      }
+    });
+  }
+
+  /** The server needs no sign-in: back to a header token, which may be left empty. */
+  useHeaderAuth(): void {
+    this.formAuthMode.set('header');
+    this.clearDiscovery();
+  }
+
+  registrationNote(d: MCPServerOAuthDiscovery): string {
+    switch (d.registration) {
+      case 'metadata_document':
+        return 'WhatIff identifies itself to this server with its own client description. Nothing to register.';
+      case 'dynamic':
+        return 'WhatIff registers itself with this server when you save. Nothing to set up.';
+      default:
+        return "This server can't register WhatIff by itself. Register an OAuth app with the provider, using the redirect URI below, and enter its client ID.";
+    }
+  }
+
   test(): void {
     if (!this.canTest()) return;
 
@@ -296,12 +383,14 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
             authentication: this.formClearAuthentication() ? null : this.formAuthentication(),
             default_enabled: this.formDefaultEnabled(),
             ritual_ids: [...this.selectedRitualIds()],
-            oauth_auth_url: this.formOAuthAuthURL().trim() || undefined,
-            oauth_token_url: this.formOAuthTokenURL().trim() || undefined,
-            oauth_client_id: this.formOAuthClientID().trim() || undefined,
-            oauth_client_secret: this.formClearOAuthClientSecret() ? null : (this.formOAuthClientSecret().trim() || undefined),
-            oauth_scopes: this.formOAuthScopes().trim() === '' ? [] : this.formOAuthScopes().trim().split(/\s+/),
-            oauth_pkce_policy: this.formOAuthPKCEPolicy()
+            ...(this.autoOAuthOnUpdate(editing) ? this.autoOAuthFields() : {
+              oauth_auth_url: this.formOAuthAuthURL().trim() || undefined,
+              oauth_token_url: this.formOAuthTokenURL().trim() || undefined,
+              oauth_client_id: this.formOAuthClientID().trim() || undefined,
+              oauth_client_secret: this.formClearOAuthClientSecret() ? null : (this.formOAuthClientSecret().trim() || undefined),
+              oauth_scopes: this.formOAuthScopes().trim() === '' ? [] : this.formOAuthScopes().trim().split(/\s+/),
+              oauth_pkce_policy: this.formOAuthPKCEPolicy()
+            })
           };
           return this.mcpServerService.updateMCPServer(editing.id, payload);
         })()
@@ -313,12 +402,14 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
             auth_mode: this.formAuthMode(),
             authentication: this.formAuthentication(),
             default_enabled: this.formDefaultEnabled(),
-            oauth_auth_url: this.formOAuthAuthURL().trim() || undefined,
-            oauth_token_url: this.formOAuthTokenURL().trim() || undefined,
-            oauth_client_id: this.formOAuthClientID().trim() || undefined,
-            oauth_client_secret: this.formOAuthClientSecret().trim() || undefined,
-            oauth_scopes: this.formOAuthScopes().trim() === '' ? [] : this.formOAuthScopes().trim().split(/\s+/),
-            oauth_pkce_policy: this.formOAuthPKCEPolicy()
+            ...(this.formAuthMode() === 'oauth' && this.formOAuthSetup() === 'auto' ? this.autoOAuthFields() : {
+              oauth_auth_url: this.formOAuthAuthURL().trim() || undefined,
+              oauth_token_url: this.formOAuthTokenURL().trim() || undefined,
+              oauth_client_id: this.formOAuthClientID().trim() || undefined,
+              oauth_client_secret: this.formOAuthClientSecret().trim() || undefined,
+              oauth_scopes: this.formOAuthScopes().trim() === '' ? [] : this.formOAuthScopes().trim().split(/\s+/),
+              oauth_pkce_policy: this.formOAuthPKCEPolicy()
+            })
           };
           return this.mcpServerService.createMCPServer(payload);
         })();
@@ -394,6 +485,40 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
 
   private clearTestResult(): void {
     this.testResult.set(null);
+  }
+
+  private clearDiscovery(): void {
+    this.discovery.set(null);
+    this.discoveryState.set('idle');
+    this.discoveryError.set('');
+  }
+
+  /** Automatic for a connector whose sign-in was read from its server, manual otherwise. */
+  private setOAuthSetupFor(server: MCPServer): void {
+    this.formOAuthSetup.set(server.auth_mode !== 'oauth' || server.oauth_issuer ? 'auto' : 'manual');
+    this.formOAuthOwnClient.set(server.oauth_client_registration === 'manual' && !!server.oauth_issuer);
+    this.clearDiscovery();
+  }
+
+  /**
+   * Whether an update reads the sign-in from the server again: in automatic setup, when the
+   * connector is new to it, its URL changed, or the person checked the server again.
+   */
+  private autoOAuthOnUpdate(editing: MCPServer): boolean {
+    if (this.formAuthMode() !== 'oauth' || this.formOAuthSetup() !== 'auto') return false;
+    return editing.auth_mode !== 'oauth' || !editing.oauth_issuer ||
+      this.formServerURL().trim() !== editing.server_url || this.discoveryState() === 'found' ||
+      this.formOAuthOwnClient() !== (editing.oauth_client_registration === 'manual');
+  }
+
+  /** The fields an automatic setup sends: just the flag, and the person's own client if any. */
+  private autoOAuthFields(): Partial<CreateMCPServerRequest> {
+    const own = this.showOwnClientFields();
+    return {
+      oauth_auto: true,
+      oauth_client_id: own ? (this.formOAuthClientID().trim() || undefined) : undefined,
+      oauth_client_secret: own ? (this.formOAuthClientSecret().trim() || undefined) : undefined
+    };
   }
 
   private buildTestPayload(): TestMCPServerConnectionRequest {

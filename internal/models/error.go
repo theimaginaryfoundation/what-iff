@@ -63,6 +63,16 @@ const (
 	// (ADR 0x044). Answered with 409; details is {"missing_parameters": [...]}.
 	ErrCodeJobNeedsValues = "job_needs_values"
 
+	// ErrCodeMCPOAuthNotRequired: an MCP server whose sign-in was to be discovered didn't
+	// ask for any (issue #517); it needs no authentication, or a token.
+	ErrCodeMCPOAuthNotRequired = "mcp_oauth_not_required"
+	// ErrCodeMCPOAuthClientIDRequired: an MCP server's sign-in was discovered, but its
+	// authorization server can't register this app by itself: a client ID has to be typed in.
+	ErrCodeMCPOAuthClientIDRequired = "mcp_oauth_client_id_required"
+	// ErrCodeMCPOAuthDiscoveryFailed: an MCP server's sign-in settings couldn't be read from
+	// it; the message says why, and they can be entered by hand.
+	ErrCodeMCPOAuthDiscoveryFailed = "mcp_oauth_discovery_failed"
+
 	// ErrCodeProviderNotConfigured: the request needed a model provider the
 	// account has no key for. Details is {"provider": "<name>"}.
 	ErrCodeProviderNotConfigured = "provider_not_configured"
@@ -159,6 +169,9 @@ var AllErrorCodes = []string{
 	ErrCodeConnectionNameTaken,
 	ErrCodeModelNameTaken,
 	ErrCodeNoModelSelected,
+	ErrCodeMCPOAuthNotRequired,
+	ErrCodeMCPOAuthClientIDRequired,
+	ErrCodeMCPOAuthDiscoveryFailed,
 }
 
 // genericErrorCodes maps HTTP statuses to their generic code.

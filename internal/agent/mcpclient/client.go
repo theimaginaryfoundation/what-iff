@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -567,9 +568,60 @@ func (c *Client) rpcCall(ctx context.Context, server *models.MCPServer, method s
 	return c.rpcExchange(ctx, c.httpClient, nil, server, method, params, sessions, "")
 }
 
-// rpcCallTool makes a tools/call: on the client without an overall timeout, bounded instead by
-// streamIdleTimeout of silence (paused while the person answers an elicitation) and by ctx.
+// StatusError is an HTTP status outside 2xx answering an MCP request.
+type StatusError struct {
+	Method string
+	Status int
+	Detail string
+}
+
+func (e *StatusError) Error() string {
+	if e.Detail != "" {
+		return fmt.Sprintf("mcp server returned status %d for %s: %s", e.Status, e.Method, e.Detail)
+	}
+	return fmt.Sprintf("mcp server returned status %d for %s", e.Status, e.Method)
+}
+
+// ensureSession runs the initialize handshake for server once per SessionState. Sessions last
+// one turn, but the tool list is cached across turns, so a turn whose tools came from the cache
+// has not initialized yet; a server with sessions (Mcp-Session-Id) refuses calls made without one.
+func (c *Client) ensureSession(ctx context.Context, server *models.MCPServer, sessions SessionState) {
+	if sessions == nil || getSessionID(sessions, server) != "" || getProtocolVersion(sessions, server) != "" {
+		return
+	}
+	if err := c.initializeRPC(ctx, server, sessions); err != nil {
+		c.logger.Debug("mcp initialize failed before tools/call; calling anyway", zap.String("server_id", server.ID.String()), zap.Error(err))
+	}
+}
+
+// clearSession forgets server's session so the next ensureSession starts a new one.
+func clearSession(sessions SessionState, server *models.MCPServer) {
+	if sessions == nil {
+		return
+	}
+	delete(sessions, sessionKeyForServer(server))
+	delete(sessions, protocolVersionKey(server))
+}
+
+// rpcCallTool makes a tools/call in an initialized session. A 404 to a call that carried a
+// session ID means the server ended that session (MCP transports spec): start a new one and
+// call once more.
 func (c *Client) rpcCallTool(ctx context.Context, server *models.MCPServer, params any, sessions SessionState, toolName string) (json.RawMessage, error) {
+	c.ensureSession(ctx, server, sessions)
+	hadSession := getSessionID(sessions, server) != ""
+	result, err := c.rpcCallToolOnce(ctx, server, params, sessions, toolName)
+	var statusErr *StatusError
+	if hadSession && errors.As(err, &statusErr) && statusErr.Status == http.StatusNotFound {
+		clearSession(sessions, server)
+		c.ensureSession(ctx, server, sessions)
+		return c.rpcCallToolOnce(ctx, server, params, sessions, toolName)
+	}
+	return result, err
+}
+
+// rpcCallToolOnce makes one tools/call: on the client without an overall timeout, bounded instead
+// by streamIdleTimeout of silence (paused while the person answers an elicitation) and by ctx.
+func (c *Client) rpcCallToolOnce(ctx context.Context, server *models.MCPServer, params any, sessions SessionState, toolName string) (json.RawMessage, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	idle := newIdleTimer(streamIdleTimeout, cancel)
@@ -610,11 +662,7 @@ func (c *Client) rpcExchange(ctx context.Context, client *http.Client, idle *idl
 		if err != nil {
 			return nil, err
 		}
-		detail := strings.TrimSpace(string(body))
-		if detail != "" {
-			return nil, fmt.Errorf("mcp server returned status %d for %s: %s", resp.StatusCode, method, truncateForError(detail, 1024))
-		}
-		return nil, fmt.Errorf("mcp server returned status %d for %s", resp.StatusCode, method)
+		return nil, &StatusError{Method: method, Status: resp.StatusCode, Detail: truncateForError(strings.TrimSpace(string(body)), 1024)}
 	}
 	var rpcResp rpcResponse
 	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
