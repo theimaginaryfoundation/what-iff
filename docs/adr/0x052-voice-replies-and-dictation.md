@@ -44,7 +44,7 @@ What the providers we support offer today:
 | Google (Gemini API) | `gemini-3.8-flash-tts`, `gemini-3.8-flash-lite-tts` | Yes: a separate `style` field (`speech_metadata`); the text is treated strictly as a transcript | 30 prebuilt | `gemini-3.5-transcribe` (preview); any Gemini chat model takes audio | Yes (`v1beta`) |
 | Qwen (Model Studio, international) | `qwen-audio-3.1-tts-flash`, `-plus`; `qwen3-tts-flash` | Yes: a separate `instruction` field (3.1 models) | System voices (count per model differs) | `qwen3-asr-flash` (through compatible-mode chat, audio as an input part) | Same key; synthesis is on the native DashScope API, not compatible mode |
 | OpenAI | None after 2027-01-06 | n/a | n/a | `gpt-transcribe` (`/v1/audio/transcriptions`) | Yes |
-| Mistral | `voxtral-mini-tts-2603`; Voxtral 3 TTS (preview) | No: inline emotion and pace tags only | Presets, and cloning from a reference clip | `voxtral-*-transcribe-3-0` (preview, `/v1/audio/transcriptions`) | Yes |
+| Mistral | `voxtral-mini-tts-3-0` (Voxtral TTS 3, preview; the built-in one); `voxtral-mini-tts-2603` is deprecated and retires 2027-04-30 | No: inline emotion and pace tags only | Presets, and cloning from a reference clip | `voxtral-*-transcribe-3-0` (preview, `/v1/audio/transcriptions`) | Yes |
 | OpenRouter | `/api/v1/audio/speech` routes Gemini, Voxtral and others | `instructions`, honoured by some models | Per model | `/api/v1/audio/transcriptions` | Yes |
 | DeepSeek | `/v1/tools/tts` (new) | No | 2 | `/v1/tools/asr` (WAV or Ogg Opus only, 120 s) | Yes |
 | Xiaomi MiMo | `mimo-v2.5-tts`, over chat completions | Yes, as a user message | 8 (Chinese and English) | `mimo-v2.5-asr` | Yes |
@@ -197,7 +197,7 @@ Each **segment** records its sequence number, its text, its audio file in the fi
 
 A message has at most one track per `voice_key`: playing a reply again in the same voice replays the stored audio and calls no provider; playing it after the personality's voice changed makes a new track.
 Segment audio is kept for 30 days after the track was last played, then deleted, and a later play synthesises it again.
-Tracks and their audio also go when their message or chat is deleted: an hourly sweeper finds them (stale, or whose message is gone), deletes each row only if it is still sweepable, so a track played since it was listed keeps its audio, and then deletes its files, rather than a database cascade that would drop the rows and strand the files.
+Tracks and their audio also go when their message or chat is deleted: an hourly sweeper finds them (stale, whose message is gone, or a turn's track never tied to a reply within a day), deletes each row only if it is still sweepable, so a track played since it was listed keeps its audio, and then deletes its files, rather than a database cascade that would drop the rows and strand the files.
 They are not part of an account export (they can be made again from the text).
 
 Synthesis runs on the server, one segment at a time, in a background worker per track, writing each segment as it finishes.
@@ -205,13 +205,16 @@ The client never sends text to synthesise; it asks for a message's track:
 
 - `POST /speech/messages/{id}`: the reply's track in its personality's current voice, started if it does not exist.
 - `GET /speech/tracks/{id}`: its status and its segments so far, each with its format and, where the container says, its duration. A saved reply's track that is open with no worker gets one.
-- `GET /speech/tracks/{id}/segments/{seq}`: one segment's audio, privately cacheable since it never changes.
+- `GET /speech/tracks/{id}/segments/{seq}`: one segment's audio, with an ETag naming its version.
+  A segment can be withdrawn and made again at the same seq (a resumed track below, a withdrawn round in decision 8), so the URL alone doesn't name its audio: it is sent `private, no-cache`, the browser keeps it but asks each time, and the version it has is answered 304 without the audio being read.
+  The ETag comes from the segment's file key, which the worker's lease token makes new each time a segment is made.
 
 A worker holds a 90-second lease on the track, renewed while it works (a slow synthesis call included), so a track whose server went away mid-way is picked up by the next request for it, a poll included.
 The lease carries a token, and renewing it, adding a segment and finishing the track all name it: a worker whose lease lapsed and went to another writes nothing more, so a segment is never made, stored or billed twice, and a stale worker can't end its successor's track.
 A worker resumes from the text the track's segments read, not from their number: segments are runs of the prepared text, so what is left is the text after them, cut afresh.
 A track cut differently before (by the live speaker, decision 8, or by rules since changed) carries on where it stopped; if the reply no longer starts with what was read, those segments are withdrawn and the track read again.
-A track that failed, or stopped when the meter refused, is reopened when asked for again, keeping the segments it has.
+A worker interrupted by its server shutting down gives up its lease and leaves the track open, so the next request, a poll included, carries on.
+A track that failed (a provider error), or stopped when the meter refused, waits for the person: it is reopened when they ask for it again (Listen), keeping the segments it has, and a poll never retries it.
 
 The client polls a track every second while it is `open`, and plays segments back to back as they arrive.
 It gives up on a track that gets no new segment for 200 seconds, past two leases, so one whose worker can't be replaced ends with an error rather than polling forever.
@@ -249,7 +252,9 @@ The streaming track is created when the turn starts (decision 9 says when), and 
 Synthesis during the turn starts only once the track is claimed, which means a client is there to hear it.
 An unclaimed track synthesises nothing while the turn runs; if it is claimed later, it is made from the saved reply like any other.
 A claim that lands as the turn ends is still read: the turn's speaker looks at the track once more before it lets go.
-The speaker takes the track's lease like any worker (decision 7); if it stops early (a deploy, out of credits, a provider failure) the track fails, and the next request for it, a poll included, carries on from the text already read.
+The speaker takes the track's lease like any worker (decision 7).
+If its server shuts down mid-turn, it leaves the track open with what it has read, like any worker; if it stops for another reason (out of credits, a provider failure) the track fails or stops, and asking for it again carries on from the text already read.
+A server that goes away mid-turn may also leave the track tied to no reply. A poll or claim that finds one with no worker, once its turn is no longer at work, ties it to the reply the turn saved and carries on from that; if the turn saved none, the track fails and is not read aloud on arrival.
 While no client has claimed the track, the speaker looks for a claim four times a second for the first ten seconds, when a watching client claims, and once a second after.
 
 ### 9. Autoplay
