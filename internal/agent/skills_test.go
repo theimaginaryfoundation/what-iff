@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -29,7 +30,11 @@ import (
 // schema (minus the pgvector tables), one user and one chat, for skill lifecycle tests.
 func newSkillsAgentFixture(t *testing.T) (*Agent, *datastore.Datastore, *ent.Client, uuid.UUID, *models.Chat) {
 	t.Helper()
-	db, err := sql.Open("sqlite3", "file:"+uuid.NewString()+"?mode=memory&cache=shared&_fk=1")
+	// A file in WAL mode rather than a shared-cache in-memory database: background workers (a
+	// queued turn's job) write while the test reads, and shared cache answers that collision with
+	// "database table is locked" at once, which no busy timeout covers. WAL lets readers through, and
+	// the busy timeout with immediate write transactions makes writers wait their turn instead.
+	db, err := sql.Open("sqlite3", "file:"+filepath.Join(t.TempDir(), "agent.db")+"?_fk=1&_journal_mode=WAL&_busy_timeout=10000&_txlock=immediate")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	drv := entsql.OpenDB(dialect.SQLite, db)

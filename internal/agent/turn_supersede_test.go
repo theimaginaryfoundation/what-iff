@@ -245,8 +245,7 @@ func TestRegenerateTurn_StartsANewRunForTheSameMessage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, jobID, latest)
 
-	// Wait on the run's in-process registration rather than polling its job row, so the test
-	// never reads the in-memory SQLite while the run writes it.
+	// Wait for the run itself to finish (its in-process registration) before reading its job.
 	require.Eventually(t, func() bool { return !a.hasRunningJob(jobID) }, 30*time.Second, 20*time.Millisecond,
 		"the run finishes (it fails: no model)")
 	job, err := s.ds.GetJob(context.Background(), s.userID, jobID)
