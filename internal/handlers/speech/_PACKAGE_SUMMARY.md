@@ -7,9 +7,10 @@ So far, dictation: whether the account has a dictation model, and transcribing a
 
 ## Responsibilities
 
-- `GET /speech/dictation` answers whether the composer has a microphone (`available`), and if so the dictation model's formats and longest clip, so the browser records what it takes.
+- `GET /speech/dictation` answers whether the composer has a microphone (`available`), and if so the dictation model, its formats (always `wav`) and longest clip.
   With no dictation model (off, not set, or unusable) it answers 200 with `available: false` and the `utility_*` code saying why, since no microphone is not an error.
-- `POST /speech/transcriptions` takes one clip as multipart form data (`audio`, `format`, `duration_seconds`, optional `chat_id` and `language`) and answers its transcript.
+- `POST /speech/transcriptions` takes one clip as multipart form data (`audio`, `format`, optional `chat_id` and `language`) and answers its transcript.
+  The clip's length is never taken from the client: it is read from the WAV's data (agent.Transcribe).
 
 ## Dependencies
 
