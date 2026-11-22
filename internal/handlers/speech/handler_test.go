@@ -62,11 +62,14 @@ func (f *fakeSpeech) SpeechTrack(context.Context, uuid.UUID, uuid.UUID) (*models
 	return f.track, f.err
 }
 
-func (f *fakeSpeech) SpeechSegmentAudio(_ context.Context, _, _ uuid.UUID, seq int) ([]byte, models.AudioFormat, error) {
+func (f *fakeSpeech) SpeechSegmentAudio(_ context.Context, _, _ uuid.UUID, seq int, ifNoneMatch string) (agent.SegmentAudio, error) {
 	if f.err != nil || seq > 0 {
-		return nil, "", datastore.ErrSpeechTrackNotFound
+		return agent.SegmentAudio{}, datastore.ErrSpeechTrackNotFound
 	}
-	return f.audio, f.format, nil
+	if ifNoneMatch == `"v1"` {
+		return agent.SegmentAudio{ETag: `"v1"`, Format: f.format, NotModified: true}, nil
+	}
+	return agent.SegmentAudio{ETag: `"v1"`, Format: f.format, Data: f.audio}, nil
 }
 
 func (f *fakeSpeech) PreviewVoice(_ context.Context, _ uuid.UUID, _ models.PersonalityVoice, text string) (provider.SpeechAudio, error) {
@@ -199,8 +202,15 @@ func TestListenAndTracks(t *testing.T) {
 	rec = serve(t, s, httptest.NewRequest(http.MethodGet, "/speech/tracks/"+trackID.String()+"/segments/0", nil), true)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "audio/mpeg", rec.Header().Get("Content-Type"))
-	require.Contains(t, rec.Header().Get("Cache-Control"), "private")
+	require.Equal(t, "private, no-cache", rec.Header().Get("Cache-Control"), "kept, but checked each time")
+	require.Equal(t, `"v1"`, rec.Header().Get("ETag"))
 	require.Equal(t, "ID3audio", rec.Body.String())
+
+	again := httptest.NewRequest(http.MethodGet, "/speech/tracks/"+trackID.String()+"/segments/0", nil)
+	again.Header.Set("If-None-Match", `"v1"`)
+	rec = serve(t, s, again, true)
+	require.Equal(t, http.StatusNotModified, rec.Code)
+	require.Empty(t, rec.Body.String())
 
 	rec = serve(t, s, httptest.NewRequest(http.MethodGet, "/speech/tracks/"+trackID.String()+"/segments/1", nil), true)
 	require.Equal(t, http.StatusNotFound, rec.Code)

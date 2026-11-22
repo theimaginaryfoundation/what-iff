@@ -198,7 +198,8 @@ func (c *geminiSpeechClient) upload(ctx context.Context, data []byte, mimeType s
 	for k, v := range c.headers() {
 		headers[k] = v
 	}
-	start, err := c.sendFull(ctx, http.MethodPost, geminiUploadRoot(c.nativeBase)+"/files", "application/json", headers,
+	root := geminiUploadRoot(c.nativeBase)
+	start, err := c.sendFull(ctx, http.MethodPost, root+"/files", "application/json", headers,
 		strings.NewReader(`{"file":{"display_name":"dictation"}}`))
 	if err != nil {
 		return geminiFile{}, err
@@ -206,6 +207,10 @@ func (c *geminiSpeechClient) upload(ctx context.Context, data []byte, mimeType s
 	uploadURL := start.header.Get("X-Goog-Upload-URL")
 	if uploadURL == "" {
 		return geminiFile{}, errors.New("no upload URL in the answer")
+	}
+	// The key goes with the clip, so only to the host the upload started on.
+	if !sameOrigin(uploadURL, root) {
+		return geminiFile{}, errors.New("the upload URL in the answer is on another host")
 	}
 	headers = map[string]string{
 		"X-Goog-Upload-Offset":  "0",
@@ -225,6 +230,19 @@ func (c *geminiSpeechClient) upload(ctx context.Context, data []byte, mimeType s
 		return geminiFile{}, fmt.Errorf("unreadable upload answer: %w", err)
 	}
 	return out.File, nil
+}
+
+// sameOrigin reports whether a and b share a scheme and host (with port).
+func sameOrigin(a, b string) bool {
+	ua, err := url.Parse(a)
+	if err != nil {
+		return false
+	}
+	ub, err := url.Parse(b)
+	if err != nil {
+		return false
+	}
+	return ua.Scheme == ub.Scheme && strings.EqualFold(ua.Host, ub.Host)
 }
 
 // waitActive waits for a file still processing to become active.

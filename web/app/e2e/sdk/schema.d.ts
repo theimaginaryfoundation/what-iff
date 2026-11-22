@@ -5067,12 +5067,14 @@ export interface paths {
         };
         /**
          * One segment's audio
-         * @description The audio never changes, so it may be cached privately.
+         * @description A segment can be withdrawn and made again at the same seq, so the audio is answered with an ETag naming its version and `Cache-Control: private, no-cache`: a client may keep it but asks each time, and an If-None-Match naming the version stored is answered 304.
          */
         get: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    "If-None-Match"?: string;
+                };
                 path: {
                     id: string;
                     seq: number;
@@ -5084,12 +5086,20 @@ export interface paths {
                 /** @description The audio */
                 200: {
                     headers: {
+                        ETag?: string;
                         [name: string]: unknown;
                     };
                     content: {
                         "audio/mpeg": string;
                         "audio/wav": string;
                     };
+                };
+                /** @description The client has this version already */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
                 /** @description Segment not found */
                 404: {

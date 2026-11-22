@@ -29,7 +29,7 @@ type Speech interface {
 	Transcribe(ctx context.Context, userID uuid.UUID, clip agent.DictationClip) (string, error)
 	Listen(ctx context.Context, userID, messageID uuid.UUID) (*models.SpeechTrack, error)
 	SpeechTrack(ctx context.Context, userID, trackID uuid.UUID) (*models.SpeechTrack, error)
-	SpeechSegmentAudio(ctx context.Context, userID, trackID uuid.UUID, seq int) ([]byte, models.AudioFormat, error)
+	SpeechSegmentAudio(ctx context.Context, userID, trackID uuid.UUID, seq int, ifNoneMatch string) (agent.SegmentAudio, error)
 	PreviewVoice(ctx context.Context, userID uuid.UUID, voice models.PersonalityVoice, text string) (provider.SpeechAudio, error)
 	ClaimSpeech(ctx context.Context, userID, trackID uuid.UUID) (*models.SpeechTrack, bool, error)
 	SkipSpeech(ctx context.Context, userID, trackID uuid.UUID) error
@@ -252,7 +252,7 @@ func (h *Handler) GetTrack(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetSegment answers one segment's audio. It never changes, so the browser may keep it.
+// GetSegment answers one segment's audio, with an ETag naming its version.
 func (h *Handler) GetSegment(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.account(w, r)
 	if !ok {
@@ -267,16 +267,27 @@ func (h *Handler) GetSegment(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Segment not found", nil)
 		return
 	}
-	data, format, err := h.speech.SpeechSegmentAudio(r.Context(), userID, trackID, seq)
+	seg, err := h.speech.SpeechSegmentAudio(r.Context(), userID, trackID, seq, r.Header.Get("If-None-Match"))
 	switch {
 	case errors.Is(err, datastore.ErrSpeechTrackNotFound):
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Segment not found", nil)
 	case err != nil:
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the segment", err)
 	default:
-		writeAudio(w, data, format, "private, max-age=86400, immutable")
+		// Kept, but checked each time: a segment made again at the same seq has another ETag.
+		w.Header().Set("ETag", seg.ETag)
+		if seg.NotModified {
+			w.Header().Set("Cache-Control", segmentCache)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		writeAudio(w, seg.Data, seg.Format, segmentCache)
 	}
 }
+
+// segmentCache lets the browser keep a segment's audio but ask each time whether it is still
+// the segment's audio (a 304 when it is).
+const segmentCache = "private, no-cache"
 
 func writeAudio(w http.ResponseWriter, data []byte, format models.AudioFormat, cache string) {
 	w.Header().Set("Content-Type", format.MIMEType())

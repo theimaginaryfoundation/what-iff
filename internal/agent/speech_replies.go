@@ -243,8 +243,19 @@ func (a *Agent) runSpeechWorker(ctx context.Context, userID uuid.UUID, l speechL
 	if errors.Is(err, datastore.ErrSpeechLeaseLost) {
 		return // another worker has the track now, or it's gone
 	}
+	if code == speechInterrupted {
+		// Shutting down is not the track's end: leave it open for the next request to resume.
+		if err := a.ds.ReleaseSpeechWorker(context.WithoutCancel(ctx), l.trackID, l.token); err != nil {
+			a.logger.Warn("couldn't release a speech track", zap.String("track_id", l.trackID.String()), zap.Error(err))
+		}
+		return
+	}
 	finish(status, code)
 }
+
+// speechInterrupted is the code synthesizeTrack gives a track whose worker's context ended
+// with the lease still held: the instance is shutting down. The track isn't finished with it.
+const speechInterrupted = "cancelled"
 
 // synthesizeTrack makes the segments for the text the track hasn't read yet, in order,
 // and says how the track ends. It resumes from the text its segments read, not their
@@ -286,7 +297,7 @@ func (a *Agent) synthesizeTrack(ctx context.Context, userID uuid.UUID, l speechL
 	for i, text := range speechtext.Segment(rest, v.maxSegmentChars()) {
 		seq := len(said) + i
 		if err := ctx.Err(); err != nil {
-			return models.SpeechTrackFailed, "cancelled", a.leaseErr(ctx, l)
+			return models.SpeechTrackFailed, speechInterrupted, a.leaseErr(ctx, l)
 		}
 		decision, allowed, err := a.checkSpeechQuota(ctx, userID)
 		if err != nil {
@@ -298,7 +309,7 @@ func (a *Agent) synthesizeTrack(ctx context.Context, userID uuid.UUID, l speechL
 		audio, usage, err := a.synthesize(ctx, client, v, text, format)
 		if err != nil {
 			if ctx.Err() != nil {
-				return models.SpeechTrackFailed, "cancelled", a.leaseErr(ctx, l)
+				return models.SpeechTrackFailed, speechInterrupted, a.leaseErr(ctx, l)
 			}
 			a.logger.Warn("speech synthesis failed", zap.String("track_id", l.trackID.String()), zap.Int("seq", seq), zap.Error(err))
 			return models.SpeechTrackFailed, speechFailureCode(err), nil
@@ -422,26 +433,51 @@ func audioDurationMS(audio provider.SpeechAudio) int {
 	return int(s * 1000)
 }
 
-// SpeechSegmentAudio is one segment's stored audio, for the account's own track.
-func (a *Agent) SpeechSegmentAudio(ctx context.Context, userID, trackID uuid.UUID, seq int) ([]byte, models.AudioFormat, error) {
+// SegmentAudio is one segment's audio as the client asked for it.
+type SegmentAudio struct {
+	// ETag names this version of the segment. A segment can be withdrawn and made again at
+	// the same seq (a resumed track, a withdrawn round), so its URL alone doesn't name its audio.
+	ETag   string
+	Format models.AudioFormat
+	// Data is nil when NotModified: the client already has this version.
+	Data        []byte
+	NotModified bool
+}
+
+// segmentETag names a segment's version by its file key, which a worker's lease token makes
+// different every time the segment is made, without giving the key away.
+func segmentETag(fileKey string) string {
+	sum := sha256.Sum256([]byte(fileKey))
+	return `"` + hex.EncodeToString(sum[:12]) + `"`
+}
+
+// SpeechSegmentAudio is one segment's stored audio, for the account's own track. When
+// ifNoneMatch names the version stored, the audio isn't read at all.
+func (a *Agent) SpeechSegmentAudio(ctx context.Context, userID, trackID uuid.UUID, seq int, ifNoneMatch string) (SegmentAudio, error) {
 	track, err := a.ds.GetSpeechTrack(ctx, userID, trackID)
 	if err != nil {
-		return nil, "", err
+		return SegmentAudio{}, err
 	}
 	for _, s := range track.Segments {
 		if s.Seq != seq {
 			continue
 		}
+		out := SegmentAudio{ETag: segmentETag(s.FileKey), Format: s.Format}
+		if ifNoneMatch == out.ETag {
+			out.NotModified = true
+			return out, nil
+		}
 		data, err := a.fileStore.DownloadFile(ctx, s.FileKey)
 		if err != nil {
-			return nil, "", err
+			return SegmentAudio{}, err
 		}
 		if data == nil {
-			return nil, "", datastore.ErrSpeechTrackNotFound
+			return SegmentAudio{}, datastore.ErrSpeechTrackNotFound
 		}
-		return data, s.Format, nil
+		out.Data = data
+		return out, nil
 	}
-	return nil, "", datastore.ErrSpeechTrackNotFound
+	return SegmentAudio{}, datastore.ErrSpeechTrackNotFound
 }
 
 // SpeechTrack is the account's track, for the client polling it. A saved reply's track
