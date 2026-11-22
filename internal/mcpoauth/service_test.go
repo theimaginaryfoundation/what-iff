@@ -71,7 +71,7 @@ func TestStartAuthBuildsAuthorizeURL(t *testing.T) {
 			OAuthPKCEPolicy: models.MCPServerPKCERequired,
 		},
 	}
-	svc := New(store, nil, nil, Config{
+	svc := New(store, loopbackHTTPClient(), nil, Config{
 		RedirectURL:      "http://localhost:8080/api/mcp-servers/oauth/callback",
 		AllowedRedirects: []string{"http://localhost:4200"},
 	})
@@ -101,7 +101,7 @@ func TestHandleCallbackExchangesAndStoresTokens(t *testing.T) {
 			OAuthClientSecret: "secret",
 		},
 	}
-	svc := New(store, nil, nil, Config{
+	svc := New(store, loopbackHTTPClient(), nil, Config{
 		RedirectURL:         "http://localhost:8080/api/mcp-servers/oauth/callback",
 		PostAuthRedirectURL: "http://localhost:4200/integrations",
 		AllowedRedirects:    []string{"http://localhost:4200"},
@@ -124,7 +124,7 @@ func TestStartAuthRejectsNonOAuthConnector(t *testing.T) {
 			AuthMode: models.MCPServerAuthModeHeader,
 		},
 	}
-	svc := New(store, nil, nil, Config{
+	svc := New(store, loopbackHTTPClient(), nil, Config{
 		RedirectURL:      "http://localhost:8080/api/mcp-servers/oauth/callback",
 		AllowedRedirects: []string{"http://localhost:4200"},
 	})
@@ -143,7 +143,7 @@ func TestStartAuthRejectsInvalidURLs(t *testing.T) {
 			OAuthClientID: "client-id",
 		},
 	}
-	svc := New(store, nil, nil, Config{
+	svc := New(store, loopbackHTTPClient(), nil, Config{
 		RedirectURL:      "http://localhost:8080/api/mcp-servers/oauth/callback",
 		AllowedRedirects: []string{"http://localhost:4200"},
 	})
@@ -169,7 +169,7 @@ func TestHandleCallbackFailsOnMalformedTokenJSON(t *testing.T) {
 			OAuthClientSecret: "secret",
 		},
 	}
-	svc := New(store, nil, nil, Config{
+	svc := New(store, loopbackHTTPClient(), nil, Config{
 		RedirectURL:         "http://localhost:8080/api/mcp-servers/oauth/callback",
 		PostAuthRedirectURL: "http://localhost:4200/integrations",
 		AllowedRedirects:    []string{"http://localhost:4200"},
@@ -204,7 +204,7 @@ func TestStartAuthRejectsDisallowedRedirectAfter(t *testing.T) {
 			OAuthClientID: "client-id",
 		},
 	}
-	svc := New(store, nil, nil, Config{
+	svc := New(store, loopbackHTTPClient(), nil, Config{
 		RedirectURL:         "http://localhost:8080/api/mcp-servers/oauth/callback",
 		PostAuthRedirectURL: "http://localhost:4200/integrations",
 		AllowedRedirects:    []string{"http://localhost:4200"},
@@ -231,7 +231,7 @@ func TestHandleCallbackFallsBackWhenSessionRedirectNotAllowed(t *testing.T) {
 		},
 		consumeRedirect: "https://evil.example/capture",
 	}
-	svc := New(store, nil, nil, Config{
+	svc := New(store, loopbackHTTPClient(), nil, Config{
 		RedirectURL:         "http://localhost:8080/api/mcp-servers/oauth/callback",
 		PostAuthRedirectURL: "http://localhost:4200/integrations",
 		AllowedRedirects:    []string{"http://localhost:4200"},
@@ -254,7 +254,7 @@ func TestNew_InvalidRedirectURLFallsBackToDefaultCallback(t *testing.T) {
 			OAuthClientID: "client-id",
 		},
 	}
-	svc := New(store, nil, nil, Config{
+	svc := New(store, loopbackHTTPClient(), nil, Config{
 		RedirectURL:      "://bad",
 		AllowedRedirects: []string{"http://localhost:4200"},
 	})
@@ -265,7 +265,7 @@ func TestNew_InvalidRedirectURLFallsBackToDefaultCallback(t *testing.T) {
 }
 
 func TestCallbackURL_ReportsConfiguredRedirect(t *testing.T) {
-	svc := New(&fakeStore{}, nil, nil, Config{RedirectURL: "https://api.example.com/api/mcp-servers/oauth/callback"})
+	svc := New(&fakeStore{}, loopbackHTTPClient(), nil, Config{RedirectURL: "https://api.example.com/api/mcp-servers/oauth/callback"})
 	require.Equal(t, "https://api.example.com/api/mcp-servers/oauth/callback", svc.CallbackURL())
 }
 
@@ -276,7 +276,7 @@ func TestTokenRequest_HTTPErrorIncludesProviderDescription(t *testing.T) {
 	}))
 	defer tokenSrv.Close()
 
-	svc := New(&fakeStore{}, nil, nil, Config{})
+	svc := New(&fakeStore{}, loopbackHTTPClient(), nil, Config{})
 	_, err := svc.tokenRequest(context.Background(), tokenSrv.URL, url.Values{"grant_type": {"authorization_code"}})
 	require.EqualError(t, err, "oauth token endpoint error (400): invalid_grant: bad code")
 }
@@ -288,7 +288,18 @@ func TestTokenRequest_HTTPErrorNonJSONBody(t *testing.T) {
 	}))
 	defer tokenSrv.Close()
 
-	svc := New(&fakeStore{}, nil, nil, Config{})
+	svc := New(&fakeStore{}, loopbackHTTPClient(), nil, Config{})
 	_, err := svc.tokenRequest(context.Background(), tokenSrv.URL, url.Values{"grant_type": {"authorization_code"}})
 	require.EqualError(t, err, fmt.Sprintf("oauth token endpoint returned HTTP %d with non-JSON body", http.StatusBadRequest))
+}
+
+func TestTokenRequest_RejectsOversizedResponse(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"access_token":"` + strings.Repeat("a", maxTokenResponseBytes) + `"}`))
+	}))
+	defer tokenSrv.Close()
+
+	svc := New(&fakeStore{}, loopbackHTTPClient(), nil, Config{})
+	_, err := svc.tokenRequest(context.Background(), tokenSrv.URL, url.Values{"grant_type": {"authorization_code"}})
+	require.ErrorContains(t, err, "exceeds")
 }

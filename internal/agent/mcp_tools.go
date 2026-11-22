@@ -288,6 +288,10 @@ func isPermanentDiscoveryError(errMsg string) bool {
 		strings.Contains(msg, "oauth connector is not authenticated"),
 		strings.Contains(msg, "oauth access token is expired"),
 		strings.Contains(msg, "server_url host could not be resolved"),
+		// netguard refusals: the address or redirect target is not allowed, so retrying cannot help
+		// (a connector saved before save-time validation existed lands here).
+		strings.Contains(msg, "refusing to connect to non-public address"),
+		strings.Contains(msg, "refusing redirect from"),
 		strings.Contains(msg, "invalid mcp"),
 		strings.Contains(msg, "invalid oauth"),
 		strings.Contains(msg, "connector status"):

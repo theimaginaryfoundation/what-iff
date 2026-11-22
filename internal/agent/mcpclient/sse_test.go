@@ -115,7 +115,7 @@ func TestCallToolWithLogNotificationsAheadOfResult(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := New(nil, nil)
+	c := New(loopbackHTTPClient(), nil)
 	server := &models.MCPServer{ID: uuid.New(), Name: "sports", ServerURL: srv.URL, AuthMode: models.MCPServerAuthModeHeader}
 	servers := []*models.MCPServer{server}
 	sessions := make(SessionState)

@@ -19,6 +19,7 @@ import (
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/netguard"
 	"go.uber.org/zap"
 )
 
@@ -53,11 +54,15 @@ var (
 	ErrInvalidRedirectAfter = errors.New("invalid redirect_after")
 )
 
+// maxTokenResponseBytes bounds a token endpoint response; real ones are a few KiB.
+const maxTokenResponseBytes = 1 << 20
+
 const defaultOAuthCallbackURL = "http://localhost:8080/api/mcp-servers/oauth/callback"
 
 func New(store Store, client *http.Client, logger *zap.Logger, cfg Config) *Service {
 	if client == nil {
-		client = &http.Client{Timeout: 20 * time.Second}
+		// Token endpoints are user-chosen, so the default reaches public addresses only.
+		client = netguard.NewHTTPClient(netguard.PublicOnlyControl, 20*time.Second)
 	}
 	if logger == nil {
 		logger = zap.NewNop()
@@ -296,7 +301,13 @@ func (s *Service) tokenRequest(ctx context.Context, tokenURL string, form url.Va
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTokenResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("oauth token endpoint read failed: %w", err)
+	}
+	if len(body) > maxTokenResponseBytes {
+		return nil, fmt.Errorf("oauth token endpoint response exceeds %d bytes", maxTokenResponseBytes)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, parseOAuthTokenHTTPError(resp.StatusCode, body)
 	}

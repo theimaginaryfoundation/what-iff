@@ -433,7 +433,7 @@ func newMCPLifecycleAgentFixture(t *testing.T, serverURL string) (*Agent, *chatC
 	agent := &Agent{
 		ds:        ds,
 		logger:    zap.NewNop(),
-		mcpClient: mcpclient.New(nil, nil),
+		mcpClient: mcpclient.New(loopbackMCPHTTPClient(), nil),
 	}
 	chatCtx := &chatContext{
 		userID: userID,

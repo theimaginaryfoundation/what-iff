@@ -54,7 +54,7 @@ func TestToolReportedFailureIsLoggedAsWarnWithoutItsText(t *testing.T) {
 	fullToolName := "mcp__" + prefix[:8] + "__lookup"
 
 	core, logs := observer.New(zap.DebugLevel)
-	a := &Agent{mcpClient: mcpclient.New(nil, nil), logger: zap.New(core)}
+	a := &Agent{mcpClient: mcpclient.New(loopbackMCPHTTPClient(), nil), logger: zap.New(core)}
 	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New()}
 	chatCtx := &chatContext{
 		userID:     chat.UserID,

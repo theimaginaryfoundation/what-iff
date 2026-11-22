@@ -114,7 +114,7 @@ func (f *fakeElicitor) Elicit(ctx context.Context, _ *models.MCPServer, toolName
 
 func callGreet(t *testing.T, srvURL string, ctx context.Context) (CallToolResult, error) {
 	t.Helper()
-	c := New(nil, nil)
+	c := New(loopbackHTTPClient(), nil)
 	server := &models.MCPServer{ID: uuid.New(), Name: "greeter", ServerURL: srvURL, AuthMode: models.MCPServerAuthModeHeader}
 	servers := []*models.MCPServer{server}
 	sessions := make(SessionState)
@@ -181,7 +181,7 @@ func TestIdleTimer_PausedWhileWaiting(t *testing.T) {
 }
 
 func TestCompleteURLElicitations(t *testing.T) {
-	c := New(nil, nil)
+	c := New(loopbackHTTPClient(), nil)
 	server := &models.MCPServer{Name: "x"}
 	required := &RPCError{Method: "tools/call", Code: urlElicitationRequiredCode, Data: json.RawMessage(
 		`{"elicitations":[{"mode":"url","elicitationId":"e1","url":"https://auth.example.com/connect","message":"Sign in"}]}`)}

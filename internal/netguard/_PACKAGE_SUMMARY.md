@@ -6,12 +6,14 @@ Keeps server-side requests to user-chosen addresses on the public internet.
 
 ## Responsibilities
 
-- **`IsPublicIP`:** true only for a global unicast address that is not loopback, private, link-local (which includes the cloud metadata address), shared (100.64.0.0/10), multicast or unspecified.
-- **`PublicOnlyControl` / `PublicOnlyDialer`:** a `net.Dialer` hook, and a dialer using it, that refuse any other address.
+- **`IsPublicIP`:** true only for a global unicast address that is not loopback, private, link-local (which includes the cloud metadata address), multicast, unspecified, or a special-use range: shared (100.64.0.0/10), "this network" (0.0.0.0/8), NAT64 and 6to4 (which embed an IPv4 address), benchmarking, documentation, and deprecated site-local.
+- **`PublicOnlyControl` / `PublicOnlyDialer`:** a `net.Dialer` hook, and a dialer using it, that refuse any other address with an error wrapping `ErrNonPublicAddress`.
+- **`PublicOrLoopbackControl` / `Control(allowLoopback)`:** the same hook that also allows loopback, for a local-development opt-in that should reach this machine and nothing else internal.
+- **`NewHTTPClient(control, timeout)`:** the HTTP client for user-chosen addresses, with that hook on every connection, no proxy, same-origin redirects only (`SameOriginRedirects`), and `http.DefaultTransport`'s pool limits.
 
 ## Dependencies
 
-- **Inbound:** `internal/relaykit` (`relaykit.PublicOnlyControl` wraps it with the caller's name, for the Discord CDN fetcher and the Buzz and Slack clients), `internal/remotesync` (the remote server client).
+- **Inbound:** `internal/relaykit` (`relaykit.PublicOnlyControl` wraps it with the caller's name, for the Discord CDN fetcher and the Buzz and Slack clients), `internal/remotesync` (the remote server client), `internal/agent/mcpclient` (its default client), `internal/mcpoauth` (its default client), `internal/server` (the shared MCP client for connector calls and OAuth token requests).
 - **Outbound:** Standard library only.
 
 ## Non-obvious decisions
@@ -22,4 +24,5 @@ Keeps server-side requests to user-chosen addresses on the public internet.
 
 ## Testing
 
+- `client_test.go` — special-use ranges, the loopback opt-in, `NewHTTPClient` checking every connection, and same-origin redirects.
 - `netguard_test.go` — public and non-public addresses, IPv4 and IPv6, and a hostname dial showing the hook sees resolved IP literals (a hostname that reaches the hook directly is refused).

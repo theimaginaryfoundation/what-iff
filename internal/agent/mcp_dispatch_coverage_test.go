@@ -46,7 +46,7 @@ func TestDispatchMCPToolUse_Guards(t *testing.T) {
 	// mcp client configured, but missing chat context
 	ds, _, cleanup := newTestDatastore(t)
 	defer cleanup()
-	a = &Agent{ds: ds, mcpClient: mcpclient.New(nil, nil)}
+	a = &Agent{ds: ds, mcpClient: mcpclient.New(loopbackMCPHTTPClient(), nil)}
 	out, files, err = a.dispatchMCPToolUse(context.Background(), nil, use)
 	require.ErrorContains(t, err, "active chat context")
 	require.Empty(t, out)
@@ -92,7 +92,7 @@ func TestDispatchMCPToolUse_ReturnsGeneratedAttachments(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	a := &Agent{mcpClient: mcpclient.New(nil, nil)}
+	a := &Agent{mcpClient: mcpclient.New(loopbackMCPHTTPClient(), nil)}
 	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New()}
 	chatCtx := &chatContext{
 		userID: chat.UserID,
@@ -169,7 +169,7 @@ func TestExecuteToolUses_MCPResultsPreserveStatusAndContent(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			a := &Agent{mcpClient: mcpclient.New(nil, nil), logger: zap.NewNop()}
+			a := &Agent{mcpClient: mcpclient.New(loopbackMCPHTTPClient(), nil), logger: zap.NewNop()}
 			chat := &models.Chat{ID: uuid.New(), UserID: uuid.New()}
 			chatCtx := &chatContext{
 				userID: chat.UserID,

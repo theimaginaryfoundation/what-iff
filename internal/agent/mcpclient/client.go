@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/netguard"
 	"go.uber.org/zap"
 )
 
@@ -66,9 +67,12 @@ type cacheEntry struct {
 	expires time.Time
 }
 
+// New builds a client. A nil httpClient means a public-addresses-only one
+// (netguard.PublicOnlyControl): connector URLs are user-chosen, so the default fails closed, and
+// only an explicit client (a local-development opt-in, or a test's loopback server) widens it.
 func New(httpClient *http.Client, logger *zap.Logger) *Client {
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 15 * time.Second}
+		httpClient = netguard.NewHTTPClient(netguard.PublicOnlyControl, 15*time.Second)
 	}
 	if logger == nil {
 		logger = zap.NewNop()

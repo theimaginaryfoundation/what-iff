@@ -61,7 +61,7 @@ func TestDiscoverToolsAndCallByFullName(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New(nil, nil)
+	client := New(loopbackHTTPClient(), nil)
 	connectorID := uuid.New()
 	server := &models.MCPServer{
 		ID:          connectorID,
@@ -114,7 +114,7 @@ func TestProbeConnection(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		client := New(nil, nil)
+		client := New(loopbackHTTPClient(), nil)
 		count, err := client.ProbeConnection(context.Background(), &models.MCPServer{
 			ID:        uuid.New(),
 			ServerURL: srv.URL,
@@ -131,7 +131,7 @@ func TestProbeConnection(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		client := New(nil, nil)
+		client := New(loopbackHTTPClient(), nil)
 		count, err := client.ProbeConnection(context.Background(), &models.MCPServer{
 			ID:        uuid.New(),
 			ServerURL: srv.URL,
@@ -160,7 +160,7 @@ func TestProbeConnection(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		client := New(nil, nil)
+		client := New(loopbackHTTPClient(), nil)
 		count, err := client.ProbeConnection(context.Background(), &models.MCPServer{
 			ID:        uuid.New(),
 			ServerURL: srv.URL,
@@ -196,7 +196,7 @@ func TestProbeConnection_PropagatesMCPSessionHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New(nil, nil)
+	client := New(loopbackHTTPClient(), nil)
 	count, err := client.ProbeConnection(context.Background(), &models.MCPServer{
 		ID:        uuid.New(),
 		ServerURL: srv.URL,
@@ -246,7 +246,7 @@ func TestCallToolByFullName_PropagatesMCPSessionHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New(nil, nil)
+	client := New(loopbackHTTPClient(), nil)
 	server := &models.MCPServer{
 		ID:        uuid.New(),
 		Name:      "fastmcp",
@@ -299,7 +299,7 @@ func TestCallToolByFullName_DefaultFlowDoesNotReuseSessionAcrossCalls(t *testing
 	}))
 	defer srv.Close()
 
-	client := New(nil, nil)
+	client := New(loopbackHTTPClient(), nil)
 	server := &models.MCPServer{
 		ID:        uuid.New(),
 		Name:      "fastmcp",
@@ -353,7 +353,7 @@ func TestCallToolByFullName_PreservesExplicitEmptyStringArguments(t *testing.T) 
 	}))
 	defer srv.Close()
 
-	client := New(nil, nil)
+	client := New(loopbackHTTPClient(), nil)
 	server := &models.MCPServer{
 		ID:        uuid.New(),
 		Name:      "slack",
@@ -414,7 +414,7 @@ func TestCallToolByFullNameDetailed_ParsesTypedContentBlocks(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New(nil, nil)
+	client := New(loopbackHTTPClient(), nil)
 	server := &models.MCPServer{
 		ID:        uuid.New(),
 		Name:      "grafana",
@@ -464,7 +464,7 @@ func TestCallToolByFullNameDetailed_FallsBackToRawResultString(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New(nil, nil)
+	client := New(loopbackHTTPClient(), nil)
 	server := &models.MCPServer{
 		ID:        uuid.New(),
 		Name:      "misc",
@@ -517,7 +517,7 @@ func TestDiscoverTools_ErrorWhenAllEligibleConnectorsFail(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New(nil, nil)
+	client := New(loopbackHTTPClient(), nil)
 	server := &models.MCPServer{
 		ID:        uuid.New(),
 		Name:      "broken",
@@ -556,7 +556,7 @@ func TestProbeConnection_RejectsOversizedResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New(nil, nil)
+	client := New(loopbackHTTPClient(), nil)
 	_, err := client.ProbeConnection(context.Background(), &models.MCPServer{
 		ID:        uuid.New(),
 		ServerURL: srv.URL,
@@ -564,4 +564,16 @@ func TestProbeConnection_RejectsOversizedResponse(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "exceeded size limit")
+}
+
+// With no client passed in, connector calls fail closed: a server on a non-public address
+// (loopback here) is refused at connect time rather than reached.
+func TestNewWithoutClientRefusesNonPublicAddresses(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
+	defer srv.Close()
+
+	_, err := New(nil, nil).ProbeConnection(context.Background(), &models.MCPServer{ID: uuid.New(), Name: "internal", ServerURL: srv.URL, AuthMode: models.MCPServerAuthModeHeader, Status: models.MCPServerStatusActive})
+	require.ErrorContains(t, err, "refusing to connect to non-public address")
+	require.Zero(t, hits)
 }

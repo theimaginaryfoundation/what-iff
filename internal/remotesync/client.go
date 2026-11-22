@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -174,18 +173,10 @@ type Client struct {
 // has no proxy (Proxy is nil, so HTTPS_PROXY is ignored): a proxy would make the checked address
 // the proxy's rather than the remote's.
 func NewHTTPClient(allowLocal bool) *http.Client {
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	if !allowLocal {
-		dialer = netguard.PublicOnlyDialer(10 * time.Second)
+	if allowLocal {
+		return netguard.NewHTTPClient(nil, requestTimeout)
 	}
-	return &http.Client{
-		Timeout: requestTimeout,
-		Transport: &http.Transport{
-			DialContext:         dialer.DialContext,
-			TLSHandshakeTimeout: 10 * time.Second,
-			ForceAttemptHTTP2:   true,
-		},
-	}
+	return netguard.NewHTTPClient(netguard.PublicOnlyControl, requestTimeout)
 }
 
 // NewClient builds a client for an already-normalized base URL. httpClient may be nil, which

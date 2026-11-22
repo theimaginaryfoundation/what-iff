@@ -494,3 +494,56 @@ func TestHandleMCPServerOAuthCallback_KnownErrorWithoutRedirectReturnsBadRequest
 	router.ServeHTTP(rr, req)
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 }
+
+func TestSavingMCPServerValidatesURLs(t *testing.T) {
+	t.Parallel()
+	existingID := uuid.New()
+	legacy := &models.MCPServer{ID: existingID, Name: "n", Description: "d", ServerURL: "https://10.0.0.5/mcp", AuthMode: models.MCPServerAuthModeHeader}
+	provider := &fakeProvider{getFn: func(context.Context, uuid.UUID, uuid.UUID) (*models.MCPServer, error) {
+		copy := *legacy
+		return &copy, nil
+	}}
+	resolve := func(_ context.Context, host string) ([]net.IPAddr, error) {
+		if host == "internal.example" {
+			return []net.IPAddr{{IP: net.ParseIP("10.1.2.3")}}, nil
+		}
+		return []net.IPAddr{{IP: net.ParseIP("8.8.8.8")}}, nil
+	}
+	header := func(serverURL string) string {
+		return `{"name":"n","description":"d","server_url":"` + serverURL + `"}`
+	}
+	oauth := func(tokenURL string) string {
+		return `{"name":"n","description":"d","server_url":"https://8.8.8.8/mcp","auth_mode":"oauth","oauth_auth_url":"https://auth.example/authorize","oauth_token_url":"` + tokenURL + `","oauth_client_id":"c"}`
+	}
+	update := "/mcp-servers/" + existingID.String()
+
+	for _, tc := range []struct {
+		name, method, target, body string
+		allowLocal                 bool
+		want                       int
+	}{
+		{"create metadata address", http.MethodPost, "/mcp-servers", header("https://169.254.169.254/latest"), false, http.StatusBadRequest},
+		{"create private address", http.MethodPost, "/mcp-servers", header("https://10.0.0.5/mcp"), false, http.StatusBadRequest},
+		{"create CGNAT address", http.MethodPost, "/mcp-servers", header("https://100.64.1.1/mcp"), false, http.StatusBadRequest},
+		{"create NAT64 metadata address", http.MethodPost, "/mcp-servers", header("https://[64:ff9b::a9fe:a9fe]/mcp"), false, http.StatusBadRequest},
+		{"create hostname resolving to private", http.MethodPost, "/mcp-servers", header("https://internal.example/mcp"), false, http.StatusBadRequest},
+		{"create localhost when not allowed", http.MethodPost, "/mcp-servers", header("http://localhost:8765/mcp"), false, http.StatusBadRequest},
+		{"create public address", http.MethodPost, "/mcp-servers", header("https://8.8.8.8/mcp"), false, http.StatusCreated},
+		{"create plain http public address", http.MethodPost, "/mcp-servers", header("http://8.8.8.8/mcp"), false, http.StatusBadRequest},
+		{"create loopback literal over http when allowed", http.MethodPost, "/mcp-servers", header("http://127.0.0.1:8765/mcp"), true, http.StatusCreated},
+		{"create IPv6 loopback over http when allowed", http.MethodPost, "/mcp-servers", header("http://[::1]:8765/mcp"), true, http.StatusCreated},
+		{"create private address even when local allowed", http.MethodPost, "/mcp-servers", header("https://192.168.1.1/mcp"), true, http.StatusBadRequest},
+		{"create oauth with http token url", http.MethodPost, "/mcp-servers", oauth("http://auth.example/token"), false, http.StatusBadRequest},
+		{"create oauth with internal token url", http.MethodPost, "/mcp-servers", oauth("https://internal.example/token"), false, http.StatusBadRequest},
+		{"create oauth with public endpoints", http.MethodPost, "/mcp-servers", oauth("https://auth.example/token"), false, http.StatusCreated},
+		{"update to private address", http.MethodPatch, update, `{"server_url":"https://192.168.1.1/mcp"}`, false, http.StatusBadRequest},
+		{"update legacy connector without changing its url", http.MethodPatch, update, `{"name":"renamed"}`, false, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := newRouterWithConfig(provider, &fakeProber{}, Config{AllowLocalhostConnections: tc.allowLocal, ResolveHostIPs: resolve})
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, newAuthedRequest(t, tc.method, tc.target, []byte(tc.body)))
+			require.Equal(t, tc.want, rr.Code, rr.Body.String())
+		})
+	}
+}

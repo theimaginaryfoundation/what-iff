@@ -52,6 +52,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/netguard"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerconnections"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
@@ -243,6 +244,13 @@ func (s *Server) setupRoutes() {
 	connectionPresets := providerconnections.Presets(s.config.builtinProviderURLs(), s.config.LocalServerHost)
 	connections := providerconnections.NewResolver(connectionStore, connectionPresets)
 
+	// Connector URLs and OAuth token endpoints are user-chosen, so their requests reach public
+	// addresses only, plus loopback when MCP_ALLOW_LOCALHOST_CONNECTIONS is set for local
+	// development. This is user-chosen egress governed by netguard, not provider egress, so it
+	// stays off the provider transport (and its deny-network block under mock/local backends):
+	// connector calls already egressed in those modes, and MCP OAuth now does the same.
+	mcpHTTPClient := telemetry.InstrumentHTTPClient(netguard.NewHTTPClient(netguard.Control(s.config.MCPAllowLocalhostConnections), 20*time.Second))
+
 	agentCfg := agent.AgentConfig{
 		LifecycleContext: s.lifecycleCtx,
 		HTTPClient:       providerHTTPClient,
@@ -266,6 +274,8 @@ func (s *Server) setupRoutes() {
 		// connection holds, so they stay off the credential transport too.
 		Connections:          agent.ConnectionResolverFunc(connectionEndpoint(connections)),
 		ConnectionHTTPClient: listingHTTPClient,
+
+		MCPHTTPClient: mcpHTTPClient,
 	}
 	if s.config.LLMBackend == "vendor" {
 		// ErrNotConfigured (no PARALLEL_API_KEY) leaves vendor-native search in place; any
@@ -369,13 +379,13 @@ func (s *Server) setupRoutes() {
 		}
 	}
 	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, keyResolver.Configured(models.ModelProviderOpenAI), providerHTTPClient, s.lifecycleCtx)
-	oauthService := mcpoauth.New(dataStore, providerHTTPClient, s.logger, mcpoauth.Config{
+	oauthService := mcpoauth.New(dataStore, mcpHTTPClient, s.logger, mcpoauth.Config{
 		RedirectURL:         s.config.MCPOAuthRedirectURL,
 		PostAuthRedirectURL: s.config.MCPOAuthPostAuthURL,
 		AllowedRedirects:    s.config.MCPOAuthAllowedRedirects,
 	})
 	go mcpoauth.NewSweeper(oauthService, s.config.MCPOAuthSweepInterval, s.config.MCPOAuthRefreshAhead, s.config.MCPOAuthMaxFailures).Run(s.lifecycleCtx)
-	mcpServerHandler := mcpserver.NewHandler(dataStore, mcpclient.New(nil, s.logger), oauthService, s.logger, mcpserver.Config{
+	mcpServerHandler := mcpserver.NewHandler(dataStore, mcpclient.New(mcpHTTPClient, s.logger), oauthService, s.logger, mcpserver.Config{
 		AllowLocalhostConnections: s.config.MCPAllowLocalhostConnections,
 	})
 	modelHandler := model.NewHandler(dataStore, s.logger)

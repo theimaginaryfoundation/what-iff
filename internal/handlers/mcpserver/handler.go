@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/mcpoauth"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/netguard"
 	"go.uber.org/zap"
 )
 
@@ -139,6 +139,10 @@ func (h *Handler) CreateMCPServer(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "name, description, and server_url are required", nil)
 		return
 	}
+	if err := validateConnectionTestURL(r.Context(), serverURL, h.config.AllowLocalhostConnections, h.resolveHostIPs); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+		return
+	}
 	if authMode != models.MCPServerAuthModeHeader && authMode != models.MCPServerAuthModeOAuth {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "auth_mode must be 'header' or 'oauth'", nil)
 		return
@@ -150,6 +154,10 @@ func (h *Handler) CreateMCPServer(w http.ResponseWriter, r *http.Request) {
 		}
 		if !validPKCEPolicy(pkcePolicy) {
 			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "oauth_pkce_policy must be required, supported, or not_supported", nil)
+			return
+		}
+		if err := h.validateOAuthURLs(r.Context(), req.OAuthAuthURL, req.OAuthTokenURL); err != nil {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
 			return
 		}
 	}
@@ -440,6 +448,14 @@ func (h *Handler) UpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "name, description, and server_url are required", nil)
 		return
 	}
+	// Checked only when the address changes, so a connector saved before this check existed
+	// can still be renamed; the client's dial guard refuses non-public addresses regardless.
+	if updated.ServerURL != current.ServerURL {
+		if err := validateConnectionTestURL(r.Context(), updated.ServerURL, h.config.AllowLocalhostConnections, h.resolveHostIPs); err != nil {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+			return
+		}
+	}
 	if strings.TrimSpace(updated.AuthMode) == "" {
 		updated.AuthMode = models.MCPServerAuthModeHeader
 	}
@@ -458,6 +474,13 @@ func (h *Handler) UpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 		if !validPKCEPolicy(updated.OAuthPKCEPolicy) {
 			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "oauth_pkce_policy must be required, supported, or not_supported", nil)
 			return
+		}
+		// Like server_url, checked only when something about them changes.
+		if updated.AuthMode != current.AuthMode || updated.OAuthAuthURL != current.OAuthAuthURL || updated.OAuthTokenURL != current.OAuthTokenURL {
+			if err := h.validateOAuthURLs(r.Context(), updated.OAuthAuthURL, updated.OAuthTokenURL); err != nil {
+				handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+				return
+			}
 		}
 	}
 
@@ -657,9 +680,34 @@ func normalizeScopes(in []string) []string {
 	return out
 }
 
+// validateOAuthURLs checks a connector's OAuth endpoints with the server_url policy. The token
+// URL is fetched by the server; the authorization URL is only visited by the browser, but the
+// same rule keeps both on https and off internal hosts.
+func (h *Handler) validateOAuthURLs(ctx context.Context, authURL, tokenURL string) error {
+	if err := validateMCPURL(ctx, "oauth_auth_url", authURL, h.config.AllowLocalhostConnections, h.resolveHostIPs); err != nil {
+		return err
+	}
+	return validateMCPURL(ctx, "oauth_token_url", tokenURL, h.config.AllowLocalhostConnections, h.resolveHostIPs)
+}
+
+// validateConnectionTestURL checks server_url; see validateMCPURL.
 func validateConnectionTestURL(
 	ctx context.Context,
 	rawURL string,
+	allowLocalhost bool,
+	resolveHostIPs func(context.Context, string) ([]net.IPAddr, error),
+) error {
+	return validateMCPURL(ctx, "server_url", rawURL, allowLocalhost, resolveHostIPs)
+}
+
+// validateMCPURL is the early, friendly check on a user-chosen MCP address (field names it in
+// errors). It applies the same policy the client enforces at connect time
+// (netguard.Control(allowLocalhost)): public addresses, plus loopback when local connections are
+// allowed. Plain http is accepted only for loopback. Path is intentionally unrestricted: self-hosted
+// MCP servers may expose JSON-RPC under non-root routes.
+func validateMCPURL(
+	ctx context.Context,
+	field, rawURL string,
 	allowLocalhost bool,
 	resolveHostIPs func(context.Context, string) ([]net.IPAddr, error),
 ) error {
@@ -668,63 +716,46 @@ func validateConnectionTestURL(
 	}
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || parsed == nil {
-		return fmt.Errorf("server_url must be a valid absolute URL")
+		return fmt.Errorf("%s must be a valid absolute URL", field)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("server_url must use http or https")
+		return fmt.Errorf("%s must use http or https", field)
 	}
-	if strings.TrimSpace(parsed.Host) == "" {
-		return fmt.Errorf("server_url host is required")
-	}
-	// Path is intentionally unrestricted: self-hosted MCP servers may expose
-	// JSON-RPC under non-root routes. Risk is mitigated by scheme/host policy
-	// here plus transport safeguards (timeouts/body limits) in the MCP client.
 	host := strings.TrimSpace(parsed.Hostname())
 	if host == "" {
-		return fmt.Errorf("server_url host is required")
+		return fmt.Errorf("%s host is required", field)
 	}
 
+	var ips []net.IP
 	if isLocalhostName(host) {
-		if !allowLocalhost {
-			return fmt.Errorf("localhost MCP URLs are disabled by server policy")
-		}
-		return nil
-	}
-
-	if ip, err := netip.ParseAddr(host); err == nil {
-		if err := validateResolvedIP(ip, allowLocalhost); err != nil {
-			return err
-		}
-	} else if parsedIP := net.ParseIP(host); parsedIP != nil {
-		if addr, ok := netip.AddrFromSlice(parsedIP); ok {
-			if err := validateResolvedIP(addr.Unmap(), allowLocalhost); err != nil {
-				return err
-			}
-		}
+		ips = []net.IP{net.IPv6loopback}
+	} else if ip := net.ParseIP(host); ip != nil {
+		ips = []net.IP{ip}
 	} else {
-		ips, err := resolveHostIPs(ctx, host)
-		if err != nil {
-			return fmt.Errorf("server_url host could not be resolved")
+		addrs, err := resolveHostIPs(ctx, host)
+		if err != nil || len(addrs) == 0 {
+			return fmt.Errorf("%s host could not be resolved", field)
 		}
-		if len(ips) == 0 {
-			return fmt.Errorf("server_url host could not be resolved")
-		}
-		for _, ipAddr := range ips {
-			if ipAddr.IP == nil {
-				continue
-			}
-			addr, ok := netip.AddrFromSlice(ipAddr.IP)
-			if !ok {
-				continue
-			}
-			if err := validateResolvedIP(addr.Unmap(), allowLocalhost); err != nil {
-				return err
-			}
+		for _, a := range addrs {
+			ips = append(ips, a.IP)
 		}
 	}
 
-	if parsed.Scheme != "https" {
-		return fmt.Errorf("server_url must use https for non-local hosts")
+	allLoopback := true
+	for _, ip := range ips {
+		switch {
+		case ip.IsLoopback():
+			if !allowLocalhost {
+				return fmt.Errorf("localhost MCP URLs are disabled by server policy")
+			}
+		case netguard.IsPublicIP(ip):
+			allLoopback = false
+		default:
+			return fmt.Errorf("private network MCP URLs are not allowed")
+		}
+	}
+	if parsed.Scheme != "https" && !allLoopback {
+		return fmt.Errorf("%s must use https for non-local hosts", field)
 	}
 	return nil
 }
@@ -732,17 +763,4 @@ func validateConnectionTestURL(
 func isLocalhostName(host string) bool {
 	h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
 	return h == "localhost" || strings.HasSuffix(h, ".localhost")
-}
-
-func validateResolvedIP(ip netip.Addr, allowLocalhost bool) error {
-	if ip.IsLoopback() {
-		if !allowLocalhost {
-			return fmt.Errorf("localhost MCP URLs are disabled by server policy")
-		}
-		return nil
-	}
-	if ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
-		return fmt.Errorf("private network MCP URLs are not allowed")
-	}
-	return nil
 }

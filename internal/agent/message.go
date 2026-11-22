@@ -244,6 +244,10 @@ type AgentConfig struct {
 	// credential transport, since a connection carries its own key.
 	Connections          ConnectionResolver
 	ConnectionHTTPClient *http.Client
+	// MCPHTTPClient carries MCP connector calls. Nil means public addresses only
+	// (see mcpclient.New); the server passes one that also allows loopback when
+	// MCP_ALLOW_LOCALHOST_CONNECTIONS is set.
+	MCPHTTPClient *http.Client
 	// LLMBackend selects assistant generation: "vendor" (default, real
 	// providers), "mock" (in-process MockAdapter), or "local" (a real local
 	// OpenAI-compatible server).
@@ -315,7 +319,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		entityTool:                   tools.NewEntityTool(ds, logger),
 		agentFileTool:                tools.NewAgentFileTool(ds, fileStore, logger),
 		fileCommentsTool:             tools.NewFileCommentsTool(ds, fileStore, logger),
-		mcpClient:                    mcpclient.New(nil, logger),
+		mcpClient:                    mcpclient.New(cfg.MCPHTTPClient, logger),
 		chunkPipeline:                newChunkPipelineForMode(cfg.LLMBackend != "vendor", &oaiClient, ds, logger),
 		fileStore:                    fileStore,
 		meter:                        cfg.Meter,

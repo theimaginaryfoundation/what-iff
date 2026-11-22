@@ -44,7 +44,7 @@ func TestGetSubagentMCPTools_ListRitualMCPServersErrorReturnsNil(t *testing.T) {
 	mock.ExpectQuery("SELECT .*").WillReturnError(errCoverageTestSentinel)
 
 	a := newTestAgent(ds)
-	a.mcpClient = mcpclient.New(nil, nil)
+	a.mcpClient = mcpclient.New(loopbackMCPHTTPClient(), nil)
 	got := a.getSubagentMCPTools(context.Background(), uuid.New(), []uuid.UUID{uuid.New()}, "gpt-5.4")
 	require.Nil(t, got)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -91,7 +91,7 @@ func TestPrepareTurnMCPToolSpecs_ChatServersLoadFailureYieldsNoTools(t *testing.
 	mock.ExpectRollback()
 
 	a := newTestAgent(ds)
-	a.mcpClient = mcpclient.New(nil, nil)
+	a.mcpClient = mcpclient.New(loopbackMCPHTTPClient(), nil)
 	got := a.prepareTurnMCPToolSpecs(context.Background(), nil, uuid.New(), uuid.New(), nil)
 	require.Empty(t, got)
 	require.NoError(t, mock.ExpectationsWereMet())
