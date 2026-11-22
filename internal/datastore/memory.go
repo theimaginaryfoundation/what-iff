@@ -240,6 +240,9 @@ func (d *Datastore) CreateMemory(ctx context.Context, userID uuid.UUID, mem mode
 	newMem, err := memCreate.Save(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T1("create.failed", "Entity", "memory"), zap.Error(err))
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
 		return nil, err
 	}
 
@@ -250,6 +253,9 @@ func (d *Datastore) CreateMemory(ctx context.Context, userID uuid.UUID, mem mode
 			Save(ctx)
 		if err != nil {
 			d.logger.Error(i18n.T1("create.failed", "Entity", "embedding"), zap.Error(err))
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
 			return nil, err
 		}
 	}
@@ -913,6 +919,9 @@ func (d *Datastore) ListMemories(ctx context.Context, userID uuid.UUID, pageNum,
 		case models.MemoryLevelSummary:
 			query = query.Where(memory.ScopeEQ(memory.ScopeSummary))
 		default:
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
 			return nil, fmt.Errorf("%w: invalid memory level filter: %s", ErrInvalidRequestBody, *filters.Level)
 		}
 	} else {

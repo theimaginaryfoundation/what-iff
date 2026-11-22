@@ -134,6 +134,9 @@ func (d *Datastore) ListModels(ctx context.Context) ([]*models.Model, error) {
 		All(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T1("query.failed", "Entity", "models"), zap.Error(err))
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
 		return nil, err
 	}
 
