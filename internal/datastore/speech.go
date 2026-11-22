@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
@@ -15,6 +16,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
 	entmodel "github.com/theimaginaryfoundation/what-iff/ent/model"
 	"github.com/theimaginaryfoundation/what-iff/ent/personality"
+	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	"github.com/theimaginaryfoundation/what-iff/ent/speechsegment"
 	"github.com/theimaginaryfoundation/what-iff/ent/speechtrack"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
@@ -24,8 +26,15 @@ import (
 // Speech (ADR 0x052): personalities' voices, and the speech tracks replies are read
 // aloud from.
 
-// ErrSpeechTrackNotFound is a track that doesn't exist, or isn't the account's.
-var ErrSpeechTrackNotFound = errors.New("speech track not found")
+var (
+	// ErrSpeechTrackNotFound is a track that doesn't exist, or isn't the account's.
+	ErrSpeechTrackNotFound = errors.New("speech track not found")
+	// ErrSpeechLeaseLost is a worker whose lease on a track lapsed and went to another,
+	// or whose track is gone: it stops without writing.
+	ErrSpeechLeaseLost = errors.New("the speech track's lease is held by another worker")
+	// ErrSpeechSegmentExists is a segment the track already has.
+	ErrSpeechSegmentExists = errors.New("the speech track already has this segment")
+)
 
 // SetPersonalityVoice sets the personality's voice, or clears it when voice is nil.
 // The model must be a speech model the account can use, and the voice one it offers;
@@ -84,7 +93,7 @@ func toSpeechTrack(e *ent.SpeechTrack) *models.SpeechTrack {
 		ID: e.ID, UserID: e.UserID, ChatID: e.ChatID, MessageID: e.MessageID, JobID: e.JobID,
 		ModelID: e.ModelID, Voice: e.Voice, Style: e.Style, VoiceKey: e.VoiceKey,
 		Status: models.SpeechTrackStatus(e.Status), ErrorCode: e.ErrorCode, CreatedAt: e.CreatedAt,
-		Segments: []models.SpeechSegment{},
+		Segments: []models.SpeechSegment{}, WorkerUntil: e.WorkerUntil,
 	}
 	if e.Autoplay != nil {
 		t.Autoplay = models.SpeechAutoplay(*e.Autoplay)
@@ -165,8 +174,10 @@ func (d *Datastore) GetSpeechTrack(ctx context.Context, userID, trackID uuid.UUI
 }
 
 // AcquireSpeechWorker claims an open track for a synthesis worker until until, when
-// no other worker holds it; it reports whether it did.
-func (d *Datastore) AcquireSpeechWorker(ctx context.Context, trackID uuid.UUID, until time.Time) (bool, error) {
+// no other worker holds it. It returns the worker's token, which every later write
+// names, and whether it got the lease.
+func (d *Datastore) AcquireSpeechWorker(ctx context.Context, trackID uuid.UUID, until time.Time) (uuid.UUID, bool, error) {
+	token := uuid.New()
 	n, err := d.dbClient.SpeechTrack.Update().
 		Where(
 			speechtrack.ID(trackID),
@@ -174,34 +185,112 @@ func (d *Datastore) AcquireSpeechWorker(ctx context.Context, trackID uuid.UUID, 
 			speechtrack.Or(speechtrack.WorkerUntilIsNil(), speechtrack.WorkerUntilLT(time.Now())),
 		).
 		SetWorkerUntil(until).
+		SetWorkerToken(token).
 		Save(ctx)
-	return n == 1, err
+	if err != nil || n != 1 {
+		return uuid.Nil, false, err
+	}
+	return token, true, nil
 }
 
-// RenewSpeechWorker extends a worker's lease on its track.
-func (d *Datastore) RenewSpeechWorker(ctx context.Context, trackID uuid.UUID, until time.Time) error {
-	return d.dbClient.SpeechTrack.UpdateOneID(trackID).SetWorkerUntil(until).Exec(ctx)
+// heldBy is the track while the worker with token holds it.
+func heldBy(trackID, token uuid.UUID) predicate.SpeechTrack {
+	return speechtrack.And(speechtrack.ID(trackID), speechtrack.WorkerToken(token), speechtrack.StatusEQ(speechtrack.StatusOpen))
 }
 
-// AddSpeechSegment records a synthesised segment of a track.
-func (d *Datastore) AddSpeechSegment(ctx context.Context, trackID uuid.UUID, s models.SpeechSegment) error {
-	err := d.dbClient.SpeechSegment.Create().
+// RenewSpeechWorker extends a worker's lease on its track, or is ErrSpeechLeaseLost.
+func (d *Datastore) RenewSpeechWorker(ctx context.Context, trackID, token uuid.UUID, until time.Time) error {
+	n, err := d.dbClient.SpeechTrack.Update().Where(heldBy(trackID, token)).SetWorkerUntil(until).Save(ctx)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrSpeechLeaseLost
+	}
+	return nil
+}
+
+// AddSpeechSegment records a synthesised segment of a track, for the worker holding it:
+// ErrSpeechLeaseLost when it no longer does, ErrSpeechSegmentExists when the track
+// already has the segment (so it isn't billed twice).
+func (d *Datastore) AddSpeechSegment(ctx context.Context, trackID, token uuid.UUID, s models.SpeechSegment) error {
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Touching the row proves the lease and holds it until the segment is in.
+	n, err := tx.SpeechTrack.Update().Where(heldBy(trackID, token)).SetUpdatedAt(time.Now()).Save(ctx)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrSpeechLeaseLost
+	}
+	exists, err := tx.SpeechSegment.Query().Where(speechsegment.TrackID(trackID), speechsegment.Seq(s.Seq)).Exist(ctx)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrSpeechSegmentExists
+	}
+	if err := tx.SpeechSegment.Create().
 		SetTrackID(trackID).SetSeq(s.Seq).SetText(s.Text).SetFileKey(s.FileKey).
 		SetFormat(string(s.Format)).SetDurationMs(s.DurationMS).SetSizeBytes(s.SizeBytes).
-		Exec(ctx)
-	if ent.IsConstraintError(err) {
-		return nil // already there: a worker that lost its lease and came back
+		Exec(ctx); err != nil {
+		return err
 	}
-	return err
+	return tx.Commit()
 }
 
-// FinishSpeechTrack ends a track's synthesis, releasing the worker's lease.
-func (d *Datastore) FinishSpeechTrack(ctx context.Context, trackID uuid.UUID, status models.SpeechTrackStatus, code string) error {
-	return d.dbClient.SpeechTrack.UpdateOneID(trackID).
+// WithdrawSpeechSegments deletes a track's segments from seq on, for the worker holding
+// it, returning their files for the caller to delete: segments that no longer match
+// what the reply says.
+func (d *Datastore) WithdrawSpeechSegments(ctx context.Context, trackID, token uuid.UUID, fromSeq int) ([]string, error) {
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	n, err := tx.SpeechTrack.Update().Where(heldBy(trackID, token)).SetUpdatedAt(time.Now()).Save(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, ErrSpeechLeaseLost
+	}
+	segs, err := tx.SpeechSegment.Query().
+		Where(speechsegment.TrackID(trackID), speechsegment.SeqGTE(fromSeq)).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(segs))
+	for _, s := range segs {
+		keys = append(keys, s.FileKey)
+	}
+	if _, err := tx.SpeechSegment.Delete().
+		Where(speechsegment.TrackID(trackID), speechsegment.SeqGTE(fromSeq)).Exec(ctx); err != nil {
+		return nil, err
+	}
+	return keys, tx.Commit()
+}
+
+// FinishSpeechTrack ends a track's synthesis, releasing the lease. A worker names its
+// token, and finishes only a track it still holds; uuid.Nil finishes one no worker holds.
+// Either way, a track another worker holds is left to it.
+func (d *Datastore) FinishSpeechTrack(ctx context.Context, trackID, token uuid.UUID, status models.SpeechTrackStatus, code string) error {
+	where := heldBy(trackID, token)
+	if token == uuid.Nil {
+		where = speechtrack.And(speechtrack.ID(trackID),
+			speechtrack.Or(speechtrack.WorkerUntilIsNil(), speechtrack.WorkerUntilLT(time.Now())))
+	}
+	_, err := d.dbClient.SpeechTrack.Update().Where(where).
 		SetStatus(speechtrack.Status(status)).
 		SetErrorCode(code).
 		ClearWorkerUntil().
-		Exec(ctx)
+		ClearWorkerToken().
+		Save(ctx)
+	return err
 }
 
 // ReopenSpeechTrack opens a failed or stopped track again, keeping the segments it
@@ -221,56 +310,75 @@ type SpeechTrackFiles struct {
 	Files []string
 }
 
+// messageGone is a track whose message was deleted.
+func messageGone() predicate.SpeechTrack {
+	return predicate.SpeechTrack(func(sel *sql.Selector) {
+		msgs := sql.Table(chatmessage.Table)
+		sel.Where(sql.And(
+			sql.NotNull(sel.C(speechtrack.FieldMessageID)),
+			sql.NotIn(sel.C(speechtrack.FieldMessageID), sql.Select(msgs.C(chatmessage.FieldID)).From(msgs)),
+		))
+	})
+}
+
+// sweepable is a track to delete: unplayed since cutoff, or whose message is gone.
+func sweepable(cutoff time.Time) predicate.SpeechTrack {
+	return speechtrack.Or(speechtrack.LastPlayedAtLT(cutoff), messageGone())
+}
+
 // SweepableSpeechTracks lists up to limit tracks to delete: unplayed since cutoff, or
-// whose message is gone.
+// whose message is gone. Deleting them takes them off the list, so each sweep reaches
+// further.
 func (d *Datastore) SweepableSpeechTracks(ctx context.Context, cutoff time.Time, limit int) ([]SpeechTrackFiles, error) {
-	stale, err := d.dbClient.SpeechTrack.Query().
-		Where(speechtrack.LastPlayedAtLT(cutoff)).
-		WithSegments().
-		Limit(limit).
-		All(ctx)
-	if err != nil {
-		return nil, err
-	}
-	// Tracks whose message was deleted, a batch at a time.
-	candidates, err := d.dbClient.SpeechTrack.Query().
-		Where(speechtrack.MessageIDNotNil(), speechtrack.LastPlayedAtGTE(cutoff)).
+	rows, err := d.dbClient.SpeechTrack.Query().
+		Where(sweepable(cutoff)).
 		Order(ent.Asc(speechtrack.FieldLastPlayedAt)).
-		Limit(limit).
 		WithSegments().
+		Limit(limit).
 		All(ctx)
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]uuid.UUID, 0, len(candidates))
-	for _, t := range candidates {
-		ids = append(ids, *t.MessageID)
-	}
-	alive, err := d.dbClient.ChatMessage.Query().Where(chatmessage.IDIn(ids...)).IDs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	exists := make(map[uuid.UUID]bool, len(alive))
-	for _, id := range alive {
-		exists[id] = true
-	}
-	var out []SpeechTrackFiles
-	add := func(t *ent.SpeechTrack) {
+	out := make([]SpeechTrackFiles, 0, len(rows))
+	for _, t := range rows {
 		f := SpeechTrackFiles{ID: t.ID}
 		for _, s := range t.Edges.Segments {
 			f.Files = append(f.Files, s.FileKey)
 		}
 		out = append(out, f)
 	}
-	for _, t := range stale {
-		add(t)
-	}
-	for _, t := range candidates {
-		if !exists[*t.MessageID] {
-			add(t)
-		}
-	}
 	return out, nil
+}
+
+// SweepSpeechTrack deletes a track the sweeper listed, with its segments' rows, if it
+// is still sweepable: one played since it was listed is kept. It returns the files of
+// the segments it deleted, for the caller to delete after, and whether it deleted it.
+func (d *Datastore) SweepSpeechTrack(ctx context.Context, trackID uuid.UUID, cutoff time.Time) ([]string, bool, error) {
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Locks the row against a Listen marking it played until the delete commits.
+	n, err := tx.SpeechTrack.Update().Where(speechtrack.ID(trackID), sweepable(cutoff)).SetUpdatedAt(time.Now()).Save(ctx)
+	if err != nil || n == 0 {
+		return nil, false, err
+	}
+	segs, err := tx.SpeechSegment.Query().Where(speechsegment.TrackID(trackID)).All(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	keys := make([]string, 0, len(segs))
+	for _, s := range segs {
+		keys = append(keys, s.FileKey)
+	}
+	if _, err := tx.SpeechSegment.Delete().Where(speechsegment.TrackID(trackID)).Exec(ctx); err != nil {
+		return nil, false, err
+	}
+	if err := tx.SpeechTrack.DeleteOneID(trackID).Exec(ctx); err != nil {
+		return nil, false, err
+	}
+	return keys, true, tx.Commit()
 }
 
 // DeleteSpeechTrack deletes a track and its segments' rows; its files are the
@@ -394,25 +502,6 @@ func (d *Datastore) SpeechTrackState(ctx context.Context, trackID uuid.UUID) (mo
 		a = models.SpeechAutoplay(*e.Autoplay)
 	}
 	return a, models.SpeechTrackStatus(e.Status), nil
-}
-
-// WithdrawSpeechSegments deletes a track's segments from seq on, returning their files
-// for the caller to delete: a round read out turned out not to be the last (ADR 0x052 §8).
-func (d *Datastore) WithdrawSpeechSegments(ctx context.Context, trackID uuid.UUID, fromSeq int) ([]string, error) {
-	segs, err := d.dbClient.SpeechSegment.Query().
-		Where(speechsegment.TrackID(trackID), speechsegment.SeqGTE(fromSeq)).All(ctx)
-	if err != nil {
-		return nil, err
-	}
-	keys := make([]string, 0, len(segs))
-	for _, s := range segs {
-		keys = append(keys, s.FileKey)
-	}
-	if _, err := d.dbClient.SpeechSegment.Delete().
-		Where(speechsegment.TrackID(trackID), speechsegment.SeqGTE(fromSeq)).Exec(ctx); err != nil {
-		return nil, err
-	}
-	return keys, nil
 }
 
 // SetChatVoiceAutoplay sets the chat's autoplay override; nil follows the personality.

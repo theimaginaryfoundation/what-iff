@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, Injector, afterNextRender, computed, inject, input, signal } from '@angular/core';
 
 import { VoiceCostOutletComponent } from '../../../../extensions/voice-cost-outlet.component';
 import { SpeechAutoplayService } from '../../../../core/services/speech-autoplay.service';
@@ -7,6 +7,8 @@ import { RadioComponent } from '../../../../shared/ui/radio/radio.component';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
 type Choice = 'default' | 'on' | 'off';
+
+let nextId = 0;
 
 /**
  * The chat's "read replies aloud" setting (ADR 0x052 §9): follow the personality, always, or
@@ -18,6 +20,7 @@ type Choice = 'default' | 'on' | 'off';
   standalone: true,
   imports: [RadioComponent, TooltipDirective, VoiceCostOutletComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { '(document:click)': 'onDocumentClick($event)', '(document:keydown.escape)': 'onEscape($event)' },
   template: `
     @if (shown()) {
       <span class="autoplay">
@@ -29,10 +32,12 @@ type Choice = 'default' | 'on' | 'off';
           class="autoplay__button"
           data-testid="autoplay-toggle"
           [class.autoplay__button--on]="on()"
+          aria-haspopup="true"
           [attr.aria-expanded]="open()"
+          [attr.aria-controls]="open() ? menuId : null"
           [attr.aria-label]="on() ? 'Replies are read aloud as they arrive' : 'Replies are not read aloud'"
           [uiTooltip]="on() ? 'Replies are read aloud as they arrive' : 'Read replies aloud as they arrive'"
-          (click)="open.set(!open())"
+          (click)="toggle()"
         >
           <svg
             width="14"
@@ -54,11 +59,11 @@ type Choice = 'default' | 'on' | 'off';
           </svg>
         </button>
         @if (open()) {
-          <span class="autoplay__menu" role="radiogroup" aria-label="Read replies aloud" data-testid="autoplay-menu">
+          <span class="autoplay__menu" role="radiogroup" aria-label="Read replies aloud" data-testid="autoplay-menu" [id]="menuId">
             <span class="autoplay__title">Read replies aloud</span>
             @for (c of choices(); track c.value) {
               <label class="autoplay__choice">
-                <ui-radio name="autoplay-choice" [value]="c.value" [checked]="choice() === c.value" (selected)="pick(c.value)" />
+                <ui-radio [name]="menuId" [value]="c.value" [checked]="choice() === c.value" (selected)="pick(c.value)" />
                 {{ c.label }}
               </label>
             }
@@ -145,8 +150,13 @@ export class AutoplayToggleComponent {
 
   readonly chatId = input<string | null>(null);
 
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly injector = inject(Injector);
+
   readonly open = signal(false);
   readonly error = signal('');
+  /** The menu's id, and its radios' name: unique to this toggle, as there may be several. */
+  readonly menuId = `autoplay-menu-${nextId++}`;
 
   private readonly settings = computed(() => this.autoplay.chatAutoplay(this.chatId()));
   readonly shown = computed(() => this.player.chatHasVoice(this.chatId()) && !!this.settings());
@@ -162,13 +172,50 @@ export class AutoplayToggleComponent {
     { value: 'off' as Choice, label: 'Never, in this chat' },
   ]);
 
+  toggle(): void {
+    if (this.open()) {
+      this.close(false);
+      return;
+    }
+    this.open.set(true);
+    // Into the menu, on the choice that holds now.
+    afterNextRender(
+      () => {
+        const menu = this.host.nativeElement.querySelector(`#${this.menuId}`);
+        (menu?.querySelector<HTMLElement>('input:checked') ?? menu?.querySelector<HTMLElement>('input'))?.focus();
+      },
+      { injector: this.injector },
+    );
+  }
+
+  /** Closes the menu, giving focus back to its button when it had it. */
+  close(refocus: boolean): void {
+    this.open.set(false);
+    this.error.set('');
+    if (refocus) this.host.nativeElement.querySelector<HTMLElement>('[data-testid="autoplay-toggle"]')?.focus();
+  }
+
+  onDocumentClick(event: Event): void {
+    if (this.open() && !this.host.nativeElement.contains(event.target as Node)) this.close(false);
+  }
+
+  onEscape(event: Event): void {
+    if (!this.open() || event.defaultPrevented) return;
+    event.preventDefault();
+    this.close(true);
+  }
+
   async pick(choice: Choice): Promise<void> {
     const chatId = this.chatId();
-    if (!chatId || choice === this.choice()) return;
+    if (!chatId) return;
+    if (choice === this.choice()) {
+      this.close(true);
+      return;
+    }
     this.error.set('');
     try {
       await this.autoplay.setOverride(chatId, choice === 'default' ? null : choice === 'on');
-      this.open.set(false);
+      this.close(true);
     } catch {
       this.error.set("Couldn't save that. Try again.");
     }

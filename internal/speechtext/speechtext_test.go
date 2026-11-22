@@ -3,6 +3,7 @@ package speechtext
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 )
@@ -100,4 +101,88 @@ func TestNextSpeakable(t *testing.T) {
 
 	piece, _ = NextSpeakable("Ask Dr. Lee tomorrow", true, 600)
 	require.Empty(t, piece, "an abbreviation doesn't end a sentence")
+}
+
+// Segments are runs of the prepared text, in order, so a track can be resumed from the
+// text it has read rather than a segment count.
+func TestSegment_PiecesAreRunsOfTheText(t *testing.T) {
+	for name, text := range map[string]string{
+		"english":   strings.Repeat("This is a sentence that goes on. And another one here! ", 60),
+		"cjk":       strings.Repeat("これは長い文章です。", 300),
+		"unspaced":  strings.Repeat("あ", 2500),
+		"paragraph": "First. Second one.\n\n" + strings.Repeat("Word ", 400),
+	} {
+		prepared := Prepare(text)
+		segs := Segment(prepared, 200)
+		require.NotEmpty(t, segs, name)
+		for _, s := range segs {
+			require.LessOrEqual(t, utf8.RuneCountInString(s), 200, name)
+		}
+		rest, ok := Remaining(prepared, segs)
+		require.True(t, ok, name)
+		require.Empty(t, rest, name)
+		rest, ok = Remaining(prepared, segs[:1])
+		require.True(t, ok, name)
+		require.NotEmpty(t, rest, name)
+	}
+}
+
+func TestSegment_CJKSentencesEndAtFullWidthStops(t *testing.T) {
+	segs := Segment(Prepare(strings.Repeat("これは長い文章です。", 30)), 1000)
+	require.Equal(t, "これは長い文章です。", segs[0], "the first sentence alone, so speech starts quickly")
+}
+
+func TestRemaining_RefusesWhatTheTextDoesntSay(t *testing.T) {
+	_, ok := Remaining("Hello there. How are you?", []string{"Hello there.", "Goodbye."})
+	require.False(t, ok)
+	rest, ok := Remaining("Hello there. How are you?", []string{"Hello there."})
+	require.True(t, ok)
+	require.Equal(t, "How are you?", rest)
+}
+
+func TestSpoken_AnEmptyFinalRoundReadsTheReply(t *testing.T) {
+	msg := "Here's your image."
+	require.Equal(t, "Here's your image.", Spoken(msg, len(msg)), "a turn that ended on a tool")
+	require.Equal(t, "Done.", Spoken("Let me look. Done.", len("Let me look. ")))
+}
+
+func TestPrepare_KeepsProseThatLooksLikeMarkup(t *testing.T) {
+	require.Equal(t, "if a<b then c>d ok", Prepare("if a<b then c>d ok"))
+	require.Equal(t, "Bold and gone.", Prepare(`<b>Bold</b> and <span class="x">gone</span>.`))
+	require.Equal(t, "See. Done.", Prepare("See www.example.com/x. Done."), "the sentence keeps its stop")
+}
+
+// Streaming text is read only as far as its words are settled: what Prepare reads now
+// is what it reads once the rest arrives.
+func TestSettled_StopsBeforeOpenMarkup(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"**Note. Then more":          "",
+		"I *think. So":               "I ",
+		"Here [see this. And":        "Here ",
+		"A [link](http://x":          "A ",
+		"Use `go te":                 "Use ",
+		"Done **well**. And _so_ on": "Done **well**. And _so_ on",
+		"snake_case words. More":     "snake_case words. More",
+		"Line one.\n**bold":          "Line one.\n",
+		"Text\n```go":                "Text\n",
+		"a < b, and <b":              "a < b, and ",
+		"2 * 3 = 6. Next":            "2 * 3 = 6. Next",
+	} {
+		require.Equal(t, want, Settled(in), in)
+	}
+	// Whatever is settled reads as a prefix of the whole, however it ends.
+	full := "**Note.** Then *more* [here](http://x). Done."
+	for i := range len(full) {
+		require.True(t, strings.HasPrefix(Prepare(full), Prepare(Settled(full[:i]))), full[:i])
+	}
+}
+
+func TestResync(t *testing.T) {
+	t.Parallel()
+	pos, ok := Resync("Note. Then more.", "**Note.")
+	require.True(t, ok)
+	require.Equal(t, "Note.", "Note. Then more."[:pos])
+	_, ok = Resync("Something else.", "Note.")
+	require.False(t, ok)
 }

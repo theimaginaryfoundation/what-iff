@@ -109,9 +109,10 @@ func builtinSpeechAdapter(p models.ModelProvider, kind models.ModelKind) models.
 // DictationModel is what the composer needs to know about the account's dictation
 // model to record for it.
 type DictationModel struct {
-	Model       string               `json:"model"`
-	DisplayName string               `json:"display_name"`
-	Formats     []models.AudioFormat `json:"formats"`
+	Model       string `json:"model"`
+	DisplayName string `json:"display_name"`
+	// Formats is always WAV: the one format whose billed length is in its data.
+	Formats []models.AudioFormat `json:"formats"`
 	// MaxSeconds is the longest clip it takes, at most five minutes.
 	MaxSeconds int `json:"max_seconds"`
 }
@@ -127,7 +128,20 @@ func (a *Agent) Dictation(ctx context.Context) (DictationModel, error) {
 	if err != nil {
 		return DictationModel{}, &models.UtilityRoleUnavailableError{Role: models.UtilityRoleTranscription, Err: fmt.Errorf("%w: %w", models.ErrUtilityModelUnavailable, err)}
 	}
+	if !st.spec.AcceptsFormat(models.AudioFormatWAV) {
+		// Dictation sends WAV only (see wavSeconds), so a model that refuses it can't dictate.
+		return DictationModel{}, &models.UtilityRoleUnavailableError{Role: models.UtilityRoleTranscription, Err: fmt.Errorf("%w: %s doesn't take WAV", models.ErrUtilityModelUnavailable, st.model)}
+	}
 	return dictationModel(st), nil
+}
+
+// clipByteLimit is the largest clip the model and this server take.
+func clipByteLimit(st speechTarget) int64 {
+	limit := int64(maxDictationBytes)
+	if st.spec.MaxClipBytes > 0 && st.spec.MaxClipBytes < limit {
+		limit = st.spec.MaxClipBytes
+	}
+	return limit
 }
 
 func dictationModel(st speechTarget) DictationModel {
@@ -135,20 +149,21 @@ func dictationModel(st speechTarget) DictationModel {
 	if st.spec.MaxClipSeconds > 0 && st.spec.MaxClipSeconds < maxSeconds {
 		maxSeconds = st.spec.MaxClipSeconds
 	}
+	// The recording has to fit the byte limit too, at the rate the composer records.
+	if bySize := int((clipByteLimit(st) - wavHeaderBytes) / wavBytesPerSec16); bySize < maxSeconds {
+		maxSeconds = bySize
+	}
 	name := st.spec.DisplayName
 	if name == "" {
 		name = st.model
 	}
-	return DictationModel{Model: st.model, DisplayName: name, Formats: st.spec.Formats, MaxSeconds: maxSeconds}
+	return DictationModel{Model: st.model, DisplayName: name, Formats: []models.AudioFormat{models.AudioFormatWAV}, MaxSeconds: maxSeconds}
 }
 
 // DictationClip is one clip the person recorded in the composer.
 type DictationClip struct {
 	Audio  []byte
 	Format models.AudioFormat
-	// ClientSeconds is the length the browser measured. It is trusted only as far as
-	// the clip's size allows (clipSeconds).
-	ClientSeconds float64
 	// Language is an optional BCP-47 hint, from the account's locale.
 	Language string
 	// ChatID is the chat the clip is for, for usage records; empty for none.
@@ -173,17 +188,25 @@ func (a *Agent) Transcribe(ctx context.Context, userID uuid.UUID, clip Dictation
 		return "", &models.UtilityRoleUnavailableError{Role: models.UtilityRoleTranscription, Err: fmt.Errorf("%w: %w", models.ErrUtilityModelUnavailable, err)}
 	}
 	limits := dictationModel(st)
-	if !st.spec.AcceptsFormat(clip.Format) {
-		return "", fmt.Errorf("%w: %s takes %v, not %s", ErrAudioFormatUnsupported, limits.DisplayName, limits.Formats, clip.Format)
+	if clip.Format != models.AudioFormatWAV || !st.spec.AcceptsFormat(models.AudioFormatWAV) {
+		return "", fmt.Errorf("%w: send 16 kHz mono PCM WAV", ErrAudioFormatUnsupported)
 	}
-	seconds := clipSeconds(clip)
-	maxBytes := int64(maxDictationBytes)
-	if st.spec.MaxClipBytes > 0 && st.spec.MaxClipBytes < maxBytes {
-		maxBytes = st.spec.MaxClipBytes
+	seconds, ok := wavSeconds(clip.Audio)
+	if !ok {
+		return "", fmt.Errorf("%w: not a PCM WAV file", ErrAudioFormatUnsupported)
 	}
 	// A second's grace: the browser stops a moment after the limit.
-	if seconds > float64(limits.MaxSeconds)+1 || int64(len(clip.Audio)) > maxBytes {
+	if seconds > float64(limits.MaxSeconds)+1 || int64(len(clip.Audio)) > clipByteLimit(st) {
 		return "", fmt.Errorf("%w: %s takes at most %d seconds", ErrClipTooLong, limits.DisplayName, limits.MaxSeconds)
+	}
+
+	if clip.ChatID != "" {
+		// Usage is attributed to the chat only if it is the caller's.
+		if id, err := uuid.Parse(clip.ChatID); err != nil {
+			clip.ChatID = ""
+		} else if _, err := a.ds.GetChat(ctx, userID, id); err != nil {
+			clip.ChatID = ""
+		}
 	}
 
 	decision := metering.Decision{Allowed: true}
@@ -231,47 +254,53 @@ func (a *Agent) Transcribe(ctx context.Context, userID uuid.UUID, clip Dictation
 	return text, nil
 }
 
-// compressedBytesPerSecond is the most a browser's compressed recording spends per
-// second (Opus or AAC at 128 kbit/s); a clip can't be shorter than its size at it.
-const compressedBytesPerSecond = 16000
+// Dictation clips are 16 kHz mono PCM WAV (ADR 0x052 §10): a WAV's length is in its
+// data, so what is billed can't be understated. A compressed clip's length is whatever its
+// container claims, which the client writes; and its size says little, since Opus at 6
+// kbit/s packs 20 times the minutes into the same bytes. Every dictation model takes WAV.
+const (
+	wavHeaderBytes   = 44
+	wavBytesPerSec16 = 16000 * 2 // 16 kHz mono 16-bit, what the composer records
+)
 
-// clipSeconds is how long a clip is: exactly, from a WAV header; otherwise what
-// the browser measured, but never less than the clip's size at the highest
-// bitrate a browser records at, so a short claimed length can't hide a long clip.
-func clipSeconds(clip DictationClip) float64 {
-	if clip.Format == models.AudioFormatWAV {
-		if s, ok := wavSeconds(clip.Audio); ok {
-			return s
-		}
-	}
-	floor := float64(len(clip.Audio)) / compressedBytesPerSecond
-	return max(clip.ClientSeconds, floor)
-}
-
-// wavSeconds reads a WAV file's length from its fmt and data chunks.
+// wavSeconds is a PCM WAV file's length, from its data and a format that must hang
+// together: PCM (integer or float), one or two channels, 8-48 kHz, 8-32 bits, and a byte
+// rate and block size that follow from them. The data chunk's declared size is ignored:
+// everything after its header counts, so a short declared size can't hide audio after it.
 func wavSeconds(b []byte) (float64, bool) {
 	if len(b) < 12 || string(b[0:4]) != "RIFF" || string(b[8:12]) != "WAVE" {
 		return 0, false
 	}
-	var byteRate uint32
+	byteRate := 0
 	for off := 12; off+8 <= len(b); {
 		id := string(b[off : off+4])
 		size := int(binary.LittleEndian.Uint32(b[off+4 : off+8]))
 		body := off + 8
 		switch id {
 		case "fmt ":
-			if body+12 <= len(b) {
-				byteRate = binary.LittleEndian.Uint32(b[body+8 : body+12])
+			if size < 16 || body+16 > len(b) {
+				return 0, false
 			}
+			tag := binary.LittleEndian.Uint16(b[body : body+2])
+			channels := int(binary.LittleEndian.Uint16(b[body+2 : body+4]))
+			rate := int(binary.LittleEndian.Uint32(b[body+4 : body+8]))
+			declared := int(binary.LittleEndian.Uint32(b[body+8 : body+12]))
+			align := int(binary.LittleEndian.Uint16(b[body+12 : body+14]))
+			bits := int(binary.LittleEndian.Uint16(b[body+14 : body+16]))
+			pcm := tag == 1 || tag == 3
+			if !pcm || channels < 1 || channels > 2 || rate < 8000 || rate > 48000 || bits < 8 || bits > 32 || bits%8 != 0 ||
+				align != channels*bits/8 || declared != rate*align {
+				return 0, false
+			}
+			byteRate = declared
 		case "data":
 			if byteRate == 0 {
 				return 0, false
 			}
-			// A streamed recording may leave the size unset; what arrived counts.
-			if size == 0 || body+size > len(b) {
-				size = len(b) - body
-			}
-			return float64(size) / float64(byteRate), true
+			return float64(len(b)-body) / float64(byteRate), true
+		}
+		if size < 0 || body+size+size%2 > len(b) {
+			return 0, false
 		}
 		off = body + size + size%2
 	}

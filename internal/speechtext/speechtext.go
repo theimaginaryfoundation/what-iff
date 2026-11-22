@@ -10,22 +10,42 @@ import (
 )
 
 // Spoken is the text to read aloud from a reply: its final round, from offset (in
-// bytes), prepared for the ear. Narration before tool calls is not read.
+// bytes), prepared for the ear. Narration before tool calls is not read, unless the
+// final round has nothing to read (a turn that ended on a tool): then all of it is.
 func Spoken(message string, finalRoundOffset int) string {
 	if finalRoundOffset > 0 && finalRoundOffset <= len(message) {
-		message = message[finalRoundOffset:]
+		if final := Prepare(message[finalRoundOffset:]); final != "" {
+			return final
+		}
 	}
 	return Prepare(message)
 }
 
+// Remaining is what is left of prepared after the segments already said, which are
+// pieces of it in order (as Segment cuts them): ok is false when they aren't, because
+// the reply or the rules that cut it have changed since.
+func Remaining(prepared string, said []string) (string, bool) {
+	pos := 0
+	for _, seg := range said {
+		rest := prepared[pos:]
+		trimmed := strings.TrimLeftFunc(rest, unicode.IsSpace)
+		if seg == "" || !strings.HasPrefix(trimmed, seg) {
+			return "", false
+		}
+		pos += len(rest) - len(trimmed) + len(seg)
+	}
+	return strings.TrimSpace(prepared[pos:]), true
+}
+
 var (
-	fence       = regexp.MustCompile("(?ms)^[ \t]*(```|~~~)[^\n]*\n.*?(^[ \t]*(```|~~~)[ \t]*$|\\z)")
-	image       = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
-	link        = regexp.MustCompile(`\[([^\]]+)\]\([^)]*\)`)
-	refLink     = regexp.MustCompile(`\[([^\]]+)\]\[[^\]]*\]`)
-	bareURL     = regexp.MustCompile(`(?i)\b(?:https?://|www\.)[^\s<>()]+`)
-	autolink    = regexp.MustCompile(`<(?:https?://|mailto:)[^>]+>`)
-	html        = regexp.MustCompile(`</?[A-Za-z][^>]*>`)
+	fence    = regexp.MustCompile("(?ms)^[ \t]*(```|~~~)[^\n]*\n.*?(^[ \t]*(```|~~~)[ \t]*$|\\z)")
+	image    = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
+	link     = regexp.MustCompile(`\[([^\]]+)\]\([^)]*\)`)
+	refLink  = regexp.MustCompile(`\[([^\]]+)\]\[[^\]]*\]`)
+	bareURL  = regexp.MustCompile(`(?i)\b(?:https?://|www\.)[^\s<>()]*[^\s<>().,!?;:'"]`)
+	autolink = regexp.MustCompile(`<(?:https?://|mailto:)[^>]+>`)
+	// A tag with no attributes or name=value ones: "a<b then c>d" is prose, not a tag.
+	html        = regexp.MustCompile(`</?[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][-\w:.]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>]+))*\s*/?>`)
 	inlineCode  = regexp.MustCompile("`([^`\n]*)`")
 	strong      = regexp.MustCompile(`(\*\*|__)(\S(?:.*?\S)?)(\*\*|__)`)
 	strike      = regexp.MustCompile(`~~(\S(?:.*?\S)?)~~`)
@@ -169,71 +189,114 @@ func Segment(text string, maxChars int) []string {
 }
 
 // pack joins pieces with sep into chunks of at most maxChars, splitting any piece
-// that alone is longer between words.
+// that alone is longer between words. Pieces are joined as they stood in the text, so
+// every chunk is a run of it: no separator after a full-width stop, none inside a word
+// cut by length.
 func pack(pieces []string, maxChars int, sep string) []string {
 	var out []string
 	var cur strings.Builder
+	curLen := 0
 	push := func() {
 		if cur.Len() > 0 {
 			out = append(out, cur.String())
 			cur.Reset()
+			curLen = 0
 		}
 	}
-	for _, p := range pieces {
-		for _, part := range splitWords(p, maxChars) {
-			if cur.Len() > 0 && utf8.RuneCountInString(cur.String())+len(sep)+utf8.RuneCountInString(part) > maxChars {
+	for i, p := range pieces {
+		gap := sep
+		if i > 0 && sep == " " && endsFullWidth(pieces[i-1]) {
+			gap = ""
+		}
+		for j, part := range splitWords(p, maxChars) {
+			if j > 0 {
+				gap = part.gap
+			}
+			n := utf8.RuneCountInString(part.text)
+			if cur.Len() > 0 && curLen+utf8.RuneCountInString(gap)+n > maxChars {
 				push()
 			}
 			if cur.Len() > 0 {
-				cur.WriteString(sep)
+				cur.WriteString(gap)
+				curLen += utf8.RuneCountInString(gap)
 			}
-			cur.WriteString(part)
+			cur.WriteString(part.text)
+			curLen += n
 		}
 	}
 	push()
 	return out
 }
 
-func splitWords(s string, maxChars int) []string {
+func endsFullWidth(s string) bool {
+	last, _ := utf8.DecodeLastRuneInString(strings.TrimRight(s, "\"'”’)]」』）"))
+	return strings.ContainsRune("。！？", last)
+}
+
+// chunk is part of a sentence, and what stood before it: a space, or nothing when a
+// word was cut by length.
+type chunk struct{ text, gap string }
+
+// splitWords cuts s into chunks of at most maxChars, between words; a "word" longer
+// than that (text written without spaces, as Chinese and Japanese are) is cut by length.
+func splitWords(s string, maxChars int) []chunk {
 	if utf8.RuneCountInString(s) <= maxChars {
-		return []string{s}
+		return []chunk{{text: s}}
 	}
-	var out []string
-	var cur []string
-	n := 0
+	var words []chunk
 	for _, w := range strings.Fields(s) {
-		wl := utf8.RuneCountInString(w)
-		if n > 0 && n+1+wl > maxChars {
-			out = append(out, strings.Join(cur, " "))
-			cur, n = nil, 0
+		gap := " "
+		for r := []rune(w); len(r) > maxChars; r = []rune(w) {
+			words = append(words, chunk{text: string(r[:maxChars]), gap: gap})
+			w, gap = string(r[maxChars:]), ""
 		}
-		cur = append(cur, w)
-		if n > 0 {
-			n++
+		words = append(words, chunk{text: w, gap: gap})
+	}
+	var out []chunk
+	var cur strings.Builder
+	curGap, n := "", 0
+	for i, w := range words {
+		wl := utf8.RuneCountInString(w.text)
+		if n > 0 && n+len(w.gap)+wl > maxChars {
+			out = append(out, chunk{text: cur.String(), gap: curGap})
+			cur.Reset()
+			n = 0
 		}
+		if n == 0 {
+			curGap = w.gap
+			if i == 0 {
+				curGap = ""
+			}
+		} else {
+			cur.WriteString(w.gap)
+			n += len(w.gap)
+		}
+		cur.WriteString(w.text)
 		n += wl
 	}
-	if len(cur) > 0 {
-		out = append(out, strings.Join(cur, " "))
+	if cur.Len() > 0 {
+		out = append(out, chunk{text: cur.String(), gap: curGap})
 	}
 	return out
 }
 
 // sentences splits a paragraph after sentence-ending punctuation followed by space,
-// keeping the punctuation (and closing quotes or brackets) with its sentence.
+// or after a full-width stop (。！？), which takes none, keeping the punctuation (and
+// closing quotes or brackets) with its sentence.
 func sentences(p string) []string {
 	var out []string
 	runes := []rune(p)
 	start := 0
 	for i := 0; i < len(runes); i++ {
-		if !strings.ContainsRune(".!?…", runes[i]) {
+		fullWidth := strings.ContainsRune("。！？", runes[i])
+		if !fullWidth && !strings.ContainsRune(".!?…", runes[i]) {
 			continue
 		}
 		j := i + 1
-		for j < len(runes) && strings.ContainsRune(".!?…\"'”’)]", runes[j]) {
+		for j < len(runes) && strings.ContainsRune(".!?…。！？\"'”’)]」』）", runes[j]) {
 			j++
 		}
-		if j < len(runes) && unicode.IsSpace(runes[j]) && !abbreviation(runes[start:i+1]) {
+		if j < len(runes) && (fullWidth || unicode.IsSpace(runes[j])) && !abbreviation(runes[start:i+1]) {
 			out = append(out, strings.TrimSpace(string(runes[start:j])))
 			start = j
 			i = j
@@ -301,20 +364,21 @@ func NextSpeakable(text string, first bool, maxChars int) (piece string, consume
 // follows it.
 func sentenceEnd(s string) int {
 	for i, r := range s {
-		if !strings.ContainsRune(".!?…", r) {
+		fullWidth := strings.ContainsRune("。！？", r)
+		if !fullWidth && !strings.ContainsRune(".!?…", r) {
 			continue
 		}
 		j := i + utf8.RuneLen(r)
 		for j < len(s) {
 			c, size := utf8.DecodeRuneInString(s[j:])
-			if !strings.ContainsRune(".!?…\"'”’)]", c) {
+			if !strings.ContainsRune(".!?…。！？\"'”’)]」』）", c) {
 				break
 			}
 			j += size
 		}
 		if j < len(s) {
 			c, _ := utf8.DecodeRuneInString(s[j:])
-			if unicode.IsSpace(c) && !abbreviation([]rune(strings.TrimSpace(s[:j]))) {
+			if (fullWidth || unicode.IsSpace(c)) && !abbreviation([]rune(strings.TrimSpace(s[:j]))) {
 				return j
 			}
 		}
@@ -324,4 +388,166 @@ func sentenceEnd(s string) int {
 		return k
 	}
 	return -1
+}
+
+// Settled is the part of streaming markdown whose words can't change as more of it
+// arrives (ADR 0x052 §8). Prepare reads an inline construct differently once it closes
+// ("**Note." is read with its asterisks, "**Note.** More" without), so the line being
+// written is cut before any emphasis, code span, strike-through, link or tag still open
+// on it, and before a code fence it opens. Finished lines are settled.
+func Settled(md string) string {
+	lineStart := strings.LastIndexByte(md, '\n') + 1
+	line := md[lineStart:]
+	if t := strings.TrimLeft(line, " \t"); strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+		return md[:lineStart]
+	}
+	cut := len(line)
+	for _, i := range []int{openPair(line, "**"), openPair(line, "__"), openPair(line, "~~"), openCode(line),
+		openEmphasis(line, '*'), openEmphasis(line, '_'), openLink(line), openTag(line)} {
+		if i >= 0 && i < cut {
+			cut = i
+		}
+	}
+	return md[:lineStart+cut]
+}
+
+// openPair is where a double marker (**, __, ~~) is left open on the line, or -1.
+func openPair(line, marker string) int {
+	open := -1
+	for i := 0; i+len(marker) <= len(line); {
+		if line[i:i+len(marker)] != marker {
+			i++
+			continue
+		}
+		if open < 0 {
+			open = i
+		} else {
+			open = -1
+		}
+		i += len(marker)
+	}
+	return open
+}
+
+// openCode is where a code span is left open on the line, or -1.
+func openCode(line string) int {
+	open := -1
+	for i := 0; i < len(line); i++ {
+		if line[i] != '`' {
+			continue
+		}
+		if open < 0 {
+			open = i
+		} else {
+			open = -1
+		}
+	}
+	return open
+}
+
+// openEmphasis is where single-marker emphasis (*word*, _word_) is left open on the line,
+// or -1: an opener follows the line's start, a space or "(" and comes before a non-space.
+func openEmphasis(line string, m byte) int {
+	open := -1
+	for i := 0; i < len(line); i++ {
+		if line[i] != m {
+			continue
+		}
+		if (i+1 < len(line) && line[i+1] == m) || (i > 0 && line[i-1] == m) {
+			continue // part of a double marker
+		}
+		before := byte(' ')
+		if i > 0 {
+			before = line[i-1]
+		}
+		switch {
+		case open < 0 && (before == ' ' || before == '\t' || before == '(') && (i+1 == len(line) || line[i+1] != ' '):
+			open = i
+		case open >= 0 && before != ' ' && before != '\t':
+			open = -1
+		}
+	}
+	return open
+}
+
+// openLink is where a link or image whose target hasn't arrived yet starts, or -1.
+func openLink(line string) int {
+	for i := 0; i < len(line); i++ {
+		if line[i] != '[' {
+			continue
+		}
+		start := i
+		if i > 0 && line[i-1] == '!' {
+			start = i - 1
+		}
+		j := strings.IndexByte(line[i:], ']')
+		if j < 0 || i+j+1 == len(line) {
+			return start // the text, or what follows it, is still coming
+		}
+		j += i
+		if line[j+1] == '(' && !strings.Contains(line[j+1:], ")") {
+			return start
+		}
+		if line[j+1] == '[' && !strings.Contains(line[j+2:], "]") {
+			return start
+		}
+	}
+	return -1
+}
+
+// openTag is where an HTML tag is still being written, or -1.
+func openTag(line string) int {
+	i := strings.LastIndexByte(line, '<')
+	if i < 0 || strings.IndexByte(line[i:], '>') >= 0 {
+		return -1
+	}
+	if i+1 == len(line) {
+		return i // what follows decides
+	}
+	if c := line[i+1]; c == '/' || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') {
+		return i
+	}
+	return -1
+}
+
+// Resync finds where prepared reaches the words already read aloud, when the text read
+// was prepared differently (markup since closed): the words, letters and digits only,
+// must be the same, and pos is just past them in prepared. ok is false when they aren't.
+func Resync(prepared, said string) (pos int, ok bool) {
+	want := []rune(wordRunes(said))
+	if len(want) == 0 {
+		return 0, true
+	}
+	k := 0
+	for i, r := range prepared {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			continue
+		}
+		if r != want[k] {
+			return 0, false
+		}
+		k++
+		if k == len(want) {
+			pos = i + utf8.RuneLen(r)
+			// The sentence's own closing punctuation goes with it.
+			for pos < len(prepared) {
+				c, size := utf8.DecodeRuneInString(prepared[pos:])
+				if unicode.IsSpace(c) || unicode.IsLetter(c) || unicode.IsDigit(c) {
+					break
+				}
+				pos += size
+			}
+			return pos, true
+		}
+	}
+	return 0, false
+}
+
+func wordRunes(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return r
+		}
+		return -1
+	}, s)
 }

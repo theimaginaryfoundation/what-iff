@@ -5,6 +5,9 @@ import { firstValueFrom } from 'rxjs';
 import { SpeechPlayerService } from './speech-player.service';
 import { SpeechService } from './speech.service';
 
+/** How many handled tracks are remembered. */
+const MAX_HANDLED = 200;
+
 /** A chat's autoplay: its personality's default, and the chat's own override (null follows it). */
 export interface ChatAutoplay {
   personality: boolean;
@@ -33,13 +36,16 @@ export class SpeechAutoplayService {
   /** A pending reply that sound isn't unlocked for yet: tapping plays it. */
   readonly tapToListen = signal<{ trackId: string; chatId: string } | null>(null);
   private readonly settings = signal<Readonly<Record<string, ChatAutoplay>>>({});
-  /** Tracks this client has handled, so a turn's polls don't claim one twice. */
+  /** Tracks this client has handled, so a turn's polls don't claim one twice; the newest kept. */
   private readonly handled = new Set<string>();
 
   constructor() {
-    const unlock = () => this.player.unlock();
-    this.document.addEventListener('pointerdown', unlock, { capture: true, once: true });
-    this.document.addEventListener('keydown', unlock, { capture: true, once: true });
+    // Every gesture, not just the first: one also resumes sound the browser suspended since.
+    const unlock = () => {
+      if (!this.player.soundReady()) this.player.unlock();
+    };
+    this.document.addEventListener('pointerdown', unlock, { capture: true });
+    this.document.addEventListener('keydown', unlock, { capture: true });
     this.document.addEventListener('visibilitychange', () => {
       const chatId = this.openChat();
       if (this.document.visibilityState === 'visible' && chatId) void this.checkPending(chatId);
@@ -83,7 +89,7 @@ export class SpeechAutoplayService {
   /** The turn this client watches carries a track: the reply can be heard as it streams. */
   onTurnTrack(chatId: string, trackId: string): void {
     if (this.handled.has(trackId)) return;
-    this.handled.add(trackId);
+    this.markHandled(trackId);
     void this.tryClaim(trackId, chatId);
   }
 
@@ -97,11 +103,11 @@ export class SpeechAutoplayService {
     }
     const [newest, ...older] = pending;
     for (const t of older) {
-      this.handled.add(t.id);
+      this.markHandled(t.id);
       void firstValueFrom(this.speech.skip(t.id)).catch(() => undefined);
     }
     if (!newest || this.handled.has(newest.id)) return;
-    this.handled.add(newest.id);
+    this.markHandled(newest.id);
     await this.tryClaim(newest.id, chatId);
   }
 
@@ -114,11 +120,20 @@ export class SpeechAutoplayService {
     await this.claimAndPlay(waiting.trackId);
   }
 
+  private markHandled(trackId: string): void {
+    this.handled.add(trackId);
+    // Only recent tracks can come round again; a long session needn't remember them all.
+    for (const old of this.handled) {
+      if (this.handled.size <= MAX_HANDLED) break;
+      this.handled.delete(old);
+    }
+  }
+
   private canPlayNow(chatId: string): boolean {
     return (
       this.document.visibilityState === 'visible' &&
       this.openChat() === chatId &&
-      this.player.unlocked() &&
+      this.player.soundReady() &&
       !this.player.recording() &&
       !this.player.playing() &&
       !this.player.loading()
@@ -130,7 +145,7 @@ export class SpeechAutoplayService {
       await this.claimAndPlay(trackId);
       return;
     }
-    if (this.document.visibilityState === 'visible' && this.openChat() === chatId && !this.player.unlocked()) {
+    if (this.document.visibilityState === 'visible' && this.openChat() === chatId && !this.player.soundReady()) {
       this.tapToListen.set({ trackId, chatId });
       return;
     }

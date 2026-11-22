@@ -431,6 +431,11 @@ func (a *Agent) changeMoodTool(ctx context.Context, chatCtx *chatContext, args [
 			UserID:           chatCtx.chat.UserID,
 		})
 		if err == nil {
+			// A model the account can't use (an experimental one it hasn't opted into) is as good as
+			// not found: the mode still changes, on the chat's current model.
+			err = a.ds.CheckUserCanUseModel(ctx, chat.UserID, m.ID)
+		}
+		if err == nil {
 			id := m.ID
 			modelID = &id
 			chatCtx.model = m.Name

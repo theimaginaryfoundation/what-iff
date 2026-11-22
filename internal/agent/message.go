@@ -1322,6 +1322,16 @@ func (a *Agent) generateAssistantForMessage(ctx context.Context, userID uuid.UUI
 	// client watching the turn can claim it and hear the reply as it streams (ADR 0x052 §8).
 	live := a.beginTurnSpeech(ctx, userID, chatJob, chatCtx)
 	ctx = withLiveSpeech(ctx, live)
+	if live != nil {
+		defer func() {
+			// A panic is recovered further up; the speaker still has to hear the turn is over,
+			// or it waits for it as long as the process lives.
+			if r := recover(); r != nil {
+				live.end(context.WithoutCancel(ctx), nil)
+				panic(r)
+			}
+		}()
+	}
 
 	agentMessage, result, err := a.dispatchAssistantGeneration(ctx, userID, chatJob, chatMessage, chatCtx, modelContext)
 	if err == nil && agentMessage != nil {

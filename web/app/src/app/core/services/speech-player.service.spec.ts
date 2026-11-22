@@ -1,6 +1,7 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 
 import { SpeechTrack } from '../models/speech.model';
 import { SpeechPlayerService } from './speech-player.service';
@@ -65,6 +66,15 @@ describe('SpeechPlayerService', () => {
     expect(player.error()).toBeNull();
   });
 
+  it('gives up on a track that stops getting segments, rather than polling forever', async () => {
+    speech.listen.mockReturnValue(of(track('open', 0)));
+    speech.track.mockReturnValue(of(track('open', 0)));
+    await player.play('m1');
+    expect(player.error()).toEqual({ messageId: 'm1', text: 'Reading aloud stopped responding. Try again.' });
+    expect(speech.track).toHaveBeenCalledTimes(200);
+    expect(player.loading()).toBeNull();
+  });
+
   it('says why a track stopped partway', async () => {
     speech.listen.mockReturnValue(of({ ...track('stopped', 1), error_code: 'quota_exceeded' }));
     await player.play('m1');
@@ -114,6 +124,23 @@ describe('SpeechPlayerService', () => {
     expect(audio.started.map(s => s.at)).toEqual([10.05, 12.05, 10, 12]);
     expect(stops).toHaveLength(2);
     expect(speech.segment).toHaveBeenCalledTimes(4);
+  });
+
+  it('reads the track again when a segment it was told of has been withdrawn', async () => {
+    speech.segment
+      .mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 404 })))
+      .mockImplementation((_: string, seq: number) => of(new ArrayBuffer(seq + 2)));
+    speech.track.mockReturnValueOnce(of(track('complete', 1, 'x')));
+    await player.playTrack(track('open', 1, 'a'));
+    expect(player.error()).toBeNull();
+    expect(audio.started).toHaveLength(1);
+  });
+
+  it('is quiet about a claimed track that is gone (its turn failed)', async () => {
+    speech.segment.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 404 })));
+    speech.track.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 404 })));
+    await player.playTrack(track('open', 1, 'a'));
+    expect(player.error()).toBeNull();
   });
 
   it("knows which chats' personalities have a voice", () => {

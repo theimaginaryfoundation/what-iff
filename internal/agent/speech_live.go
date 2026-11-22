@@ -12,7 +12,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -31,8 +30,19 @@ import (
 // tool call is almost always one short sentence (ADR 0x052 §8).
 const commitChars = 200
 
-// livePoll is how often a turn's track looks for a claim and for new text.
-var livePoll = 250 * time.Millisecond
+// livePoll is how often a turn's track looks for a claim and for new text. A client
+// watching the turn claims within a second or two, so after liveEagerFor the wait for a
+// claim slows to liveIdlePoll: a scheduled turn nobody watches shouldn't ask four times
+// a second.
+var (
+	livePoll     = 250 * time.Millisecond
+	liveIdlePoll = time.Second
+	liveEagerFor = 10 * time.Second
+)
+
+// liveMaxTurn is the longest a speaker follows a turn; past it, it lets go (a turn that
+// long has a problem of its own) and a later Listen reads the saved reply.
+var liveMaxTurn = 2 * time.Hour
 
 // liveSpeech is one turn's reply read aloud as it streams.
 type liveSpeech struct {
@@ -47,6 +57,8 @@ type liveSpeech struct {
 	ended bool
 	msg   *models.ChatMessage
 	done  chan struct{}
+	// begun is when the turn started, for liveEagerFor and liveMaxTurn.
+	begun time.Time
 }
 
 type liveSpeechKey struct{}
@@ -102,7 +114,7 @@ func (a *Agent) beginTurnSpeech(ctx context.Context, userID uuid.UUID, chatJob *
 		return nil
 	}
 	chatJob.SpeechTrackID = &track.ID
-	l := &liveSpeech{a: a, userID: userID, chatID: chat.ID, trackID: track.ID, v: v, done: make(chan struct{})}
+	l := &liveSpeech{a: a, userID: userID, chatID: chat.ID, trackID: track.ID, v: v, done: make(chan struct{}), begun: time.Now()}
 	base := a.lifecycleCtx
 	if base == nil {
 		base = context.Background()
@@ -128,7 +140,9 @@ func (l *liveSpeech) end(ctx context.Context, msg *models.ChatMessage) {
 	}
 	if msg != nil {
 		if err := l.a.ds.LinkSpeechTrack(ctx, l.trackID, msg.ID); err != nil {
+			// Unlinked, the track can't be made from the reply later; Listen makes another.
 			l.a.logger.Warn("couldn't tie a speech track to its reply", zap.Error(err))
+			msg = nil
 		}
 	}
 	l.mu.Lock()
@@ -142,11 +156,11 @@ func (l *liveSpeech) state() (buf *jobDraftDeltaBuffer, ended bool, msg *models.
 	return l.buf, l.ended, l.msg
 }
 
-func (l *liveSpeech) sleep(ctx context.Context) bool {
+func (l *liveSpeech) sleep(ctx context.Context, d time.Duration) bool {
 	select {
 	case <-ctx.Done():
 		return false
-	case <-time.After(livePoll):
+	case <-time.After(d):
 		return true
 	}
 }
@@ -164,54 +178,81 @@ func (l *liveSpeech) run(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		_, ended, msg := l.state()
-		switch {
-		case autoplay == models.SpeechAutoplayPlayed:
+		if autoplay == models.SpeechAutoplayPlayed {
 			l.speak(ctx)
 			return
-		case autoplay == models.SpeechAutoplaySkipped || ended:
-			if ended && msg == nil {
-				// The turn failed: there is no reply to read.
+		}
+		if autoplay == models.SpeechAutoplaySkipped {
+			return
+		}
+		_, ended, msg := l.state()
+		if ended {
+			// A claim may have landed between the read above and the turn ending: look
+			// once more, so a claimed track is never left with nobody making it.
+			if again, _, err := l.a.ds.SpeechTrackState(ctx, l.trackID); err == nil && again == models.SpeechAutoplayPlayed {
+				l.speak(ctx)
+				return
+			}
+			if msg == nil {
+				// The turn failed (or its reply couldn't be tied to the track): nothing to read.
 				_ = l.a.ds.DeleteSpeechTrack(context.WithoutCancel(ctx), l.trackID)
 			}
 			// Unclaimed with a reply: a later claim makes it from the saved text.
 			return
 		}
-		if !l.sleep(ctx) {
+		wait := livePoll
+		if time.Since(l.begun) > liveEagerFor {
+			wait = liveIdlePoll
+		}
+		if time.Since(l.begun) > liveMaxTurn || !l.sleep(ctx, wait) {
 			return
 		}
 	}
 }
 
-// speak reads the reply as it streams, and the rest once it is saved.
+// speak reads the reply as it streams, and the rest once it is saved. Whatever stops it
+// early ends the track (failed), so a client following it isn't left waiting, and the
+// next request for it starts a worker that carries on from the text read.
 func (l *liveSpeech) speak(ctx context.Context) {
 	a := l.a
-	ok, err := a.ds.AcquireSpeechWorker(ctx, l.trackID, time.Now().Add(speechWorkerLease))
+	token, ok, err := a.ds.AcquireSpeechWorker(ctx, l.trackID, time.Now().Add(speechWorkerLease))
 	if err != nil || !ok {
 		return
 	}
+	lease := speechLease{trackID: l.trackID, token: token}
+	work, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go a.holdSpeechLease(work, cancel, lease)
+	status, code := models.SpeechTrackFailed, "cancelled"
+	defer func() {
+		if r := recover(); r != nil {
+			a.logger.Error("live speech panicked", zap.Any("panic", r))
+			status, code = models.SpeechTrackFailed, "internal_error"
+		}
+		// Finishing names the lease: one lost to another worker is that worker's to finish.
+		if err := a.ds.FinishSpeechTrack(context.WithoutCancel(ctx), l.trackID, token, status, code); err != nil {
+			a.logger.Warn("couldn't finish a speech track", zap.Error(err))
+		}
+	}()
 	client, err := provider.NewSpeechClient(l.v.target.spec.Adapter, l.v.target.endpoint)
 	if err != nil {
-		_ = a.ds.FinishSpeechTrack(ctx, l.trackID, models.SpeechTrackFailed, "internal_error")
+		status, code = models.SpeechTrackFailed, "internal_error"
 		return
 	}
-	s := &liveSegmenter{l: l, client: client, rounds: -1, format: preferredSpeechFormat(l.v.target.spec)}
+	s := &liveSegmenter{l: l, lease: lease, client: client, rounds: -1, format: preferredSpeechFormat(l.v.target.spec)}
 	for {
 		buf, ended, msg := l.state()
 		if ended {
-			status, code := s.finish(ctx, msg)
-			if err := a.ds.FinishSpeechTrack(context.WithoutCancel(ctx), l.trackID, status, code); err != nil {
-				a.logger.Warn("couldn't finish a speech track", zap.Error(err))
-			}
+			status, code = s.finish(work, msg)
 			return
 		}
 		if buf != nil {
-			if status, code, stop := s.step(ctx, buf); stop {
-				_ = a.ds.FinishSpeechTrack(context.WithoutCancel(ctx), l.trackID, status, code)
+			if st, c, stop := s.step(work, buf); stop {
+				status, code = st, c
 				return
 			}
 		}
-		if err := a.ds.RenewSpeechWorker(ctx, l.trackID, time.Now().Add(speechWorkerLease)); err != nil || !l.sleep(ctx) {
+		if time.Since(l.begun) > liveMaxTurn || !l.sleep(work, livePoll) {
 			return
 		}
 	}
@@ -220,6 +261,7 @@ func (l *liveSpeech) speak(ctx context.Context) {
 // liveSegmenter turns streaming text into a track's segments.
 type liveSegmenter struct {
 	l      *liveSpeech
+	lease  speechLease
 	client provider.SpeechClient
 	format models.AudioFormat
 
@@ -236,13 +278,15 @@ type liveSegmenter struct {
 }
 
 // step reads what the streaming text allows now. stop is set when the track has to end
-// early (out of credits, or a provider failure).
+// early (out of credits, a provider failure, the lease lost).
 func (s *liveSegmenter) step(ctx context.Context, buf *jobDraftDeltaBuffer) (models.SpeechTrackStatus, string, bool) {
 	text, start, rounds := buf.liveText()
 	if rounds != s.rounds {
 		// A new round: the last one ended in a tool call, so it was narration.
 		if s.committed && s.seq > s.roundSeq {
-			s.withdraw(ctx)
+			if !s.withdraw(ctx) {
+				return models.SpeechTrackFailed, "internal_error", true
+			}
 		}
 		s.rounds, s.roundSeq, s.committed, s.spoken = rounds, s.seq, false, ""
 	}
@@ -254,13 +298,18 @@ func (s *liveSegmenter) step(ctx context.Context, buf *jobDraftDeltaBuffer) (mod
 		return "", "", false
 	}
 	s.committed = true
-	for {
-		prepared := speechtext.Prepare(raw)
-		if !strings.HasPrefix(prepared, s.spoken) {
-			// The markdown read differently once more of it arrived; wait for the end,
-			// which reconciles from the saved reply.
-			return "", "", false
+	// Only words that can't change as more arrives: markup still open on the line being
+	// written is read differently once it closes.
+	prepared := speechtext.Prepare(speechtext.Settled(raw))
+	if !strings.HasPrefix(prepared, s.spoken) {
+		// Read differently after all: carry on from the same words, if they are the same.
+		pos, ok := speechtext.Resync(prepared, s.spoken)
+		if !ok {
+			return "", "", false // the end reconciles from the saved reply
 		}
+		s.spoken = prepared[:pos]
+	}
+	for {
 		piece, n := speechtext.NextSpeakable(prepared[len(s.spoken):], s.seq == s.roundSeq, s.l.v.maxSegmentChars())
 		if piece == "" {
 			return "", "", false
@@ -275,17 +324,24 @@ func (s *liveSegmenter) step(ctx context.Context, buf *jobDraftDeltaBuffer) (mod
 // finish reads the rest of the saved reply's final round.
 func (s *liveSegmenter) finish(ctx context.Context, msg *models.ChatMessage) (models.SpeechTrackStatus, string) {
 	if msg == nil {
-		s.withdrawAll(ctx)
+		s.withdrawFrom(ctx, 0)
 		return models.SpeechTrackFailed, "turn_failed"
 	}
 	final := speechtext.Spoken(msg.Message, msg.FinalRoundOffset)
 	rest := final
-	if s.committed && strings.HasPrefix(final, s.spoken) {
+	switch {
+	case s.seq == s.roundSeq:
+		// Nothing of the final round read yet (it was too short to commit): read it all.
+		// Earlier rounds were taken back as each turned out to be narration.
+	case strings.HasPrefix(final, s.spoken):
 		rest = final[len(s.spoken):]
-	} else if s.seq > s.roundSeq || !s.committed {
-		// What was read doesn't match the saved reply (or nothing was): start its final
-		// round again.
-		s.withdraw(ctx)
+	default:
+		if pos, ok := speechtext.Resync(final, s.spoken); ok {
+			rest = final[pos:]
+		} else if !s.withdraw(ctx) {
+			// What was read isn't what was saved: read its final round again.
+			return models.SpeechTrackFailed, "internal_error"
+		}
 	}
 	for _, piece := range speechtext.Segment(rest, s.l.v.maxSegmentChars()) {
 		if status, code, stop := s.say(ctx, piece); stop {
@@ -307,15 +363,19 @@ func (s *liveSegmenter) say(ctx context.Context, piece string) (models.SpeechTra
 	}
 	audio, usage, err := a.synthesize(ctx, s.client, l.v, piece, s.format)
 	if err != nil {
+		if ctx.Err() != nil {
+			return models.SpeechTrackFailed, "cancelled", true
+		}
 		a.logger.Warn("live speech synthesis failed", zap.String("track_id", l.trackID.String()), zap.Error(err))
 		return models.SpeechTrackFailed, speechFailureCode(err), true
 	}
-	key := fmt.Sprintf("users/%s/speech/%s/%04d-%s.%s", l.userID, l.trackID, s.seq, uuid.NewString()[:8], audio.Format)
+	key := speechSegmentKey(l.userID, l.trackID, s.seq, audio.Format, uuid.New())
 	if err := a.fileStore.UploadFile(ctx, key, audio.Data, audio.Format.MIMEType()); err != nil {
 		return models.SpeechTrackFailed, "storage_error", true
 	}
 	seg := models.SpeechSegment{Seq: s.seq, Text: piece, FileKey: key, Format: audio.Format, DurationMS: audioDurationMS(audio), SizeBytes: len(audio.Data)}
-	if err := a.ds.AddSpeechSegment(ctx, l.trackID, seg); err != nil {
+	if err := a.ds.AddSpeechSegment(ctx, l.trackID, s.lease.token, seg); err != nil {
+		a.deleteSpeechFiles(context.WithoutCancel(ctx), []string{key})
 		return models.SpeechTrackFailed, "internal_error", true
 	}
 	s.chars += usage.Characters
@@ -325,23 +385,23 @@ func (s *liveSegmenter) say(ctx context.Context, piece string) (models.SpeechTra
 }
 
 // withdraw takes back the current round's segments: it wasn't the last round.
-func (s *liveSegmenter) withdraw(ctx context.Context) {
-	s.withdrawFrom(ctx, s.roundSeq)
+func (s *liveSegmenter) withdraw(ctx context.Context) bool {
+	if !s.withdrawFrom(ctx, s.roundSeq) {
+		return false
+	}
 	s.spoken = ""
+	return true
 }
 
-func (s *liveSegmenter) withdrawAll(ctx context.Context) { s.withdrawFrom(ctx, 0) }
-
-func (s *liveSegmenter) withdrawFrom(ctx context.Context, seq int) {
-	keys, err := s.l.a.ds.WithdrawSpeechSegments(ctx, s.l.trackID, seq)
+func (s *liveSegmenter) withdrawFrom(ctx context.Context, seq int) bool {
+	keys, err := s.l.a.ds.WithdrawSpeechSegments(ctx, s.l.trackID, s.lease.token, seq)
 	if err != nil {
 		s.l.a.logger.Warn("couldn't withdraw speech", zap.Error(err))
-		return
+		return false
 	}
-	for _, k := range keys {
-		_ = s.l.a.fileStore.DeleteFile(ctx, k)
-	}
+	s.l.a.deleteSpeechFiles(ctx, keys)
 	s.seq = seq
+	return true
 }
 
 // ClaimSpeech claims a pending track for this client to play (ADR 0x052 §9), and answers it.
@@ -366,11 +426,11 @@ func (a *Agent) ClaimSpeech(ctx context.Context, userID, trackID uuid.UUID) (*mo
 	}
 	v, err := a.resolveVoice(ctx, userID, models.PersonalityVoice{ModelID: track.ModelID, Voice: track.Voice, Style: track.Style})
 	if err != nil {
-		_ = a.ds.FinishSpeechTrack(ctx, track.ID, models.SpeechTrackFailed, models.ErrCodeVoiceUnavailable)
+		_ = a.ds.FinishSpeechTrack(ctx, track.ID, uuid.Nil, models.SpeechTrackFailed, models.ErrCodeVoiceUnavailable)
 		track.Status, track.ErrorCode = models.SpeechTrackFailed, models.ErrCodeVoiceUnavailable
 		return track, true, nil
 	}
-	a.startSpeechWorker(userID, track, v, speechtext.Segment(speechtext.Spoken(msg.Message, msg.FinalRoundOffset), v.maxSegmentChars()))
+	a.startSpeechWorker(userID, track.ID, v, speechtext.Spoken(msg.Message, msg.FinalRoundOffset))
 	return track, true, nil
 }
 

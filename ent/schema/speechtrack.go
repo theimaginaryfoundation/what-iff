@@ -52,6 +52,9 @@ func (SpeechTrack) Fields() []ent.Field {
 		// reads replies aloud, then played by the one client that claims it, or skipped.
 		// NULL for a track made by Listen.
 		field.Enum("autoplay").Values("pending", "played", "skipped").Optional().Nillable(),
+		// Which worker holds the lease: renewing it, adding a segment and finishing the
+		// track all name it, so a worker that lost its lease can't write over its successor.
+		field.UUID("worker_token", uuid.UUID{}).Optional().Nillable(),
 		// When the track was last asked for; the sweeper deletes tracks unplayed for 30 days.
 		field.Time("last_played_at"),
 	}

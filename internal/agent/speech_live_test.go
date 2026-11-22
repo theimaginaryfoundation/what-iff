@@ -216,3 +216,44 @@ func TestAutoplay_SettingsAndClaims(t *testing.T) {
 	_, _, err = f.a.ClaimSpeech(apicontext.WithUserID(context.Background(), f.bob), f.bob, *tr.job.SpeechTrackID)
 	require.Error(t, err, "not bob's track")
 }
+
+// Markup still open while it streams isn't read with its markers, doesn't stop the
+// speaker, and nothing is read twice once it closes.
+func TestLiveSpeech_OpenMarkupWaitsAndIsReadOnce(t *testing.T) {
+	t.Parallel()
+	f := newSpeechFixture(t, "unused", 0)
+	f.autoplayOn(t)
+	tr := f.startTurn(t)
+	_, _, err := f.a.ClaimSpeech(tr.ctx, f.alice, *tr.job.SpeechTrackID)
+	require.NoError(t, err)
+
+	tr.write(longRound(6) + "**Note. Then more")
+	require.Eventually(t, func() bool { return len(f.spokenSoFar()) >= 2 }, 3*time.Second, 5*time.Millisecond)
+	tr.write(" words.** And that is the end of it. ")
+	tr.finish(t)
+
+	done := f.waitTrack(t, *tr.job.SpeechTrackID)
+	require.Equal(t, models.SpeechTrackComplete, done.Status)
+	joined := strings.Join(f.spokenSoFar(), " ")
+	require.NotContains(t, joined, "*", "no markers read aloud")
+	require.Equal(t, 1, strings.Count(joined, "Sentence number A"), "the opening isn't read again")
+	require.Contains(t, joined, "Note. Then more words.")
+}
+
+// A claim that lands just as the turn ends still gets the reply read.
+func TestLiveSpeech_AClaimAtTheTurnsEndIsRead(t *testing.T) {
+	t.Parallel()
+	f := newSpeechFixture(t, "unused", 0)
+	f.autoplayOn(t)
+	tr := f.startTurn(t)
+	tr.write("A short answer. ")
+	// The claim is in, but the speaker hasn't seen it when the turn ends.
+	claimed, err := f.a.ds.ClaimSpeechTrack(tr.ctx, f.alice, *tr.job.SpeechTrackID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	tr.finish(t)
+
+	done := f.waitTrack(t, *tr.job.SpeechTrackID)
+	require.Equal(t, models.SpeechTrackComplete, done.Status)
+	require.Len(t, done.Segments, 1)
+}

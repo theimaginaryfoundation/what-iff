@@ -40,4 +40,27 @@ describe('AutoplayToggleComponent', () => {
     expect(autoplay.chatAutoplay('c1')).toEqual({ personality: true, override: false });
     expect(c.on()).toBe(false);
   });
+
+  it('closes on Escape and on a click outside, and on picking the choice that holds', async () => {
+    const { fixture } = render(true);
+    const c = fixture.componentInstance;
+    const menu = () => fixture.nativeElement.querySelector('[data-testid="autoplay-menu"]');
+    c.toggle();
+    fixture.detectChanges();
+    expect(menu()).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('[data-testid="autoplay-toggle"]').getAttribute('aria-controls')).toBe(c.menuId);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fixture.detectChanges();
+    expect(menu()).toBeNull();
+
+    c.toggle();
+    document.body.click();
+    fixture.detectChanges();
+    expect(menu()).toBeNull();
+
+    c.toggle();
+    await c.pick('default');
+    expect(c.open()).toBe(false);
+  });
 });

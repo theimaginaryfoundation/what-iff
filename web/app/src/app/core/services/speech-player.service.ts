@@ -9,6 +9,13 @@ import { SpeechService } from './speech.service';
 
 /** How often a track still being made is asked for again. */
 const TRACK_POLL_MS = 1000;
+/**
+ * How long a track may go without a new segment before the player gives up: past two of the
+ * server's 90-second worker leases, so a worker that went away has been replaced by then.
+ */
+const TRACK_STALL_MS = 200_000;
+/** How many times in a row a segment may fail to load while its track is still open. */
+const MAX_SEGMENT_RETRIES = 3;
 
 /**
  * Plays replies aloud (ADR 0x052 §7): one player for the whole app, so starting a reply stops
@@ -76,6 +83,15 @@ export class SpeechPlayerService {
     return this.context;
   }
 
+  /**
+   * Whether sound can start now without a gesture: unlocked by an earlier one, and not suspended
+   * since (iOS suspends audio after an interruption or a while in the background, and only a gesture
+   * resumes it).
+   */
+  soundReady(): boolean {
+    return this.unlocked() && this.context?.state === 'running';
+  }
+
   /** Plays a reply aloud from the start, stopping anything else. */
   async play(messageId: string): Promise<void> {
     this.stop();
@@ -110,6 +126,8 @@ export class SpeechPlayerService {
     } catch (err) {
       if (session !== this.session) return;
       this.stop();
+      // A track that's gone was a turn that failed: there was nothing to read, which isn't an error.
+      if (err instanceof HttpErrorResponse && err.status === 404) return;
       this.error.set({ messageId: key, text: playFailure(err) });
     }
   }
@@ -122,14 +140,21 @@ export class SpeechPlayerService {
   private async follow(session: number, context: AudioContext, key: string, track: SpeechTrack): Promise<void> {
     const scheduled: Scheduled[] = [];
     let startAt = context.currentTime + 0.05;
+    let waited = 0;
+    let fetchFailures = 0;
     while (session === this.session) {
       const withdrawn = scheduled.findIndex(s => track.segments[s.seq]?.id !== s.id);
       if (withdrawn >= 0) {
+        // A round read out turned out not to be the last: its audio stops, playing or not, and
+        // what replaces it follows what is kept.
         for (const s of scheduled.splice(withdrawn)) {
-          if (s.start > context.currentTime) s.source.stop();
+          try {
+            s.source.stop();
+          } catch {
+            // Already ended.
+          }
         }
-        const playingNow = scheduled.filter(s => s.start <= context.currentTime);
-        startAt = Math.max(context.currentTime, playingNow.at(-1)?.end ?? context.currentTime);
+        startAt = Math.max(context.currentTime, scheduled.at(-1)?.end ?? context.currentTime);
       }
       if (track.message_id && key !== track.message_id) {
         key = track.message_id;
@@ -139,7 +164,19 @@ export class SpeechPlayerService {
       const next = scheduled.length;
       if (next < track.segments.length) {
         const seg = track.segments[next];
-        const data = await firstValueFrom(this.speech.segment(track.id, seg.seq));
+        let data: ArrayBuffer;
+        try {
+          data = await firstValueFrom(this.speech.segment(track.id, seg.seq));
+        } catch (err) {
+          // The segment may have been withdrawn since this copy of the track was read: read the
+          // track again rather than give up, unless that keeps failing.
+          if (session !== this.session) return;
+          if (track.status !== 'open' || ++fetchFailures > MAX_SEGMENT_RETRIES) throw err;
+          await this.wait(TRACK_POLL_MS);
+          if (session !== this.session) return;
+          track = await firstValueFrom(this.speech.track(track.id));
+          continue;
+        }
         if (session !== this.session) return;
         const buffer = await context.decodeAudioData(data);
         if (session !== this.session) return;
@@ -147,12 +184,18 @@ export class SpeechPlayerService {
         const source = this.schedule(context, buffer, startAt);
         scheduled.push({ id: seg.id, seq: seg.seq, source, start: startAt, end: startAt + buffer.duration });
         startAt += buffer.duration;
+        waited = 0;
+        fetchFailures = 0;
         this.loading.set(null);
         this.playing.set(key);
         continue;
       }
       if (track.status !== 'open') break;
+      if (waited >= TRACK_STALL_MS) {
+        throw new Error('stalled');
+      }
       await this.wait(TRACK_POLL_MS);
+      waited += TRACK_POLL_MS;
       if (session !== this.session) return;
       track = await firstValueFrom(this.speech.track(track.id));
     }
@@ -225,6 +268,9 @@ function trackFailure(track: SpeechTrack): string {
 }
 
 function playFailure(err: unknown): string {
+  if (err instanceof Error && err.message === 'stalled') {
+    return 'Reading aloud stopped responding. Try again.';
+  }
   if (err instanceof HttpErrorResponse && err.status === 409) {
     return apiErrorMessage(err, "This personality's voice isn't available.");
   }

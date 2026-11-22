@@ -26,7 +26,7 @@ var (
 	ErrInvalidProvider             = errors.New("invalid model provider")
 	ErrInvalidSubscriptionTier     = errors.New("invalid model subscription tier")
 	ErrInvalidReasoningSupport     = errors.New("invalid model reasoning support override")
-	ErrInvalidSpeechPrice          = errors.New("a speech price can't be negative")
+	ErrInvalidSpeechPrice          = fmt.Errorf("a speech price must be between 0 and %d", maxSpeechPrice)
 )
 
 func toModelModel(e *ent.Model) *models.Model {
@@ -348,6 +348,20 @@ func (d *Datastore) CheckUserCanUseModel(ctx context.Context, userID, modelID uu
 	return assertUserCanUseModelTx(ctx, tx, userID, modelID)
 }
 
+// CheckUserCanUseModelOfKind is CheckUserCanUseModel for a model of another kind: a voice
+// for a personality, or a dictation model.
+func (d *Datastore) CheckUserCanUseModelOfKind(ctx context.Context, userID, modelID uuid.UUID, kind models.ModelKind) error {
+	if modelID == uuid.Nil {
+		return ErrModelNotFound
+	}
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }() // read-only
+	return assertUserCanUseModelOfKindTx(ctx, tx, userID, modelID, kind)
+}
+
 // AdminPatchUserExperimentalModels toggles experimental model access for a user.
 func (d *Datastore) AdminPatchUserExperimentalModels(ctx context.Context, userID uuid.UUID, enabled bool) (*models.UserResponse, error) {
 	tx, err := d.dbClient.Tx(ctx)
@@ -589,6 +603,17 @@ func (d *Datastore) AdminGetModel(ctx context.Context, id uuid.UUID) (*models.Mo
 	return toModelModel(dbModel), nil
 }
 
+// AdminModelKind is the kind AdminCreateModel gives req: the known table's for a model it knows
+// (on the provider an empty one defaults to), else the requested kind.
+func AdminModelKind(req models.CreateModelRequest) (models.ModelKind, error) {
+	providerValue, err := normalizeModelProvider(req.Provider)
+	if err != nil {
+		return "", err
+	}
+	kind, _, err := models.ResolveSpeechModel(models.ModelProvider(providerValue), strings.TrimSpace(req.Name), req.Kind, req.SpeechVoices)
+	return kind, err
+}
+
 func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModelRequest) (*models.Model, error) {
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
@@ -634,7 +659,7 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 		return nil, err
 	}
 	audio := kind.IsAudio()
-	if req.CreditsPer1kChars < 0 || req.CreditsPerMinute < 0 {
+	if !validSpeechPrice(req.CreditsPer1kChars) || !validSpeechPrice(req.CreditsPerMinute) {
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}
@@ -645,6 +670,18 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 		Where(entmodel.Name(name), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if err == nil {
+		existingKind := models.ModelKind(existing.Kind)
+		if existingKind == "" {
+			existingKind = models.ModelKindChat
+		}
+		if existing.Deleted && existingKind != kind {
+			// Chats, personalities and settings may still name the deleted row; restoring it as
+			// another kind would hand them a model they can't run on.
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, fmt.Errorf("%w: a deleted %s model has this name; restore it as one or choose another name", models.ErrInvalidModelKind, existingKind)
+		}
 		if existing.Deleted {
 			restored, rerr := tx.Model.UpdateOneID(existing.ID).
 				SetDeleted(false).
@@ -844,7 +881,7 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 		update.SetBaseCreditsPerSlab(normalizeBaseCreditsPerSlab(*req.BaseCreditsPerSlab))
 	}
 	if req.CreditsPer1kChars != nil {
-		if *req.CreditsPer1kChars < 0 {
+		if !validSpeechPrice(*req.CreditsPer1kChars) {
 			if rerr := tx.Rollback(); rerr != nil {
 				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 			}
@@ -853,7 +890,7 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 		update.SetCreditsPer1kChars(*req.CreditsPer1kChars)
 	}
 	if req.CreditsPerMinute != nil {
-		if *req.CreditsPerMinute < 0 {
+		if !validSpeechPrice(*req.CreditsPerMinute) {
 			if rerr := tx.Rollback(); rerr != nil {
 				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 			}
@@ -862,7 +899,7 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 		update.SetCreditsPerMinute(*req.CreditsPerMinute)
 	}
 	if req.SpeechVoices != nil {
-		voices, verr := models.NormalizeSpeechVoices(req.SpeechVoices)
+		voices, verr := models.CheckSpeechVoices(models.ModelProvider(current.Provider), current.Name, req.SpeechVoices)
 		// kind is NOT NULL with a chat default, so every row has one.
 		if verr == nil && current.Kind != entmodel.KindSpeech {
 			verr = models.ErrInvalidSpeechVoices
@@ -1077,4 +1114,13 @@ func resolveDefaultModelTx(ctx context.Context, tx *ent.Tx) (*ent.Model, error) 
 	return tx.Model.Query().
 		Where(entmodel.Deleted(false), entmodel.ConnectionIDIsNil(), entmodel.KindEQ(entmodel.KindChat)).
 		First(ctx)
+}
+
+// maxSpeechPrice bounds a speech price, in credits per unit: far above any real one, and
+// low enough that a track's total can never overflow when it is rounded to credits.
+const maxSpeechPrice = 1_000_000
+
+// validSpeechPrice is a price an admin can set: a number from zero to maxSpeechPrice.
+func validSpeechPrice(p float64) bool {
+	return p >= 0 && p <= maxSpeechPrice
 }

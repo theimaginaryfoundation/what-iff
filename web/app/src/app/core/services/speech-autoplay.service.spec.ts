@@ -26,6 +26,7 @@ describe('SpeechAutoplayService', () => {
     playing: ReturnType<typeof signal<string | null>>;
     loading: ReturnType<typeof signal<string | null>>;
     unlock: ReturnType<typeof vi.fn>;
+    soundReady: () => boolean;
     playTrack: ReturnType<typeof vi.fn>;
   };
   let visibility: DocumentVisibilityState;
@@ -44,6 +45,7 @@ describe('SpeechAutoplayService', () => {
       playing: signal<string | null>(null),
       loading: signal<string | null>(null),
       unlock: vi.fn(() => player.unlocked.set(true)),
+      soundReady: () => player.unlocked(),
       playTrack: vi.fn(() => Promise.resolve()),
     };
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });

@@ -7,7 +7,7 @@ import { SpeechService } from '../../../../core/services/speech.service';
 import { apiErrorMessage, hasErrorCode } from '../../../../core/utils/api-error.helpers';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 import { ChatSendGate } from '../../services/chat-send-gate';
-import { ClipRecorder, RecorderDeps, browserCanRecord, browserRecorderDeps, canDictate, planRecording } from './clip-recorder';
+import { ClipRecorder, RecorderDeps, RecordingCancelled, browserRecorderDeps, canDictate } from './clip-recorder';
 
 /** Where a dictation is. */
 export type DictationState = 'idle' | 'starting' | 'recording' | 'transcribing';
@@ -34,7 +34,7 @@ export type DictationState = 'idle' | 'starting' | 'recording' | 'transcribing';
           type="button"
           class="dictation__button"
           data-testid="dictation-button"
-          [disabled]="disabled() || blocked() || state() === 'starting' || state() === 'transcribing'"
+          [disabled]="startDisabled()"
           [attr.aria-pressed]="state() === 'recording'"
           [attr.aria-label]="label()"
           [uiTooltip]="label()"
@@ -173,7 +173,6 @@ export class DictationButtonComponent implements OnInit {
 
   /** Stands in for the browser in tests. */
   deps: RecorderDeps = browserRecorderDeps;
-  canRecord: (mimeType: string) => boolean = browserCanRecord;
   browserCanDictate: () => boolean = canDictate;
 
   readonly state = signal<DictationState>('idle');
@@ -183,6 +182,11 @@ export class DictationButtonComponent implements OnInit {
 
   readonly available = computed(() => !!this.speech.dictation()?.available && this.browserCanDictate());
   readonly blocked = computed(() => this.sendGate?.blocked() ?? false);
+  /** Stopping is always allowed; only starting waits on the composer and the credit gate. */
+  readonly startDisabled = computed(() => {
+    const state = this.state();
+    return state === 'starting' || state === 'transcribing' || (state === 'idle' && (this.disabled() || this.blocked()));
+  });
   readonly maxSeconds = computed(() => this.speech.dictation()?.max_seconds ?? 300);
   readonly time = computed(() => {
     const s = Math.floor(this.elapsed());
@@ -199,11 +203,19 @@ export class DictationButtonComponent implements OnInit {
     }
   });
 
+  /** The recording, from the moment the microphone is asked for: a discard then gives it back. */
   private recorder: ClipRecorder | null = null;
+  /** The chat the recording is for: a transcript that comes back after a chat switch is dropped. */
+  private recordingChatId: string | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
 
+  private destroyed = false;
+
   constructor() {
-    this.destroyRef.onDestroy(() => this.discard());
+    this.destroyRef.onDestroy(() => {
+      this.destroyed = true;
+      this.discard();
+    });
   }
 
   ngOnInit(): void {
@@ -219,7 +231,9 @@ export class DictationButtonComponent implements OnInit {
   }
 
   onEscape(event: Event): void {
-    if (this.state() === 'recording') {
+    // Something nearer the focus (a dialog, a menu) already took this Escape.
+    if (event.defaultPrevented) return;
+    if (this.state() === 'recording' || this.state() === 'starting') {
       event.preventDefault();
       event.stopPropagation();
       this.discard();
@@ -231,11 +245,17 @@ export class DictationButtonComponent implements OnInit {
     if (!model?.available) return;
     this.error.set('');
     this.state.set('starting');
-    const recorder = new ClipRecorder(planRecording(model.formats ?? [], this.canRecord), this.deps, this.maxSeconds() + 1);
+    const recorder = new ClipRecorder(this.deps, this.maxSeconds() + 1);
+    this.recorder = recorder;
+    this.recordingChatId = this.chatId();
     try {
       await recorder.start();
     } catch (err) {
       recorder.cancel();
+      if (err instanceof RecordingCancelled || this.recorder !== recorder) {
+        return; // discarded (Escape, or the composer went away) while the browser was asking
+      }
+      this.recorder = null;
       this.state.set('idle');
       this.error.set(
         err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'SecurityError')
@@ -244,7 +264,10 @@ export class DictationButtonComponent implements OnInit {
       );
       return;
     }
-    this.recorder = recorder;
+    if (this.recorder !== recorder) {
+      recorder.cancel();
+      return;
+    }
     this.elapsed.set(0);
     this.state.set('recording');
     this.recordingStarted.emit();
@@ -265,7 +288,8 @@ export class DictationButtonComponent implements OnInit {
 
   async finish(atLimit = false): Promise<void> {
     const recorder = this.recorder;
-    if (!recorder) return;
+    if (!recorder || this.state() !== 'recording') return;
+    const chatId = this.recordingChatId;
     this.player.recording.set(false);
     this.stopTicker();
     this.recorder = null;
@@ -276,8 +300,8 @@ export class DictationButtonComponent implements OnInit {
         this.state.set('idle');
         return;
       }
-      const text = await firstValueFrom(this.speech.transcribe(clip, this.chatId(), navigator.language));
-      if (text) {
+      const text = await firstValueFrom(this.speech.transcribe(clip, chatId, navigator.language));
+      if (text && !this.destroyed && this.chatId() === chatId) {
         this.transcribed.emit(text);
       }
       if (atLimit) {

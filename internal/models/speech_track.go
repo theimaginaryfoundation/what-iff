@@ -67,6 +67,13 @@ type SpeechTrack struct {
 	Autoplay  SpeechAutoplay  `json:"autoplay,omitempty"`
 	CreatedAt time.Time       `json:"created_at"`
 	Segments  []SpeechSegment `json:"segments"`
+	// WorkerUntil is the synthesis worker's lease; nil or past, an open track has no worker.
+	WorkerUntil *time.Time `json:"-"`
+}
+
+// HasWorker reports whether a worker holds the track's lease now.
+func (t *SpeechTrack) HasWorker(now time.Time) bool {
+	return t.WorkerUntil != nil && t.WorkerUntil.After(now)
 }
 
 // SpeechAutoplay is where a track is in being read aloud as it arrived (ADR 0x052 §9).

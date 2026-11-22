@@ -113,9 +113,8 @@ type Transcription struct {
 }
 
 // Transcribe transcribes one clip: a multipart form with the clip as "audio",
-// its "format" (webm, mp4, ogg, wav, mp3 or flac), "duration_seconds" as the
-// browser measured it, and optionally "chat_id" and "language". The clip is
-// never stored.
+// its "format" (wav: 16 kHz mono PCM, whose length is read from its data), and
+// optionally "chat_id" and "language". The clip is never stored.
 func (h *Handler) Transcribe(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserIDFromContext(r.Context())
 	if !ok {
@@ -153,12 +152,8 @@ func (h *Handler) Transcribe(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, models.ErrCodeAudioFormatUnsupported, "Say which format the recording is in", nil)
 		return
 	}
-	seconds, _ := strconv.ParseFloat(r.FormValue("duration_seconds"), 64)
-	if seconds < 0 {
-		seconds = 0
-	}
 	clip := agent.DictationClip{
-		Audio: audio, Format: format, ClientSeconds: seconds,
+		Audio: audio, Format: format,
 		Language: strings.TrimSpace(r.FormValue("language")), ChatID: strings.TrimSpace(r.FormValue("chat_id")),
 	}
 	if clip.ChatID != "" {
