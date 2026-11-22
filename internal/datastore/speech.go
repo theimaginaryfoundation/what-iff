@@ -289,6 +289,18 @@ func (d *Datastore) FinishSpeechTrack(ctx context.Context, trackID, token uuid.U
 	return err
 }
 
+// ReleaseSpeechWorker gives up a worker's lease and leaves its track open, for a worker
+// interrupted (its instance shutting down) rather than finished: the next request for the
+// track, a poll included, starts another worker where it stopped. A track the worker no
+// longer holds is left as it is.
+func (d *Datastore) ReleaseSpeechWorker(ctx context.Context, trackID, token uuid.UUID) error {
+	_, err := d.dbClient.SpeechTrack.Update().Where(heldBy(trackID, token)).
+		ClearWorkerUntil().
+		ClearWorkerToken().
+		Save(ctx)
+	return err
+}
+
 // ReopenSpeechTrack opens a failed or stopped track again, keeping the segments it
 // has, so asking for it once more tries the rest; it reports whether it did.
 func (d *Datastore) ReopenSpeechTrack(ctx context.Context, trackID uuid.UUID) (bool, error) {

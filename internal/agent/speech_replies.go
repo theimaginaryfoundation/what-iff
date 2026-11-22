@@ -243,8 +243,19 @@ func (a *Agent) runSpeechWorker(ctx context.Context, userID uuid.UUID, l speechL
 	if errors.Is(err, datastore.ErrSpeechLeaseLost) {
 		return // another worker has the track now, or it's gone
 	}
+	if code == speechInterrupted {
+		// Shutting down is not the track's end: leave it open for the next request to resume.
+		if err := a.ds.ReleaseSpeechWorker(context.WithoutCancel(ctx), l.trackID, l.token); err != nil {
+			a.logger.Warn("couldn't release a speech track", zap.String("track_id", l.trackID.String()), zap.Error(err))
+		}
+		return
+	}
 	finish(status, code)
 }
+
+// speechInterrupted is the code synthesizeTrack gives a track whose worker's context ended
+// with the lease still held: the instance is shutting down. The track isn't finished with it.
+const speechInterrupted = "cancelled"
 
 // synthesizeTrack makes the segments for the text the track hasn't read yet, in order,
 // and says how the track ends. It resumes from the text its segments read, not their
@@ -280,7 +291,7 @@ func (a *Agent) synthesizeTrack(ctx context.Context, userID uuid.UUID, l speechL
 	for i, text := range speechtext.Segment(rest, v.maxSegmentChars()) {
 		seq := len(said) + i
 		if err := ctx.Err(); err != nil {
-			return models.SpeechTrackFailed, "cancelled", a.leaseErr(ctx, l)
+			return models.SpeechTrackFailed, speechInterrupted, a.leaseErr(ctx, l)
 		}
 		decision, allowed, err := a.checkSpeechQuota(ctx, userID)
 		if err != nil {
@@ -292,7 +303,7 @@ func (a *Agent) synthesizeTrack(ctx context.Context, userID uuid.UUID, l speechL
 		audio, usage, err := a.synthesize(ctx, client, v, text, format)
 		if err != nil {
 			if ctx.Err() != nil {
-				return models.SpeechTrackFailed, "cancelled", a.leaseErr(ctx, l)
+				return models.SpeechTrackFailed, speechInterrupted, a.leaseErr(ctx, l)
 			}
 			a.logger.Warn("speech synthesis failed", zap.String("track_id", l.trackID.String()), zap.Int("seq", seq), zap.Error(err))
 			return models.SpeechTrackFailed, speechFailureCode(err), nil

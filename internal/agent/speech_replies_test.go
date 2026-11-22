@@ -70,6 +70,9 @@ type speechFixture struct {
 	spoken      []string // the inputs the speech server was asked to read
 	calls       atomic.Int32
 	mu          sync.Mutex
+	// hold, when set, runs before the speech server answers its nth call (from 1), with the
+	// request's context.
+	hold func(ctx context.Context, n int32)
 }
 
 func newSpeechFixture(t *testing.T, reply string, finalRoundOffset int) *speechFixture {
@@ -99,8 +102,12 @@ func newSpeechFixture(t *testing.T, reply string, finalRoundOffset int) *speechF
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.mu.Lock()
 		f.spoken = append(f.spoken, body.Input)
+		hold := f.hold
 		f.mu.Unlock()
-		f.calls.Add(1)
+		n := f.calls.Add(1)
+		if hold != nil {
+			hold(r.Context(), n)
+		}
 		w.Header().Set("Content-Type", "audio/mpeg")
 		_, _ = io.WriteString(w, "ID3"+body.Input)
 	}))
@@ -152,6 +159,47 @@ func (f *speechFixture) waitTrack(t *testing.T, id uuid.UUID) *models.SpeechTrac
 		return track.Status != models.SpeechTrackOpen
 	}, 5*time.Second, 10*time.Millisecond)
 	return track
+}
+
+// A worker interrupted by its instance shutting down leaves the track open with no worker,
+// keeping the segments it made, and the next poll carries on from there (ADR 0x052 §8).
+func TestSpeechTrack_PollResumesATrackInterruptedByShutdown(t *testing.T) {
+	t.Parallel()
+	reply := "It will **rain** on Tuesday. Take a coat.\n\nThe rest of the week is dry."
+	f := newSpeechFixture(t, reply, 0)
+	f.giveVoice(t, "")
+	ctx := context.Background()
+	life, shutDown := context.WithCancel(context.Background())
+	f.a.lifecycleCtx = life
+	f.mu.Lock()
+	f.hold = func(req context.Context, n int32) {
+		if n == 2 {
+			shutDown()
+			<-req.Done()
+		}
+	}
+	f.mu.Unlock()
+
+	track, err := f.a.Listen(ctx, f.alice, f.reply)
+	require.NoError(t, err)
+	var stored *models.SpeechTrack
+	require.Eventually(t, func() bool {
+		// The stored row, not SpeechTrack, which would resume it.
+		stored, err = f.a.ds.GetSpeechTrack(ctx, f.alice, track.ID)
+		require.NoError(t, err)
+		return !stored.HasWorker(time.Now())
+	}, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, models.SpeechTrackOpen, stored.Status, "shutting down is not the track's end")
+	require.Len(t, stored.Segments, 1, "it keeps the segment it made")
+
+	f.mu.Lock()
+	f.hold = nil
+	f.mu.Unlock()
+	f.a.lifecycleCtx = context.Background()
+	done := f.waitTrack(t, track.ID)
+	require.Equal(t, models.SpeechTrackComplete, done.Status)
+	require.Len(t, done.Segments, 2)
+	require.EqualValues(t, 3, f.calls.Load(), "only the interrupted segment is asked for again")
 }
 
 func TestListen_ReadsTheFinalRoundInSegmentsAndStoresThem(t *testing.T) {
