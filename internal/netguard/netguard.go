@@ -51,6 +51,11 @@ func mustCIDRs(cidrs ...string) []*net.IPNet {
 // IsPublicIP reports whether ip is an address on the public internet: not loopback, private,
 // link-local (including the cloud metadata address), multicast, unspecified, or one of the
 // special-use ranges in nonPublicNets (shared, NAT64, 6to4, documentation, and others).
+//
+// This is the SSRF boundary for every user-chosen fetch. It leans on net.IP's predicates for
+// RFC 1918, ULA, loopback and link-local; TestIsPublicIPRangeBoundaries pins each range it must
+// refuse, at both ends, so a change here or in those predicates fails a test rather than opening
+// a hole. A range added to or removed from this function belongs in that table too.
 func IsPublicIP(ip net.IP) bool {
 	if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
 		return false
@@ -125,7 +130,9 @@ func NewHTTPClient(control func(network, address string, c syscall.RawConn) erro
 }
 
 // SameOriginRedirects is an http.Client CheckRedirect that follows a redirect only to the same
-// scheme and host as the original request, at most 10 times.
+// scheme and host as the original request, at most 10 times. It compares against via[0], the
+// first request, on purpose: every hop must stay on the origin the caller chose, so a chain
+// cannot walk away from it one hop at a time.
 func SameOriginRedirects(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")

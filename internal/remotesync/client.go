@@ -174,6 +174,7 @@ type Client struct {
 // the proxy's rather than the remote's.
 func NewHTTPClient(allowLocal bool) *http.Client {
 	if allowLocal {
+		// nil control: no address check at all, which is what the local-network opt-in means.
 		return netguard.NewHTTPClient(nil, requestTimeout)
 	}
 	return netguard.NewHTTPClient(netguard.PublicOnlyControl, requestTimeout)
