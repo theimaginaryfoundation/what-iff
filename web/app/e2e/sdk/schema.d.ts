@@ -4831,7 +4831,7 @@ export interface paths {
         put?: never;
         /**
          * Transcribe a dictated clip
-         * @description Transcribes one clip on the account's dictation model, metered as one `transcription`. The clip is never stored. A WAV's length is read from its header; another format's is the browser's measure, never less than its size allows.
+         * @description Transcribes one clip on the account's dictation model, metered as one `transcription`. The clip is never stored. Clips are PCM WAV (16 kHz mono is what the composer records): the billed length is read from the audio data, so another format, or a header whose rates don't agree, is refused with `audio_format_unsupported`.
          */
         post: {
             parameters: {
@@ -4845,12 +4845,11 @@ export interface paths {
                     "multipart/form-data": {
                         /** Format: binary */
                         audio: string;
-                        format: components["schemas"]["AudioFormat"];
-                        /** @description The clip's length as the browser measured it. */
-                        duration_seconds?: number;
+                        /** @enum {string} */
+                        format: "wav";
                         /**
                          * Format: uuid
-                         * @description The chat the clip is for, for usage records.
+                         * @description The chat the clip is for, for usage records; ignored unless it is the caller's.
                          */
                         chat_id?: string;
                         /** @description An optional BCP-47 hint, such as the account's locale. */
@@ -4915,7 +4914,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description A format the dictation model doesn't take (`audio_format_unsupported`) */
+                /** @description Not a PCM WAV clip, or a dictation model that takes no WAV (`audio_format_unsupported`) */
                 415: {
                     headers: {
                         [name: string]: unknown;
@@ -5016,7 +5015,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A speech track and its segments so far */
+        /**
+         * A speech track and its segments so far
+         * @description Polled while the track is `open`. A saved reply's track that has lost its worker (the instance it ran on went away) gets another, so polling always moves on; one that can't go on (its reply or voice gone) comes back `failed`.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -17226,7 +17228,7 @@ export interface components {
             code?: string;
             model?: string;
             display_name?: string;
-            /** @description The formats the model takes; the composer records WAV when it takes none the browser records. */
+            /** @description Always `[wav]`; dictation sends PCM WAV only. */
             formats?: components["schemas"]["AudioFormat"][];
             /** @description The longest clip it takes, at most 300. */
             max_seconds?: number;
