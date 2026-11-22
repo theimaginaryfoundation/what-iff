@@ -65,6 +65,15 @@ describe('SpeechPlayerService', () => {
     expect(player.error()).toBeNull();
   });
 
+  it('gives up on a track that stops getting segments, rather than polling forever', async () => {
+    speech.listen.mockReturnValue(of(track('open', 0)));
+    speech.track.mockReturnValue(of(track('open', 0)));
+    await player.play('m1');
+    expect(player.error()).toEqual({ messageId: 'm1', text: 'Reading aloud stopped responding. Try again.' });
+    expect(speech.track).toHaveBeenCalledTimes(200);
+    expect(player.loading()).toBeNull();
+  });
+
   it('says why a track stopped partway', async () => {
     speech.listen.mockReturnValue(of({ ...track('stopped', 1), error_code: 'quota_exceeded' }));
     await player.play('m1');

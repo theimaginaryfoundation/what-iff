@@ -1,6 +1,6 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
-import { Observable, firstValueFrom, map } from 'rxjs';
+import { catchError, firstValueFrom, map, Observable, throwError } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import { Personality } from '../models/personality.model';
@@ -80,12 +80,14 @@ export class SpeechService {
 
   /** One segment's audio, to decode. */
   segment(trackId: string, seq: number): Observable<ArrayBuffer> {
-    return this.http.get(`${this.baseUrl}/tracks/${trackId}/segments/${seq}`, { responseType: 'arraybuffer' });
+    return this.http
+      .get(`${this.baseUrl}/tracks/${trackId}/segments/${seq}`, { responseType: 'arraybuffer' })
+      .pipe(catchError(decodeErrorBody));
   }
 
   /** Text read aloud in a voice not yet saved; billed, not stored. */
   preview(voice: PersonalityVoice, text: string): Observable<ArrayBuffer> {
-    return this.http.post(`${this.baseUrl}/preview`, { ...voice, text }, { responseType: 'arraybuffer' });
+    return this.http.post(`${this.baseUrl}/preview`, { ...voice, text }, { responseType: 'arraybuffer' }).pipe(catchError(decodeErrorBody));
   }
 
   setVoice(personalityId: string, voice: PersonalityVoice): Observable<Personality> {
@@ -95,4 +97,32 @@ export class SpeechService {
   clearVoice(personalityId: string): Observable<Personality> {
     return this.http.delete<Personality>(`${environment.apiUrl}/personality/${personalityId}/voice`);
   }
+}
+
+/**
+ * An audio request's error, with its body read as the JSON envelope it is: asked for as an
+ * ArrayBuffer, the body would otherwise hide the server's code and message (quota, too long,
+ * voice unavailable) behind a generic one.
+ */
+export function decodeErrorBody(err: unknown): Observable<never> {
+  // A tag check, not instanceof: a buffer from another realm (a worker, a test DOM) fails that.
+  if (err instanceof HttpErrorResponse && Object.prototype.toString.call(err.error) === '[object ArrayBuffer]') {
+    let body: unknown = null;
+    try {
+      body = JSON.parse(new TextDecoder().decode(new Uint8Array(err.error as ArrayBuffer)));
+    } catch {
+      // Not JSON: keep the status alone.
+    }
+    return throwError(
+      () =>
+        new HttpErrorResponse({
+          error: body,
+          headers: err.headers,
+          status: err.status,
+          statusText: err.statusText,
+          url: err.url ?? undefined,
+        }),
+    );
+  }
+  return throwError(() => err);
 }

@@ -9,6 +9,11 @@ import { SpeechService } from './speech.service';
 
 /** How often a track still being made is asked for again. */
 const TRACK_POLL_MS = 1000;
+/**
+ * How long a track may go without a new segment before the player gives up: past two of the
+ * server's 90-second worker leases, so a worker that went away has been replaced by then.
+ */
+const TRACK_STALL_MS = 200_000;
 
 /**
  * Plays replies aloud (ADR 0x052 §7): one player for the whole app, so starting a reply stops
@@ -82,6 +87,7 @@ export class SpeechPlayerService {
       let track = await firstValueFrom(this.speech.listen(messageId));
       let next = 0;
       let startAt = context.currentTime + 0.05;
+      let waited = 0;
       while (session === this.session) {
         if (next < track.segments.length) {
           const data = await firstValueFrom(this.speech.segment(track.id, track.segments[next].seq));
@@ -92,12 +98,17 @@ export class SpeechPlayerService {
           this.schedule(context, buffer, startAt);
           startAt += buffer.duration;
           next++;
+          waited = 0;
           this.loading.set(null);
           this.playing.set(messageId);
           continue;
         }
         if (track.status !== 'open') break;
+        if (waited >= TRACK_STALL_MS) {
+          throw new Error('stalled');
+        }
         await this.wait(TRACK_POLL_MS);
+        waited += TRACK_POLL_MS;
         if (session !== this.session) return;
         track = await firstValueFrom(this.speech.track(track.id));
       }
@@ -165,6 +176,9 @@ function trackFailure(track: SpeechTrack): string {
 }
 
 function playFailure(err: unknown): string {
+  if (err instanceof Error && err.message === 'stalled') {
+    return 'Reading aloud stopped responding. Try again.';
+  }
   if (err instanceof HttpErrorResponse && err.status === 409) {
     return apiErrorMessage(err, "This personality's voice isn't available.");
   }
