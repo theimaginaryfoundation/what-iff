@@ -86,6 +86,9 @@ type AccountBackupChatMessage struct {
 	// ExcludeFromMemory marks a message of a turn sent with memory saving off
 	// (ChatMessage.ExcludeFromMemory); absent in older backups (= not flagged).
 	ExcludeFromMemory bool `json:"exclude_from_memory,omitempty"`
+	// FinalRoundOffset is where a reply's final round starts, the part read aloud
+	// (ChatMessage.FinalRoundOffset); absent in older backups (= all of it).
+	FinalRoundOffset int `json:"final_round_offset,omitempty"`
 }
 
 type AccountBackupChatMessageContextItem struct {

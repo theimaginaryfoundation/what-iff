@@ -18,6 +18,8 @@ import (
 )
 
 type fakeStore struct {
+	voices                               []*models.PersonalityVoice
+	setVoiceErr                          error
 	listPersonalitiesFn                  func(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.PersonalityFilters) (*models.PaginatedResponse, error)
 	createPersonalityFn                  func(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
 	getPersonalityFn                     func(ctx context.Context, userID, id uuid.UUID) (*models.Personality, error)
@@ -50,6 +52,16 @@ func (f *fakeStore) CreatePersonality(ctx context.Context, userID uuid.UUID, per
 func (f *fakeStore) ListPersonalities(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.PersonalityFilters) (*models.PaginatedResponse, error) {
 	return f.listPersonalitiesFn(ctx, userID, pageNum, pageSize, filters)
 }
+
+// SetPersonalityVoice records the voice it was given and answers the personality with it.
+func (f *fakeStore) SetPersonalityVoice(_ context.Context, _ uuid.UUID, id uuid.UUID, voice *models.PersonalityVoice) (*models.Personality, error) {
+	if f.setVoiceErr != nil {
+		return nil, f.setVoiceErr
+	}
+	f.voices = append(f.voices, voice)
+	return &models.Personality{ID: id, Voice: voice}, nil
+}
+
 func (f *fakeStore) GetPersonality(ctx context.Context, userID, id uuid.UUID) (*models.Personality, error) {
 	if f.getPersonalityFn != nil {
 		return f.getPersonalityFn(ctx, userID, id)

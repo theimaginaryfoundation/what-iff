@@ -4949,6 +4949,250 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/speech/messages/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read a reply aloud
+         * @description The reply's speech track in its chat's personality's voice, started if it isn't there yet (ADR 0x052 §7). Only the reply's final round is read. Poll the track while it is `open`; segments arrive in order.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The track */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpeechTrack"];
+                    };
+                };
+                /** @description Message not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not a reply, or no usable voice (`voice_unavailable`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/speech/tracks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A speech track and its segments so far
+         * @description Polled while the track is `open`. A saved reply's track that has lost its worker (the instance it ran on went away) gets another, so polling always moves on; one that can't go on (its reply or voice gone) comes back `failed`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The track */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpeechTrack"];
+                    };
+                };
+                /** @description Track not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/speech/tracks/{id}/segments/{seq}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One segment's audio
+         * @description A segment can be withdrawn and made again at the same seq, so the audio is answered with an ETag naming its version and `Cache-Control: private, no-cache`: a client may keep it but asks each time, and an If-None-Match naming the version stored is answered 304.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: {
+                    "If-None-Match"?: string;
+                };
+                path: {
+                    id: string;
+                    seq: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The audio */
+                200: {
+                    headers: {
+                        ETag?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "audio/mpeg": string;
+                        "audio/wav": string;
+                    };
+                };
+                /** @description The client has this version already */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Segment not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/speech/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Try a voice
+         * @description Reads up to 300 characters aloud in a voice not yet saved, for the personality page. Billed like any synthesis; not stored.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PersonalityVoice"] & {
+                        text: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The audio */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "audio/mpeg": string;
+                        "audio/wav": string;
+                    };
+                };
+                /** @description No model, voice or text, or too much text */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The voice can't be used (`voice_unavailable`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Out of credits (`quota_exceeded`) */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/job": {
         parameters: {
             query?: never;
@@ -6008,14 +6252,6 @@ export interface paths {
                         /** @description Optional hex accent color for this personality (for example */
                         accent_color?: string | null;
                         thumbnail_circle?: components["schemas"]["PersonalityThumbnailCircle"];
-                        /** @description Default autoplay behavior for TTS when using this personality. */
-                        tts_autoplay_default?: boolean;
-                        /** @description Voice preset used for TTS. */
-                        voice?: string;
-                        /** @description Optional voice-style instruction passed to TTS synthesis. */
-                        voice_style?: string;
-                        /** @description Voice speed multiplier used for TTS. */
-                        voice_speed?: number;
                     };
                 };
             };
@@ -7043,6 +7279,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/personality/{id}/voice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a personality's voice
+         * @description A speech model the account can use, one of the voices it offers, and a style (ADR 0x052 §5). Answers the personality.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PersonalityVoice"];
+                };
+            };
+            responses: {
+                /** @description The personality, with its voice */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Personality"];
+                    };
+                };
+                /** @description Not a voice the account can use, a voice the model doesn't offer, or an overlong style */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Personality not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Clear a personality's voice */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The personality, without a voice */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Personality"];
+                    };
+                };
+                /** @description Personality not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/personality/{id}": {
         parameters: {
             query?: never;
@@ -7124,14 +7456,6 @@ export interface paths {
                         /** @description Optional hex accent color for this personality (for example */
                         accent_color?: string | null;
                         thumbnail_circle?: components["schemas"]["PersonalityThumbnailCircle"];
-                        /** @description Default autoplay behavior for TTS when using this personality. */
-                        tts_autoplay_default?: boolean;
-                        /** @description Voice preset used for TTS. */
-                        voice?: string;
-                        /** @description Optional voice-style instruction passed to TTS synthesis. */
-                        voice_style?: string;
-                        /** @description Voice speed multiplier used for TTS. */
-                        voice_speed?: number;
                     };
                 };
             };
@@ -9789,8 +10113,6 @@ export interface paths {
                          * @enum {string}
                          */
                         context_scope?: "account" | "sandbox";
-                        /** @description Optional per-chat TTS autoplay override. Null/omitted means inherit personality default. */
-                        tts_autoplay_override?: boolean | null;
                     };
                 };
             };
@@ -9824,258 +10146,6 @@ export interface paths {
                 };
                 /** @description Personality or model not found / not owned by user */
                 404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/speech/stt/session": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start STT session
-         * @description Starts a session for chunked speech-to-text uploads.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": components["schemas"]["SpeechSTTSessionStartRequest"];
-                };
-            };
-            responses: {
-                /** @description STT session started */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SpeechSTTSessionResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/speech/stt/session/{id}/chunk": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Upload STT audio chunk
-         * @description Uploads one audio chunk and returns transcript delta and accumulated transcript.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "multipart/form-data": {
-                        /** Format: binary */
-                        audio?: string;
-                        duration_seconds?: number;
-                    };
-                };
-            };
-            responses: {
-                /** @description STT chunk transcribed */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SpeechSTTSessionResponse"];
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Session not found or expired */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/speech/stt/session/{id}/finalize": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Finalize STT session
-         * @description Finalizes a chunked STT session and returns final transcript.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": components["schemas"]["SpeechSTTFinalizeRequest"];
-                };
-            };
-            responses: {
-                /** @description STT session finalized */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SpeechSTTSessionResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Session not found or expired */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/speech/tts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Stream text-to-speech audio
-         * @description Streams TTS audio chunks over server-sent events.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["SpeechTTSRequest"];
-                };
-            };
-            responses: {
-                /** @description SSE stream with `status`, `audio_chunk`, and `done` events. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "text/event-stream": string;
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -10200,8 +10270,6 @@ export interface paths {
                          * @enum {string}
                          */
                         context_scope?: "account" | "sandbox";
-                        /** @description Optional per-chat TTS autoplay override. Null means inherit personality default. */
-                        tts_autoplay_override?: boolean | null;
                     };
                 };
             };
@@ -10345,8 +10413,6 @@ export interface paths {
                          * @enum {string}
                          */
                         context_scope?: "account" | "sandbox";
-                        /** @description Optional per-chat TTS autoplay override. Null means inherit personality default. */
-                        tts_autoplay_override?: boolean | null;
                     };
                 };
             };
@@ -16082,6 +16148,10 @@ export interface components {
             kind?: components["schemas"]["ModelKind"];
             /** @description The voices a speech model offers (ADR 0x052); absent for other kinds. */
             speech_voices?: components["schemas"]["SpeechVoice"][];
+            /** @description Whether a speech model takes a style instruction. */
+            speech_style?: boolean;
+            /** @description All the voices a known speech model has, so one narrowed away can be offered again; absent for a model added by id, whose voices are typed. */
+            available_voices?: components["schemas"]["SpeechVoice"][];
         };
         /**
          * @example pending
@@ -16355,8 +16425,6 @@ export interface components {
             personality_name?: string;
             tags?: string[];
             is_favorite?: boolean;
-            /** @description Optional per-chat TTS autoplay override. Null means inherit personality default. */
-            tts_autoplay_override?: boolean | null;
             /** @description When true, the thread is in the archive and omitted from default list responses */
             archived?: boolean;
             /**
@@ -16368,32 +16436,6 @@ export interface components {
             created_at?: string;
             /** Format: date-time */
             updated_at?: string;
-        };
-        SpeechSTTSessionStartRequest: {
-            operation_id?: string;
-            /** Format: uuid */
-            chat_id?: string;
-            /** Format: uuid */
-            message_id?: string;
-        };
-        SpeechSTTFinalizeRequest: {
-            duration_seconds?: number;
-        };
-        SpeechSTTSessionResponse: {
-            session_id: string;
-            operation_id?: string;
-            transcript: string;
-            delta_text?: string;
-            duration_seconds?: number;
-            done: boolean;
-        };
-        SpeechTTSRequest: {
-            text: string;
-            voice?: string;
-            voice_speed?: number;
-            voice_style?: string;
-            /** @enum {string} */
-            playback_mode?: "manual" | "autoplay";
         };
         ChatContext: {
             /** Format: uuid */
@@ -16585,6 +16627,8 @@ export interface components {
          *     }
          */
         ChatMessage: {
+            /** @description Where an assistant reply's final round starts in `message`, in bytes (ADR 0x052): the text before it was written before a tool call, and is not read aloud. Absent for a reply with no tool rounds. */
+            final_round_offset?: number;
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
@@ -16942,6 +16986,38 @@ export interface components {
          * @enum {string}
          */
         AudioFormat: "mp3" | "wav" | "webm" | "mp4" | "ogg" | "flac";
+        PersonalityVoice: {
+            /**
+             * Format: uuid
+             * @description A speech model.
+             */
+            model_id: string;
+            /** @description One of the voices the model offers. */
+            voice: string;
+            /** @description How the personality sounds, for models that take a style instruction. */
+            style?: string;
+        };
+        SpeechTrack: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            chat_id: string;
+            /** Format: uuid */
+            message_id?: string;
+            /**
+             * @description `open` while segments are still coming; `stopped` when credits ran out partway (asking again resumes it).
+             * @enum {string}
+             */
+            status: "open" | "complete" | "failed" | "stopped";
+            error_code?: string;
+            segments: {
+                seq: number;
+                format: components["schemas"]["AudioFormat"];
+                /** @description Zero where the container doesn't say; the player measures it. */
+                duration_ms: number;
+                size_bytes: number;
+            }[];
+        };
         DictationModel: {
             available: boolean;
             /** @description Why dictation isn't available: `utility_model_not_set`, `utility_role_off`, `utility_model_unavailable`, or `forbidden`. */
@@ -17557,6 +17633,8 @@ export interface components {
          *     }
          */
         Personality: {
+            /** @description The personality's voice (ADR 0x052), or absent for none. Set and cleared on `/personality/{id}/voice`; a personality PUT never changes it. */
+            voice?: components["schemas"]["PersonalityVoice"] | null;
             /** @description Reasoning effort for this personality's threads that set none of their own (over the account default; read at each turn). On update, omitting the field keeps it; null or an empty string clears it. */
             reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
             /** @description Agent loop for this personality's threads that set none of their own. On update, omitting the field keeps it; null or an empty string clears it. */
@@ -17580,14 +17658,6 @@ export interface components {
             accent_color?: string | null;
             /** @description Optional normalized portrait circle bounds used to focus circular thumbnails. */
             thumbnail_circle?: components["schemas"]["PersonalityThumbnailCircle"] | null;
-            /** @description Default TTS autoplay behavior for chats using this personality. */
-            tts_autoplay_default?: boolean;
-            /** @description Personality-level TTS voice preset. */
-            voice?: string;
-            /** @description Optional personality-level style instruction used for TTS synthesis. */
-            voice_style?: string;
-            /** @description Personality-level TTS speed multiplier. */
-            voice_speed?: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -18931,7 +19001,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "utility_model_not_set" | "utility_role_off" | "utility_model_unavailable" | "model_wrong_kind" | "audio_format_unsupported" | "clip_too_long" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "connection_name_taken" | "model_name_taken" | "no_model_selected";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "utility_model_not_set" | "utility_role_off" | "utility_model_unavailable" | "model_wrong_kind" | "audio_format_unsupported" | "clip_too_long" | "voice_unavailable" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "connection_name_taken" | "model_name_taken" | "no_model_selected";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**

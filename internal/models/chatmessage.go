@@ -111,6 +111,10 @@ type ChatMessage struct {
 	// CommentRefs are the document comments the message is about (ADR 0x046): on a user's message
 	// the comment it was sent from, on the agent's the comments it made or replied to.
 	CommentRefs []modeltypes.CommentRef `json:"comment_refs,omitempty"`
+	// FinalRoundOffset is where an assistant reply's final round starts in Message, in
+	// bytes (ADR 0x052 §6): the text before it was written before a tool call, and is
+	// shown but not read aloud. Zero for a reply with no tool rounds.
+	FinalRoundOffset int `json:"final_round_offset,omitempty"`
 	// ContextBreakdown is a snapshot of the model context assembled for this assistant turn
 	// (segment-by-segment token estimates + budget). Set on assistant messages when captured
 	// at generation time; nil on user messages and older assistant messages.

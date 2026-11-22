@@ -2832,6 +2832,182 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /speech/messages/{id}:
+    post:
+      summary: Read a reply aloud
+      description: >-
+        The reply's speech track in its chat's personality's voice, started if it
+        isn't there yet (ADR 0x052 §7). Only the reply's final round is read. Poll
+        the track while it is `open`; segments arrive in order.
+      tags: [Speech]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The track
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpeechTrack'
+        '404':
+          description: Message not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Not a reply, or no usable voice (`voice_unavailable`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /speech/tracks/{id}:
+    get:
+      summary: A speech track and its segments so far
+      description: >-
+        Polled while the track is `open`. A saved reply's track that has lost
+        its worker (the instance it ran on went away) gets another, so polling
+        always moves on; one that can't go on (its reply or voice gone) comes
+        back `failed`.
+      tags: [Speech]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The track
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpeechTrack'
+        '404':
+          description: Track not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /speech/tracks/{id}/segments/{seq}:
+    get:
+      summary: One segment's audio
+      description: >-
+        A segment can be withdrawn and made again at the same seq, so the audio
+        is answered with an ETag naming its version and `Cache-Control:
+        private, no-cache`: a client may keep it but asks each time, and an
+        If-None-Match naming the version stored is answered 304.
+      tags: [Speech]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: seq
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The audio
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '304':
+          description: The client has this version already
+        '404':
+          description: Segment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /speech/preview:
+    post:
+      summary: Try a voice
+      description: >-
+        Reads up to 300 characters aloud in a voice not yet saved, for the
+        personality page. Billed like any synthesis; not stored.
+      tags: [Speech]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/PersonalityVoice'
+                - type: object
+                  required: [text]
+                  properties:
+                    text:
+                      type: string
+                      maxLength: 300
+      responses:
+        '200':
+          description: The audio
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: No model, voice or text, or too much text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The voice can't be used (`voice_unavailable`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Out of credits (`quota_exceeded`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   # Job Management Endpoints
   /job:
     get:
@@ -3599,20 +3775,6 @@ paths:
                   description: Optional hex accent color for this personality (for example #C2572A).
                 thumbnail_circle:
                   $ref: '#/components/schemas/PersonalityThumbnailCircle'
-                tts_autoplay_default:
-                  type: boolean
-                  description: Default autoplay behavior for TTS when using this personality.
-                voice:
-                  type: string
-                  description: Voice preset used for TTS.
-                voice_style:
-                  type: string
-                  description: Optional voice-style instruction passed to TTS synthesis.
-                voice_speed:
-                  type: number
-                  minimum: 0.25
-                  maximum: 4
-                  description: Voice speed multiplier used for TTS.
               required:
                 - name
                 - system_prompt
@@ -4283,6 +4445,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /personality/{id}/voice:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      summary: Set a personality's voice
+      description: >-
+        A speech model the account can use, one of the voices it offers, and a style
+        (ADR 0x052 §5). Answers the personality.
+      tags: [Speech]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonalityVoice'
+      responses:
+        '200':
+          description: The personality, with its voice
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Personality'
+        '400':
+          description: Not a voice the account can use, a voice the model doesn't offer, or an overlong style
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Personality not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Clear a personality's voice
+      tags: [Speech]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The personality, without a voice
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Personality'
+        '404':
+          description: Personality not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /personality/{id}:
     get:
       summary: Get personality by ID
@@ -4354,20 +4576,6 @@ paths:
                   description: Optional hex accent color for this personality (for example #C2572A).
                 thumbnail_circle:
                   $ref: '#/components/schemas/PersonalityThumbnailCircle'
-                tts_autoplay_default:
-                  type: boolean
-                  description: Default autoplay behavior for TTS when using this personality.
-                voice:
-                  type: string
-                  description: Voice preset used for TTS.
-                voice_style:
-                  type: string
-                  description: Optional voice-style instruction passed to TTS synthesis.
-                voice_speed:
-                  type: number
-                  minimum: 0.25
-                  maximum: 4
-                  description: Voice speed multiplier used for TTS.
               required:
                 - name
                 - system_prompt
@@ -6347,10 +6555,6 @@ paths:
                   description: >-
                     Optional. `sandbox` creates the thread sandboxed; see the `context_scope` property of the Chat schema.
                     Defaults to `account`.
-                tts_autoplay_override:
-                  type: boolean
-                  nullable: true
-                  description: Optional per-chat TTS autoplay override. Null/omitted means inherit personality default.
               required:
                 - name
       responses:
@@ -6374,148 +6578,6 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: Personality or model not found / not owned by user
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /speech/stt/session:
-    post:
-      summary: Start STT session
-      description: Starts a session for chunked speech-to-text uploads.
-      tags: [Chat Management]
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SpeechSTTSessionStartRequest'
-      responses:
-        '200':
-          description: STT session started
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SpeechSTTSessionResponse'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /speech/stt/session/{id}/chunk:
-    post:
-      summary: Upload STT audio chunk
-      description: Uploads one audio chunk and returns transcript delta and accumulated transcript.
-      tags: [Chat Management]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              properties:
-                audio:
-                  type: string
-                  format: binary
-                duration_seconds:
-                  type: integer
-      responses:
-        '200':
-          description: STT chunk transcribed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SpeechSTTSessionResponse'
-        '400':
-          description: Invalid request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Session not found or expired
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /speech/stt/session/{id}/finalize:
-    post:
-      summary: Finalize STT session
-      description: Finalizes a chunked STT session and returns final transcript.
-      tags: [Chat Management]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SpeechSTTFinalizeRequest'
-      responses:
-        '200':
-          description: STT session finalized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SpeechSTTSessionResponse'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Session not found or expired
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /speech/tts:
-    post:
-      summary: Stream text-to-speech audio
-      description: Streams TTS audio chunks over server-sent events.
-      tags: [Chat Management]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SpeechTTSRequest'
-      responses:
-        '200':
-          description: SSE stream with `status`, `audio_chunk`, and `done` events.
-          content:
-            text/event-stream:
-              schema:
-                type: string
-        '400':
-          description: Invalid request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
           content:
             application/json:
               schema:
@@ -6619,10 +6681,6 @@ paths:
                     Optional. Only `account` is accepted on an existing thread (it leaves the sandbox, which cannot be
                     undone); a thread is sandboxed when it is created, never later, so `sandbox` on a thread that is
                     not one is a 400. See the `context_scope` property of the Chat schema.
-                tts_autoplay_override:
-                  type: boolean
-                  nullable: true
-                  description: Optional per-chat TTS autoplay override. Null means inherit personality default.
               required:
                 - name
       responses:
@@ -6714,10 +6772,6 @@ paths:
                     Optional. Only `account` is accepted on an existing thread (it leaves the sandbox, which cannot be
                     undone); a thread is sandboxed when it is created, never later, so `sandbox` on a thread that is
                     not one is a 400. See the `context_scope` property of the Chat schema.
-                tts_autoplay_override:
-                  type: boolean
-                  nullable: true
-                  description: Optional per-chat TTS autoplay override. Null means inherit personality default.
       responses:
         '200':
           description: Chat updated successfully
@@ -11318,6 +11372,16 @@ components:
           description: The voices a speech model offers (ADR 0x052); absent for other kinds.
           items:
             $ref: '#/components/schemas/SpeechVoice'
+        speech_style:
+          type: boolean
+          description: Whether a speech model takes a style instruction.
+        available_voices:
+          type: array
+          description: >-
+            All the voices a known speech model has, so one narrowed away can be offered
+            again; absent for a model added by id, whose voices are typed.
+          items:
+            $ref: '#/components/schemas/SpeechVoice'
       required:
         - id
         - name
@@ -11793,10 +11857,6 @@ components:
             maxLength: 10
         is_favorite:
           type: boolean
-        tts_autoplay_override:
-          type: boolean
-          nullable: true
-          description: Optional per-chat TTS autoplay override. Null means inherit personality default.
         archived:
           type: boolean
           description: When true, the thread is in the archive and omitted from default list responses
@@ -11831,64 +11891,6 @@ components:
         context_scope: account
         created_at: "2024-01-01T00:00:00Z"
         updated_at: "2024-01-01T00:00:00Z"
-
-    SpeechSTTSessionStartRequest:
-      type: object
-      properties:
-        operation_id:
-          type: string
-        chat_id:
-          type: string
-          format: uuid
-        message_id:
-          type: string
-          format: uuid
-
-    SpeechSTTFinalizeRequest:
-      type: object
-      properties:
-        duration_seconds:
-          type: integer
-          minimum: 1
-
-    SpeechSTTSessionResponse:
-      type: object
-      properties:
-        session_id:
-          type: string
-        operation_id:
-          type: string
-        transcript:
-          type: string
-        delta_text:
-          type: string
-        duration_seconds:
-          type: integer
-        done:
-          type: boolean
-      required:
-        - session_id
-        - transcript
-        - done
-
-    SpeechTTSRequest:
-      type: object
-      properties:
-        text:
-          type: string
-        voice:
-          type: string
-        voice_speed:
-          type: number
-          minimum: 0.25
-          maximum: 4
-        voice_style:
-          type: string
-        playback_mode:
-          type: string
-          enum: [manual, autoplay]
-      required:
-        - text
 
     ChatContext:
       type: object
@@ -12209,6 +12211,12 @@ components:
     ChatMessage:
       type: object
       properties:
+        final_round_offset:
+          type: integer
+          description: >-
+            Where an assistant reply's final round starts in `message`, in bytes (ADR
+            0x052): the text before it was written before a tool call, and is not read
+            aloud. Absent for a reply with no tool rounds.
         id:
           type: string
           format: uuid
@@ -12868,6 +12876,57 @@ components:
       description: >-
         An audio container: `webm` is Opus in WebM (Chromium and Firefox
         recordings), `mp4` is AAC in MP4 or M4A (Safari recordings).
+    PersonalityVoice:
+      type: object
+      required: [model_id, voice]
+      properties:
+        model_id:
+          type: string
+          format: uuid
+          description: A speech model.
+        voice:
+          type: string
+          description: One of the voices the model offers.
+        style:
+          type: string
+          maxLength: 500
+          description: How the personality sounds, for models that take a style instruction.
+    SpeechTrack:
+      type: object
+      required: [id, chat_id, status, segments]
+      properties:
+        id:
+          type: string
+          format: uuid
+        chat_id:
+          type: string
+          format: uuid
+        message_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [open, complete, failed, stopped]
+          description: >-
+            `open` while segments are still coming; `stopped` when credits ran out
+            partway (asking again resumes it).
+        error_code:
+          type: string
+        segments:
+          type: array
+          items:
+            type: object
+            required: [seq, format, duration_ms, size_bytes]
+            properties:
+              seq:
+                type: integer
+              format:
+                $ref: '#/components/schemas/AudioFormat'
+              duration_ms:
+                type: integer
+                description: Zero where the container doesn't say; the player measures it.
+              size_bytes:
+                type: integer
     DictationModel:
       type: object
       required: [available]
@@ -13895,6 +13954,13 @@ components:
     Personality:
       type: object
       properties:
+        voice:
+          allOf:
+            - $ref: '#/components/schemas/PersonalityVoice'
+          nullable: true
+          description: >-
+            The personality's voice (ADR 0x052), or absent for none. Set and cleared on
+            `/personality/{id}/voice`; a personality PUT never changes it.
         reasoning_effort:
           allOf:
             - $ref: '#/components/schemas/ReasoningEffort'
@@ -13936,20 +14002,6 @@ components:
             - $ref: '#/components/schemas/PersonalityThumbnailCircle'
           nullable: true
           description: Optional normalized portrait circle bounds used to focus circular thumbnails.
-        tts_autoplay_default:
-          type: boolean
-          description: Default TTS autoplay behavior for chats using this personality.
-        voice:
-          type: string
-          description: Personality-level TTS voice preset.
-        voice_style:
-          type: string
-          description: Optional personality-level style instruction used for TTS synthesis.
-        voice_speed:
-          type: number
-          minimum: 0.25
-          maximum: 4
-          description: Personality-level TTS speed multiplier.
         created_at:
           type: string
           format: date-time
@@ -16319,6 +16371,7 @@ components:
         - model_wrong_kind
         - audio_format_unsupported
         - clip_too_long
+        - voice_unavailable
         - reauthentication_required
         - provider_unreachable
         - provider_key_rejected

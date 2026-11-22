@@ -2,13 +2,15 @@
 
 ## Role
 
-Serves voice replies and dictation (ADR 0x052).
-So far, dictation: whether the account has a dictation model, and transcribing a clip the person recorded in the composer.
+Serves voice replies and dictation (ADR 0x052): reading a reply aloud, a track's segments, trying a voice, and transcribing a clip the person recorded in the composer.
 
 ## Responsibilities
 
 - `GET /speech/dictation` answers whether the composer has a microphone (`available`), and if so the dictation model, its formats (always `wav`) and longest clip.
   With no dictation model (off, not set, or unusable) it answers 200 with `available: false` and the `utility_*` code saying why, since no microphone is not an error.
+- `POST /speech/messages/{id}` answers the reply's speech track in its personality's voice, started if it isn't there yet; `GET /speech/tracks/{id}` answers its status and segments so far, which the client polls while it is `open` (a saved reply's track with no worker gets one); `GET /speech/tracks/{id}/segments/{seq}` answers one segment's audio with an ETag naming its version, `private, no-cache`: a segment made again at the same seq has another ETag, and the one the client has is a 304 without reading the audio.
+  No voice, or one that can't be used, is a 409 `voice_unavailable`; segment file keys never leave the server.
+- `POST /speech/preview` reads up to 300 characters aloud in a voice not yet saved (billed, not stored), answering the audio with `no-store`.
 - `POST /speech/transcriptions` takes one clip as multipart form data (`audio`, `format`, optional `chat_id` and `language`) and answers its transcript.
   The clip's length is never taken from the client: it is read from the WAV's data (agent.Transcribe).
 
@@ -28,7 +30,7 @@ So far, dictation: whether the account has a dictation model, and transcribing a
 
 ## Testing
 
-- `handler_test.go` — over a fake agent: the dictation model and why there is none; a transcript with every field passed on; a bad chat id and a negative duration dropped; each refusal's status and code (no clip, unknown format, out of credits, a format the model refuses, too long, no dictation model, a provider failure without its own error); an oversized upload.
+- `handler_test.go` — over a fake agent: listening, a track and a segment's audio (headers; no file key in the answer), unknown ids, the refusals' codes, and previews (audio, a missing model, out of credits); the dictation model and why there is none; a transcript with every field passed on; a bad chat id and a negative duration dropped; each refusal's status and code (no clip, unknown format, out of credits, a format the model refuses, too long, no dictation model, a provider failure without its own error); an oversized upload.
 
 ## Related documentation
 

@@ -56,7 +56,8 @@ func newAccountExportTestDatastore(t *testing.T) *Datastore {
 			comment_refs json,
 			chat_messages uuid NOT NULL,
 			chat_message_generation_mood uuid,
-			chat_message_generation_expression uuid
+			chat_message_generation_expression uuid,
+			final_round_offset integer NOT NULL DEFAULT 0
 		)`)
 	require.NoError(t, err)
 	return ds

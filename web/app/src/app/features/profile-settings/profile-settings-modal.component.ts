@@ -41,6 +41,7 @@ import { ShieldIconComponent, UserIconComponent } from '../../shared/ui/icons/ic
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { BackgroundModelsComponent } from './background-models/background-models.component';
 import { DictationModelComponent } from './voice/dictation-model.component';
+import { OfferedVoicesComponent } from './voice/offered-voices.component';
 import { ProfileSettingsModalService, ProfileSettingsTab } from './profile-settings-modal.service';
 import { ProvidersSectionComponent } from './providers/providers-section.component';
 
@@ -58,6 +59,7 @@ import { ProvidersSectionComponent } from './providers/providers-section.compone
     ProvidersSectionComponent,
     BackgroundModelsComponent,
     DictationModelComponent,
+    OfferedVoicesComponent,
   ],
   templateUrl: './profile-settings-modal.component.html',
   styleUrl: './profile-settings-modal.component.scss',

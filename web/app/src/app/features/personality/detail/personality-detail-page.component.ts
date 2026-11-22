@@ -1,12 +1,5 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  effect,
-  inject,
-  OnInit,
-  signal,
-} from '@angular/core';
+import { PersonalityVoiceComponent } from '../components/personality-voice.component';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, OnInit, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -38,14 +31,8 @@ import { PersonalityExpressionsManagerComponent } from './personality-expression
 import { PersonalityMediaJobBannerComponent } from '../components/personality-media-job-banner.component';
 import { PersonalityTurnSettingsFieldsComponent } from '../components/personality-turn-settings-fields.component';
 import { TurnSettingValues, TurnSettingsPatch } from '../../../core/models/turn-settings.model';
-import {
-  BellIconComponent,
-  ContractIconComponent,
-} from '../../../shared/ui/icons/icons';
-import {
-  PersonalityEditDraft,
-  PersonalityEditorSessionService,
-} from '../services/personality-editor-session.service';
+import { BellIconComponent, ContractIconComponent } from '../../../shared/ui/icons/icons';
+import { PersonalityEditDraft, PersonalityEditorSessionService } from '../services/personality-editor-session.service';
 import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import { EntityMarketplaceOutletComponent } from '../../../extensions/entity-marketplace-outlet.component';
@@ -54,6 +41,7 @@ import { EntityMarketplaceOutletComponent } from '../../../extensions/entity-mar
   selector: 'app-personality-detail-page',
   standalone: true,
   imports: [
+    PersonalityVoiceComponent,
     PersonaAccentScopeComponent,
     PersonaCoverComponent,
     PersonalitySystemPromptEditorComponent,
@@ -110,11 +98,7 @@ export class PersonalityDetailPageComponent implements OnInit {
     if (!personality) return null;
     return toPersonalityDetailVm(personality, {
       defaultPersonalityId: this.defaultPersonalityId(),
-      coverImageUrl: personalityCoverUrl(
-        personality,
-        this.expressions(),
-        this.imageGallery.getImageUrl.bind(this.imageGallery),
-      ),
+      coverImageUrl: personalityCoverUrl(personality, this.expressions(), this.imageGallery.getImageUrl.bind(this.imageGallery)),
     });
   });
 
@@ -133,9 +117,7 @@ export class PersonalityDetailPageComponent implements OnInit {
 
   readonly systemPromptValue = computed<SystemPromptValue>(() => {
     const personality = this.personality();
-    const draft = this.editorSession.personalityId() === personality?.id
-      ? this.editorSession.draft()
-      : null;
+    const draft = this.editorSession.personalityId() === personality?.id ? this.editorSession.draft() : null;
     return {
       systemPrompt: draft?.system_prompt ?? personality?.system_prompt ?? '',
     };
@@ -210,6 +192,12 @@ export class PersonalityDetailPageComponent implements OnInit {
         });
       },
     });
+  }
+
+  /** The voice was saved or removed on its own route; the rest of the personality is as it was. */
+  onVoiceChanged(updated: Personality): void {
+    const personality = this.personality();
+    if (personality) this.view.setPersonality({ ...personality, voice: updated.voice ?? null });
   }
 
   onExpressionsEnabledChanged(enabled: boolean): void {
@@ -380,10 +368,12 @@ export class PersonalityDetailPageComponent implements OnInit {
     const personality = this.personality();
     if (!personality) return;
     try {
-      const chat = await firstValueFrom(this.chatService.createChat({
-        name: DEFAULT_THREAD_NAME,
-        personality_id: personality.id,
-      }));
+      const chat = await firstValueFrom(
+        this.chatService.createChat({
+          name: DEFAULT_THREAD_NAME,
+          personality_id: personality.id,
+        }),
+      );
       this.chatService.setLastChatId(chat.id);
       this.router.navigate(['/chat', chat.id]);
     } catch (err) {
@@ -403,11 +393,7 @@ export class PersonalityDetailPageComponent implements OnInit {
    * spreading it as overrides); immediate controls pass just their own field,
    * which is what keeps them from flushing an unsaved draft on save.
    */
-  private buildUpdateRequest(
-    personality: Personality,
-    overrides: Partial<UpdatePersonalityRequest>,
-  ): UpdatePersonalityRequest {
+  private buildUpdateRequest(personality: Personality, overrides: Partial<UpdatePersonalityRequest>): UpdatePersonalityRequest {
     return buildPersonalityUpdateRequest(personality, overrides);
   }
 }
-

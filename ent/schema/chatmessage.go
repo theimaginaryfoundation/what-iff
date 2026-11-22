@@ -82,6 +82,12 @@ func (ChatMessage) Fields() []ent.Field {
 		field.JSON("comment_refs", []modeltypes.CommentRef{}).
 			Optional().
 			Comment("Document comments the message is about (ADR 0x046): on a user message the comment that sent it, on an assistant message the comments it made or replied to. Shown as links to the thread."),
+		// Where the reply's final round starts in message (ADR 0x052 §6), in bytes: text
+		// before it was written before a tool call, and is not read aloud. Zero for a
+		// reply with no tool rounds, and for every message before speech.
+		field.Int("final_round_offset").
+			Default(0).
+			NonNegative(),
 		field.Bool("bookmarked").
 			Default(false).
 			Comment("User-flagged bookmark for navigating long threads; either origin can be bookmarked."),

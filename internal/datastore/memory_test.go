@@ -1012,7 +1012,8 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			image_style text NOT NULL DEFAULT 'auto',
 			user_personalities uuid NOT NULL,
 			reasoning_effort text,
-			agent_loop text
+			agent_loop text,
+			voice_model_id uuid NULL, voice text NOT NULL DEFAULT '', voice_style text NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE memories (
 			id uuid PRIMARY KEY,

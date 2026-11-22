@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -17,7 +18,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -26,6 +29,34 @@ type fakeSpeech struct {
 	err       error
 	text      string
 	got       []agent.DictationClip
+
+	track    *models.SpeechTrack
+	audio    []byte
+	format   models.AudioFormat
+	previews []string
+}
+
+func (f *fakeSpeech) Listen(context.Context, uuid.UUID, uuid.UUID) (*models.SpeechTrack, error) {
+	return f.track, f.err
+}
+
+func (f *fakeSpeech) SpeechTrack(context.Context, uuid.UUID, uuid.UUID) (*models.SpeechTrack, error) {
+	return f.track, f.err
+}
+
+func (f *fakeSpeech) SpeechSegmentAudio(_ context.Context, _, _ uuid.UUID, seq int, ifNoneMatch string) (agent.SegmentAudio, error) {
+	if f.err != nil || seq > 0 {
+		return agent.SegmentAudio{}, datastore.ErrSpeechTrackNotFound
+	}
+	if ifNoneMatch == `"v1"` {
+		return agent.SegmentAudio{ETag: `"v1"`, Format: f.format, NotModified: true}, nil
+	}
+	return agent.SegmentAudio{ETag: `"v1"`, Format: f.format, Data: f.audio}, nil
+}
+
+func (f *fakeSpeech) PreviewVoice(_ context.Context, _ uuid.UUID, _ models.PersonalityVoice, text string) (provider.SpeechAudio, error) {
+	f.previews = append(f.previews, text)
+	return provider.SpeechAudio{Data: f.audio, Format: f.format}, f.err
 }
 
 func (f *fakeSpeech) Dictation(context.Context) (agent.DictationModel, error) {
@@ -134,4 +165,73 @@ func TestTranscribe_TooLargeAnUpload(t *testing.T) {
 	rec := serve(t, &fakeSpeech{}, clipRequest(t, map[string]string{"format": "wav"}, make([]byte, maxUploadBytes+1)), true)
 	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
 	require.Contains(t, rec.Body.String(), models.ErrCodeClipTooLong)
+}
+
+func TestListenAndTracks(t *testing.T) {
+	t.Parallel()
+	trackID, msgID := uuid.New(), uuid.New()
+	s := &fakeSpeech{track: &models.SpeechTrack{ID: trackID, Status: models.SpeechTrackOpen, Segments: []models.SpeechSegment{{Seq: 0, Format: models.AudioFormatMP3, FileKey: "secret/key"}}},
+		audio: []byte("ID3audio"), format: models.AudioFormatMP3}
+
+	rec := serve(t, s, httptest.NewRequest(http.MethodPost, "/speech/messages/"+msgID.String(), nil), true)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"status":"open"`)
+	require.NotContains(t, rec.Body.String(), "secret/key", "file keys stay on the server")
+
+	rec = serve(t, s, httptest.NewRequest(http.MethodGet, "/speech/tracks/"+trackID.String(), nil), true)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	rec = serve(t, s, httptest.NewRequest(http.MethodGet, "/speech/tracks/"+trackID.String()+"/segments/0", nil), true)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "audio/mpeg", rec.Header().Get("Content-Type"))
+	require.Equal(t, "private, no-cache", rec.Header().Get("Cache-Control"), "kept, but checked each time")
+	require.Equal(t, `"v1"`, rec.Header().Get("ETag"))
+	require.Equal(t, "ID3audio", rec.Body.String())
+
+	again := httptest.NewRequest(http.MethodGet, "/speech/tracks/"+trackID.String()+"/segments/0", nil)
+	again.Header.Set("If-None-Match", `"v1"`)
+	rec = serve(t, s, again, true)
+	require.Equal(t, http.StatusNotModified, rec.Code)
+	require.Empty(t, rec.Body.String())
+
+	rec = serve(t, s, httptest.NewRequest(http.MethodGet, "/speech/tracks/"+trackID.String()+"/segments/1", nil), true)
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	rec = serve(t, s, httptest.NewRequest(http.MethodGet, "/speech/tracks/not-a-uuid", nil), true)
+	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestListen_Refusals(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{agent.ErrNoVoice, http.StatusConflict, models.ErrCodeVoiceUnavailable},
+		{fmt.Errorf("%w: gone", agent.ErrVoiceUnavailable), http.StatusConflict, models.ErrCodeVoiceUnavailable},
+		{datastore.ErrChatMessageNotFound, http.StatusNotFound, ""},
+	} {
+		rec := serve(t, &fakeSpeech{err: tc.err}, httptest.NewRequest(http.MethodPost, "/speech/messages/"+uuid.NewString(), nil), true)
+		require.Equal(t, tc.status, rec.Code, tc.err.Error())
+		if tc.code != "" {
+			require.Contains(t, rec.Body.String(), tc.code)
+		}
+	}
+}
+
+func TestPreview(t *testing.T) {
+	t.Parallel()
+	s := &fakeSpeech{audio: []byte("RIFFwav"), format: models.AudioFormatWAV}
+	body := `{"model_id":"` + uuid.NewString() + `","voice":"Kore","style":"warm","text":"Hi, I'm Ada."}`
+	rec := serve(t, s, httptest.NewRequest(http.MethodPost, "/speech/preview", strings.NewReader(body)), true)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "audio/wav", rec.Header().Get("Content-Type"))
+	require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+	require.Equal(t, []string{"Hi, I'm Ada."}, s.previews)
+
+	rec = serve(t, s, httptest.NewRequest(http.MethodPost, "/speech/preview", strings.NewReader(`{"voice":"Kore","text":"x"}`)), true)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "no model")
+	s.err = fmt.Errorf("%w for user", agent.ErrQuotaExceeded)
+	rec = serve(t, s, httptest.NewRequest(http.MethodPost, "/speech/preview", strings.NewReader(body)), true)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 }

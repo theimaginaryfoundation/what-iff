@@ -40,6 +40,10 @@ type Personality struct {
 	// ImageStyle is the preferred image generation style (e.g. "auto", "anime", "none").
 	// Persisted from the generation wizard and used for future expression grid generations.
 	ImageStyle string `json:"image_style"`
+	// Voice is the personality's voice (ADR 0x052 §5), or nil for none. It is set on
+	// its own route, never by a personality PUT, so an editor that doesn't know about
+	// voices can't clear one.
+	Voice *PersonalityVoice `json:"voice,omitempty"`
 	// TurnSettingValues are this personality's reasoning effort and agent loop (ADR 0x026). They
 	// seed a new thread with this personality, over the account default. Full replace on update.
 	TurnSettingValues

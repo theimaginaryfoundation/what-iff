@@ -442,7 +442,7 @@ func copyMessagesInto(ctx context.Context, tx *ent.Tx, linkID, chatID uuid.UUID,
 			c.SetID(ids[i]).SetChatID(chatID).SetMessage(m.Message).SetOrigin(m.Origin).
 				SetReadStatus(chatmessage.ReadStatusRead).SetSentAt(m.SentAt).
 				SetGenerationModel(m.GenerationModel).SetGenerationPersonality(m.GenerationPersonality).
-				SetNillableExcludeFromMemory(m.ExcludeFromMemory)
+				SetNillableExcludeFromMemory(m.ExcludeFromMemory).SetFinalRoundOffset(m.FinalRoundOffset)
 		}).Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("copy messages: %w", err)

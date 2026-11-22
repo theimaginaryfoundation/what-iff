@@ -58,7 +58,10 @@ const (
 	// doesn't take; the client records WAV for that model instead (ADR 0x052 §10).
 	ErrCodeAudioFormatUnsupported = "audio_format_unsupported"
 	// ErrCodeClipTooLong is a dictated clip longer or larger than the dictation model takes.
-	ErrCodeClipTooLong         = "clip_too_long"
+	ErrCodeClipTooLong = "clip_too_long"
+	// ErrCodeVoiceUnavailable is a reply that can't be read aloud: its personality has no
+	// voice, or the voice's model is gone, unusable, or no longer offers it (ADR 0x052).
+	ErrCodeVoiceUnavailable    = "voice_unavailable"
 	ErrCodeSystemPromptTooLong = "system_prompt_too_long"
 	// ErrCodeBuzzTermsRequired: a Buzz community has join terms the owner has not yet
 	// accepted for the persona; details.policy carries them (ADR 0x028).
@@ -159,6 +162,7 @@ var AllErrorCodes = []string{
 	ErrCodeModelWrongKind,
 	ErrCodeAudioFormatUnsupported,
 	ErrCodeClipTooLong,
+	ErrCodeVoiceUnavailable,
 	ErrCodeReauthenticationRequired,
 	ErrCodeProviderUnreachable,
 	ErrCodeProviderKeyRejected,

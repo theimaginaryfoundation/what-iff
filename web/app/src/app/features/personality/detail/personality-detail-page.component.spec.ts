@@ -1,4 +1,4 @@
-import type { MockedObject } from "vitest";
+import type { MockedObject } from 'vitest';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
@@ -20,342 +20,356 @@ import { PersonalityDetailPageComponent } from './personality-detail-page.compon
 import { EntityMarketplaceOutletComponent } from '../../../extensions/entity-marketplace-outlet.component';
 
 function makePersonality(overrides: Partial<Personality> = {}): Personality {
-    return {
-        id: 'p-1',
-        name: 'Vera Calder',
-        system_prompt: 'A spectral cartographer.',
-        scratchpad: 'Scratchpad body',
-        scratchpad_update_prompt: 'Update scratchpad carefully',
-        archival_model: 'gpt-legacy',
-        memory_search_prompt: 'Search memories like this',
-        memory_write_prompt: 'Write memories like this',
-        auto_pin_memories: false,
-        expressions_enabled: true,
-        image_style: 'auto',
-        cover_image_id: 'img-cover-1',
-        cover_image_url: null,
-        accent_color: '#7A5AF8',
-        thumbnail_circle: { cx: 0.5, cy: 0.42, r: 0.34 },
-        created_at: '2026-04-28T00:00:00Z',
-        updated_at: '2026-04-28T00:00:00Z',
-        stats: { chat_count: 2, last_used_at: null },
-        ...overrides,
-    };
+  return {
+    id: 'p-1',
+    name: 'Vera Calder',
+    system_prompt: 'A spectral cartographer.',
+    scratchpad: 'Scratchpad body',
+    scratchpad_update_prompt: 'Update scratchpad carefully',
+    archival_model: 'gpt-legacy',
+    memory_search_prompt: 'Search memories like this',
+    memory_write_prompt: 'Write memories like this',
+    auto_pin_memories: false,
+    expressions_enabled: true,
+    image_style: 'auto',
+    cover_image_id: 'img-cover-1',
+    cover_image_url: null,
+    accent_color: '#7A5AF8',
+    thumbnail_circle: { cx: 0.5, cy: 0.42, r: 0.34 },
+    created_at: '2026-04-28T00:00:00Z',
+    updated_at: '2026-04-28T00:00:00Z',
+    stats: { chat_count: 2, last_used_at: null },
+    ...overrides,
+  };
 }
 
 describe('PersonalityDetailPageComponent', () => {
-    let fixture: ComponentFixture<PersonalityDetailPageComponent>;
-    let chatService: Pick<MockedObject<ChatService>, 'createChat' | 'setLastChatId'>;
-    let personalityService: Pick<MockedObject<PersonalityService>, 'getPersonality' | 'listExpressions' | 'updatePersonality' | 'deletePersonality'>;
-    let router: Pick<MockedObject<Router>, 'navigate'>;
+  let fixture: ComponentFixture<PersonalityDetailPageComponent>;
+  let chatService: Pick<MockedObject<ChatService>, 'createChat' | 'setLastChatId'>;
+  let personalityService: Pick<
+    MockedObject<PersonalityService>,
+    'getPersonality' | 'listExpressions' | 'updatePersonality' | 'deletePersonality'
+  >;
+  let router: Pick<MockedObject<Router>, 'navigate'>;
 
-    const preferences: UserPreferences = {
-        id: 'pref-1',
+  const preferences: UserPreferences = {
+    id: 'pref-1',
+    user_id: 'u-1',
+    default_model_id: 'm-1',
+    default_personality_id: undefined,
+    theme: 'dark',
+  };
+
+  beforeEach(async () => {
+    personalityService = {
+      getPersonality: vi.fn().mockName('PersonalityService.getPersonality'),
+      listExpressions: vi.fn().mockName('PersonalityService.listExpressions'),
+      updatePersonality: vi.fn().mockName('PersonalityService.updatePersonality'),
+      deletePersonality: vi.fn().mockName('PersonalityService.deletePersonality'),
+    } as unknown as Pick<
+      MockedObject<PersonalityService>,
+      'getPersonality' | 'listExpressions' | 'updatePersonality' | 'deletePersonality'
+    >;
+    personalityService.getPersonality.mockReturnValue(of(makePersonality()));
+    personalityService.listExpressions.mockReturnValue(of([]));
+    personalityService.updatePersonality.mockReturnValue(of(makePersonality()));
+
+    chatService = {
+      createChat: vi.fn().mockName('ChatService.createChat'),
+      setLastChatId: vi.fn().mockName('ChatService.setLastChatId'),
+    } as unknown as Pick<MockedObject<ChatService>, 'createChat' | 'setLastChatId'>;
+    chatService.createChat.mockReturnValue(
+      of({
+        id: 'chat-1',
         user_id: 'u-1',
-        default_model_id: 'm-1',
-        default_personality_id: undefined,
-        theme: 'dark',
+        name: 'New thread',
+        personality_id: 'p-1',
+        created_at: '',
+        updated_at: '',
+      } as Chat),
+    );
+
+    const preferences$ = new BehaviorSubject<UserPreferences | null>(preferences);
+    const userPreferencesService = {
+      getUserPreferences: vi.fn().mockName('UserPreferencesService.getUserPreferences'),
+      updateUserPreferences: vi.fn().mockName('UserPreferencesService.updateUserPreferences'),
+      preferences$: preferences$.asObservable(),
     };
+    userPreferencesService.getUserPreferences.mockReturnValue(of(preferences));
 
-    beforeEach(async () => {
-        personalityService = {
-            getPersonality: vi.fn().mockName("PersonalityService.getPersonality"),
-            listExpressions: vi.fn().mockName("PersonalityService.listExpressions"),
-            updatePersonality: vi.fn().mockName("PersonalityService.updatePersonality"),
-            deletePersonality: vi.fn().mockName("PersonalityService.deletePersonality")
-        } as unknown as Pick<MockedObject<PersonalityService>, 'getPersonality' | 'listExpressions' | 'updatePersonality' | 'deletePersonality'>;
-        personalityService.getPersonality.mockReturnValue(of(makePersonality()));
-        personalityService.listExpressions.mockReturnValue(of([]));
-        personalityService.updatePersonality.mockReturnValue(of(makePersonality()));
+    const fileAttachmentService = {
+      listFileAttachments: vi.fn().mockName('FileAttachmentService.listFileAttachments'),
+      uploadPersonalityFileAttachment: vi.fn().mockName('FileAttachmentService.uploadPersonalityFileAttachment'),
+      deleteFileAttachment: vi.fn().mockName('FileAttachmentService.deleteFileAttachment'),
+    };
+    fileAttachmentService.listFileAttachments.mockReturnValue(of({ results: [], total_count: 0, page: 1 }));
 
-        chatService = {
-            createChat: vi.fn().mockName("ChatService.createChat"),
-            setLastChatId: vi.fn().mockName("ChatService.setLastChatId")
-        } as unknown as Pick<MockedObject<ChatService>, 'createChat' | 'setLastChatId'>;
-        chatService.createChat.mockReturnValue(of({
-            id: 'chat-1',
-            user_id: 'u-1',
-            name: 'New thread',
-            personality_id: 'p-1',
-            created_at: '',
-            updated_at: '',
-        } as Chat));
+    const confirmation = {
+      confirm: vi.fn().mockName('ConfirmationService.confirm'),
+      alert: vi.fn().mockName('ConfirmationService.alert'),
+    };
+    router = {
+      navigate: vi.fn().mockName('Router.navigate'),
+    } as unknown as Pick<MockedObject<Router>, 'navigate'>;
 
-        const preferences$ = new BehaviorSubject<UserPreferences | null>(preferences);
-        const userPreferencesService = {
-            getUserPreferences: vi.fn().mockName("UserPreferencesService.getUserPreferences"),
-            updateUserPreferences: vi.fn().mockName("UserPreferencesService.updateUserPreferences"),
-            preferences$: preferences$.asObservable()
-        };
-        userPreferencesService.getUserPreferences.mockReturnValue(of(preferences));
+    await TestBed.configureTestingModule({
+      imports: [PersonalityDetailPageComponent],
+      providers: [
+        provideZonelessChangeDetection(),
+        provideHttpClient(withXhr()),
+        provideHttpClientTesting(),
+        {
+          provide: ActivatedRoute,
+          useValue: { snapshot: { paramMap: { get: () => 'p-1' } } },
+        },
+        { provide: ChatService, useValue: chatService },
+        { provide: ConfirmationService, useValue: confirmation },
+        { provide: FileAttachmentService, useValue: fileAttachmentService },
+        { provide: PersonalityService, useValue: personalityService },
+        { provide: Router, useValue: router },
+        { provide: UserPreferencesService, useValue: userPreferencesService },
+      ],
+    }).compileComponents();
 
-        const fileAttachmentService = {
-            listFileAttachments: vi.fn().mockName("FileAttachmentService.listFileAttachments"),
-            uploadPersonalityFileAttachment: vi.fn().mockName("FileAttachmentService.uploadPersonalityFileAttachment"),
-            deleteFileAttachment: vi.fn().mockName("FileAttachmentService.deleteFileAttachment")
-        };
-        fileAttachmentService.listFileAttachments.mockReturnValue(of({ results: [], total_count: 0, page: 1 }));
+    fixture = TestBed.createComponent(PersonalityDetailPageComponent);
+  });
 
-        const confirmation = {
-            confirm: vi.fn().mockName("ConfirmationService.confirm"),
-            alert: vi.fn().mockName("ConfirmationService.alert")
-        };
-        router = {
-            navigate: vi.fn().mockName("Router.navigate")
-        } as unknown as Pick<MockedObject<Router>, 'navigate'>;
+  it('instantiates and loads a personality from the route id', () => {
+    fixture.detectChanges();
+    const nameInput = fixture.nativeElement.querySelector('input[aria-label="Personality name"]') as HTMLInputElement;
+    expect(nameInput.value).toBe('Vera Calder');
+  });
 
-        await TestBed.configureTestingModule({
-            imports: [PersonalityDetailPageComponent],
-            providers: [
-                provideZonelessChangeDetection(),
-                provideHttpClient(withXhr()),
-                provideHttpClientTesting(),
-                {
-                    provide: ActivatedRoute,
-                    useValue: { snapshot: { paramMap: { get: () => 'p-1' } } },
-                },
-                { provide: ChatService, useValue: chatService },
-                { provide: ConfirmationService, useValue: confirmation },
-                { provide: FileAttachmentService, useValue: fileAttachmentService },
-                { provide: PersonalityService, useValue: personalityService },
-                { provide: Router, useValue: router },
-                { provide: UserPreferencesService, useValue: userPreferencesService },
-            ],
-        }).compileComponents();
+  it('mounts the marketplace outlet in the header with the personality identity', () => {
+    fixture.detectChanges();
+    const outlet = fixture.debugElement.query(By.directive(EntityMarketplaceOutletComponent));
+    expect(outlet).toBeTruthy();
+    const instance = outlet.componentInstance as EntityMarketplaceOutletComponent;
+    expect(instance.kind()).toBe('personality');
+    expect(instance.entityId()).toBe('p-1');
+    expect((outlet.nativeElement as HTMLElement).closest('header')).toBeTruthy();
+  });
 
-        fixture = TestBed.createComponent(PersonalityDetailPageComponent);
+  it('explains each section with a help hint next to its heading', () => {
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    for (const label of ['What is the system prompt?', 'What is the scratchpad?', 'What are attachments?', 'What are expressions?']) {
+      expect(host.querySelector(`h2 ui-help-hint button[aria-label="${label}"]`), label).toBeTruthy();
+    }
+  });
+
+  it('contracts the editor back to the personalities list', () => {
+    fixture.detectChanges();
+
+    const contractButton = fixture.nativeElement.querySelector('[aria-label="Compact editor"]') as HTMLButtonElement;
+    contractButton.click();
+
+    expect(router.navigate).toHaveBeenCalledWith(['/personality'], {
+      queryParams: { edit: 'p-1' },
+    });
+  });
+
+  it('starts a new chat with the personality without requiring ChatSessionService', async () => {
+    fixture.detectChanges();
+    await fixture.componentInstance.onUseInNewChat();
+
+    expect(chatService.createChat).toHaveBeenCalledWith({
+      name: 'New thread',
+      personality_id: 'p-1',
+    });
+    expect(chatService.setLastChatId).toHaveBeenCalledWith('chat-1');
+    expect(router.navigate).toHaveBeenCalledWith(['/chat', 'chat-1']);
+  });
+
+  it('preserves non-edited fields when saving prompt edits', async () => {
+    fixture.detectChanges();
+
+    await fixture.componentInstance.onSavePrompt({
+      systemPrompt: 'Updated prompt',
     });
 
-    it('instantiates and loads a personality from the route id', () => {
-        fixture.detectChanges();
-        const nameInput = fixture.nativeElement.querySelector('input[aria-label="Personality name"]') as HTMLInputElement;
-        expect(nameInput.value).toBe('Vera Calder');
+    const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
+    expect(request.cover_image_id).toBe('img-cover-1');
+    expect(request.accent_color).toBe('#7A5AF8');
+    expect(request.thumbnail_circle).toEqual({ cx: 0.5, cy: 0.42, r: 0.34 });
+    expect(request.archival_model).toBe('gpt-legacy');
+    expect(request.memory_search_prompt).toBe('Search memories like this');
+    expect(request.memory_write_prompt).toBe('Write memories like this');
+    expect(request.image_style).toBe('auto');
+    expect(request.expressions_enabled).toBe(true);
+  });
+
+  it('does not flush unsaved draft edits when an immediate toggle saves', () => {
+    fixture.detectChanges();
+
+    // Unsaved header-form edits sitting in the draft, awaiting "Save changes".
+    fixture.componentInstance.setDraftField('name', 'Half-typed name');
+    fixture.componentInstance.setDraftField('scratchpad', 'Half-typed scratchpad');
+
+    // An immediate control (the auto-pin toggle) persists on its own. It
+    // must send only its own field against the persisted personality — not
+    // drag the in-progress draft to the server behind the user's back.
+    fixture.componentInstance.onAutoPinMemoriesChange(true);
+
+    const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
+    expect(request.auto_pin_memories).toBe(true);
+    expect(request.name).toBe('Vera Calder');
+    expect(request.scratchpad).toBe('Scratchpad body');
+  });
+
+  it('exports the saved personality as a character card from the header button', () => {
+    const exportCard = vi.spyOn(TestBed.inject(PersonalityCardService), 'exportCard').mockReturnValue(of(undefined));
+    fixture.detectChanges();
+
+    const button = Array.from<HTMLButtonElement>(fixture.nativeElement.querySelectorAll('button')).find(
+      b => b.textContent?.trim() === 'Export card',
+    );
+    expect(button).toBeTruthy();
+    button!.click();
+
+    expect(exportCard).toHaveBeenCalledWith(expect.objectContaining({ id: 'p-1' }), 'json');
+    expect(fixture.componentInstance.isExportingCard()).toBe(false);
+  });
+
+  it('offers the PNG card only when the personality has a cover image', () => {
+    const exportCard = vi.spyOn(TestBed.inject(PersonalityCardService), 'exportCard').mockReturnValue(of(undefined));
+    const labels = () => Array.from<HTMLButtonElement>(fixture.nativeElement.querySelectorAll('button')).map(b => b.textContent?.trim());
+
+    vi.mocked(TestBed.inject(PersonalityService).getPersonality).mockReturnValue(of(makePersonality({ cover_image_id: null })));
+    fixture.detectChanges();
+    expect(labels()).not.toContain('Export PNG card');
+    expect(labels()).toContain('Export card');
+
+    // A cover image is what a PNG card is made of.
+    const withCover = TestBed.createComponent(PersonalityDetailPageComponent);
+    vi.mocked(TestBed.inject(PersonalityService).getPersonality).mockReturnValue(of(makePersonality({ cover_image_id: 'c-1' })));
+    withCover.detectChanges();
+    const button = Array.from<HTMLButtonElement>(withCover.nativeElement.querySelectorAll('button')).find(
+      b => b.textContent?.trim() === 'Export PNG card',
+    );
+    expect(button).toBeTruthy();
+    button!.click();
+
+    expect(exportCard).toHaveBeenCalledWith(expect.objectContaining({ id: 'p-1' }), 'png');
+  });
+
+  it('tells the user when a character card export fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(TestBed.inject(PersonalityCardService), 'exportCard').mockReturnValue(throwError(() => new Error('boom')));
+    fixture.detectChanges();
+
+    fixture.componentInstance.onExportCard();
+    await vi.waitFor(() =>
+      expect(TestBed.inject(ConfirmationService).alert).toHaveBeenCalledWith(expect.objectContaining({ type: 'danger' })),
+    );
+
+    expect(fixture.componentInstance.isExportingCard()).toBe(false);
+  });
+
+  it('persists the in-progress draft only on an explicit Save changes', () => {
+    fixture.detectChanges();
+
+    fixture.componentInstance.setDraftField('name', 'Renamed via header');
+    fixture.componentInstance.setDraftField('scratchpad', 'New scratchpad body');
+    fixture.componentInstance.saveEditor();
+
+    const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
+    expect(request.name).toBe('Renamed via header');
+    expect(request.scratchpad).toBe('New scratchpad body');
+  });
+
+  describe('thread settings card', () => {
+    function selects(): HTMLSelectElement[] {
+      return Array.from(fixture.nativeElement.querySelectorAll('app-personality-turn-settings-fields select'));
+    }
+
+    function choose(select: HTMLSelectElement, value: string): void {
+      select.value = value;
+      select.dispatchEvent(new Event('change'));
+      fixture.detectChanges();
+    }
+
+    it('shows the saved values under a "Thread settings" heading', () => {
+      vi.mocked(personalityService.getPersonality).mockReturnValue(
+        of(makePersonality({ reasoning_effort: 'low', agent_loop: 'advanced' })),
+      );
+      fixture.detectChanges();
+
+      const heading = fixture.nativeElement.querySelector('#personality-thread-settings-heading') as HTMLElement;
+      expect(heading.textContent).toContain('Thread settings');
+      const [effort, loop] = selects();
+      expect(effort.value).toBe('low');
+      expect(loop.value).toBe('advanced');
+      expect(fixture.componentInstance.turnSettings()).toEqual({ reasoning_effort: 'low', agent_loop: 'advanced' });
     });
 
-    it('mounts the marketplace outlet in the header with the personality identity', () => {
-        fixture.detectChanges();
-        const outlet = fixture.debugElement.query(By.directive(EntityMarketplaceOutletComponent));
-        expect(outlet).toBeTruthy();
-        const instance = outlet.componentInstance as EntityMarketplaceOutletComponent;
-        expect(instance.kind()).toBe('personality');
-        expect(instance.entityId()).toBe('p-1');
-        expect((outlet.nativeElement as HTMLElement).closest('header')).toBeTruthy();
+    it('saves a reasoning effort immediately, keeping the rest of the saved personality', () => {
+      const saved = makePersonality({ reasoning_effort: 'high' });
+      vi.mocked(personalityService.updatePersonality).mockReturnValue(of(saved));
+      fixture.detectChanges();
+      fixture.componentInstance.setDraftField('name', 'Half-typed name');
+
+      choose(selects()[0], 'high');
+
+      const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
+      expect(request.reasoning_effort).toBe('high');
+      expect(request.name).toBe('Vera Calder');
+      expect(fixture.componentInstance.turnSettingsUpdating()).toBe(false);
+      expect(fixture.componentInstance.personality()?.reasoning_effort).toBe('high');
+      expect(fixture.componentInstance.turnSettings().reasoning_effort).toBe('high');
     });
 
-    it('explains each section with a help hint next to its heading', () => {
-        fixture.detectChanges();
-        const host = fixture.nativeElement as HTMLElement;
-        for (const label of ['What is the system prompt?', 'What is the scratchpad?', 'What are attachments?', 'What are expressions?']) {
-            expect(host.querySelector(`h2 ui-help-hint button[aria-label="${label}"]`), label).toBeTruthy();
-        }
+    it('saves an agent loop immediately and clears it back to the account default', () => {
+      fixture.detectChanges();
+
+      choose(selects()[1], 'advanced');
+      expect(vi.mocked(personalityService.updatePersonality).mock.lastCall![1].agent_loop).toBe('advanced');
+
+      choose(selects()[1], '');
+      expect(vi.mocked(personalityService.updatePersonality).mock.lastCall![1].agent_loop).toBeNull();
+      expect(fixture.componentInstance.turnSettings().agent_loop).toBeNull();
     });
 
-    it('contracts the editor back to the personalities list', () => {
-        fixture.detectChanges();
+    it('disables the fields while a save is in flight', () => {
+      vi.mocked(personalityService.updatePersonality).mockReturnValue(NEVER);
+      fixture.detectChanges();
 
-        const contractButton = fixture.nativeElement.querySelector('[aria-label="Compact editor"]') as HTMLButtonElement;
-        contractButton.click();
+      fixture.componentInstance.onTurnSettingChange({ agent_loop: 'advanced' });
+      fixture.detectChanges();
 
-        expect(router.navigate).toHaveBeenCalledWith(['/personality'], {
-            queryParams: { edit: 'p-1' },
-        });
+      expect(fixture.componentInstance.turnSettingsUpdating()).toBe(true);
+      expect(selects().every(select => select.disabled)).toBe(true);
     });
 
-    it('starts a new chat with the personality without requiring ChatSessionService', async () => {
-        fixture.detectChanges();
-        await fixture.componentInstance.onUseInNewChat();
+    it('reverts the shown values and alerts when the save fails', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      vi.mocked(personalityService.getPersonality).mockReturnValue(of(makePersonality({ reasoning_effort: 'low', agent_loop: null })));
+      vi.mocked(personalityService.updatePersonality).mockReturnValue(throwError(() => new Error('nope')));
+      fixture.detectChanges();
 
-        expect(chatService.createChat).toHaveBeenCalledWith({
-            name: 'New thread',
-            personality_id: 'p-1',
-        });
-        expect(chatService.setLastChatId).toHaveBeenCalledWith('chat-1');
-        expect(router.navigate).toHaveBeenCalledWith(['/chat', 'chat-1']);
+      fixture.componentInstance.onTurnSettingChange({ reasoning_effort: 'high' });
+
+      await vi.waitFor(() =>
+        expect(TestBed.inject(ConfirmationService).alert).toHaveBeenCalledWith({
+          message: 'Failed to update thread settings. Please try again.',
+          type: 'danger',
+        }),
+      );
+      expect(fixture.componentInstance.turnSettings()).toEqual({ reasoning_effort: 'low', agent_loop: null });
+      expect(fixture.componentInstance.turnSettingsUpdating()).toBe(false);
     });
 
-    it('preserves non-edited fields when saving prompt edits', async () => {
-        fixture.detectChanges();
+    it('carries draft turn settings on the full-page Save changes', () => {
+      fixture.detectChanges();
 
-        await fixture.componentInstance.onSavePrompt({
-            systemPrompt: 'Updated prompt',
-        });
+      fixture.componentInstance.setDraftField('reasoning_effort', 'medium');
+      fixture.componentInstance.setDraftField('agent_loop', 'advanced');
+      expect(fixture.componentInstance.turnSettings()).toEqual({ reasoning_effort: 'medium', agent_loop: 'advanced' });
+      fixture.componentInstance.saveEditor();
 
-        const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
-        expect(request.cover_image_id).toBe('img-cover-1');
-        expect(request.accent_color).toBe('#7A5AF8');
-        expect(request.thumbnail_circle).toEqual({ cx: 0.5, cy: 0.42, r: 0.34 });
-        expect(request.archival_model).toBe('gpt-legacy');
-        expect(request.memory_search_prompt).toBe('Search memories like this');
-        expect(request.memory_write_prompt).toBe('Write memories like this');
-        expect(request.image_style).toBe('auto');
-        expect(request.expressions_enabled).toBe(true);
+      const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
+      expect(request.reasoning_effort).toBe('medium');
+      expect(request.agent_loop).toBe('advanced');
     });
-
-    it('does not flush unsaved draft edits when an immediate toggle saves', () => {
-        fixture.detectChanges();
-
-        // Unsaved header-form edits sitting in the draft, awaiting "Save changes".
-        fixture.componentInstance.setDraftField('name', 'Half-typed name');
-        fixture.componentInstance.setDraftField('scratchpad', 'Half-typed scratchpad');
-
-        // An immediate control (the auto-pin toggle) persists on its own. It
-        // must send only its own field against the persisted personality — not
-        // drag the in-progress draft to the server behind the user's back.
-        fixture.componentInstance.onAutoPinMemoriesChange(true);
-
-        const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
-        expect(request.auto_pin_memories).toBe(true);
-        expect(request.name).toBe('Vera Calder');
-        expect(request.scratchpad).toBe('Scratchpad body');
-    });
-
-    it('exports the saved personality as a character card from the header button', () => {
-        const exportCard = vi.spyOn(TestBed.inject(PersonalityCardService), 'exportCard').mockReturnValue(of(undefined));
-        fixture.detectChanges();
-
-        const button = Array.from<HTMLButtonElement>(fixture.nativeElement.querySelectorAll('button'))
-            .find(b => b.textContent?.trim() === 'Export card');
-        expect(button).toBeTruthy();
-        button!.click();
-
-        expect(exportCard).toHaveBeenCalledWith(expect.objectContaining({ id: 'p-1' }), 'json');
-        expect(fixture.componentInstance.isExportingCard()).toBe(false);
-    });
-
-    it('offers the PNG card only when the personality has a cover image', () => {
-        const exportCard = vi.spyOn(TestBed.inject(PersonalityCardService), 'exportCard').mockReturnValue(of(undefined));
-        const labels = () => Array.from<HTMLButtonElement>(fixture.nativeElement.querySelectorAll('button')).map(b => b.textContent?.trim());
-
-        vi.mocked(TestBed.inject(PersonalityService).getPersonality).mockReturnValue(of(makePersonality({ cover_image_id: null })));
-        fixture.detectChanges();
-        expect(labels()).not.toContain('Export PNG card');
-        expect(labels()).toContain('Export card');
-
-        // A cover image is what a PNG card is made of.
-        const withCover = TestBed.createComponent(PersonalityDetailPageComponent);
-        vi.mocked(TestBed.inject(PersonalityService).getPersonality).mockReturnValue(of(makePersonality({ cover_image_id: 'c-1' })));
-        withCover.detectChanges();
-        const button = Array.from<HTMLButtonElement>(withCover.nativeElement.querySelectorAll('button'))
-            .find(b => b.textContent?.trim() === 'Export PNG card');
-        expect(button).toBeTruthy();
-        button!.click();
-
-        expect(exportCard).toHaveBeenCalledWith(expect.objectContaining({ id: 'p-1' }), 'png');
-    });
-
-    it('tells the user when a character card export fails', async () => {
-        vi.spyOn(console, 'error').mockImplementation(() => undefined);
-        vi.spyOn(TestBed.inject(PersonalityCardService), 'exportCard').mockReturnValue(throwError(() => new Error('boom')));
-        fixture.detectChanges();
-
-        fixture.componentInstance.onExportCard();
-        await vi.waitFor(() => expect(TestBed.inject(ConfirmationService).alert).toHaveBeenCalledWith(expect.objectContaining({ type: 'danger' })));
-
-        expect(fixture.componentInstance.isExportingCard()).toBe(false);
-    });
-
-    it('persists the in-progress draft only on an explicit Save changes', () => {
-        fixture.detectChanges();
-
-        fixture.componentInstance.setDraftField('name', 'Renamed via header');
-        fixture.componentInstance.setDraftField('scratchpad', 'New scratchpad body');
-        fixture.componentInstance.saveEditor();
-
-        const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
-        expect(request.name).toBe('Renamed via header');
-        expect(request.scratchpad).toBe('New scratchpad body');
-    });
-
-    describe('thread settings card', () => {
-        function selects(): HTMLSelectElement[] {
-            return Array.from(fixture.nativeElement.querySelectorAll('app-personality-turn-settings-fields select'));
-        }
-
-        function choose(select: HTMLSelectElement, value: string): void {
-            select.value = value;
-            select.dispatchEvent(new Event('change'));
-            fixture.detectChanges();
-        }
-
-        it('shows the saved values under a "Thread settings" heading', () => {
-            vi.mocked(personalityService.getPersonality).mockReturnValue(of(makePersonality({ reasoning_effort: 'low', agent_loop: 'advanced' })));
-            fixture.detectChanges();
-
-            const heading = fixture.nativeElement.querySelector('#personality-thread-settings-heading') as HTMLElement;
-            expect(heading.textContent).toContain('Thread settings');
-            const [effort, loop] = selects();
-            expect(effort.value).toBe('low');
-            expect(loop.value).toBe('advanced');
-            expect(fixture.componentInstance.turnSettings()).toEqual({ reasoning_effort: 'low', agent_loop: 'advanced' });
-        });
-
-        it('saves a reasoning effort immediately, keeping the rest of the saved personality', () => {
-            const saved = makePersonality({ reasoning_effort: 'high' });
-            vi.mocked(personalityService.updatePersonality).mockReturnValue(of(saved));
-            fixture.detectChanges();
-            fixture.componentInstance.setDraftField('name', 'Half-typed name');
-
-            choose(selects()[0], 'high');
-
-            const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
-            expect(request.reasoning_effort).toBe('high');
-            expect(request.name).toBe('Vera Calder');
-            expect(fixture.componentInstance.turnSettingsUpdating()).toBe(false);
-            expect(fixture.componentInstance.personality()?.reasoning_effort).toBe('high');
-            expect(fixture.componentInstance.turnSettings().reasoning_effort).toBe('high');
-        });
-
-        it('saves an agent loop immediately and clears it back to the account default', () => {
-            fixture.detectChanges();
-
-            choose(selects()[1], 'advanced');
-            expect(vi.mocked(personalityService.updatePersonality).mock.lastCall![1].agent_loop).toBe('advanced');
-
-            choose(selects()[1], '');
-            expect(vi.mocked(personalityService.updatePersonality).mock.lastCall![1].agent_loop).toBeNull();
-            expect(fixture.componentInstance.turnSettings().agent_loop).toBeNull();
-        });
-
-        it('disables the fields while a save is in flight', () => {
-            vi.mocked(personalityService.updatePersonality).mockReturnValue(NEVER);
-            fixture.detectChanges();
-
-            fixture.componentInstance.onTurnSettingChange({ agent_loop: 'advanced' });
-            fixture.detectChanges();
-
-            expect(fixture.componentInstance.turnSettingsUpdating()).toBe(true);
-            expect(selects().every(select => select.disabled)).toBe(true);
-        });
-
-        it('reverts the shown values and alerts when the save fails', async () => {
-            vi.spyOn(console, 'error').mockImplementation(() => undefined);
-            vi.mocked(personalityService.getPersonality).mockReturnValue(of(makePersonality({ reasoning_effort: 'low', agent_loop: null })));
-            vi.mocked(personalityService.updatePersonality).mockReturnValue(throwError(() => new Error('nope')));
-            fixture.detectChanges();
-
-            fixture.componentInstance.onTurnSettingChange({ reasoning_effort: 'high' });
-
-            await vi.waitFor(() =>
-                expect(TestBed.inject(ConfirmationService).alert).toHaveBeenCalledWith({
-                    message: 'Failed to update thread settings. Please try again.',
-                    type: 'danger',
-                }),
-            );
-            expect(fixture.componentInstance.turnSettings()).toEqual({ reasoning_effort: 'low', agent_loop: null });
-            expect(fixture.componentInstance.turnSettingsUpdating()).toBe(false);
-        });
-
-        it('carries draft turn settings on the full-page Save changes', () => {
-            fixture.detectChanges();
-
-            fixture.componentInstance.setDraftField('reasoning_effort', 'medium');
-            fixture.componentInstance.setDraftField('agent_loop', 'advanced');
-            expect(fixture.componentInstance.turnSettings()).toEqual({ reasoning_effort: 'medium', agent_loop: 'advanced' });
-            fixture.componentInstance.saveEditor();
-
-            const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
-            expect(request.reasoning_effort).toBe('medium');
-            expect(request.agent_loop).toBe('advanced');
-        });
-    });
+  });
 });
