@@ -6,13 +6,14 @@ Serves voice replies and dictation (ADR 0x052): reading a reply aloud, a track's
 
 ## Responsibilities
 
-- `GET /speech/dictation` answers whether the composer has a microphone (`available`), and if so the dictation model's formats and longest clip, so the browser records what it takes.
+- `GET /speech/dictation` answers whether the composer has a microphone (`available`), and if so the dictation model, its formats (always `wav`) and longest clip.
   With no dictation model (off, not set, or unusable) it answers 200 with `available: false` and the `utility_*` code saying why, since no microphone is not an error.
-- `POST /speech/messages/{id}` answers the reply's speech track in its personality's voice, started if it isn't there yet; `GET /speech/tracks/{id}` answers its status and segments so far, which the client polls while it is `open`; `GET /speech/tracks/{id}/segments/{seq}` answers one segment's audio, privately cacheable since it never changes.
+- `POST /speech/messages/{id}` answers the reply's speech track in its personality's voice, started if it isn't there yet; `GET /speech/tracks/{id}` answers its status and segments so far, which the client polls while it is `open` (a saved reply's track with no worker gets one); `GET /speech/tracks/{id}/segments/{seq}` answers one segment's audio, privately cacheable since it never changes.
   No voice, or one that can't be used, is a 409 `voice_unavailable`; segment file keys never leave the server.
 - Autoplay (ADR 0x052 §9): `POST /speech/tracks/{id}/claim` (only one client gets a pending track; the rest are answered `claimed: false`), `POST /speech/tracks/{id}/skip`, `GET /speech/chats/{id}/pending` (newest first, `[]` when none) and `PUT /speech/chats/{id}/autoplay` (`true`, `false`, or `null` to follow the personality: its own route, since a PATCH can't tell null from absent).
 - `POST /speech/preview` reads up to 300 characters aloud in a voice not yet saved (billed, not stored), answering the audio with `no-store`.
-- `POST /speech/transcriptions` takes one clip as multipart form data (`audio`, `format`, `duration_seconds`, optional `chat_id` and `language`) and answers its transcript.
+- `POST /speech/transcriptions` takes one clip as multipart form data (`audio`, `format`, optional `chat_id` and `language`) and answers its transcript.
+  The clip's length is never taken from the client: it is read from the WAV's data (agent.Transcribe).
 
 ## Dependencies
 
