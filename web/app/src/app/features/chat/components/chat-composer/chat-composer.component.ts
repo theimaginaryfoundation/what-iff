@@ -21,7 +21,13 @@ import { catchError, finalize, map, switchMap } from 'rxjs/operators';
 import { EmojiSearch, PickerComponent } from '@ctrl/ngx-emoji-mart';
 import { EmojiEvent } from '@ctrl/ngx-emoji-mart/ngx-emoji';
 
-import { FileAttachment, PendingFileAttachment, isPendingImageAttachment, pendingAttachmentKey, isImageAttachment } from '../../../../core/models/file-attachment.model';
+import {
+  FileAttachment,
+  PendingFileAttachment,
+  isPendingImageAttachment,
+  pendingAttachmentKey,
+  isImageAttachment,
+} from '../../../../core/models/file-attachment.model';
 import { fileBadge } from '../../../gallery/helpers/file-preview.helpers';
 import { Chat } from '../../../../core/models/chat.model';
 import { Model } from '../../../../core/models/model.model';
@@ -36,12 +42,7 @@ import { AgentLoop, InheritedTurnSettings, ReasoningEffort } from '../../../../c
 import { MODE_PLURAL, MODE_SINGULAR } from '../../../mood/mode-ui.labels';
 import { AuthImagePipe } from '../../../../core/pipes/auth-image.pipe';
 import { MAX_FILE_SIZE_BYTES, isMimeOrExtensionAllowedForChatUpload } from '../../chat.constants';
-import {
-  matchCommands,
-  parseSlash,
-  resolveSlashCommand,
-  SlashCommand,
-} from '../../helpers/slash-command.helpers';
+import { matchCommands, parseSlash, resolveSlashCommand, SlashCommand } from '../../helpers/slash-command.helpers';
 import {
   ActiveEmojiShortcode,
   EmojiSuggestion,
@@ -67,10 +68,7 @@ import {
 } from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 import { ModalComponent } from '../../../../shared/ui/modal/modal.component';
-import {
-  TEXT_LIMIT_HARD_MAX,
-  TEXT_LIMIT_WARNING_THRESHOLD,
-} from '../../../../core/constants/text-limits.constants';
+import { TEXT_LIMIT_HARD_MAX, TEXT_LIMIT_WARNING_THRESHOLD } from '../../../../core/constants/text-limits.constants';
 
 const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: 'attach', label: 'Attach file', description: 'Upload a file', keywords: ['file', 'upload'] },
@@ -79,7 +77,12 @@ const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: 'thread', label: 'Thread', description: 'Attach threads your personality can read', keywords: ['threads', 'reference', 'context'] },
   { id: 'gallery', label: 'Gallery image', description: 'Attach an image from the gallery', keywords: ['photo', 'image'] },
   { id: 'personality', label: 'Personality', description: 'Change the thread’s personality', keywords: ['persona', 'character'] },
-  { id: 'mode', label: MODE_SINGULAR, description: 'Switch the thread’s mode: its instructions, skills and model', keywords: ['emotion', 'mood'] },
+  {
+    id: 'mode',
+    label: MODE_SINGULAR,
+    description: 'Switch the thread’s mode: its instructions, skills and model',
+    keywords: ['emotion', 'mood'],
+  },
 ];
 /** How long the "Thread already added." notice stays visible. */
 const THREAD_NOTICE_MS = 2000;
@@ -117,7 +120,14 @@ let nextPreviewId = 0;
     TooltipDirective,
   ],
   template: `
-    <form class="composer" (submit)="onSubmit($event)" (drop)="onDrop($event)" (dragover)="onDragOver($event)" (dragleave)="onDragLeave($event)" [class.composer--thread-drop]="isThreadDragOver()">
+    <form
+      class="composer"
+      (submit)="onSubmit($event)"
+      (drop)="onDrop($event)"
+      (dragover)="onDragOver($event)"
+      (dragleave)="onDragLeave($event)"
+      [class.composer--thread-drop]="isThreadDragOver()"
+    >
       @if (quotaMessage()) {
         <p class="composer__quota" role="alert">{{ quotaMessage() }}</p>
       }
@@ -131,14 +141,7 @@ let nextPreviewId = 0;
       @if (generationRetryTarget()) {
         <div class="composer__retry-bar" role="status">
           <span class="composer__retry-text">Couldn’t complete the last reply.</span>
-          <button
-            type="button"
-            class="composer__retry-btn"
-            [disabled]="controlsDisabled()"
-            (click)="retryGeneration.emit()"
-          >
-            Retry
-          </button>
+          <button type="button" class="composer__retry-btn" [disabled]="controlsDisabled()" (click)="retryGeneration.emit()">Retry</button>
         </div>
       }
 
@@ -157,7 +160,9 @@ let nextPreviewId = 0;
       @if (busyNotice(); as notice) {
         <div class="composer__thread-notice composer__busy-notice" role="status">{{ notice }}</div>
       } @else if (steering() && draft().trim()) {
-        <div class="composer__thread-notice" role="status" data-testid="composer-steer-notice">Still working. Send this now and the agent reads it at its next step.</div>
+        <div class="composer__thread-notice" role="status" data-testid="composer-steer-notice">
+          Still working. Send this now and the agent reads it at its next step.
+        </div>
       }
 
       <app-thread-ref-chips
@@ -178,7 +183,9 @@ let nextPreviewId = 0;
                 [attr.aria-label]="'Remove skill ' + r.name"
                 uiTooltip="Remove skill"
                 (click)="removePendingRitual(r.id)"
-              >×</button>
+              >
+                ×
+              </button>
             </span>
           }
         </div>
@@ -227,15 +234,12 @@ let nextPreviewId = 0;
                 [attr.aria-label]="'Remove attachment ' + (attachment.attachment?.name ?? attachment.file?.name)"
                 [uiTooltip]="notSeen ? '' : 'Remove attachment'"
                 (click)="removeAttachment(pendingAttachmentKey(attachment))"
-              >×</button>
+              >
+                ×
+              </button>
             </span>
             @if (previewable && previewKey() === chipKey) {
-              <app-attachment-preview
-                [item]="attachment"
-                [anchor]="chip"
-                [previewId]="previewDomId"
-                [name]="chipName"
-              />
+              <app-attachment-preview [item]="attachment" [anchor]="chip" [previewId]="previewDomId" [name]="chipName" />
             }
           }
         </div>
@@ -271,9 +275,19 @@ let nextPreviewId = 0;
             (mousedown)="onResizerMouseDown($event)"
             (touchstart)="onResizerTouchStart($event)"
           >
-            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polyline points="5,2 2,2 2,5"/>
-              <polyline points="7,10 10,10 10,7"/>
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.9"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="5,2 2,2 2,5" />
+              <polyline points="7,10 10,10 10,7" />
             </svg>
           </button>
 
@@ -369,9 +383,13 @@ let nextPreviewId = 0;
                             <span class="composer__skill-name">Auto</span>
                             <!-- Auto lets the model pick and switch the mode; choosing one below locks it. -->
                             @if (isAutoMood() && activeMode(); as current) {
-                              <span id="composer-auto-mode-desc" class="composer__skill-subtitle">Your personality picks the mode · now {{ current.name }}</span>
+                              <span id="composer-auto-mode-desc" class="composer__skill-subtitle"
+                                >Your personality picks the mode · now {{ current.name }}</span
+                              >
                             } @else {
-                              <span id="composer-auto-mode-desc" class="composer__skill-subtitle">Your personality picks and switches the mode itself</span>
+                              <span id="composer-auto-mode-desc" class="composer__skill-subtitle"
+                                >Your personality picks and switches the mode itself</span
+                              >
                             }
                           </span>
                         </button>
@@ -449,7 +467,13 @@ let nextPreviewId = 0;
                     <ui-bolt-icon [size]="13" />
                     Skill
                   </button>
-                  <button type="button" role="menuitem" uiTooltip="Attach threads so your personality can read them" placement="right" (click)="openThreadPicker()">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    uiTooltip="Attach threads so your personality can read them"
+                    placement="right"
+                    (click)="openThreadPicker()"
+                  >
                     <span aria-hidden="true">#</span>
                     Threads
                   </button>
@@ -544,8 +568,18 @@ let nextPreviewId = 0;
                   data-testid="composer-steer-send"
                   [disabled]="composerDisabled() || !draft().trim() || isOverLimit()"
                 >
-                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M 2.5 7 L 7 2 L 11.5 7 M 7 7 L 7 12"/>
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 14 14"
+                    fill="none"
+                    stroke="white"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M 2.5 7 L 7 2 L 11.5 7 M 7 7 L 7 12" />
                   </svg>
                 </button>
               }
@@ -566,8 +600,18 @@ let nextPreviewId = 0;
                 [uiTooltip]="softKeyboard() ? '' : 'Send (Enter). Shift+Enter adds a new line'"
                 [disabled]="composerDisabled() || busy() || hasUploadingAttachments() || !draft().trim() || isOverLimit()"
               >
-                <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M 2.5 7 L 7 2 L 11.5 7 M 7 7 L 7 12"/>
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  stroke="white"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M 2.5 7 L 7 2 L 11.5 7 M 7 7 L 7 12" />
                 </svg>
               </button>
             }
@@ -584,7 +628,6 @@ let nextPreviewId = 0;
             />
           </div>
         }
-
       </div>
 
       @if (shouldShowLengthHint()) {
@@ -615,819 +658,825 @@ let nextPreviewId = 0;
         (dismiss)="limitWarningOpen.set(false)"
       >
         <div modal-header>
-          <h2 id="chat-composer-limit-warning-title" class="text-base font-semibold text-(--color-text-primary)">
-            Large message warning
-          </h2>
+          <h2 id="chat-composer-limit-warning-title" class="text-base font-semibold text-(--color-text-primary)">Large message warning</h2>
         </div>
         <p class="text-sm text-(--color-text-secondary)">
-          This message is over {{ warningLimitLabel }} characters and may be truncated or degrade output quality.
-          Send anyway?
+          This message is over {{ warningLimitLabel }} characters and may be truncated or degrade output quality. Send anyway?
         </p>
         <div modal-footer class="flex justify-end gap-2">
           <button
             type="button"
             class="rounded-lg border border-(--color-border-default) px-3 py-1.5 text-sm font-medium text-(--color-text-primary) hover:bg-(--color-surface-elevated)"
             (click)="limitWarningOpen.set(false)"
-          >Cancel</button>
+          >
+            Cancel
+          </button>
           <button
             type="button"
             class="rounded-lg bg-(--color-accent) px-3 py-1.5 text-sm font-semibold text-white hover:brightness-95"
             (click)="confirmLimitWarningAndSend()"
-          >Send anyway</button>
+          >
+            Send anyway
+          </button>
         </div>
       </ui-modal>
     </form>
   `,
-  styles: [`
-    :host {
-      display: block;
-    }
-
-    .composer {
-      border-top: 1px solid var(--color-border-base);
-      display: grid;
-      gap: 0.5rem;
-      background: var(--color-surface-muted);
-      padding: 0.625rem 3.25rem 0.625rem 1rem;
-      position: relative;
-    }
-
-    .composer__body {
-      margin-inline: auto;
-      max-width: min(100%, 720px);
-      position: relative;
-      width: 100%;
-    }
-
-    .composer__unified-wrap {
-      background: var(--color-surface-base);
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.75rem;
-      cursor: text;
-      display: flex;
-      flex-direction: column;
-      position: relative;
-    }
-
-    .composer__unified-wrap--animating {
-      transition: height 0.18s ease;
-    }
-
-    .composer__unified-wrap:focus-within {
-      border-color: var(--color-border-base);
-      box-shadow: none;
-    }
-
-    .composer__unified-wrap:focus-within .composer__controls-row {
-      border-top-color: var(--color-accent-app, var(--color-accent));
-    }
-
-    .composer__resizer {
-      position: absolute;
-      top: 7px;
-      right: 9px;
-      width: 20px;
-      height: 20px;
-      border-radius: 5px;
-      border: 1px solid var(--color-border-base);
-      background: var(--color-surface-muted);
-      cursor: ns-resize;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--color-text-muted);
-      z-index: 5;
-      user-select: none;
-      -webkit-user-select: none;
-      touch-action: none;
-      transition: background 0.12s, color 0.12s, border-color 0.12s;
-    }
-
-    .composer__resizer:hover,
-    .composer__resizer--active {
-      background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-      color: var(--color-accent);
-      border-color: var(--color-border-hover);
-    }
-
-    textarea {
-      background: transparent;
-      border: none;
-      border-radius: 0;
-      box-sizing: border-box;
-      color: var(--color-text-primary);
-      flex: 0 0 auto;
-      font-size: 0.8125rem;
-      line-height: 1.6;
-      height: 2.25rem;
-      min-height: 2.25rem;
-      outline: none;
-      overflow-y: hidden;
-      padding: 0.625rem 2rem 0.375rem 0.75rem;
-      resize: none;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(128, 128, 128, 0.4) transparent;
-      width: 100%;
-    }
-
-    textarea:focus,
-    textarea:focus-visible {
-      border-radius: 0.75rem 0.75rem 0 0;
-      outline: 1px solid var(--color-accent-app, var(--color-accent));
-      outline-offset: -1px;
-    }
-
-    textarea::-webkit-scrollbar {
-      width: 4px;
-    }
-
-    textarea::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
-    textarea::-webkit-scrollbar-thumb {
-      background: rgba(128, 128, 128, 0.4);
-      border-radius: 4px;
-    }
-
-    textarea::-webkit-scrollbar-thumb:hover {
-      background: rgba(128, 128, 128, 0.65);
-    }
-
-    .composer__controls-row {
-      align-items: center;
-      border-top: 1px solid var(--color-border-base);
-      display: flex;
-      flex-shrink: 0;
-      gap: 0.375rem;
-      padding: 0.3125rem 0.5rem;
-    }
-
-    .composer__pending-skills {
-      align-items: center;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.375rem;
-      justify-content: flex-start;
-      width: 100%;
-    }
-
-    .composer__skill-chip {
-      align-items: center;
-      background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface-base));
-      border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
-      border-radius: 999px;
-      color: var(--color-text-secondary);
-      display: inline-flex;
-      font-size: 0.6875rem;
-      font-weight: 600;
-      gap: 0.25rem;
-      max-width: 100%;
-      padding: 0.125rem 0.25rem 0.125rem 0.5rem;
-    }
-
-    .composer__drag--thread {
-      pointer-events: none;
-    }
-
-    .composer--thread-drop {
-      outline: 2px dashed var(--color-accent);
-      outline-offset: 2px;
-    }
-
-    .composer__thread-notice {
-      background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface-base));
-      border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
-      border-radius: 0.5rem;
-      color: var(--color-text-secondary);
-      font-size: 0.75rem;
-      font-weight: 600;
-      padding: 0.25rem 0.625rem;
-      width: fit-content;
-    }
-
-    .composer__busy-notice {
-      font-weight: 500;
-      max-width: 100%;
-    }
-
-    .composer__skill-chip-remove {
-      background: transparent;
-      border: 0;
-      color: var(--color-text-muted);
-      cursor: pointer;
-      font-size: 0.875rem;
-      line-height: 1;
-      padding: 0 0.125rem;
-    }
-
-    .composer__skill-chip-remove:hover:not(:disabled) {
-      color: var(--color-danger);
-    }
-
-    .composer__attachments {
-      align-items: center;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-      justify-content: flex-start;
-    }
-
-    .composer__attachment {
-      align-items: center;
-      border: 1px solid var(--color-border-base);
-      border-radius: 999px;
-      color: var(--color-text-secondary);
-      display: inline-flex;
-      font-size: 0.75rem;
-      gap: 0.35rem;
-      max-width: 100%;
-      padding: 0.25rem 0.35rem 0.25rem 0.5rem;
-    }
-
-    .composer__attachment--previewable {
-      cursor: default;
-    }
-
-    .composer__attachment--previewable:focus-visible {
-      outline: 2px solid var(--color-accent);
-      outline-offset: 2px;
-    }
-
-    .composer__attachment-name {
-      max-width: 14rem;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .composer__attachment-remove {
-      background: transparent;
-      border: 0;
-      color: var(--color-text-muted);
-      cursor: pointer;
-      flex-shrink: 0;
-      font-size: 0.875rem;
-      line-height: 1;
-      padding: 0 0.125rem;
-    }
-
-    .composer__attachment-remove:hover:not(:disabled) {
-      color: var(--color-danger);
-    }
-
-    .composer__attachments small {
-      color: var(--color-text-muted);
-      font-size: 0.625rem;
-    }
-
-    /* An image the selected model can't see: still attached (and saved), just not sent. */
-    .composer__attachment--no-vision {
-      background: color-mix(in srgb, var(--color-warning) 14%, transparent);
-      border-color: color-mix(in srgb, var(--color-warning) 55%, transparent);
-      color: var(--color-text-primary);
-      cursor: help;
-    }
-
-    .composer__attachment--no-vision:focus-visible {
-      outline: 2px solid var(--color-warning);
-      outline-offset: 2px;
-    }
-
-    .composer__attachment-no-vision-icon {
-      color: var(--color-warning);
-      display: inline-flex;
-      flex-shrink: 0;
-    }
-
-    .composer__attachment--error {
-      border-color: var(--color-danger);
-    }
-
-    .composer__attachment--error small {
-      color: var(--color-danger);
-    }
-
-    .composer__send {
-      align-items: center;
-      background: var(--color-accent);
-      border: 0;
-      border-radius: 0.4375rem;
-      cursor: pointer;
-      display: inline-flex;
-      flex-shrink: 0;
-      height: 1.875rem;
-      justify-content: center;
-      width: 1.875rem;
-    }
-
-    .composer__send:hover:not(:disabled) {
-      filter: brightness(1.1);
-    }
-
-    .composer__stop {
-      align-items: center;
-      background: var(--color-danger);
-      border: 0;
-      border-radius: 0.4375rem;
-      cursor: pointer;
-      display: inline-flex;
-      flex-shrink: 0;
-      height: 1.875rem;
-      justify-content: center;
-      width: 1.875rem;
-    }
-
-    .composer__stop:hover {
-      filter: brightness(1.08);
-    }
-
-    .composer__stop-icon {
-      background: white;
-      border-radius: 2px;
-      display: block;
-      height: 0.5rem;
-      width: 0.5rem;
-    }
-
-    .composer__plus-anchor {
-      display: flex;
-      position: relative;
-    }
-
-    .composer__plus {
-      align-items: center;
-      background: transparent;
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.5rem;
-      box-sizing: border-box;
-      color: var(--color-text-secondary);
-      cursor: pointer;
-      display: inline-flex;
-      flex: 0 0 2.25rem;
-      height: 2.25rem;
-      justify-content: center;
-      width: 2.25rem;
-    }
-
-    .composer__plus-menu {
-      background: var(--color-surface-elevated, var(--color-surface-base));
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.5rem;
-      bottom: calc(100% + 0.375rem);
-      box-shadow: 0 0.5rem 1.5rem color-mix(in srgb, black 20%, transparent);
-      display: grid;
-      left: 0;
-      min-width: 13rem;
-      padding: 0.25rem;
-      position: absolute;
-      z-index: 50;
-    }
-
-    .composer__emoji-popover {
-      background: var(--color-surface-elevated, var(--color-surface-base));
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.5rem;
-      bottom: calc(100% + 0.375rem);
-      box-shadow: 0 0.5rem 1.5rem color-mix(in srgb, black 20%, transparent);
-      left: 0;
-      max-height: min(20.5rem, 50vh);
-      overflow: hidden;
-      position: absolute;
-      z-index: 60;
-    }
-
-    .composer__emoji-popover emoji-mart,
-    .composer__emoji-popover ::ng-deep .emoji-mart {
-      border: 0;
-      width: min(20.5rem, 92vw);
-    }
-
-    .composer__mode-popover {
-      background: var(--color-surface-elevated, var(--color-surface-base));
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.5rem;
-      bottom: calc(100% + 0.375rem);
-      box-shadow: 0 0.5rem 1.5rem color-mix(in srgb, black 20%, transparent);
-      display: flex;
-      flex-direction: column;
-      gap: 0.375rem;
-      left: 0;
-      max-height: min(20rem, 50vh);
-      max-width: min(22rem, 92vw);
-      min-width: 14rem;
-      overflow: hidden;
-      padding: 0.5rem;
-      position: absolute;
-      z-index: 58;
-    }
-
-    .composer__skill-popover {
-      background: var(--color-surface-elevated, var(--color-surface-base));
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.5rem;
-      bottom: calc(100% + 0.375rem);
-      box-shadow: 0 0.5rem 1.5rem color-mix(in srgb, black 20%, transparent);
-      display: flex;
-      flex-direction: column;
-      gap: 0.375rem;
-      left: 0;
-      max-height: min(20rem, 50vh);
-      max-width: min(22rem, 92vw);
-      min-width: 14rem;
-      overflow: hidden;
-      padding: 0.5rem;
-      position: absolute;
-      z-index: 58;
-    }
-
-    .composer__skill-search-label {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
-    }
-
-    .composer__skill-search {
-      background: var(--color-surface-input, var(--color-surface-base));
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.375rem;
-      color: var(--color-text-primary);
-      font-size: 0.75rem;
-      padding: 0.375rem 0.5rem;
-      width: 100%;
-    }
-
-    .composer__skill-status {
-      color: var(--color-text-muted);
-      font-size: 0.75rem;
-      margin: 0;
-      padding: 0.25rem 0;
-    }
-
-    .composer__skill-status--error {
-      color: var(--color-danger);
-    }
-
-    .composer__skill-list {
-      list-style: none;
-      margin: 0;
-      max-height: min(14rem, 40vh);
-      overflow-y: auto;
-      padding: 0;
-    }
-
-    .composer__skill-row {
-      align-items: center;
-      background: transparent;
-      border: 0;
-      border-radius: 0.375rem;
-      color: var(--color-text-primary);
-      cursor: pointer;
-      display: flex;
-      font-size: 0.75rem;
-      gap: 0.5rem;
-      justify-content: space-between;
-      padding: 0.4375rem 0.5rem;
-      text-align: left;
-      width: 100%;
-    }
-
-    .composer__skill-row:hover:not(:disabled) {
-      background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-    }
-
-    .composer__skill-row--selected {
-      background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-      font-weight: 600;
-    }
-
-    .composer__skill-row-main {
-      display: flex;
-      flex-direction: column;
-      gap: 0.125rem;
-      min-width: 0;
-    }
-
-    .composer__skill-subtitle {
-      color: var(--color-text-muted);
-      font-size: 0.625rem;
-      font-weight: 500;
-    }
-
-    .composer__skill-current {
-      color: var(--color-text-muted);
-      flex-shrink: 0;
-      font-size: 0.625rem;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-
-    .composer__skill-name {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .composer__skill-added {
-      color: var(--color-text-muted);
-      flex-shrink: 0;
-      font-size: 0.625rem;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-
-    .composer__gallery-popover {
-      background: var(--color-surface-elevated, var(--color-surface-base));
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.5rem;
-      bottom: calc(100% + 0.375rem);
-      box-shadow: 0 0.5rem 1.5rem color-mix(in srgb, black 20%, transparent);
-      left: 0;
-      max-height: min(20rem, 50vh);
-      max-width: min(22rem, 92vw);
-      min-width: 14rem;
-      overflow: auto;
-      padding: 0.5rem;
-      position: absolute;
-      z-index: 55;
-    }
-
-    .composer__gallery-grid {
-      display: grid;
-      gap: 0.35rem;
-      grid-template-columns: repeat(auto-fill, minmax(3.25rem, 1fr));
-    }
-
-    .composer__gallery-thumb {
-      aspect-ratio: 1;
-      background: var(--color-surface-muted);
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.375rem;
-      cursor: pointer;
-      overflow: hidden;
-      padding: 0;
-      width: 100%;
-    }
-
-    .composer__gallery-file {
-      align-items: center;
-      background: var(--color-surface-muted);
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.375rem;
-      color: var(--color-text-primary);
-      cursor: pointer;
-      display: flex;
-      flex-direction: column;
-      font-size: 0.6875rem;
-      gap: 0.25rem;
-      justify-content: center;
-      min-height: 4rem;
-      overflow: hidden;
-      padding: 0.35rem;
-      width: 100%;
-    }
-
-    .composer__gallery-badge {
-      color: var(--color-accent);
-      font-size: 0.625rem;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-    }
-
-    .composer__gallery-file-name {
-      max-width: 100%;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .composer__gallery-thumb:disabled {
-      cursor: wait;
-      opacity: 0.55;
-    }
-
-    .composer__gallery-thumb img {
-      display: block;
-      height: 100%;
-      object-fit: cover;
-      width: 100%;
-    }
-
-    .composer__gallery-status {
-      color: var(--color-text-muted);
-      font-size: 0.75rem;
-      margin: 0;
-      padding: 0.5rem;
-    }
-
-    .composer__gallery-status--inline {
-      padding-top: 0.25rem;
-      text-align: center;
-    }
-
-    .composer__menu-emoji {
-      display: inline-flex;
-      font-size: 0.875rem;
-      line-height: 1;
-      width: 1.125rem;
-      justify-content: center;
-    }
-
-    .composer__plus-menu button {
-      align-items: center;
-      background: transparent;
-      border: 0;
-      border-radius: 0.375rem;
-      color: var(--color-text-primary);
-      cursor: pointer;
-      display: flex;
-      font-size: 0.75rem;
-      gap: 0.5rem;
-      padding: 0.4375rem 0.625rem;
-      text-align: left;
-    }
-
-    .composer__plus-menu button:hover:not(:disabled),
-    .composer__plus-menu button:focus-visible {
-      background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-    }
-
-    button:disabled {
-      cursor: not-allowed;
-      opacity: 0.5;
-    }
-
-    .composer__menu {
-      bottom: calc(100% - 1rem);
-      left: 50%;
-      max-width: 26rem;
-      position: absolute;
-      transform: translateX(-50%);
-      width: min(100%, 26rem, calc(100% - 2rem));
-    }
-
-    .composer__emoji-autocomplete {
-      bottom: calc(100% + 0.375rem);
-      left: 0;
-      max-width: min(20rem, 92vw);
-      position: absolute;
-      width: max-content;
-      z-index: 60;
-    }
-
-    .composer__quota {
-      color: var(--color-danger);
-      font-size: 0.875rem;
-      margin: 0;
-      margin-inline: auto;
-      max-width: min(100%, 120rem);
-      width: 100%;
-    }
-
-    .composer__length {
-      color: var(--color-text-muted);
-      display: flex;
-      font-size: 0.75rem;
-      gap: 0.5rem;
-      justify-content: space-between;
-      margin-inline: auto;
-      max-width: min(100%, 120rem);
-      width: 100%;
-    }
-
-    .composer__length--warning {
-      color: var(--color-warning, #d97706);
-    }
-
-    .composer__length--error {
-      color: var(--color-danger);
-    }
-
-    .composer__archived {
-      background: color-mix(in srgb, var(--color-text-muted) 8%, transparent);
-      border-radius: 0.5rem;
-      color: var(--color-text-muted);
-      font-size: 0.8125rem;
-      margin: 0;
-      margin-inline: auto;
-      max-width: min(100%, 120rem);
-      padding: 0.5rem 0.75rem;
-      width: 100%;
-    }
-
-    .composer:has(.composer__archived) .composer__body {
-      opacity: 0.72;
-    }
-
-    .composer__retry-bar {
-      align-items: center;
-      background: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface-base));
-      border: 1px solid color-mix(in srgb, var(--color-danger) 28%, var(--color-border-base));
-      border-radius: 0.5rem;
-      color: var(--color-text-secondary);
-      display: flex;
-      flex-wrap: wrap;
-      font-size: 0.75rem;
-      gap: 0.5rem;
-      justify-content: space-between;
-      margin-inline: auto;
-      max-width: min(100%, 120rem);
-      padding: 0.375rem 0.625rem;
-      width: 100%;
-    }
-
-    .composer__retry-text {
-      flex: 1;
-      min-width: 10rem;
-    }
-
-    .composer__retry-btn {
-      border-radius: 999px;
-      border: 1px solid var(--color-border-base);
-      background: var(--color-surface-base);
-      color: var(--color-text-primary);
-      flex-shrink: 0;
-      font-size: 0.6875rem;
-      font-weight: 600;
-      padding: 0.25rem 0.75rem;
-    }
-
-    .composer__drag {
-      align-items: center;
-      /* Never become the drag target itself: an overlay that appears under the
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+
+      .composer {
+        border-top: 1px solid var(--color-border-base);
+        display: grid;
+        gap: 0.5rem;
+        background: var(--color-surface-muted);
+        padding: 0.625rem 3.25rem 0.625rem 1rem;
+        position: relative;
+      }
+
+      .composer__body {
+        margin-inline: auto;
+        max-width: min(100%, 720px);
+        position: relative;
+        width: 100%;
+      }
+
+      .composer__unified-wrap {
+        background: var(--color-surface-base);
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.75rem;
+        cursor: text;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+      }
+
+      .composer__unified-wrap--animating {
+        transition: height 0.18s ease;
+      }
+
+      .composer__unified-wrap:focus-within {
+        border-color: var(--color-border-base);
+        box-shadow: none;
+      }
+
+      .composer__unified-wrap:focus-within .composer__controls-row {
+        border-top-color: var(--color-accent-app, var(--color-accent));
+      }
+
+      .composer__resizer {
+        position: absolute;
+        top: 7px;
+        right: 9px;
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
+        border: 1px solid var(--color-border-base);
+        background: var(--color-surface-muted);
+        cursor: ns-resize;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--color-text-muted);
+        z-index: 5;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: none;
+        transition:
+          background 0.12s,
+          color 0.12s,
+          border-color 0.12s;
+      }
+
+      .composer__resizer:hover,
+      .composer__resizer--active {
+        background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+        color: var(--color-accent);
+        border-color: var(--color-border-hover);
+      }
+
+      textarea {
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        box-sizing: border-box;
+        color: var(--color-text-primary);
+        flex: 0 0 auto;
+        font-size: 0.8125rem;
+        line-height: 1.6;
+        height: 2.25rem;
+        min-height: 2.25rem;
+        outline: none;
+        overflow-y: hidden;
+        padding: 0.625rem 2rem 0.375rem 0.75rem;
+        resize: none;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(128, 128, 128, 0.4) transparent;
+        width: 100%;
+      }
+
+      textarea:focus,
+      textarea:focus-visible {
+        border-radius: 0.75rem 0.75rem 0 0;
+        outline: 1px solid var(--color-accent-app, var(--color-accent));
+        outline-offset: -1px;
+      }
+
+      textarea::-webkit-scrollbar {
+        width: 4px;
+      }
+
+      textarea::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      textarea::-webkit-scrollbar-thumb {
+        background: rgba(128, 128, 128, 0.4);
+        border-radius: 4px;
+      }
+
+      textarea::-webkit-scrollbar-thumb:hover {
+        background: rgba(128, 128, 128, 0.65);
+      }
+
+      .composer__controls-row {
+        align-items: center;
+        border-top: 1px solid var(--color-border-base);
+        display: flex;
+        flex-shrink: 0;
+        gap: 0.375rem;
+        padding: 0.3125rem 0.5rem;
+      }
+
+      .composer__pending-skills {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.375rem;
+        justify-content: flex-start;
+        width: 100%;
+      }
+
+      .composer__skill-chip {
+        align-items: center;
+        background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface-base));
+        border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
+        border-radius: 999px;
+        color: var(--color-text-secondary);
+        display: inline-flex;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        gap: 0.25rem;
+        max-width: 100%;
+        padding: 0.125rem 0.25rem 0.125rem 0.5rem;
+      }
+
+      .composer__drag--thread {
+        pointer-events: none;
+      }
+
+      .composer--thread-drop {
+        outline: 2px dashed var(--color-accent);
+        outline-offset: 2px;
+      }
+
+      .composer__thread-notice {
+        background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface-base));
+        border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
+        border-radius: 0.5rem;
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.25rem 0.625rem;
+        width: fit-content;
+      }
+
+      .composer__busy-notice {
+        font-weight: 500;
+        max-width: 100%;
+      }
+
+      .composer__skill-chip-remove {
+        background: transparent;
+        border: 0;
+        color: var(--color-text-muted);
+        cursor: pointer;
+        font-size: 0.875rem;
+        line-height: 1;
+        padding: 0 0.125rem;
+      }
+
+      .composer__skill-chip-remove:hover:not(:disabled) {
+        color: var(--color-danger);
+      }
+
+      .composer__attachments {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        justify-content: flex-start;
+      }
+
+      .composer__attachment {
+        align-items: center;
+        border: 1px solid var(--color-border-base);
+        border-radius: 999px;
+        color: var(--color-text-secondary);
+        display: inline-flex;
+        font-size: 0.75rem;
+        gap: 0.35rem;
+        max-width: 100%;
+        padding: 0.25rem 0.35rem 0.25rem 0.5rem;
+      }
+
+      .composer__attachment--previewable {
+        cursor: default;
+      }
+
+      .composer__attachment--previewable:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+      }
+
+      .composer__attachment-name {
+        max-width: 14rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .composer__attachment-remove {
+        background: transparent;
+        border: 0;
+        color: var(--color-text-muted);
+        cursor: pointer;
+        flex-shrink: 0;
+        font-size: 0.875rem;
+        line-height: 1;
+        padding: 0 0.125rem;
+      }
+
+      .composer__attachment-remove:hover:not(:disabled) {
+        color: var(--color-danger);
+      }
+
+      .composer__attachments small {
+        color: var(--color-text-muted);
+        font-size: 0.625rem;
+      }
+
+      /* An image the selected model can't see: still attached (and saved), just not sent. */
+      .composer__attachment--no-vision {
+        background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+        border-color: color-mix(in srgb, var(--color-warning) 55%, transparent);
+        color: var(--color-text-primary);
+        cursor: help;
+      }
+
+      .composer__attachment--no-vision:focus-visible {
+        outline: 2px solid var(--color-warning);
+        outline-offset: 2px;
+      }
+
+      .composer__attachment-no-vision-icon {
+        color: var(--color-warning);
+        display: inline-flex;
+        flex-shrink: 0;
+      }
+
+      .composer__attachment--error {
+        border-color: var(--color-danger);
+      }
+
+      .composer__attachment--error small {
+        color: var(--color-danger);
+      }
+
+      .composer__send {
+        align-items: center;
+        background: var(--color-accent);
+        border: 0;
+        border-radius: 0.4375rem;
+        cursor: pointer;
+        display: inline-flex;
+        flex-shrink: 0;
+        height: 1.875rem;
+        justify-content: center;
+        width: 1.875rem;
+      }
+
+      .composer__send:hover:not(:disabled) {
+        filter: brightness(1.1);
+      }
+
+      .composer__stop {
+        align-items: center;
+        background: var(--color-danger);
+        border: 0;
+        border-radius: 0.4375rem;
+        cursor: pointer;
+        display: inline-flex;
+        flex-shrink: 0;
+        height: 1.875rem;
+        justify-content: center;
+        width: 1.875rem;
+      }
+
+      .composer__stop:hover {
+        filter: brightness(1.08);
+      }
+
+      .composer__stop-icon {
+        background: white;
+        border-radius: 2px;
+        display: block;
+        height: 0.5rem;
+        width: 0.5rem;
+      }
+
+      .composer__plus-anchor {
+        display: flex;
+        position: relative;
+      }
+
+      .composer__plus {
+        align-items: center;
+        background: transparent;
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.5rem;
+        box-sizing: border-box;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        display: inline-flex;
+        flex: 0 0 2.25rem;
+        height: 2.25rem;
+        justify-content: center;
+        width: 2.25rem;
+      }
+
+      .composer__plus-menu {
+        background: var(--color-surface-elevated, var(--color-surface-base));
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.5rem;
+        bottom: calc(100% + 0.375rem);
+        box-shadow: 0 0.5rem 1.5rem color-mix(in srgb, black 20%, transparent);
+        display: grid;
+        left: 0;
+        min-width: 13rem;
+        padding: 0.25rem;
+        position: absolute;
+        z-index: 50;
+      }
+
+      .composer__emoji-popover {
+        background: var(--color-surface-elevated, var(--color-surface-base));
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.5rem;
+        bottom: calc(100% + 0.375rem);
+        box-shadow: 0 0.5rem 1.5rem color-mix(in srgb, black 20%, transparent);
+        left: 0;
+        max-height: min(20.5rem, 50vh);
+        overflow: hidden;
+        position: absolute;
+        z-index: 60;
+      }
+
+      .composer__emoji-popover emoji-mart,
+      .composer__emoji-popover ::ng-deep .emoji-mart {
+        border: 0;
+        width: min(20.5rem, 92vw);
+      }
+
+      .composer__mode-popover {
+        background: var(--color-surface-elevated, var(--color-surface-base));
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.5rem;
+        bottom: calc(100% + 0.375rem);
+        box-shadow: 0 0.5rem 1.5rem color-mix(in srgb, black 20%, transparent);
+        display: flex;
+        flex-direction: column;
+        gap: 0.375rem;
+        left: 0;
+        max-height: min(20rem, 50vh);
+        max-width: min(22rem, 92vw);
+        min-width: 14rem;
+        overflow: hidden;
+        padding: 0.5rem;
+        position: absolute;
+        z-index: 58;
+      }
+
+      .composer__skill-popover {
+        background: var(--color-surface-elevated, var(--color-surface-base));
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.5rem;
+        bottom: calc(100% + 0.375rem);
+        box-shadow: 0 0.5rem 1.5rem color-mix(in srgb, black 20%, transparent);
+        display: flex;
+        flex-direction: column;
+        gap: 0.375rem;
+        left: 0;
+        max-height: min(20rem, 50vh);
+        max-width: min(22rem, 92vw);
+        min-width: 14rem;
+        overflow: hidden;
+        padding: 0.5rem;
+        position: absolute;
+        z-index: 58;
+      }
+
+      .composer__skill-search-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      .composer__skill-search {
+        background: var(--color-surface-input, var(--color-surface-base));
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.375rem;
+        color: var(--color-text-primary);
+        font-size: 0.75rem;
+        padding: 0.375rem 0.5rem;
+        width: 100%;
+      }
+
+      .composer__skill-status {
+        color: var(--color-text-muted);
+        font-size: 0.75rem;
+        margin: 0;
+        padding: 0.25rem 0;
+      }
+
+      .composer__skill-status--error {
+        color: var(--color-danger);
+      }
+
+      .composer__skill-list {
+        list-style: none;
+        margin: 0;
+        max-height: min(14rem, 40vh);
+        overflow-y: auto;
+        padding: 0;
+      }
+
+      .composer__skill-row {
+        align-items: center;
+        background: transparent;
+        border: 0;
+        border-radius: 0.375rem;
+        color: var(--color-text-primary);
+        cursor: pointer;
+        display: flex;
+        font-size: 0.75rem;
+        gap: 0.5rem;
+        justify-content: space-between;
+        padding: 0.4375rem 0.5rem;
+        text-align: left;
+        width: 100%;
+      }
+
+      .composer__skill-row:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+      }
+
+      .composer__skill-row--selected {
+        background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+        font-weight: 600;
+      }
+
+      .composer__skill-row-main {
+        display: flex;
+        flex-direction: column;
+        gap: 0.125rem;
+        min-width: 0;
+      }
+
+      .composer__skill-subtitle {
+        color: var(--color-text-muted);
+        font-size: 0.625rem;
+        font-weight: 500;
+      }
+
+      .composer__skill-current {
+        color: var(--color-text-muted);
+        flex-shrink: 0;
+        font-size: 0.625rem;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+
+      .composer__skill-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .composer__skill-added {
+        color: var(--color-text-muted);
+        flex-shrink: 0;
+        font-size: 0.625rem;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+
+      .composer__gallery-popover {
+        background: var(--color-surface-elevated, var(--color-surface-base));
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.5rem;
+        bottom: calc(100% + 0.375rem);
+        box-shadow: 0 0.5rem 1.5rem color-mix(in srgb, black 20%, transparent);
+        left: 0;
+        max-height: min(20rem, 50vh);
+        max-width: min(22rem, 92vw);
+        min-width: 14rem;
+        overflow: auto;
+        padding: 0.5rem;
+        position: absolute;
+        z-index: 55;
+      }
+
+      .composer__gallery-grid {
+        display: grid;
+        gap: 0.35rem;
+        grid-template-columns: repeat(auto-fill, minmax(3.25rem, 1fr));
+      }
+
+      .composer__gallery-thumb {
+        aspect-ratio: 1;
+        background: var(--color-surface-muted);
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.375rem;
+        cursor: pointer;
+        overflow: hidden;
+        padding: 0;
+        width: 100%;
+      }
+
+      .composer__gallery-file {
+        align-items: center;
+        background: var(--color-surface-muted);
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.375rem;
+        color: var(--color-text-primary);
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        font-size: 0.6875rem;
+        gap: 0.25rem;
+        justify-content: center;
+        min-height: 4rem;
+        overflow: hidden;
+        padding: 0.35rem;
+        width: 100%;
+      }
+
+      .composer__gallery-badge {
+        color: var(--color-accent);
+        font-size: 0.625rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      .composer__gallery-file-name {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .composer__gallery-thumb:disabled {
+        cursor: wait;
+        opacity: 0.55;
+      }
+
+      .composer__gallery-thumb img {
+        display: block;
+        height: 100%;
+        object-fit: cover;
+        width: 100%;
+      }
+
+      .composer__gallery-status {
+        color: var(--color-text-muted);
+        font-size: 0.75rem;
+        margin: 0;
+        padding: 0.5rem;
+      }
+
+      .composer__gallery-status--inline {
+        padding-top: 0.25rem;
+        text-align: center;
+      }
+
+      .composer__menu-emoji {
+        display: inline-flex;
+        font-size: 0.875rem;
+        line-height: 1;
+        width: 1.125rem;
+        justify-content: center;
+      }
+
+      .composer__plus-menu button {
+        align-items: center;
+        background: transparent;
+        border: 0;
+        border-radius: 0.375rem;
+        color: var(--color-text-primary);
+        cursor: pointer;
+        display: flex;
+        font-size: 0.75rem;
+        gap: 0.5rem;
+        padding: 0.4375rem 0.625rem;
+        text-align: left;
+      }
+
+      .composer__plus-menu button:hover:not(:disabled),
+      .composer__plus-menu button:focus-visible {
+        background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+
+      .composer__menu {
+        bottom: calc(100% - 1rem);
+        left: 50%;
+        max-width: 26rem;
+        position: absolute;
+        transform: translateX(-50%);
+        width: min(100%, 26rem, calc(100% - 2rem));
+      }
+
+      .composer__emoji-autocomplete {
+        bottom: calc(100% + 0.375rem);
+        left: 0;
+        max-width: min(20rem, 92vw);
+        position: absolute;
+        width: max-content;
+        z-index: 60;
+      }
+
+      .composer__quota {
+        color: var(--color-danger);
+        font-size: 0.875rem;
+        margin: 0;
+        margin-inline: auto;
+        max-width: min(100%, 120rem);
+        width: 100%;
+      }
+
+      .composer__length {
+        color: var(--color-text-muted);
+        display: flex;
+        font-size: 0.75rem;
+        gap: 0.5rem;
+        justify-content: space-between;
+        margin-inline: auto;
+        max-width: min(100%, 120rem);
+        width: 100%;
+      }
+
+      .composer__length--warning {
+        color: var(--color-warning, #d97706);
+      }
+
+      .composer__length--error {
+        color: var(--color-danger);
+      }
+
+      .composer__archived {
+        background: color-mix(in srgb, var(--color-text-muted) 8%, transparent);
+        border-radius: 0.5rem;
+        color: var(--color-text-muted);
+        font-size: 0.8125rem;
+        margin: 0;
+        margin-inline: auto;
+        max-width: min(100%, 120rem);
+        padding: 0.5rem 0.75rem;
+        width: 100%;
+      }
+
+      .composer:has(.composer__archived) .composer__body {
+        opacity: 0.72;
+      }
+
+      .composer__retry-bar {
+        align-items: center;
+        background: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface-base));
+        border: 1px solid color-mix(in srgb, var(--color-danger) 28%, var(--color-border-base));
+        border-radius: 0.5rem;
+        color: var(--color-text-secondary);
+        display: flex;
+        flex-wrap: wrap;
+        font-size: 0.75rem;
+        gap: 0.5rem;
+        justify-content: space-between;
+        margin-inline: auto;
+        max-width: min(100%, 120rem);
+        padding: 0.375rem 0.625rem;
+        width: 100%;
+      }
+
+      .composer__retry-text {
+        flex: 1;
+        min-width: 10rem;
+      }
+
+      .composer__retry-btn {
+        border-radius: 999px;
+        border: 1px solid var(--color-border-base);
+        background: var(--color-surface-base);
+        color: var(--color-text-primary);
+        flex-shrink: 0;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        padding: 0.25rem 0.75rem;
+      }
+
+      .composer__drag {
+        align-items: center;
+        /* Never become the drag target itself: an overlay that appears under the
          pointer fires dragleave on the element below it, which hid the overlay,
          which re-exposed that element, and so on. A drop that landed while the
          overlay was being torn down could miss the form's handler, and the
          browser then opened the file itself. */
-      pointer-events: none;
-      background: color-mix(in srgb, var(--color-accent) 16%, transparent);
-      border: 2px dashed var(--color-accent);
-      border-radius: 1.25rem;
-      display: flex;
-      inset: 0.5rem;
-      justify-content: center;
-      position: absolute;
-      z-index: 2;
-    }
-
-    @media (max-width: 1023px) {
-      .composer {
-        padding-right: 1rem;
-      }
-
-      textarea {
-        font-size: 1rem;
-      }
-
-      .composer__skill-search {
-        font-size: 1rem;
-      }
-    }
-
-    @media (max-width: 767px) {
-      .composer__send,
-      .composer__stop {
-        min-height: 2.75rem;
-        min-width: 2.75rem;
-      }
-
-      .composer__plus {
-        min-height: 2.75rem;
-        min-width: 2.75rem;
-      }
-
-      .composer__plus-menu {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        top: auto;
-        border-radius: 0.875rem 0.875rem 0 0;
-        min-width: unset;
-        max-height: 50vh;
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 4px;
-        padding: 8px 6px calc(env(safe-area-inset-bottom, 0px) + 14px);
-      }
-
-      .composer__plus-menu button {
-        flex-direction: column;
-        gap: 5px;
-        padding: 14px 8px;
-        font-size: 12px;
-        border-radius: 8px;
+        pointer-events: none;
+        background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+        border: 2px dashed var(--color-accent);
+        border-radius: 1.25rem;
+        display: flex;
+        inset: 0.5rem;
         justify-content: center;
+        position: absolute;
+        z-index: 2;
       }
-    }
-  `],
+
+      @media (max-width: 1023px) {
+        .composer {
+          padding-right: 1rem;
+        }
+
+        textarea {
+          font-size: 1rem;
+        }
+
+        .composer__skill-search {
+          font-size: 1rem;
+        }
+      }
+
+      @media (max-width: 767px) {
+        .composer__send,
+        .composer__stop {
+          min-height: 2.75rem;
+          min-width: 2.75rem;
+        }
+
+        .composer__plus {
+          min-height: 2.75rem;
+          min-width: 2.75rem;
+        }
+
+        .composer__plus-menu {
+          position: fixed;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          top: auto;
+          border-radius: 0.875rem 0.875rem 0 0;
+          min-width: unset;
+          max-height: 50vh;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 4px;
+          padding: 8px 6px calc(env(safe-area-inset-bottom, 0px) + 14px);
+        }
+
+        .composer__plus-menu button {
+          flex-direction: column;
+          gap: 5px;
+          padding: 14px 8px;
+          font-size: 12px;
+          border-radius: 8px;
+          justify-content: center;
+        }
+      }
+    `,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ChatComposerComponent {
@@ -1522,9 +1571,7 @@ export class ChatComposerComponent {
       return custom;
     }
     const name = this.selectedPersonalityName()?.trim() || '';
-    return name
-      ? `Message ${name}... (type '/' for commands)`
-      : "Message... (type '/' for commands)";
+    return name ? `Message ${name}... (type '/' for commands)` : "Message... (type '/' for commands)";
   });
   readonly personaButtonLabel = computed(() => this.selectedPersonalityName() || 'Pick personality');
   readonly personaButtonAriaLabel = computed(() => {
@@ -1597,9 +1644,7 @@ export class ChatComposerComponent {
   readonly hasUploadingAttachments = computed(() => this.attachments().some(attachment => attachment.isUploading));
   readonly noVisionTooltip = "This model can't see images. It's saved to your gallery, not sent";
   /** True when the selected model is known to be text-only; its image chips then show the no-vision style. */
-  readonly selectedModelLacksVision = computed(
-    () => this.models().find(m => m.id === this.selectedModelId())?.vision_support === false,
-  );
+  readonly selectedModelLacksVision = computed(() => this.models().find(m => m.id === this.selectedModelId())?.vision_support === false);
   readonly isPendingImageAttachment = isPendingImageAttachment;
   /** Locks the textarea itself: only a hard block (quota, archived thread), never a busy reply. */
   readonly composerDisabled = computed(() => this.disabled() || this.threadArchived());
@@ -1608,9 +1653,7 @@ export class ChatComposerComponent {
   readonly characterCount = computed(() => this.draft().length);
   readonly characterCountLabel = computed(() => this.characterCount().toLocaleString());
   readonly isOverLimit = computed(() => this.characterCount() > TEXT_LIMIT_HARD_MAX);
-  readonly isNearLimit = computed(
-    () => this.characterCount() >= TEXT_LIMIT_WARNING_THRESHOLD && !this.isOverLimit(),
-  );
+  readonly isNearLimit = computed(() => this.characterCount() >= TEXT_LIMIT_WARNING_THRESHOLD && !this.isOverLimit());
   readonly shouldShowLengthHint = computed(
     () => this.characterCount() >= CHAT_LENGTH_HINT_THRESHOLD || this.isNearLimit() || this.isOverLimit(),
   );
@@ -1627,9 +1670,7 @@ export class ChatComposerComponent {
     return opts.filter(m => m.name.toLowerCase().includes(q));
   });
   readonly isAutoMode = computed(() => this.isAutoMood());
-  readonly activeMode = computed(() =>
-    this.modeOptions().find(m => m.id === this.activeMoodId()) ?? null,
-  );
+  readonly activeMode = computed(() => this.modeOptions().find(m => m.id === this.activeMoodId()) ?? null);
   readonly selectedModelReasoningSupport = computed(
     () => this.models().find(model => model.id === this.selectedModelId())?.reasoning_support ?? null,
   );
@@ -1650,9 +1691,7 @@ export class ChatComposerComponent {
     }
     if (this.isAutoMood()) {
       const name = this.activeMode()?.name;
-      return name
-        ? `${this.modeSingular} set to Auto. Currently ${name}.`
-        : `${this.modeSingular} set to Auto.`;
+      return name ? `${this.modeSingular} set to Auto. Currently ${name}.` : `${this.modeSingular} set to Auto.`;
     }
     const name = this.activeMode()?.name ?? 'a specific mode';
     return `${this.modeSingular} locked to ${name}.`;
@@ -1902,11 +1941,7 @@ export class ChatComposerComponent {
 
   togglePlusMenu(): void {
     const submenuOpen =
-      this.emojiOpen() ||
-      this.skillPickerOpen() ||
-      this.threadPickerOpen() ||
-      this.modePickerOpen() ||
-      this.galleryOpen();
+      this.emojiOpen() || this.skillPickerOpen() || this.threadPickerOpen() || this.modePickerOpen() || this.galleryOpen();
 
     if (submenuOpen) {
       this.closeAuxiliaryPopovers();
@@ -2035,7 +2070,7 @@ export class ChatComposerComponent {
         finalize(() => this.skillLoading.set(false)),
       )
       .subscribe({
-        next: (chat) => {
+        next: chat => {
           this.skillOptions.set(sortRitualOptions(chat.results ?? []));
           this.skillLoadError.set(null);
         },
@@ -2443,11 +2478,12 @@ export class ChatComposerComponent {
   }
 
   onResizerMouseDown(event: MouseEvent): void {
-    this.startResizeDrag(event.clientY,
-      (onMove) => document.addEventListener('mousemove', onMove),
-      (onMove) => document.removeEventListener('mousemove', onMove),
-      (onUp) => document.addEventListener('mouseup', onUp),
-      (onUp) => document.removeEventListener('mouseup', onUp),
+    this.startResizeDrag(
+      event.clientY,
+      onMove => document.addEventListener('mousemove', onMove),
+      onMove => document.removeEventListener('mousemove', onMove),
+      onUp => document.addEventListener('mouseup', onUp),
+      onUp => document.removeEventListener('mouseup', onUp),
     );
     event.preventDefault();
     event.stopPropagation();
@@ -2456,11 +2492,12 @@ export class ChatComposerComponent {
   onResizerTouchStart(event: TouchEvent): void {
     const touch = event.touches[0];
     if (!touch) return;
-    this.startResizeDrag(touch.clientY,
-      (onMove) => document.addEventListener('touchmove', onMove as unknown as EventListener, { passive: false }),
-      (onMove) => document.removeEventListener('touchmove', onMove as unknown as EventListener),
-      (onUp) => document.addEventListener('touchend', onUp as unknown as EventListener),
-      (onUp) => document.removeEventListener('touchend', onUp as unknown as EventListener),
+    this.startResizeDrag(
+      touch.clientY,
+      onMove => document.addEventListener('touchmove', onMove as unknown as EventListener, { passive: false }),
+      onMove => document.removeEventListener('touchmove', onMove as unknown as EventListener),
+      onUp => document.addEventListener('touchend', onUp as unknown as EventListener),
+      onUp => document.removeEventListener('touchend', onUp as unknown as EventListener),
     );
     event.preventDefault();
     event.stopPropagation();
@@ -2481,7 +2518,7 @@ export class ChatComposerComponent {
     let moved = false;
 
     const onMove = (e: MouseEvent | TouchEvent) => {
-      const clientY = e instanceof MouseEvent ? e.clientY : (e as TouchEvent).touches[0]?.clientY ?? startClientY;
+      const clientY = e instanceof MouseEvent ? e.clientY : ((e as TouchEvent).touches[0]?.clientY ?? startClientY);
       const dy = startClientY - clientY;
       if (Math.abs(dy) > 4) moved = true;
       if (!moved) return;
@@ -2489,7 +2526,10 @@ export class ChatComposerComponent {
       this.inputManualHeight.set(newH);
       wrap.style.height = newH + 'px';
       const ta = this.textareaRef()?.nativeElement;
-      if (ta) { ta.style.flex = '1'; ta.style.overflowY = 'auto'; }
+      if (ta) {
+        ta.style.flex = '1';
+        ta.style.overflowY = 'auto';
+      }
       if (e instanceof TouchEvent) e.preventDefault();
     };
 
@@ -2510,7 +2550,10 @@ export class ChatComposerComponent {
           // Was auto-size → maximize
           this.inputExpanded.set(true);
           wrap.style.height = maxH + 'px';
-          if (ta) { ta.style.flex = '1'; ta.style.overflowY = 'auto'; }
+          if (ta) {
+            ta.style.flex = '1';
+            ta.style.overflowY = 'auto';
+          }
         }
       }
     };
@@ -2546,9 +2589,7 @@ export class ChatComposerComponent {
     const styles = window.getComputedStyle(textarea);
     const fontSize = this.parsePx(styles.fontSize, 13);
     const lineHeightVal = styles.lineHeight;
-    const lineH = lineHeightVal === 'normal'
-      ? fontSize * 1.6
-      : this.parsePx(lineHeightVal, fontSize * 1.6);
+    const lineH = lineHeightVal === 'normal' ? fontSize * 1.6 : this.parsePx(lineHeightVal, fontSize * 1.6);
     const paddingTop = this.parsePx(styles.paddingTop, 10);
     const paddingBottom = this.parsePx(styles.paddingBottom, 6);
     const isMobile = window.innerWidth <= COMPOSER_MOBILE_BREAKPOINT;
