@@ -17,7 +17,9 @@ import (
 // routable are refused, though Go's own predicates call them global unicast.
 func TestSpecialUseRangesAreNotPublic(t *testing.T) {
 	for _, ip := range []string{"64:ff9b::a9fe:a9fe", "64:ff9b::a00:1", "64:ff9b:1::1", "2002:a9fe:a9fe::1", "0.1.2.3", "192.0.0.8", "198.18.0.1", "fec0::1", "192.0.2.1", "2001:db8::1"} {
-		assert.False(t, IsPublicIP(net.ParseIP(ip)), ip)
+		parsed := net.ParseIP(ip)
+		require.NotNil(t, parsed, ip) // IsPublicIP(nil) is false, so a typo would pass silently
+		assert.False(t, IsPublicIP(parsed), ip)
 	}
 }
 

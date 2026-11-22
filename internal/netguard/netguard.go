@@ -34,6 +34,8 @@ var nonPublicNets = mustCIDRs(
 	"203.0.113.0/24",  // documentation (TEST-NET-3)
 )
 
+// mustCIDRs is for the compile-time literals above only; it panics at init on a typo, which
+// TestSpecialUseRangesAreNotPublic would also catch.
 func mustCIDRs(cidrs ...string) []*net.IPNet {
 	out := make([]*net.IPNet, 0, len(cidrs))
 	for _, c := range cidrs {
@@ -108,20 +110,17 @@ func PublicOnlyDialer(timeout time.Duration) *net.Dialer {
 // Proxy is nil, so HTTPS_PROXY is ignored: through a proxy the checked address would be the
 // proxy's, not the server's. Redirects are followed only within the same origin
 // (SameOriginRedirects), so credentials and request bodies are never replayed to another host
-// or downgraded to http. The pool limits match http.DefaultTransport's.
+// or downgraded to http. Everything else (pool limits, TLS and keep-alive timeouts) is
+// http.DefaultTransport's, cloned so it stays in step with the standard library.
 func NewHTTPClient(control func(network, address string, c syscall.RawConn) error, timeout time.Duration) *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second, Control: control}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = dialer.DialContext
 	return &http.Client{
 		Timeout:       timeout,
 		CheckRedirect: SameOriginRedirects,
-		Transport: &http.Transport{
-			DialContext:           dialer.DialContext,
-			ForceAttemptHTTP2:     true,
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-		},
+		Transport:     transport,
 	}
 }
 
