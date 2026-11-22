@@ -66,15 +66,20 @@ func (v voice) key() string {
 
 // resolveVoice is pv as it can be used now, or ErrVoiceUnavailable saying why not.
 func (a *Agent) resolveVoice(ctx context.Context, userID uuid.UUID, pv models.PersonalityVoice) (voice, error) {
+	// The checks a personality's voice passed when it was set, again now: a voice model the
+	// account can use (not another account's, not retired, opted into if experimental).
+	if err := a.ds.CheckUserCanUseModelOfKind(ctx, userID, pv.ModelID, models.ModelKindSpeech); err != nil {
+		if errors.Is(err, datastore.ErrModelNotFound) || errors.Is(err, datastore.ErrExperimentalModelNotAllowed) {
+			return voice{}, fmt.Errorf("%w: its model is turned off or gone", ErrVoiceUnavailable)
+		}
+		return voice{}, err
+	}
 	m, err := a.ds.GetModel(ctx, pv.ModelID)
 	if errors.Is(err, datastore.ErrModelNotFound) {
 		return voice{}, fmt.Errorf("%w: its model is turned off or gone", ErrVoiceUnavailable)
 	}
 	if err != nil {
 		return voice{}, err
-	}
-	if m.EffectiveKind() != models.ModelKindSpeech {
-		return voice{}, fmt.Errorf("%w: %s is not a voice model", ErrVoiceUnavailable, m.DisplayName)
 	}
 	if !slices.ContainsFunc(m.SpeechVoices, func(o models.SpeechVoice) bool { return o.ID == pv.Voice }) {
 		return voice{}, fmt.Errorf("%w: %s no longer offers that voice", ErrVoiceUnavailable, m.DisplayName)
@@ -166,84 +171,173 @@ func (a *Agent) Listen(ctx context.Context, userID, messageID uuid.UUID) (*model
 		}
 	}
 	if track.Status == models.SpeechTrackOpen {
-		a.startSpeechWorker(userID, track, v, speechtext.Segment(speechtext.Spoken(msg.Message, msg.FinalRoundOffset), v.maxSegmentChars()))
+		a.startSpeechWorker(userID, track.ID, v, speechtext.Spoken(msg.Message, msg.FinalRoundOffset))
 	}
 	return track, nil
 }
 
-// startSpeechWorker synthesises the track's remaining segments in the background, if
-// it can take the track's lease; another worker holding it is left to finish.
-func (a *Agent) startSpeechWorker(userID uuid.UUID, track *models.SpeechTrack, v voice, segments []string) {
+// startSpeechWorker synthesises the rest of the track's text in the background, if it
+// can take the track's lease; another worker holding it is left to finish. spoken is
+// the prepared text the whole track reads (speechtext.Spoken).
+func (a *Agent) startSpeechWorker(userID, trackID uuid.UUID, v voice, spoken string) {
 	base := a.lifecycleCtx
 	if base == nil {
 		base = context.Background()
 	}
 	// The account's context, so the credential transport finds its keys.
 	ctx := apicontext.WithUserID(base, userID)
-	ok, err := a.ds.AcquireSpeechWorker(ctx, track.ID, time.Now().Add(speechWorkerLease))
+	token, ok, err := a.ds.AcquireSpeechWorker(ctx, trackID, time.Now().Add(speechWorkerLease))
 	if err != nil {
-		a.logger.Warn("couldn't take a speech track", zap.String("track_id", track.ID.String()), zap.Error(err))
+		a.logger.Warn("couldn't take a speech track", zap.String("track_id", trackID.String()), zap.Error(err))
 		return
 	}
 	if !ok {
 		return
 	}
-	go a.runSpeechWorker(ctx, userID, track, v, segments)
+	go a.runSpeechWorker(ctx, userID, speechLease{trackID: trackID, token: token}, v, spoken)
 }
 
-func (a *Agent) runSpeechWorker(ctx context.Context, userID uuid.UUID, track *models.SpeechTrack, v voice, segments []string) {
+// speechLease is a worker's hold on a track: every write it makes names its token.
+type speechLease struct {
+	trackID, token uuid.UUID
+}
+
+// holdSpeechLease renews the lease until ctx ends, so a synthesis call longer than the
+// lease doesn't lose it; it cancels ctx when the lease goes to another worker.
+func (a *Agent) holdSpeechLease(ctx context.Context, cancel context.CancelFunc, l speechLease) {
+	t := time.NewTicker(speechWorkerLease / 3)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		err := a.ds.RenewSpeechWorker(ctx, l.trackID, l.token, time.Now().Add(speechWorkerLease))
+		if errors.Is(err, datastore.ErrSpeechLeaseLost) {
+			cancel()
+			return
+		}
+		if err != nil && ctx.Err() == nil {
+			a.logger.Warn("couldn't renew a speech track's lease", zap.String("track_id", l.trackID.String()), zap.Error(err))
+		}
+	}
+}
+
+func (a *Agent) runSpeechWorker(ctx context.Context, userID uuid.UUID, l speechLease, v voice, spoken string) {
+	finish := func(status models.SpeechTrackStatus, code string) {
+		if err := a.ds.FinishSpeechTrack(context.WithoutCancel(ctx), l.trackID, l.token, status, code); err != nil {
+			a.logger.Warn("couldn't finish a speech track", zap.String("track_id", l.trackID.String()), zap.Error(err))
+		}
+	}
 	defer func() {
 		if r := recover(); r != nil {
-			a.logger.Error("speech worker panicked", zap.String("track_id", track.ID.String()), zap.Any("panic", r))
-			_ = a.ds.FinishSpeechTrack(context.WithoutCancel(ctx), track.ID, models.SpeechTrackFailed, "internal_error")
+			a.logger.Error("speech worker panicked", zap.String("track_id", l.trackID.String()), zap.Any("panic", r))
+			finish(models.SpeechTrackFailed, "internal_error")
 		}
 	}()
-	status, code := a.synthesizeTrack(ctx, userID, track, v, segments)
-	if err := a.ds.FinishSpeechTrack(context.WithoutCancel(ctx), track.ID, status, code); err != nil {
-		a.logger.Warn("couldn't finish a speech track", zap.String("track_id", track.ID.String()), zap.Error(err))
+	work, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go a.holdSpeechLease(work, cancel, l)
+	status, code, err := a.synthesizeTrack(work, userID, l, v, spoken)
+	if errors.Is(err, datastore.ErrSpeechLeaseLost) {
+		return // another worker has the track now, or it's gone
 	}
+	finish(status, code)
 }
 
-// synthesizeTrack makes each segment the track doesn't have yet, in order, and says how
-// the track ends.
-func (a *Agent) synthesizeTrack(ctx context.Context, userID uuid.UUID, track *models.SpeechTrack, v voice, segments []string) (models.SpeechTrackStatus, string) {
+// synthesizeTrack makes the segments for the text the track hasn't read yet, in order,
+// and says how the track ends. It resumes from the text its segments read, not their
+// number, so a track cut differently before (by the live speaker, or by older rules)
+// carries on where it stopped; segments the text no longer starts with are withdrawn.
+// ErrSpeechLeaseLost means another worker took the track: it writes nothing more.
+func (a *Agent) synthesizeTrack(ctx context.Context, userID uuid.UUID, l speechLease, v voice, spoken string) (models.SpeechTrackStatus, string, error) {
+	track, err := a.ds.GetSpeechTrack(ctx, userID, l.trackID)
+	if errors.Is(err, datastore.ErrSpeechTrackNotFound) {
+		return "", "", datastore.ErrSpeechLeaseLost
+	}
+	if err != nil {
+		return models.SpeechTrackFailed, "internal_error", nil
+	}
+	said := make([]string, len(track.Segments))
+	for i, seg := range track.Segments {
+		said[i] = seg.Text
+	}
+	rest, ok := speechtext.Remaining(spoken, said)
+	if !ok {
+		keys, err := a.ds.WithdrawSpeechSegments(ctx, l.trackID, l.token, 0)
+		if err != nil {
+			return models.SpeechTrackFailed, "internal_error", err
+		}
+		a.deleteSpeechFiles(ctx, keys)
+		said, rest = nil, spoken
+	}
 	client, err := provider.NewSpeechClient(v.target.spec.Adapter, v.target.endpoint)
 	if err != nil {
-		return models.SpeechTrackFailed, "internal_error"
+		return models.SpeechTrackFailed, "internal_error", nil
 	}
 	format := preferredSpeechFormat(v.target.spec)
-	for seq := len(track.Segments); seq < len(segments); seq++ {
+	for i, text := range speechtext.Segment(rest, v.maxSegmentChars()) {
+		seq := len(said) + i
 		if err := ctx.Err(); err != nil {
-			return models.SpeechTrackFailed, "cancelled"
+			return models.SpeechTrackFailed, "cancelled", a.leaseErr(ctx, l)
 		}
-		if err := a.ds.RenewSpeechWorker(ctx, track.ID, time.Now().Add(speechWorkerLease)); err != nil {
-			return models.SpeechTrackFailed, "internal_error"
-		}
-		text := segments[seq]
 		decision, allowed, err := a.checkSpeechQuota(ctx, userID)
 		if err != nil {
-			return models.SpeechTrackFailed, "internal_error"
+			return models.SpeechTrackFailed, "internal_error", nil
 		}
 		if !allowed {
-			return models.SpeechTrackStopped, models.ErrCodeQuotaExceeded
+			return models.SpeechTrackStopped, models.ErrCodeQuotaExceeded, nil
 		}
 		audio, usage, err := a.synthesize(ctx, client, v, text, format)
 		if err != nil {
-			a.logger.Warn("speech synthesis failed", zap.String("track_id", track.ID.String()), zap.Int("seq", seq), zap.Error(err))
-			return models.SpeechTrackFailed, speechFailureCode(err)
+			if ctx.Err() != nil {
+				return models.SpeechTrackFailed, "cancelled", a.leaseErr(ctx, l)
+			}
+			a.logger.Warn("speech synthesis failed", zap.String("track_id", l.trackID.String()), zap.Int("seq", seq), zap.Error(err))
+			return models.SpeechTrackFailed, speechFailureCode(err), nil
 		}
-		key := path.Join("users", userID.String(), "speech", track.ID.String(), fmt.Sprintf("%04d.%s", seq, audio.Format))
+		key := speechSegmentKey(userID, l.trackID, seq, audio.Format, l.token)
 		if err := a.fileStore.UploadFile(ctx, key, audio.Data, audio.Format.MIMEType()); err != nil {
-			a.logger.Warn("couldn't store speech", zap.String("track_id", track.ID.String()), zap.Error(err))
-			return models.SpeechTrackFailed, "storage_error"
+			a.logger.Warn("couldn't store speech", zap.String("track_id", l.trackID.String()), zap.Error(err))
+			return models.SpeechTrackFailed, "storage_error", nil
 		}
 		seg := models.SpeechSegment{Seq: seq, Text: text, FileKey: key, Format: audio.Format, DurationMS: audioDurationMS(audio), SizeBytes: len(audio.Data)}
-		if err := a.ds.AddSpeechSegment(ctx, track.ID, seg); err != nil {
-			return models.SpeechTrackFailed, "internal_error"
+		switch err := a.ds.AddSpeechSegment(ctx, l.trackID, l.token, seg); {
+		case errors.Is(err, datastore.ErrSpeechLeaseLost), errors.Is(err, datastore.ErrSpeechSegmentExists):
+			a.deleteSpeechFiles(context.WithoutCancel(ctx), []string{key})
+			return "", "", datastore.ErrSpeechLeaseLost
+		case err != nil:
+			a.deleteSpeechFiles(context.WithoutCancel(ctx), []string{key})
+			return models.SpeechTrackFailed, "internal_error", nil
 		}
 		a.recordSpeech(ctx, decision, userID, track.ChatID, v, usage)
 	}
-	return models.SpeechTrackComplete, ""
+	return models.SpeechTrackComplete, "", nil
+}
+
+// leaseErr is ErrSpeechLeaseLost when ctx ended because the lease went to another
+// worker, else nil: the worker was stopped (shutdown) and fails the track.
+func (a *Agent) leaseErr(ctx context.Context, l speechLease) error {
+	if err := a.ds.RenewSpeechWorker(context.WithoutCancel(ctx), l.trackID, l.token, time.Now().Add(speechWorkerLease)); errors.Is(err, datastore.ErrSpeechLeaseLost) {
+		return err
+	}
+	return nil
+}
+
+// speechSegmentKey is where a segment's audio is stored. The worker's token is in it, so
+// a worker that lost its lease never writes over its successor's file.
+func speechSegmentKey(userID, trackID uuid.UUID, seq int, format models.AudioFormat, token uuid.UUID) string {
+	return path.Join("users", userID.String(), "speech", trackID.String(), fmt.Sprintf("%04d-%s.%s", seq, token.String()[:8], format))
+}
+
+// deleteSpeechFiles deletes audio files nothing points at any more.
+func (a *Agent) deleteSpeechFiles(ctx context.Context, keys []string) {
+	for _, key := range keys {
+		if err := a.fileStore.DeleteFile(ctx, key); err != nil {
+			a.logger.Warn("couldn't delete speech audio", zap.String("key", key), zap.Error(err))
+		}
+	}
 }
 
 // preferredSpeechFormat is MP3 where the model returns it (small, and every browser
@@ -340,9 +434,39 @@ func (a *Agent) SpeechSegmentAudio(ctx context.Context, userID, trackID uuid.UUI
 	return nil, "", datastore.ErrSpeechTrackNotFound
 }
 
-// SpeechTrack is the account's track, for the client polling it.
+// SpeechTrack is the account's track, for the client polling it. A saved reply's track
+// still open with no worker (its instance went away mid-track) gets one, so a client
+// polling it doesn't wait forever.
 func (a *Agent) SpeechTrack(ctx context.Context, userID, trackID uuid.UUID) (*models.SpeechTrack, error) {
-	return a.ds.GetSpeechTrack(ctx, userID, trackID)
+	track, err := a.ds.GetSpeechTrack(ctx, userID, trackID)
+	if err != nil {
+		return nil, err
+	}
+	if track.Status == models.SpeechTrackOpen && track.MessageID != nil && !track.HasWorker(time.Now()) {
+		a.resumeSpeechTrack(ctx, userID, track)
+	}
+	return track, nil
+}
+
+// resumeSpeechTrack starts a worker on an open track that has none, in the track's own
+// voice; a track that can't go on (its reply or voice gone) is failed instead.
+func (a *Agent) resumeSpeechTrack(ctx context.Context, userID uuid.UUID, track *models.SpeechTrack) {
+	fail := func(code string) {
+		if err := a.ds.FinishSpeechTrack(ctx, track.ID, uuid.Nil, models.SpeechTrackFailed, code); err == nil {
+			track.Status, track.ErrorCode = models.SpeechTrackFailed, code
+		}
+	}
+	msg, err := a.ds.GetChatMessage(ctx, userID, *track.MessageID)
+	if err != nil {
+		fail("message_gone")
+		return
+	}
+	v, err := a.resolveVoice(ctx, userID, models.PersonalityVoice{ModelID: track.ModelID, Voice: track.Voice, Style: track.Style})
+	if err != nil {
+		fail(models.ErrCodeVoiceUnavailable)
+		return
+	}
+	a.startSpeechWorker(userID, track.ID, v, speechtext.Spoken(msg.Message, msg.FinalRoundOffset))
 }
 
 // PreviewVoice reads text aloud in pv, for the personality page to try a voice before
@@ -405,24 +529,22 @@ func (a *Agent) sweepSpeechOnce(ctx context.Context) {
 			a.logger.Error("speech sweeper panicked", zap.Any("panic", r))
 		}
 	}()
-	tracks, err := a.ds.SweepableSpeechTracks(ctx, time.Now().Add(-speechRetention), 200)
+	cutoff := time.Now().Add(-speechRetention)
+	tracks, err := a.ds.SweepableSpeechTracks(ctx, cutoff, 200)
 	if err != nil {
 		a.logger.Warn("couldn't list speech to sweep", zap.Error(err))
 		return
 	}
 	for _, t := range tracks {
-		kept := false
-		for _, key := range t.Files {
-			if err := a.fileStore.DeleteFile(ctx, key); err != nil {
-				a.logger.Warn("couldn't delete speech audio", zap.String("key", key), zap.Error(err))
-				kept = true
-			}
-		}
-		if kept {
-			continue // try again next sweep, rather than strand the file
-		}
-		if err := a.ds.DeleteSpeechTrack(ctx, t.ID); err != nil {
+		// The row goes first, and only if it is still sweepable, so a track played since it
+		// was listed keeps its audio; its files go after, from what was deleted.
+		keys, deleted, err := a.ds.SweepSpeechTrack(ctx, t.ID, cutoff)
+		if err != nil {
 			a.logger.Warn("couldn't delete a speech track", zap.String("track_id", t.ID.String()), zap.Error(err))
+			continue
+		}
+		if deleted {
+			a.deleteSpeechFiles(ctx, keys)
 		}
 	}
 }

@@ -10,22 +10,42 @@ import (
 )
 
 // Spoken is the text to read aloud from a reply: its final round, from offset (in
-// bytes), prepared for the ear. Narration before tool calls is not read.
+// bytes), prepared for the ear. Narration before tool calls is not read, unless the
+// final round has nothing to read (a turn that ended on a tool): then all of it is.
 func Spoken(message string, finalRoundOffset int) string {
 	if finalRoundOffset > 0 && finalRoundOffset <= len(message) {
-		message = message[finalRoundOffset:]
+		if final := Prepare(message[finalRoundOffset:]); final != "" {
+			return final
+		}
 	}
 	return Prepare(message)
 }
 
+// Remaining is what is left of prepared after the segments already said, which are
+// pieces of it in order (as Segment cuts them): ok is false when they aren't, because
+// the reply or the rules that cut it have changed since.
+func Remaining(prepared string, said []string) (string, bool) {
+	pos := 0
+	for _, seg := range said {
+		rest := prepared[pos:]
+		trimmed := strings.TrimLeftFunc(rest, unicode.IsSpace)
+		if seg == "" || !strings.HasPrefix(trimmed, seg) {
+			return "", false
+		}
+		pos += len(rest) - len(trimmed) + len(seg)
+	}
+	return strings.TrimSpace(prepared[pos:]), true
+}
+
 var (
-	fence       = regexp.MustCompile("(?ms)^[ \t]*(```|~~~)[^\n]*\n.*?(^[ \t]*(```|~~~)[ \t]*$|\\z)")
-	image       = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
-	link        = regexp.MustCompile(`\[([^\]]+)\]\([^)]*\)`)
-	refLink     = regexp.MustCompile(`\[([^\]]+)\]\[[^\]]*\]`)
-	bareURL     = regexp.MustCompile(`(?i)\b(?:https?://|www\.)[^\s<>()]+`)
-	autolink    = regexp.MustCompile(`<(?:https?://|mailto:)[^>]+>`)
-	html        = regexp.MustCompile(`</?[A-Za-z][^>]*>`)
+	fence    = regexp.MustCompile("(?ms)^[ \t]*(```|~~~)[^\n]*\n.*?(^[ \t]*(```|~~~)[ \t]*$|\\z)")
+	image    = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
+	link     = regexp.MustCompile(`\[([^\]]+)\]\([^)]*\)`)
+	refLink  = regexp.MustCompile(`\[([^\]]+)\]\[[^\]]*\]`)
+	bareURL  = regexp.MustCompile(`(?i)\b(?:https?://|www\.)[^\s<>()]*[^\s<>().,!?;:'"]`)
+	autolink = regexp.MustCompile(`<(?:https?://|mailto:)[^>]+>`)
+	// A tag with no attributes or name=value ones: "a<b then c>d" is prose, not a tag.
+	html        = regexp.MustCompile(`</?[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][-\w:.]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>]+))*\s*/?>`)
 	inlineCode  = regexp.MustCompile("`([^`\n]*)`")
 	strong      = regexp.MustCompile(`(\*\*|__)(\S(?:.*?\S)?)(\*\*|__)`)
 	strike      = regexp.MustCompile(`~~(\S(?:.*?\S)?)~~`)
@@ -169,71 +189,114 @@ func Segment(text string, maxChars int) []string {
 }
 
 // pack joins pieces with sep into chunks of at most maxChars, splitting any piece
-// that alone is longer between words.
+// that alone is longer between words. Pieces are joined as they stood in the text, so
+// every chunk is a run of it: no separator after a full-width stop, none inside a word
+// cut by length.
 func pack(pieces []string, maxChars int, sep string) []string {
 	var out []string
 	var cur strings.Builder
+	curLen := 0
 	push := func() {
 		if cur.Len() > 0 {
 			out = append(out, cur.String())
 			cur.Reset()
+			curLen = 0
 		}
 	}
-	for _, p := range pieces {
-		for _, part := range splitWords(p, maxChars) {
-			if cur.Len() > 0 && utf8.RuneCountInString(cur.String())+len(sep)+utf8.RuneCountInString(part) > maxChars {
+	for i, p := range pieces {
+		gap := sep
+		if i > 0 && sep == " " && endsFullWidth(pieces[i-1]) {
+			gap = ""
+		}
+		for j, part := range splitWords(p, maxChars) {
+			if j > 0 {
+				gap = part.gap
+			}
+			n := utf8.RuneCountInString(part.text)
+			if cur.Len() > 0 && curLen+utf8.RuneCountInString(gap)+n > maxChars {
 				push()
 			}
 			if cur.Len() > 0 {
-				cur.WriteString(sep)
+				cur.WriteString(gap)
+				curLen += utf8.RuneCountInString(gap)
 			}
-			cur.WriteString(part)
+			cur.WriteString(part.text)
+			curLen += n
 		}
 	}
 	push()
 	return out
 }
 
-func splitWords(s string, maxChars int) []string {
+func endsFullWidth(s string) bool {
+	last, _ := utf8.DecodeLastRuneInString(strings.TrimRight(s, "\"'”’)]」』）"))
+	return strings.ContainsRune("。！？", last)
+}
+
+// chunk is part of a sentence, and what stood before it: a space, or nothing when a
+// word was cut by length.
+type chunk struct{ text, gap string }
+
+// splitWords cuts s into chunks of at most maxChars, between words; a "word" longer
+// than that (text written without spaces, as Chinese and Japanese are) is cut by length.
+func splitWords(s string, maxChars int) []chunk {
 	if utf8.RuneCountInString(s) <= maxChars {
-		return []string{s}
+		return []chunk{{text: s}}
 	}
-	var out []string
-	var cur []string
-	n := 0
+	var words []chunk
 	for _, w := range strings.Fields(s) {
-		wl := utf8.RuneCountInString(w)
-		if n > 0 && n+1+wl > maxChars {
-			out = append(out, strings.Join(cur, " "))
-			cur, n = nil, 0
+		gap := " "
+		for r := []rune(w); len(r) > maxChars; r = []rune(w) {
+			words = append(words, chunk{text: string(r[:maxChars]), gap: gap})
+			w, gap = string(r[maxChars:]), ""
 		}
-		cur = append(cur, w)
-		if n > 0 {
-			n++
+		words = append(words, chunk{text: w, gap: gap})
+	}
+	var out []chunk
+	var cur strings.Builder
+	curGap, n := "", 0
+	for i, w := range words {
+		wl := utf8.RuneCountInString(w.text)
+		if n > 0 && n+len(w.gap)+wl > maxChars {
+			out = append(out, chunk{text: cur.String(), gap: curGap})
+			cur.Reset()
+			n = 0
 		}
+		if n == 0 {
+			curGap = w.gap
+			if i == 0 {
+				curGap = ""
+			}
+		} else {
+			cur.WriteString(w.gap)
+			n += len(w.gap)
+		}
+		cur.WriteString(w.text)
 		n += wl
 	}
-	if len(cur) > 0 {
-		out = append(out, strings.Join(cur, " "))
+	if cur.Len() > 0 {
+		out = append(out, chunk{text: cur.String(), gap: curGap})
 	}
 	return out
 }
 
 // sentences splits a paragraph after sentence-ending punctuation followed by space,
-// keeping the punctuation (and closing quotes or brackets) with its sentence.
+// or after a full-width stop (。！？), which takes none, keeping the punctuation (and
+// closing quotes or brackets) with its sentence.
 func sentences(p string) []string {
 	var out []string
 	runes := []rune(p)
 	start := 0
 	for i := 0; i < len(runes); i++ {
-		if !strings.ContainsRune(".!?…", runes[i]) {
+		fullWidth := strings.ContainsRune("。！？", runes[i])
+		if !fullWidth && !strings.ContainsRune(".!?…", runes[i]) {
 			continue
 		}
 		j := i + 1
-		for j < len(runes) && strings.ContainsRune(".!?…\"'”’)]", runes[j]) {
+		for j < len(runes) && strings.ContainsRune(".!?…。！？\"'”’)]」』）", runes[j]) {
 			j++
 		}
-		if j < len(runes) && unicode.IsSpace(runes[j]) && !abbreviation(runes[start:i+1]) {
+		if j < len(runes) && (fullWidth || unicode.IsSpace(runes[j])) && !abbreviation(runes[start:i+1]) {
 			out = append(out, strings.TrimSpace(string(runes[start:j])))
 			start = j
 			i = j

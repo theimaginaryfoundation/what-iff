@@ -21,6 +21,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/ent/migrate"
 	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -326,4 +327,94 @@ func TestDraftBuffer_FinalRoundStart(t *testing.T) {
 	b.mu.Unlock()
 	text, off := b.streamed()
 	require.Equal(t, "Done.", text[off:])
+}
+
+// A worker writes only while it holds the track's lease: one whose lease went to another
+// worker adds no segment, bills nothing, and doesn't end the track.
+func TestSpeechWorker_ALostLeaseWritesNothing(t *testing.T) {
+	t.Parallel()
+	f := newSpeechFixture(t, "One. Two.", 0)
+	f.giveVoice(t, "")
+	ctx := apicontext.WithUserID(context.Background(), f.alice)
+	track, _, err := f.a.ds.FindOrCreateSpeechTrack(ctx, datastore.NewSpeechTrack{
+		UserID: f.alice, ChatID: f.chat, MessageID: f.reply, ModelID: f.voiceModel.ID, Voice: "af_bella", VoiceKey: "k",
+	})
+	require.NoError(t, err)
+	stale, ok, err := f.a.ds.AcquireSpeechWorker(ctx, track.ID, time.Now().Add(-time.Second)) // already lapsed
+	require.NoError(t, err)
+	require.True(t, ok)
+	fresh, ok, err := f.a.ds.AcquireSpeechWorker(ctx, track.ID, time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.True(t, ok, "a lapsed lease can be taken")
+
+	seg := models.SpeechSegment{Seq: 0, Text: "One.", FileKey: "k0", Format: models.AudioFormatMP3, SizeBytes: 3}
+	require.ErrorIs(t, f.a.ds.AddSpeechSegment(ctx, track.ID, stale, seg), datastore.ErrSpeechLeaseLost)
+	require.ErrorIs(t, f.a.ds.RenewSpeechWorker(ctx, track.ID, stale, time.Now().Add(time.Minute)), datastore.ErrSpeechLeaseLost)
+	require.NoError(t, f.a.ds.FinishSpeechTrack(ctx, track.ID, stale, models.SpeechTrackFailed, "x"))
+	require.NoError(t, f.a.ds.AddSpeechSegment(ctx, track.ID, fresh, seg))
+	require.ErrorIs(t, f.a.ds.AddSpeechSegment(ctx, track.ID, fresh, seg), datastore.ErrSpeechSegmentExists, "not billed twice")
+
+	got, err := f.a.ds.GetSpeechTrack(ctx, f.alice, track.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.SpeechTrackOpen, got.Status, "the stale worker's finish didn't end its successor's track")
+	require.Len(t, got.Segments, 1)
+}
+
+// A track whose worker went away mid-track is picked up by the client's next poll, and
+// carries on from the text it had read, however that was cut.
+func TestSpeechTrack_APollResumesAStalledTrackFromItsText(t *testing.T) {
+	t.Parallel()
+	f := newSpeechFixture(t, "Sure. The rest of the first paragraph.\n\nA second paragraph.", 0)
+	f.giveVoice(t, "")
+	meter := &recordingMeter{allow: true}
+	f.a.meter = meter
+	ctx := apicontext.WithUserID(context.Background(), f.alice)
+	v, err := f.a.resolveVoice(ctx, f.alice, models.PersonalityVoice{ModelID: f.voiceModel.ID, Voice: "af_bella"})
+	require.NoError(t, err)
+	track, _, err := f.a.ds.FindOrCreateSpeechTrack(ctx, datastore.NewSpeechTrack{
+		UserID: f.alice, ChatID: f.chat, MessageID: f.reply, ModelID: f.voiceModel.ID, Voice: "af_bella", VoiceKey: v.key(),
+	})
+	require.NoError(t, err)
+	// A worker read "Sure." and died, its lease lapsing.
+	dead, _, err := f.a.ds.AcquireSpeechWorker(ctx, track.ID, time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.NoError(t, f.a.ds.AddSpeechSegment(ctx, track.ID, dead, models.SpeechSegment{Seq: 0, Text: "Sure.", FileKey: "old", Format: models.AudioFormatMP3, SizeBytes: 3}))
+	require.NoError(t, f.ent.SpeechTrack.UpdateOneID(track.ID).SetWorkerUntil(time.Now().Add(-time.Second)).Exec(ctx))
+
+	done := f.waitTrack(t, track.ID)
+	require.Equal(t, models.SpeechTrackComplete, done.Status)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	require.Equal(t, []string{"The rest of the first paragraph.\n\nA second paragraph."}, f.spoken, "nothing read twice, nothing skipped")
+	require.Len(t, done.Segments, 2)
+	require.Equal(t, "Sure.", done.Segments[0].Text)
+}
+
+// Segments the reply no longer starts with (cut by a live speaker from narration, or
+// by older rules) are withdrawn, and the track read again from the start.
+func TestSpeechTrack_ResumingWithdrawsSegmentsTheReplyDoesntSay(t *testing.T) {
+	t.Parallel()
+	f := newSpeechFixture(t, "Fresh words.", 0)
+	f.giveVoice(t, "")
+	ctx := apicontext.WithUserID(context.Background(), f.alice)
+	v, err := f.a.resolveVoice(ctx, f.alice, models.PersonalityVoice{ModelID: f.voiceModel.ID, Voice: "af_bella"})
+	require.NoError(t, err)
+	track, _, err := f.a.ds.FindOrCreateSpeechTrack(ctx, datastore.NewSpeechTrack{
+		UserID: f.alice, ChatID: f.chat, MessageID: f.reply, ModelID: f.voiceModel.ID, Voice: "af_bella", VoiceKey: v.key(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.files.UploadFile(ctx, "narration", []byte("x"), "audio/mpeg"))
+	dead, _, err := f.a.ds.AcquireSpeechWorker(ctx, track.ID, time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.NoError(t, f.a.ds.AddSpeechSegment(ctx, track.ID, dead, models.SpeechSegment{Seq: 0, Text: "Let me look.", FileKey: "narration", Format: models.AudioFormatMP3, SizeBytes: 1}))
+	require.NoError(t, f.ent.SpeechTrack.UpdateOneID(track.ID).SetWorkerUntil(time.Now().Add(-time.Second)).Exec(ctx))
+
+	done := f.waitTrack(t, track.ID)
+	require.Equal(t, models.SpeechTrackComplete, done.Status)
+	require.Len(t, done.Segments, 1)
+	require.Equal(t, "Fresh words.", done.Segments[0].Text)
+	f.files.mu.Lock()
+	_, kept := f.files.files["narration"]
+	f.files.mu.Unlock()
+	require.False(t, kept, "the withdrawn segment's audio is deleted")
 }

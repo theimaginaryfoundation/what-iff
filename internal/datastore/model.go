@@ -345,6 +345,20 @@ func (d *Datastore) CheckUserCanUseModel(ctx context.Context, userID, modelID uu
 	return assertUserCanUseModelTx(ctx, tx, userID, modelID)
 }
 
+// CheckUserCanUseModelOfKind is CheckUserCanUseModel for a model of another kind: a voice
+// for a personality, or a dictation model.
+func (d *Datastore) CheckUserCanUseModelOfKind(ctx context.Context, userID, modelID uuid.UUID, kind models.ModelKind) error {
+	if modelID == uuid.Nil {
+		return ErrModelNotFound
+	}
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }() // read-only
+	return assertUserCanUseModelOfKindTx(ctx, tx, userID, modelID, kind)
+}
+
 // AdminPatchUserExperimentalModels toggles experimental model access for a user.
 func (d *Datastore) AdminPatchUserExperimentalModels(ctx context.Context, userID uuid.UUID, enabled bool) (*models.UserResponse, error) {
 	tx, err := d.dbClient.Tx(ctx)
