@@ -85,10 +85,15 @@ func TestCallTimeouts_NonStreamedRequest(t *testing.T) {
 }
 
 // A healthy stream outlives Request: once SSE headers arrive, Stream and StreamIdle apply.
+// It also outlives StreamIdle, since every tick restarts it.
+//
+// The margins are wide because this test fails if any one delay runs long: the headers must
+// arrive within Request, and no gap between ticks may reach StreamIdle. A loaded race-enabled
+// run can pause a goroutine for 100ms or more, which a 100ms StreamIdle didn't survive.
 func TestCallTimeouts_HealthyStreamOutlivesRequestLimit(t *testing.T) {
 	t.Parallel()
-	srv := sseTickServer(t, 10*time.Millisecond, 250*time.Millisecond, false)
-	c := WithCallTimeouts(nil, CallTimeouts{Request: 50 * time.Millisecond, Stream: 5 * time.Second, StreamIdle: 100 * time.Millisecond})
+	srv := sseTickServer(t, 10*time.Millisecond, time.Second, false)
+	c := WithCallTimeouts(nil, CallTimeouts{Request: 100 * time.Millisecond, Stream: 10 * time.Second, StreamIdle: 400 * time.Millisecond})
 
 	require.NoError(t, getBody(t.Context(), c, srv.URL))
 }
