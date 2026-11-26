@@ -507,6 +507,13 @@ func TestSavingMCPServerValidatesURLs(t *testing.T) {
 		if host == "internal.example" {
 			return []net.IPAddr{{IP: net.ParseIP("10.1.2.3")}}, nil
 		}
+		// Split-horizon names: any private answer refuses the name, whatever order DNS returns.
+		if host == "mixed.example" {
+			return []net.IPAddr{{IP: net.ParseIP("8.8.8.8")}, {IP: net.ParseIP("10.1.2.3")}}, nil
+		}
+		if host == "mixed-reversed.example" {
+			return []net.IPAddr{{IP: net.ParseIP("10.1.2.3")}, {IP: net.ParseIP("8.8.8.8")}}, nil
+		}
 		return []net.IPAddr{{IP: net.ParseIP("8.8.8.8")}}, nil
 	}
 	header := func(serverURL string) string {
@@ -527,6 +534,8 @@ func TestSavingMCPServerValidatesURLs(t *testing.T) {
 		{"create CGNAT address", http.MethodPost, "/mcp-servers", header("https://100.64.1.1/mcp"), false, http.StatusBadRequest},
 		{"create NAT64 metadata address", http.MethodPost, "/mcp-servers", header("https://[64:ff9b::a9fe:a9fe]/mcp"), false, http.StatusBadRequest},
 		{"create hostname resolving to private", http.MethodPost, "/mcp-servers", header("https://internal.example/mcp"), false, http.StatusBadRequest},
+		{"create hostname resolving to public then private", http.MethodPost, "/mcp-servers", header("https://mixed.example/mcp"), false, http.StatusBadRequest},
+		{"create hostname resolving to private then public", http.MethodPost, "/mcp-servers", header("https://mixed-reversed.example/mcp"), false, http.StatusBadRequest},
 		{"create localhost when not allowed", http.MethodPost, "/mcp-servers", header("http://localhost:8765/mcp"), false, http.StatusBadRequest},
 		{"create public address", http.MethodPost, "/mcp-servers", header("https://8.8.8.8/mcp"), false, http.StatusCreated},
 		{"create plain http public address", http.MethodPost, "/mcp-servers", header("http://8.8.8.8/mcp"), false, http.StatusBadRequest},

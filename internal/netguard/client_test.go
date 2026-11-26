@@ -57,7 +57,7 @@ func TestIsPublicIPRangeBoundaries(t *testing.T) {
 		}
 	}
 	// Neighbours just outside the refused ranges stay public, so the ranges are not too wide.
-	for _, ip := range []string{"9.255.255.255", "11.0.0.0", "172.15.255.255", "172.32.0.0", "192.167.255.255", "192.169.0.0", "100.63.255.255", "100.128.0.0", "1.0.0.0", "198.17.255.255", "198.20.0.0", "8.8.8.8", "2606:4700::6810:85e5"} {
+	for _, ip := range []string{"9.255.255.255", "11.0.0.0", "172.15.255.255", "172.32.0.0", "192.167.255.255", "192.169.0.0", "100.63.255.255", "100.128.0.0", "1.0.0.0", "198.17.255.255", "198.20.0.0", "8.8.8.8", "::ffff:8.8.8.8", "2606:4700::6810:85e5"} {
 		parsed := net.ParseIP(ip)
 		require.NotNil(t, parsed, ip)
 		assert.True(t, IsPublicIP(parsed), "%s must stay public", ip)
