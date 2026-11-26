@@ -57,7 +57,8 @@ var (
 // maxTokenResponseBytes bounds a token endpoint response. Real ones, JWT id_tokens included, are a
 // few KiB; 256 KiB leaves ample headroom while keeping what a hostile endpoint can make the
 // server buffer and parse small. A larger response fails with "oauth token endpoint response
-// exceeds N bytes"; raise this constant if a real provider ever needs more.
+// (status S) exceeds N bytes", keeping the status visible; raise this constant if a real
+// provider ever needs more.
 const maxTokenResponseBytes = 256 << 10
 
 const defaultOAuthCallbackURL = "http://localhost:8080/api/mcp-servers/oauth/callback"
@@ -309,7 +310,7 @@ func (s *Service) tokenRequest(ctx context.Context, tokenURL string, form url.Va
 		return nil, fmt.Errorf("oauth token endpoint read failed: %w", err)
 	}
 	if len(body) > maxTokenResponseBytes {
-		return nil, fmt.Errorf("oauth token endpoint response exceeds %d bytes", maxTokenResponseBytes)
+		return nil, fmt.Errorf("oauth token endpoint response (status %d) exceeds %d bytes", resp.StatusCode, maxTokenResponseBytes)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, parseOAuthTokenHTTPError(resp.StatusCode, body)

@@ -301,5 +301,5 @@ func TestTokenRequest_RejectsOversizedResponse(t *testing.T) {
 
 	svc := New(&fakeStore{}, loopbackHTTPClient(), nil, Config{})
 	_, err := svc.tokenRequest(context.Background(), tokenSrv.URL, url.Values{"grant_type": {"authorization_code"}})
-	require.ErrorContains(t, err, "exceeds")
+	require.ErrorContains(t, err, "(status 200) exceeds")
 }
