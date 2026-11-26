@@ -750,7 +750,7 @@ func validateMCPURL(
 	return nil
 }
 
-// hostIPs is every address host stands for: loopback for a localhost name, the literal itself
+// hostIPs is every address host stands for: both loopbacks for a localhost name, the literal itself
 // for an IP, otherwise what it resolves to.
 func hostIPs(
 	ctx context.Context,
@@ -758,7 +758,7 @@ func hostIPs(
 	resolveHostIPs func(context.Context, string) ([]net.IPAddr, error),
 ) ([]net.IP, error) {
 	if isLocalhostName(host) {
-		return []net.IP{net.IPv6loopback}, nil
+		return []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback}, nil
 	}
 	if ip := net.ParseIP(host); ip != nil {
 		return []net.IP{ip}, nil
@@ -767,12 +767,14 @@ func hostIPs(
 	if err != nil {
 		return nil, err
 	}
-	if len(addrs) == 0 {
-		return nil, fmt.Errorf("no addresses for %s", host)
-	}
 	ips := make([]net.IP, 0, len(addrs))
 	for _, a := range addrs {
-		ips = append(ips, a.IP)
+		if a.IP != nil {
+			ips = append(ips, a.IP)
+		}
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no addresses for %s", host)
 	}
 	return ips, nil
 }

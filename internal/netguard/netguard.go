@@ -153,7 +153,7 @@ func SameOriginRedirects(req *http.Request, via []*http.Request) error {
 	}
 	first := via[0].URL
 	if req.URL.Scheme != first.Scheme || req.URL.Host != first.Host {
-		return fmt.Errorf("refusing redirect from %s://%s to another origin", first.Scheme, first.Host)
+		return fmt.Errorf("refusing redirect from %s://%s to %s://%s", first.Scheme, first.Host, req.URL.Scheme, req.URL.Host)
 	}
 	return nil
 }
