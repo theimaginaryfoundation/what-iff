@@ -101,6 +101,9 @@ func TestNewHTTPClientChecksEveryConnection(t *testing.T) {
 // Redirects stay on the original origin: a different port is another origin, so neither a
 // credential nor a replayed body can follow it there.
 func TestNewHTTPClientFollowsOnlySameOriginRedirects(t *testing.T) {
+	// Called directly with no history, it refuses rather than panicking on via[0].
+	assert.Error(t, SameOriginRedirects(httptest.NewRequest(http.MethodGet, "https://a.example/", nil), nil))
+
 	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer other.Close()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -148,6 +148,9 @@ func NewHTTPClient(control func(network, address string, c syscall.RawConn) erro
 // first request, on purpose: every hop must stay on the origin the caller chose, so a chain
 // cannot walk away from it one hop at a time.
 func SameOriginRedirects(req *http.Request, via []*http.Request) error {
+	if len(via) == 0 {
+		return errors.New("redirect without an original request")
+	}
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
