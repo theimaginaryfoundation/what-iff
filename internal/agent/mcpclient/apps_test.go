@@ -62,7 +62,7 @@ func appServer(t *testing.T, calls *[]string) *httptest.Server {
 func TestApps_DiscoveryHidesAppOnlyToolsAndCarriesTheView(t *testing.T) {
 	var calls []string
 	srv := appServer(t, &calls)
-	c := New(nil, nil)
+	c := New(loopbackHTTPClient(), nil)
 	server := &models.MCPServer{ID: uuid.New(), Name: "charts", ServerURL: srv.URL}
 	res, err := c.DiscoverTools(context.Background(), uuid.New(), []*models.MCPServer{server})
 	require.NoError(t, err)
@@ -90,7 +90,7 @@ func TestApps_DiscoveryHidesAppOnlyToolsAndCarriesTheView(t *testing.T) {
 func TestApps_ViewMayCallOnlyAppVisibleTools(t *testing.T) {
 	var calls []string
 	srv := appServer(t, &calls)
-	c := New(nil, nil)
+	c := New(loopbackHTTPClient(), nil)
 	server := &models.MCPServer{ID: uuid.New(), Name: "charts", ServerURL: srv.URL}
 
 	raw, err := c.CallAppTool(context.Background(), server, "refresh_data", nil, nil)
@@ -108,7 +108,7 @@ func TestApps_ViewMayCallOnlyAppVisibleTools(t *testing.T) {
 func TestApps_ReadAppResource(t *testing.T) {
 	var calls []string
 	srv := appServer(t, &calls)
-	c := New(nil, nil)
+	c := New(loopbackHTTPClient(), nil)
 	server := &models.MCPServer{ID: uuid.New(), Name: "charts", ServerURL: srv.URL}
 
 	res, err := c.ReadAppResource(context.Background(), server, "ui://charts/view", nil)

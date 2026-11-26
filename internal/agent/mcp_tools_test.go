@@ -43,7 +43,7 @@ func TestGetSubagentMCPTools_ReturnsFunctionToolsFromDiscovery(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	a := &Agent{mcpClient: mcpclient.New(nil, nil)}
+	a := &Agent{mcpClient: mcpclient.New(loopbackMCPHTTPClient(), nil)}
 	server := &models.MCPServer{
 		ID:        uuid.New(),
 		Name:      "tracker",

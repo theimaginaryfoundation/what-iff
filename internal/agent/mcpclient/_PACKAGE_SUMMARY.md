@@ -22,6 +22,8 @@ In-process MCP runtime client for connector tool discovery and invocation.
 - `CallToolByFullName`: resolves connector/tool target and performs MCP invocation.
 - `CallToolResult`: detailed result with tool status, structured data, model-visible output, attachments, and `Err()` for tool-level failures.
 - `ElicitationHandler` / `WithElicitationHandler`: how a caller lets a server ask the person mid-call; without one, an elicitation is cancelled.
+- `New(httpClient, logger)`: a nil client means public addresses only (`netguard.NewHTTPClient(netguard.PublicOnlyControl, …)`), so a caller that forgets to pass one fails closed.
+  The server passes one that also allows loopback when `MCP_ALLOW_LOCALHOST_CONNECTIONS` is set; tests pass a loopback client for their httptest servers.
 - `RPCError`: a JSON-RPC error answer, with its code (a `-32042` URLElicitationRequiredError makes `tools/call` ask and retry once).
 - `ToolReportedError`: the typed error `Err()` returns for a failure the server reported (`isError`).
   Callers distinguish it with `errors.As` from transport and protocol errors (the agent logs it at Warn, without its text).
@@ -29,10 +31,12 @@ In-process MCP runtime client for connector tool discovery and invocation.
 ## Dependencies
 
 - **Inbound:** `internal/agent` (`mcp_tools.go`, tool dispatch path).
-- **Outbound:** standard `net/http`, `encoding/json`, `internal/models`.
+- **Outbound:** standard `net/http`, `encoding/json`, `internal/models`, `internal/netguard`.
 
 ## Non-obvious decisions
 
+- Connector addresses are checked at connect time, not only when saved (the client dials through a `netguard` Control hook): a name that resolves or is rebound to an internal address is refused on every request.
+  Redirects are followed only within the same origin, so a bearer token or request body is never replayed to another host or downgraded to http.
 - Discovery and execution use JSON-RPC method calls (`initialize`, `tools/list`, `tools/call`) with best-effort `notifications/initialized`.
 - `initialize` asks for protocol `2025-11-25` and advertises elicitation (form and url) and the MCP Apps extension; the version the server picks is kept with the session and sent as `MCP-Protocol-Version`.
 - A reply that is an SSE stream is read event by event, not to the end first: a server request on it (elicitation) must be answered with a POST before the response arrives.
@@ -51,6 +55,7 @@ In-process MCP runtime client for connector tool discovery and invocation.
 - `client_test.go` covers discovery, full-name parsing, and tool invocation using an HTTP test server.
 - `server_requests_test.go` covers an elicitation answered mid-stream (with ping and notifications on the stream), no handler (cancel), a handler error, the idle timer, and URL elicitation retries.
 - `apps_test.go` covers app-only tools hidden from the model, which tools a view may call, reading a view, `_meta.ui` parsing, and the CSP (sanitised domains, no smuggled directives).
+- `client_test.go` also covers the nil-client default refusing a loopback server; `loopback_test.go` holds the loopback client the other tests use.
 - `tool_result_test.go` covers structured output (text wins, structured fallback), tool-level errors, raw fallback, and detailed versus string-returning calls.
 
 ## Related

@@ -9,7 +9,7 @@ A process-wide seam that announces changes to a user's files (ADR 0x043 §3): a 
 - **`Event`** carries the kind of change, the owner, the row after the change, the previous object key and name when they changed, and the conversation the change was made from, if any.
 - **`Subscribe`** registers a `Subscriber`; **`Notify`** calls every subscriber in order, synchronously, in the caller's goroutine.
 - The public build has no subscribers.
-  The private build subscribes in an `init()` to push the change into the conversation's live container (what-iff-private `docs/design/2026-11-06-file-workspace-c4a-sync.md`).
+  A private build can subscribe in an `init()` to push the change into the conversation's live container.
 
 ## Dependencies
 

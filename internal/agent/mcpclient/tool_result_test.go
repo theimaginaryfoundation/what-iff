@@ -74,7 +74,7 @@ func TestParseToolCallResult_Output(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, ok := New(nil, nil).parseToolCallResult(json.RawMessage(tt.input))
+			result, ok := New(loopbackHTTPClient(), nil).parseToolCallResult(json.RawMessage(tt.input))
 			require.True(t, ok)
 			require.Equal(t, tt.output, result.Output)
 			require.Equal(t, tt.isError, result.IsError)
@@ -108,7 +108,7 @@ func TestCallToolResult_ErrIsATypedToolReportedError(t *testing.T) {
 
 func TestParseToolCallResult_RawFallback(t *testing.T) {
 	for _, input := range []string{`{"status":"ok"}`, `{"content":[{"type":"unknown"}]}`, `not json`} {
-		_, ok := New(nil, nil).parseToolCallResult(json.RawMessage(input))
+		_, ok := New(loopbackHTTPClient(), nil).parseToolCallResult(json.RawMessage(input))
 		require.False(t, ok, input)
 	}
 }
@@ -136,7 +136,7 @@ func TestCallToolByFullName_ToolError(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	client := New(nil, nil)
+	client := New(loopbackHTTPClient(), nil)
 	server := &models.MCPServer{ID: uuid.New(), Name: "example", ServerURL: srv.URL, Status: models.MCPServerStatusActive}
 	servers := []*models.MCPServer{server}
 	fullName := "mcp__" + connectorPrefix(server) + "__create"
