@@ -27,6 +27,9 @@ func TestSpecialUseRangesAreNotPublic(t *testing.T) {
 // address on either side where there is one. This pins the boundary independently of how
 // IsPublicIP computes it (net.IP predicates or nonPublicNets), so a regression in either fails.
 func TestIsPublicIPRangeBoundaries(t *testing.T) {
+	// A nil IP (a resolver entry without an address) is refused, not a panic.
+	require.False(t, IsPublicIP(nil))
+
 	refused := map[string][]string{
 		"RFC 1918 10/8":              {"10.0.0.0", "10.255.255.255"},
 		"RFC 1918 172.16/12":         {"172.16.0.0", "172.31.255.255"},
