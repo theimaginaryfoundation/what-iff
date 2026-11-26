@@ -726,19 +726,9 @@ func validateMCPURL(
 		return fmt.Errorf("%s host is required", field)
 	}
 
-	var ips []net.IP
-	if isLocalhostName(host) {
-		ips = []net.IP{net.IPv6loopback}
-	} else if ip := net.ParseIP(host); ip != nil {
-		ips = []net.IP{ip}
-	} else {
-		addrs, err := resolveHostIPs(ctx, host)
-		if err != nil || len(addrs) == 0 {
-			return fmt.Errorf("%s host could not be resolved", field)
-		}
-		for _, a := range addrs {
-			ips = append(ips, a.IP)
-		}
+	ips, err := hostIPs(ctx, host, resolveHostIPs)
+	if err != nil {
+		return fmt.Errorf("%s host could not be resolved", field)
 	}
 
 	allLoopback := true
@@ -755,9 +745,36 @@ func validateMCPURL(
 		}
 	}
 	if parsed.Scheme != "https" && !allLoopback {
-		return fmt.Errorf("%s must use https for non-local hosts", field)
+		return fmt.Errorf("%s must use https for non-loopback addresses", field)
 	}
 	return nil
+}
+
+// hostIPs is every address host stands for: loopback for a localhost name, the literal itself
+// for an IP, otherwise what it resolves to.
+func hostIPs(
+	ctx context.Context,
+	host string,
+	resolveHostIPs func(context.Context, string) ([]net.IPAddr, error),
+) ([]net.IP, error) {
+	if isLocalhostName(host) {
+		return []net.IP{net.IPv6loopback}, nil
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return []net.IP{ip}, nil
+	}
+	addrs, err := resolveHostIPs(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("no addresses for %s", host)
+	}
+	ips := make([]net.IP, 0, len(addrs))
+	for _, a := range addrs {
+		ips = append(ips, a.IP)
+	}
+	return ips, nil
 }
 
 func isLocalhostName(host string) bool {

@@ -13,6 +13,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/netguard"
 	"go.uber.org/zap"
 )
 
@@ -289,8 +290,9 @@ func isPermanentDiscoveryError(errMsg string) bool {
 		strings.Contains(msg, "oauth access token is expired"),
 		strings.Contains(msg, "server_url host could not be resolved"),
 		// netguard refusals: the address or redirect target is not allowed, so retrying cannot help
-		// (a connector saved before save-time validation existed lands here).
-		strings.Contains(msg, "refusing to connect to non-public address"),
+		// (a connector saved before save-time validation existed lands here). Only the persisted
+		// message is available here, not the error, so this matches the sentinel's text.
+		strings.Contains(msg, netguard.ErrNonPublicAddress.Error()),
 		strings.Contains(msg, "refusing redirect from"),
 		strings.Contains(msg, "invalid mcp"),
 		strings.Contains(msg, "invalid oauth"),

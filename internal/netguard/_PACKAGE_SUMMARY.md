@@ -8,6 +8,7 @@ Keeps server-side requests to user-chosen addresses on the public internet.
 
 - **`IsPublicIP`:** true only for a global unicast address that is not loopback, private, link-local (which includes the cloud metadata address), multicast, unspecified, or a special-use range: shared (100.64.0.0/10), "this network" (0.0.0.0/8), NAT64 and 6to4 (which embed an IPv4 address), benchmarking, documentation, and deprecated site-local.
 - **`PublicOnlyControl` / `PublicOnlyDialer`:** a `net.Dialer` hook, and a dialer using it, that refuse any other address with an error wrapping `ErrNonPublicAddress`.
+  Callers check `errors.Is(err, ErrNonPublicAddress)` to treat a refusal as permanent rather than retryable.
 - **`PublicOrLoopbackControl` / `Control(allowLoopback)`:** the same hook that also allows loopback, for a local-development opt-in that should reach this machine and nothing else internal.
 - **`NoAddressCheck`:** a hook that allows everything, so turning the guard off (a local-network opt-in) is explicit and greppable.
 - **`NewHTTPClient(control, timeout)`:** the HTTP client for user-chosen addresses, with that hook on every connection (nil means `PublicOnlyControl`, so leaving it out fails closed), no proxy, same-origin redirects only (`SameOriginRedirects`), and otherwise a clone of `http.DefaultTransport`.
@@ -22,6 +23,8 @@ Keeps server-side requests to user-chosen addresses on the public internet.
 - **Checked at connect time, not at URL-parse time.**
   The hook sees the resolved address of every connection, so a name that resolves to an internal address, or is rebound to one after a first check, is still refused.
   It never sees a hostname: a dialer resolves first and calls the hook once per IP it tries, so public names work and need no lookup of their own here.
+- **`IsPublicIP` only gets stricter.**
+  It is the boundary for every caller at once, so a caller that needs an internal address uses an explicit opt-in at its call site (`PublicOrLoopbackControl`, `NoAddressCheck`) rather than widening it.
 
 ## Testing
 

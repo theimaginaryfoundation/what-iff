@@ -2,6 +2,11 @@
 // The check runs on the resolved address just before each connection, so a name that resolves
 // to an internal address, or is rebound to one after a first check, still cannot reach the
 // server's own network or the cloud metadata service.
+//
+// IsPublicIP is the boundary for every caller at once, so it should only ever get stricter. A
+// caller that needs an internal address gets an explicit opt-in at its own call site
+// (PublicOrLoopbackControl, NoAddressCheck), never a wider IsPublicIP. Callers tell a refusal
+// from a network failure with errors.Is(err, ErrNonPublicAddress).
 package netguard
 
 import (
